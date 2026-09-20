@@ -2189,40 +2189,36 @@ static int h_closes_ww(const char* open, const char* start) {
 /* WHATWG: starts that close an open p in button scope
  * (13.2.6.4.7 "in body" block set + h/pre/form/li/dd/dt/plaintext/
  * hr/xmp). */
+typedef struct {
+    char name[12];
+    uint8_t len;
+    uint8_t special;   /* WHATWG 13.2.4 special set */
+    uint8_t no_fmt;    /* never reconstructed (formatting) */
+    uint8_t closes;    /* bit0: h_p_closes implied-end set; bit1:
+                        * k_p_closers — replaced the per-close-tag
+                        * strcmp scans (#1218 profile). */
+} HTagInfo;
+
+static const HTagInfo* h_tag_lookup(const char* n);
+
+static const HTagInfo* h_tag_lookup(const char* n);
+
 static int h_p_closes(const char* start) {
-    static const char* const k[] = {
-        "address", "article", "aside",  "blockquote", "center",
-        "details", "dialog", "dir",     "div",        "dl",
-        "fieldset", "figcaption", "figure", "footer", "header",
-        "hgroup",  "main",    "menu",   "nav",        "ol",
-        "p",       "search",  "section", "summary",   "ul",
-        "h1",      "h2",      "h3",     "h4",         "h5",
-        "h6",      "pre",     "listing", "form",      "li",
-        "dd",      "dt",      "plaintext", "hr",     "xmp",
-        NULL};
-    for (int i = 0; k[i]; i++)
-        if (strcmp(start, k[i]) == 0) return 1;
-    return 0;
+    /* Classifier hit (round: #1218 profile — the 40-name strcmp
+     * scan was the top WHATWG self-time on table-heavy pages).
+     * Sets preserved bit-for-bit from the old k[] list. */
+    const HTagInfo* t = h_tag_lookup(start);
+    return t && (t->closes & 1);
 }
 
 /* Implied-end sets: a start tag in `closes` closes any open
  * element named `name` (HTML4 §7.5.4 / table model). */
-static const char* const k_p_closers[] = {
-    "address", "article", "aside", "blockquote", "details", "dialog",
-    "dir", "div", "dl", "fieldset", "figcaption", "figure", "footer",
-    "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup",
-    "hr", "li", "main", "menu", "nav", "ol", "p", "pre", "section",
-    "table", "ul", NULL,
-};
-static int h_in_list(const char* const* list, const char* name) {
-    for (int i = 0; list[i]; i++)
-        if (strcmp(list[i], name) == 0) return 1;
-    return 0;
-}
 /* Does starting `start` close an open element named `open`? */
 static int h_closes(const char* open, const char* start) {
-    if (strcmp(open, "p") == 0 && h_in_list(k_p_closers, start))
-        return 1;
+    if (strcmp(open, "p") == 0) {
+        const HTagInfo* t = h_tag_lookup(start);
+        if (t && (t->closes & 2)) return 1;
+    }
     if (strcmp(open, "li") == 0 && strcmp(start, "li") == 0)
         return 1;
     if ((strcmp(open, "dt") == 0 || strcmp(open, "dd") == 0) &&
@@ -3066,98 +3062,92 @@ static int h_is_formatting(const char* n) {
  * sampler pinned at ~21% of WHATWG parse (h_is_special_ww +
  * h_reconstructs). Keep in sync with the WHATWG special and
  * no-formatting sets. */
-typedef struct {
-    char name[12];
-    uint8_t len;
-    uint8_t special;   /* WHATWG 13.2.4 special set */
-    uint8_t no_fmt;    /* never reconstructed (formatting) */
-} HTagInfo;
 
 static const HTagInfo h_tag_infos[] = {
-    {"address", 7, 1, 1},
-    {"applet", 6, 1, 0},
-    {"area", 4, 1, 0},
-    {"article", 7, 1, 1},
-    {"aside", 5, 1, 1},
-    {"base", 4, 1, 1},
-    {"basefont", 8, 1, 1},
-    {"bgsound", 7, 1, 1},
-    {"blockquote", 10, 1, 1},
-    {"body", 4, 1, 1},
-    {"br", 2, 1, 0},
-    {"button", 6, 1, 0},
-    {"caption", 7, 1, 1},
-    {"center", 6, 1, 1},
-    {"col", 3, 1, 1},
-    {"colgroup", 8, 1, 1},
-    {"dd", 2, 1, 1},
-    {"details", 7, 1, 1},
-    {"dialog", 6, 1, 1},
-    {"dir", 3, 1, 1},
-    {"div", 3, 1, 1},
-    {"dl", 2, 1, 1},
-    {"dt", 2, 1, 1},
-    {"embed", 5, 1, 0},
-    {"fieldset", 8, 1, 1},
-    {"figcaption", 10, 1, 1},
-    {"figure", 6, 1, 1},
-    {"footer", 6, 1, 1},
-    {"form", 4, 1, 1},
-    {"frame", 5, 1, 1},
-    {"frameset", 8, 1, 1},
-    {"h1", 2, 1, 1},
-    {"h2", 2, 1, 1},
-    {"h3", 2, 1, 1},
-    {"h4", 2, 1, 1},
-    {"h5", 2, 1, 1},
-    {"h6", 2, 1, 1},
-    {"head", 4, 1, 1},
-    {"header", 6, 1, 1},
-    {"hgroup", 6, 1, 1},
-    {"hr", 2, 1, 1},
-    {"html", 4, 1, 1},
-    {"iframe", 6, 1, 0},
-    {"img", 3, 1, 0},
-    {"input", 5, 1, 0},
-    {"keygen", 6, 1, 0},
-    {"li", 2, 1, 1},
-    {"link", 4, 1, 1},
-    {"listing", 7, 1, 1},
-    {"main", 4, 1, 1},
-    {"marquee", 7, 1, 0},
-    {"menu", 4, 1, 1},
-    {"meta", 4, 1, 1},
-    {"nav", 3, 1, 1},
-    {"noembed", 7, 1, 0},
-    {"noframes", 8, 1, 1},
-    {"noscript", 8, 1, 0},
-    {"object", 6, 1, 0},
-    {"ol", 2, 1, 1},
-    {"p", 1, 1, 1},
-    {"param", 5, 1, 0},
-    {"plaintext", 9, 1, 1},
-    {"pre", 3, 1, 1},
-    {"script", 6, 1, 1},
-    {"search", 6, 1, 1},
-    {"section", 7, 1, 1},
-    {"select", 6, 1, 0},
-    {"source", 6, 1, 0},
-    {"style", 5, 1, 1},
-    {"summary", 7, 1, 1},
-    {"table", 5, 1, 1},
-    {"tbody", 5, 1, 1},
-    {"td", 2, 1, 1},
-    {"template", 8, 1, 1},
-    {"textarea", 8, 1, 1},
-    {"tfoot", 5, 1, 1},
-    {"th", 2, 1, 1},
-    {"thead", 5, 1, 1},
-    {"title", 5, 1, 1},
-    {"tr", 2, 1, 1},
-    {"track", 5, 1, 0},
-    {"ul", 2, 1, 1},
-    {"wbr", 3, 1, 0},
-    {"xmp", 3, 1, 0},
+    {"address", 7, 1, 1, 3},
+    {"applet", 6, 1, 0, 0},
+    {"area", 4, 1, 0, 0},
+    {"article", 7, 1, 1, 3},
+    {"aside", 5, 1, 1, 3},
+    {"base", 4, 1, 1, 0},
+    {"basefont", 8, 1, 1, 0},
+    {"bgsound", 7, 1, 1, 0},
+    {"blockquote", 10, 1, 1, 3},
+    {"body", 4, 1, 1, 0},
+    {"br", 2, 1, 0, 0},
+    {"button", 6, 1, 0, 0},
+    {"caption", 7, 1, 1, 0},
+    {"center", 6, 1, 1, 1},
+    {"col", 3, 1, 1, 0},
+    {"colgroup", 8, 1, 1, 0},
+    {"dd", 2, 1, 1, 1},
+    {"details", 7, 1, 1, 3},
+    {"dialog", 6, 1, 1, 3},
+    {"dir", 3, 1, 1, 3},
+    {"div", 3, 1, 1, 3},
+    {"dl", 2, 1, 1, 3},
+    {"dt", 2, 1, 1, 1},
+    {"embed", 5, 1, 0, 0},
+    {"fieldset", 8, 1, 1, 3},
+    {"figcaption", 10, 1, 1, 3},
+    {"figure", 6, 1, 1, 3},
+    {"footer", 6, 1, 1, 3},
+    {"form", 4, 1, 1, 3},
+    {"frame", 5, 1, 1, 0},
+    {"frameset", 8, 1, 1, 0},
+    {"h1", 2, 1, 1, 3},
+    {"h2", 2, 1, 1, 3},
+    {"h3", 2, 1, 1, 3},
+    {"h4", 2, 1, 1, 3},
+    {"h5", 2, 1, 1, 3},
+    {"h6", 2, 1, 1, 3},
+    {"head", 4, 1, 1, 0},
+    {"header", 6, 1, 1, 3},
+    {"hgroup", 6, 1, 1, 3},
+    {"hr", 2, 1, 1, 3},
+    {"html", 4, 1, 1, 0},
+    {"iframe", 6, 1, 0, 0},
+    {"img", 3, 1, 0, 0},
+    {"input", 5, 1, 0, 0},
+    {"keygen", 6, 1, 0, 0},
+    {"li", 2, 1, 1, 3},
+    {"link", 4, 1, 1, 0},
+    {"listing", 7, 1, 1, 1},
+    {"main", 4, 1, 1, 3},
+    {"marquee", 7, 1, 0, 0},
+    {"menu", 4, 1, 1, 3},
+    {"meta", 4, 1, 1, 0},
+    {"nav", 3, 1, 1, 3},
+    {"noembed", 7, 1, 0, 0},
+    {"noframes", 8, 1, 1, 0},
+    {"noscript", 8, 1, 0, 0},
+    {"object", 6, 1, 0, 0},
+    {"ol", 2, 1, 1, 3},
+    {"p", 1, 1, 1, 3},
+    {"param", 5, 1, 0, 0},
+    {"plaintext", 9, 1, 1, 1},
+    {"pre", 3, 1, 1, 3},
+    {"script", 6, 1, 1, 0},
+    {"search", 6, 1, 1, 1},
+    {"section", 7, 1, 1, 3},
+    {"select", 6, 1, 0, 0},
+    {"source", 6, 1, 0, 0},
+    {"style", 5, 1, 1, 0},
+    {"summary", 7, 1, 1, 1},
+    {"table", 5, 1, 1, 2},
+    {"tbody", 5, 1, 1, 0},
+    {"td", 2, 1, 1, 0},
+    {"template", 8, 1, 1, 0},
+    {"textarea", 8, 1, 1, 0},
+    {"tfoot", 5, 1, 1, 0},
+    {"th", 2, 1, 1, 0},
+    {"thead", 5, 1, 1, 0},
+    {"title", 5, 1, 1, 0},
+    {"tr", 2, 1, 1, 0},
+    {"track", 5, 1, 0, 0},
+    {"ul", 2, 1, 1, 3},
+    {"wbr", 3, 1, 0, 0},
+    {"xmp", 3, 1, 0, 1},
 };
 
 /* bucket[first_char] = start index; bucket[first_char+1] = end */
