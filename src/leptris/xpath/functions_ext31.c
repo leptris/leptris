@@ -3850,11 +3850,14 @@ static struct leptris_xpath_result* fn_function_name(
         size_t len = hash ? (size_t)(hash - nm) : strlen(nm);
         out = xpath_result_new(XPATH_RESULT_STRING);
         if (out) {
-            char* buf = LEPTRIS_ALLOC_N(char, len + 4);
+            /* The stored name is the lexical QName verbatim
+             * ("fn:node-name" / "local:add") — no fn: prefixing:
+             * QT3 pins fn:node-name#0 -> "fn:node-name", and a
+             * user function must keep its own prefix. */
+            char* buf = LEPTRIS_ALLOC_N(char, len + 1);
             if (buf) {
-                memcpy(buf, "fn:", 3);
-                memcpy(buf + 3, nm, len);
-                buf[3 + len] = 0;
+                memcpy(buf, nm, len);
+                buf[len] = 0;
                 out->value.string_value = buf;
             }
         }

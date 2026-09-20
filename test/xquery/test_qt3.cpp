@@ -494,6 +494,19 @@ TEST(Qt3Subset, OpYearMonthDuration) {
     run_test_set("op/subtract-yearMonthDuration-from-dateTime.xml", {}, 21, no_local);
 }
 
+/* fn-items family (lever 6 stage-2, batch 6): function metadata
+ * gates the lane-07B surface (arity, name). */
+TEST(Qt3Subset, FunctionItems) {
+    /* QName-valued assertions and the integer-overflow arity bound
+     * wait on the QName/decimal batches (concat precedent). */
+    const std::vector<const char*> nq = {
+        "#340282366920938463463374607431768211456", " dateTime#",
+        " concat#", "local:coerce",
+    };
+    run_test_set("fn/function-arity.xml", {}, 8, nq);
+    run_test_set("fn/function-name.xml", {}, 4, nq);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions

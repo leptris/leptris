@@ -3558,7 +3558,7 @@ TEST(Xslt30, FunctionItemMetadataAndHofs) {
         "<xsl:template match='/'>"
         "<o><xsl:value-of select=\"function-name(concat#2)\"/></o></xsl:template>",
         "<r/>")),
-        "<o>fn:concat</o>");
+        "<o>concat</o>");
     EXPECT_EQ(body(run30(
         "<xsl:template match='/'>"
         "<o><xsl:value-of select=\"let $f := function($x){$x+1}"
