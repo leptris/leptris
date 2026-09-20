@@ -2495,7 +2495,10 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
                                           int dtd_attrs) {
     /* Per-parse getenv (uncached): ~100-200ns against ~ms parses,
      * and it lets tests toggle the lane per-case in one process. */
-    if (!getenv("LEPTRIS_INTERLEAVED")) return NULL;
+    /* Empty string counts as unset: MSVC's _putenv_s(k, "") (the
+     * only "unset" the CRT offers) leaves an empty value behind. */
+    const char* gate = getenv("LEPTRIS_INTERLEAVED");
+    if (!gate || !*gate) return NULL;
     if (keep_ent || dtd_attrs) return NULL;
     if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
 
@@ -2512,7 +2515,8 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
     free(c.recs); free(c.attrs);
     /* Uncached like the gate above: a cached stats flag keeps
      * printing after the env is unset (caught by the canary spec). */
-    if (getenv("LEPTRIS_IL_STATS"))
+    const char* stats = getenv("LEPTRIS_IL_STATS");
+    if (stats && *stats)
         fprintf(stderr, "il: records=%zu attrs=%zu\n", c.nrec, c.nattr);
     return d;
 }
