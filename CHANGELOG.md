@@ -1,19 +1,13 @@
 ## [Unreleased]
 
-## [1.9.213] - 2026-09-20
+## [1.9.213] - 2026-09-21
 
-### Added
+### Added — the op:date and yearMonth families (#1182, lever 6)
 
-- yearMonthDuration family — 11 sets, 264/264 (xquery)
-- op-date family — date/time/dateTime +/- duration, 6 sets, 128/128 (xquery)
+- **op-date arithmetic (#1265)**: date/time/dateTime +/- dayTimeDuration — 6 QT3 sets, 128/128. Shared lexical shifter (`leptris_dt_shift`), time arithmetic wrapping the day, ISO date-shaped string comparisons. Fixed two corpus-caught bugs: zoned times misclassified as dateTimes, and dateTime results printing the input's seconds instead of the shifted instant's.
+- **yearMonthDuration family (#1266)**: 11 QT3 sets, 264/264 — months arithmetic (PnYnM canonical, llrint tie rule), month-end clamping for date/dateTime shifts (leap-aware), negative-year printing. The lt/gt sets rode the existing months comparison hook untouched.
 
-### Fixed
-
-- (long long)nd in month-shift date prints (MSVC va_arg) (xpath)
-- long long ip in dur_format's fraction path (ILP32 SegFault) (xpath)
-- long long in date/duration shift math (MSVC + ILP32 long) (xpath)
-
-
+Both batches survived the 32-bit-long portability classes (MSVC/ILP32): int64-range instant math and every %lld argument now use long long — the CI legs caught three occurrences of the width/specifier mismatch family.
 
 ## [1.9.212] - 2026-09-21
 
