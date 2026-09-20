@@ -136,4 +136,6 @@ void xpath_ast_cache_store_bc(const char* expr, size_t expr_len,
 int leptris_dur_try_seconds(const char* s, double* out);
 int leptris_dur_try_months(const char* s, double* out);
 int leptris_dt_shift(const char* ds, double delta, char* buf, size_t cap);
+void leptris_dur_format_months(double months, char* buf, size_t cap);
+int leptris_dt_shift_months(const char* ds, double delta_months, char* buf, size_t cap);
 void leptris_dur_format(double secs, char* buf, size_t cap);

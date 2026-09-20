@@ -2375,6 +2375,84 @@ int leptris_dt_shift(const char* ds, double delta, char* buf,
     return 1;
 }
 
+/* Canonical yearMonthDuration: PnYnM (zero -> P0M). */
+void leptris_dur_format_months(double months, char* buf, size_t cap) {
+    int neg = months < 0;
+    if (neg) months = -months;
+    long long y = (long long)(months / 12);
+    long long m = (long long)(months - (double)y * 12);
+    /* rounding residue: fractional months only arise from divide;
+     * the corpus divides to whole months or expects P0M. */
+    if (months == 0 || (y == 0 && m == 0)) {
+        snprintf(buf, cap, "P0M");
+        return;
+    }
+    if (y && m)
+        snprintf(buf, cap, "%sP%lldY%lldM", neg ? "-" : "", y, m);
+    else if (y)
+        snprintf(buf, cap, "%sP%lldY", neg ? "-" : "", y);
+    else
+        snprintf(buf, cap, "%sP%lldM", neg ? "-" : "", m);
+}
+
+/* Month shift for date/dateTime lexicals: add delta months with
+ * month-end clamping (Jan 31 + P1M = Feb 28/29); the day-of-month
+ * never exceeds the target month's length; time and zone ride
+ * through untouched. */
+int leptris_dt_shift_months(const char* ds, double delta_months,
+                            char* buf, size_t cap) {
+    int y, mo, d, h, mi;
+    double se;
+    long off;
+    int has_off;
+    if (!h_dt_parse(ds, &y, &mo, &d, &h, &mi, &se, &off, &has_off))
+        return 0;
+    if (strchr(ds, '-') == NULL) return 0;   /* time-only: no months */
+    long long total = (long long)y * 12 + (mo - 1) +
+                      (long long)delta_months;
+    long long ny = total / 12;
+    long long nm = total % 12;
+    if (nm < 0) { nm += 12; ny--; }
+    static const int mlen[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+    int leap = ((ny % 4 == 0 && ny % 100 != 0) || ny % 400 == 0);
+    int maxd = mlen[nm];
+    if (nm == 1 && leap) maxd = 29;
+    int nd = d > maxd ? maxd : d;
+    char zone[8];
+    if (!has_off) zone[0] = '\0';
+    else if (off == 0) snprintf(zone, sizeof zone, "Z");
+    else {
+        int oh = (int)(off / 60), om = (int)(off % 60);
+        snprintf(zone, sizeof zone, "%s%02d:%02d",
+                 off < 0 ? "-" : "+", oh < 0 ? -oh : oh,
+                 om < 0 ? -om : om);
+    }
+    if (strchr(ds, 'T')) {
+        char secs[24];
+        if (se == (double)(long)se)
+            snprintf(secs, sizeof secs, "%02d", (int)se);
+        else {
+            long ip = (long)se;
+            double fr = se - ip;
+            char raw[32];
+            snprintf(raw, sizeof raw, "%.9f", fr);
+            char* dot = strchr(raw, '.');
+            char* frac = dot + 1;
+            char* last = frac + strlen(frac) - 1;
+            while (last > frac && *last == '0') *last-- = '\0';
+            snprintf(secs, sizeof secs, "%02ld.%s", ip, frac);
+        }
+        snprintf(buf, cap, "%s%04lld-%02lld-%02lldT%02d:%02d:%s%s",
+                 ny < 0 ? "-" : "", ny < 0 ? -ny : ny,
+                 nm + 1, nd, h, mi, secs, zone);
+    } else {
+        snprintf(buf, cap, "%s%04lld-%02lld-%02lld%s",
+                 ny < 0 ? "-" : "", ny < 0 ? -ny : ny,
+                 nm + 1, nd, zone);
+    }
+    return 1;
+}
+
 ADJUST_TZ(adjust_dttz, 1)
 ADJUST_TZ(adjust_dtetz, 2)
 ADJUST_TZ(adjust_ttz, 3)

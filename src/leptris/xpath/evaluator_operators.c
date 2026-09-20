@@ -2011,6 +2011,79 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             double lsec = 0, rsec = 0;
             int ld = ls && leptris_dur_try_seconds(ls, &lsec);
             int rd = rs && leptris_dur_try_seconds(rs, &rsec);
+            /* yearMonth family rides the months measure (PnYnM) */
+            double lmo = 0, rmo = 0;
+            int lmo_ok = !ld && ls &&
+                         leptris_dur_try_months(ls, &lmo);
+            int rmo_ok = !rd && rs &&
+                         leptris_dur_try_months(rs, &rmo);
+            if ((lmo_ok || rmo_ok) &&
+                (op == XPATH_OP_PLUS || op == XPATH_OP_MINUS ||
+                 op == XPATH_OP_MULTIPLY || op == XPATH_OP_DIV)) {
+                char mbuf[40];
+                struct leptris_xpath_result* mres = NULL;
+                if ((op == XPATH_OP_PLUS || op == XPATH_OP_MINUS) &&
+                    lmo_ok && rmo_ok) {
+                    double v = (op == XPATH_OP_PLUS) ? lmo + rmo
+                                                     : lmo - rmo;
+                    leptris_dur_format_months(v, mbuf, sizeof mbuf);
+                    mres = xpath_result_new(XPATH_RESULT_STRING);
+                    if (mres)
+                        mres->value.string_value =
+                            leptris_strdup(mbuf);
+                } else if (op == XPATH_OP_MULTIPLY &&
+                           (lmo_ok || rmo_ok)) {
+                    double m = lmo_ok ? lmo : rmo;
+                    double num = lmo_ok ? xpath_to_number(right)
+                                        : xpath_to_number(left);
+                    /* F&O: fractional months round half-up */
+                    leptris_dur_format_months(
+                        (double)llrint(m * num), mbuf, sizeof mbuf);
+                    mres = xpath_result_new(XPATH_RESULT_STRING);
+                    if (mres)
+                        mres->value.string_value =
+                            leptris_strdup(mbuf);
+                } else if (op == XPATH_OP_DIV && lmo_ok && rmo_ok) {
+                    mres = xpath_result_new(XPATH_RESULT_NUMBER);
+                    if (mres)
+                        mres->value.number_value = lmo / rmo;
+                } else if (op == XPATH_OP_DIV && lmo_ok) {
+                    leptris_dur_format_months(
+                        (double)llrint(lmo / xpath_to_number(right)),
+                        mbuf, sizeof mbuf);
+                    mres = xpath_result_new(XPATH_RESULT_STRING);
+                    if (mres)
+                        mres->value.string_value =
+                            leptris_strdup(mbuf);
+                }
+                if (mres) {
+                    xpath_result_free(left);
+                    xpath_result_free(right);
+                    return mres;
+                }
+            }
+            /* month shift for date/dateTime lexicals */
+            if ((op == XPATH_OP_PLUS || op == XPATH_OP_MINUS) &&
+                (lmo_ok != rmo_ok)) {
+                const char* ds = lmo_ok ? rs : ls;
+                double mo = lmo_ok ? lmo : rmo;
+                if (ds && ds[0] >= '0' && ds[0] <= '9') {
+                    double delta = (op == XPATH_OP_PLUS)
+                                       ? mo : -mo;
+                    char dbuf[64];
+                    if (leptris_dt_shift_months(ds, delta, dbuf,
+                                                sizeof dbuf)) {
+                        result = xpath_result_new(
+                            XPATH_RESULT_STRING);
+                        if (result)
+                            result->value.string_value =
+                                leptris_strdup(dbuf);
+                        xpath_result_free(left);
+                        xpath_result_free(right);
+                        return result;
+                    }
+                }
+            }
             if (ld || rd) {
                 double num = ld ? xpath_to_number(right)
                                 : xpath_to_number(left);
