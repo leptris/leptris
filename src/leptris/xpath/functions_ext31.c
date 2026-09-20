@@ -2330,7 +2330,7 @@ int leptris_dt_shift(const char* ds, double delta, char* buf,
         snprintf(secs, sizeof secs, "%02ld.%s", ip, frac);
     }
     if (is_time) {
-        long tot = (long)(h * 3600L + mi * 60L + se + delta);
+        long long tot = (long long)(h * 3600L + mi * 60L + se + delta);
         tot %= 86400;
         if (tot < 0) tot += 86400;
         snprintf(buf, cap, "%02d:%02d:%02d%s",
@@ -2338,19 +2338,19 @@ int leptris_dt_shift(const char* ds, double delta, char* buf,
                  (int)(tot % 60), zone);
         return 1;
     }
-    long days = h_days_from_civil(y, mo, d);
+    long long days = (long long)h_days_from_civil(y, mo, d);
     if (strchr(ds, 'T') == NULL) {
         /* date: whole-duration shift, keep the date part (floor) */
         double exact = (days * 86400.0 + delta) / 86400.0;
-        long ndf = (long)floor(exact);
+        long long ndf = (long long)floor(exact);
         int ny, nm, ndd;
         h_civil_from_days(ndf, &ny, &nm, &ndd);
         snprintf(buf, cap, "%04d-%02d-%02d%s", ny, nm, ndd, zone);
         return 1;
     }
-    long base = (long)(days * 86400.0 + h * 3600.0 + mi * 60.0 +
+    long long base = (long long)(days * 86400.0 + h * 3600.0 + mi * 60.0 +
                        se + delta);
-    long nd = base / 86400, rem = base % 86400;
+    long long nd = base / 86400, rem = base % 86400;
     if (rem < 0) { rem += 86400; nd--; }
     int ny, nm, ndd;
     h_civil_from_days(nd, &ny, &nm, &ndd);
