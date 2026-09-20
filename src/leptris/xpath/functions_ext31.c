@@ -1823,6 +1823,195 @@ static struct leptris_xpath_result* fn_date_field(XPathContext* ctx,
         return fn_date_field(ctx, a, n, WHICH);                   \
     }
 
+static long h_days_from_civil(int y, int m, int d);
+static void h_civil_from_days(long z, int* y, int* m, int* d);
+static int h_dt_parse(const char* in, int* y, int* mo, int* d,
+                      int* h, int* mi, double* se, long* off_min,
+                      int* has_off);
+
+/* fn:parse-ietf-date (F&O 3.1 9.9.5): RFC 5322/822 date-time to
+ * xs:dateTime. Two lexical orders: [Dow ","] Day Month Year
+ * HH:MM[:SS[.f]] Zone, and the ctime-ish Month Day HH:MM[:SS]
+ * Year. Component separators are runs of space/tab/'-'/','
+ * ("20 - Aug - 2014", "Aug-20"). Zones: GMT/UT/UTC/Z -> +00:00,
+ * obsolete US names -> their offsets, single military letters ->
+ * -00:00, +/-HHMM, absent -> implicit UTC (Saxon-HE parity: fixed
+ * UTC). 2-digit years: 00-29 => 20xx, else 19xx. The fraction
+ * substring is carried verbatim (the corpus pins .25 and .299). */
+static struct leptris_xpath_result* fn_parse_ietf_date(
+        XPathContext* ctx, XPathASTNode** a, size_t n) {
+    if (il_arg_empty(ctx, a[0])) return seq_new();
+    char* in = re_str_arg(ctx, a, 0);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = leptris_strdup("");
+    if (!in) return out;
+    char buf[48];
+    static const char* mons[] = { "jan","feb","mar","apr","may","jun",
+                                  "jul","aug","sep","oct","nov","dec" };
+    char work[160];
+    size_t wl = strlen(in);
+    if (wl >= sizeof work) { free(in); return out; }
+    memcpy(work, in, wl + 1);
+    for (char* q = work; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+#define IETF_SEP(q) \
+    while (*(q) == ' ' || *(q) == '\t' || *(q) == '-' || *(q) == ',') (q)++
+    char* p = work;
+    IETF_SEP(p);
+    char* end = NULL;
+    int mo = 0;
+    long day = 0, yr = 0, hh = 0, mm = 0, sec = 0;
+    char frac[16];
+    frac[0] = '\0';
+    /* Leading alpha that is NOT a month name is a day-of-week —
+     * consume it (and its separator) and re-dispatch ("Wed, 20
+     * Aug..." vs "Aug 20 ..."). */
+    if (isalpha((unsigned char)*p)) {
+        int is_mon = 0;
+        for (int i = 0; i < 12; i++)
+            if (strncmp(p, mons[i], 3) == 0) { is_mon = 1; break; }
+        if (!is_mon) {
+            while (isalpha((unsigned char)*p)) p++;
+            IETF_SEP(p);
+        }
+    }
+    if (isalpha((unsigned char)*p)) {
+        /* ctime order: Month Day HH:MM[:SS] Year */
+        for (int i = 0; i < 12; i++)
+            if (strncmp(p, mons[i], 3) == 0) { mo = i + 1; break; }
+        if (!mo) { free(in); return out; }
+        while (isalpha((unsigned char)*p)) p++;
+        IETF_SEP(p);
+        day = strtol(p, &end, 10);
+        if (end == p || day < 1 || day > 31) { free(in); return out; }
+        p = end;
+        IETF_SEP(p);
+        hh = strtol(p, &end, 10);
+        if (end == p || *end != ':') { free(in); return out; }
+        p = end + 1;
+        mm = strtol(p, &end, 10);
+        if (end == p) { free(in); return out; }
+        p = end;
+        if (*p == ':') {
+            p++;
+            sec = strtol(p, &end, 10);
+            if (end == p) sec = 0; else p = end;
+            if (*p == '.') {
+                size_t fl = 0;
+                p++;
+                while (isdigit((unsigned char)*p) && fl < 14)
+                    frac[fl++] = *p++;
+                frac[fl] = '\0';
+            }
+        }
+        IETF_SEP(p);
+        yr = strtol(p, &end, 10);
+        if (end == p) { free(in); return out; }
+        if (end - p <= 2)
+            yr += (yr >= 0 && yr <= 29) ? 2000 : 1900;
+        p = end;
+    } else {
+        /* day-first: [Dow ","] Day Month Year HH:MM[:SS] */
+        day = strtol(p, &end, 10);
+        if (end == p || day < 1 || day > 31) { free(in); return out; }
+        p = end;
+        IETF_SEP(p);
+        if (isalpha((unsigned char)*p)) {
+            for (int i = 0; i < 12; i++)
+                if (strncmp(p, mons[i], 3) == 0) { mo = i + 1; break; }
+            while (isalpha((unsigned char)*p)) p++;
+        }
+        if (!mo) { free(in); return out; }
+        IETF_SEP(p);
+        yr = strtol(p, &end, 10);
+        if (end == p) { free(in); return out; }
+        if (end - p <= 2)
+            yr += (yr >= 0 && yr <= 29) ? 2000 : 1900;
+        p = end;
+        IETF_SEP(p);
+        hh = strtol(p, &end, 10);
+        if (end == p || *end != ':') { free(in); return out; }
+        p = end + 1;
+        mm = strtol(p, &end, 10);
+        if (end == p) { free(in); return out; }
+        p = end;
+        if (*p == ':') {
+            p++;
+            sec = strtol(p, &end, 10);
+            if (end == p) sec = 0; else p = end;
+            if (*p == '.') {
+                size_t fl = 0;
+                p++;
+                while (isdigit((unsigned char)*p) && fl < 14)
+                    frac[fl++] = *p++;
+                frac[fl] = '\0';
+            }
+        }
+    }
+#undef IETF_SEP
+    /* optional day-of-week may follow EITHER order's date part in
+     * some inputs; a trailing pure-alpha token before the zone that
+     * is not a zone name is consumed harmlessly by the zone scan
+     * below failing. */
+    long off = 0;
+    int has_zone = 0;
+    while (*p == ' ' || *p == '\t') p++;
+    if (!*p) {
+        has_zone = 1;
+    } else if (*p == '+' || *p == '-') {
+        int neg = (*p == '-');
+        p++;
+        if (!isdigit((unsigned char)p[0])) { free(in); return out; }
+        char* e2 = NULL;
+        long z = strtol(p, &e2, 10);
+        if (e2 == p) { free(in); return out; }
+        long zh = z / 100, zm = z % 100;
+        off = neg ? -(zh * 60 + zm) : (zh * 60 + zm);
+        has_zone = 1;
+    } else {
+        static const struct { const char* nm; long min; } zones[] = {
+            {"gmt",0},{"ut",0},{"utc",0},{"z",0},
+            {"est",-300},{"edt",-240},{"cst",-360},{"cdt",-300},
+            {"mst",-420},{"mdt",-360},{"pst",-480},{"pdt",-420},
+        };
+        char zn[8];
+        int zi = 0;
+        while (isalpha((unsigned char)*p) && zi < 7) zn[zi++] = *p++;
+        zn[zi] = '\0';
+        for (size_t i = 0; i < sizeof zones / sizeof zones[0]; i++)
+            if (strcmp(zn, zones[i].nm) == 0) {
+                off = zones[i].min;
+                has_zone = 1;
+                break;
+            }
+        if (!has_zone && zi == 1) { off = 0; has_zone = 1; }
+    }
+    if (!has_zone) { free(in); return out; }
+    long days = h_days_from_civil((int)yr, mo, (int)day);
+    long base = days * 86400L + hh * 3600L + mm * 60L + sec
+                - off * 60L;
+    long nd = base / 86400, rem = base % 86400;
+    if (rem < 0) { rem += 86400; nd--; }
+    int ny, nm2, ndd;
+    h_civil_from_days(nd, &ny, &nm2, &ndd);
+    if (frac[0])
+        snprintf(buf, sizeof buf,
+                 "%04d-%02d-%02dT%02d:%02d:%02ld.%sZ",
+                 ny, nm2, ndd, (int)(rem / 3600),
+                 (int)(rem % 3600 / 60), rem % 60, frac);
+    else
+        snprintf(buf, sizeof buf, "%04d-%02d-%02dT%02d:%02d:%02ldZ",
+                 ny, nm2, ndd, (int)(rem / 3600),
+                 (int)(rem % 3600 / 60), rem % 60);
+    free(out->value.string_value);
+    out->value.string_value = leptris_strdup(buf);
+    free(in);
+    (void)n;
+    return out;
+}
+
 DATE_FIELD(year_from_dt, 1)
 DATE_FIELD(month_from_dt, 2)
 DATE_FIELD(day_from_dt, 3)
@@ -1833,6 +2022,43 @@ DATE_FIELD(days_from_dur, 7)
 DATE_FIELD(hours_from_dur, 8)
 DATE_FIELD(minutes_from_dur, 9)
 DATE_FIELD(seconds_from_dur, 10)
+
+/* timezone-from-{date,dateTime,time}: the lexical tail offset as a
+ * dayTimeDuration string ("+05:00" -> "PT5H", "Z" -> "PT0S");
+ * naive values (no tail) -> empty sequence. */
+static struct leptris_xpath_result* fn_timezone_from(
+        XPathContext* ctx, XPathASTNode** a, size_t n) {
+    if (il_arg_empty(ctx, a[0])) return seq_new();
+    char* in = re_str_arg(ctx, a, 0);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = leptris_strdup("");
+    if (!in) return out;
+    int y, mo, d, h, mi; double se; long off; int has_off;
+    if (h_dt_parse(in, &y, &mo, &d, &h, &mi, &se, &off, &has_off)) {
+        if (!has_off) {
+            /* naive value: the timezone is the empty sequence */
+            leptris_xpath_result_free(out);
+            free(in);
+            return seq_new();
+        }
+        char buf[24];
+        long oh = off / 60, om = off % 60;
+        if (off == 0) snprintf(buf, sizeof buf, "PT0S");
+        else if (om == 0)
+            snprintf(buf, sizeof buf, "%sPT%ldH",
+                     off < 0 ? "-" : "", labs(oh));
+        else
+            snprintf(buf, sizeof buf, "%sPT%ldH%ldM",
+                     off < 0 ? "-" : "", labs(oh), labs(om));
+        free(out->value.string_value);
+        out->value.string_value = leptris_strdup(buf);
+    }
+    free(in);
+    (void)n;
+    return out;
+}
 
 
 
@@ -4804,6 +5030,10 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "seconds-from-dateTime", fn_seconds_from_t, 1, 1);
     xpath_function_registry_register(registry, "minutes-from-duration", fn_minutes_from_dur, 1, 1);
     xpath_function_registry_register(registry, "seconds-from-duration", fn_seconds_from_dur, 1, 1);
+    xpath_function_registry_register(registry, "timezone-from-dateTime", fn_timezone_from, 1, 1);
+    xpath_function_registry_register(registry, "timezone-from-date", fn_timezone_from, 1, 1);
+    xpath_function_registry_register(registry, "timezone-from-time", fn_timezone_from, 1, 1);
+    xpath_function_registry_register(registry, "parse-ietf-date", fn_parse_ietf_date, 1, 1);
     xpath_function_registry_register(registry, "month-from-dateTime", fn_month_from_dt, 1, 1);
     xpath_function_registry_register(registry, "day-from-dateTime", fn_day_from_dt, 1, 1);
     xpath_function_registry_register(registry, "hours-from-time", fn_hours_from_t, 1, 1);
