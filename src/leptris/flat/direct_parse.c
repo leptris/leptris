@@ -1957,6 +1957,566 @@ fail:
     return NULL;
 }
 
+/* ============================================================================
+ * Interleaved lane — TODO.max-perf/interleaved-parse, slice 1 (#1222).
+ *
+ * Second parse lane behind LEPTRIS_INTERLEAVED=1 (default OFF): the
+ * scan phase ONLY appends to flat streams (element/text records + a
+ * flat attr array, pure (off,len) views — no struct stores, no inline
+ * NUL-termination, no restore pass), and a cache-sequential post-pass
+ * replays the classic lane's exact field stores and wiring
+ * (dp_wire_child, dp_split_hash_name, the attr tail, the doc shell).
+ * Children are wired in the post-pass's doc-order replay — the
+ * stream keeps only each depth's last-child record to chain siblings.
+ *
+ * Bail-to-classic (never wrong; one extra parse on bailing docs):
+ * '<!' / '<?' / '&' anywhere, any xmlns attr, KEEP_ENTITY_REFS or
+ * DTDATTR flags, len >= 2GiB, malformed input, depth over limit, OOM.
+ * ============================================================================
+ */
+
+#define IL_NONE 0xFFFFFFFFu
+
+typedef struct IlRec {
+    uint32_t off;            /* elem: raw name incl. prefix; text: content */
+    uint32_t len;
+    uint32_t parent;         /* record index, IL_NONE for the root */
+    uint32_t next_sib;       /* record index, IL_NONE = last sibling */
+    uint32_t line;           /* byte offset of '<' (or text start) + 1 */
+    uint32_t start_tag_end;  /* byte offset after '>' (0 when !line_ok) */
+    uint32_t elem_end;       /* after close '>' (self-close = start) */
+    uint32_t first_attr;     /* attr array index, IL_NONE = none */
+    uint32_t attr_count;
+    uint8_t  kind;           /* 0 = element, 1 = text */
+    uint8_t  self_closing;
+    uint8_t  open_prefixed;
+    uint8_t  has_open_parent;
+} IlRec;
+
+typedef struct IlAttr {
+    uint32_t name_off, name_len, val_off, val_len;
+    uint32_t has_ws;         /* literal \t/\n/\r — §3.3.3 normalization */
+} IlAttr;
+
+typedef struct IlCtx {
+    IlRec* recs; size_t nrec, crec;
+    IlAttr* attrs; size_t nattr, cattr;
+    uint32_t open[DP_MAX_DEPTH];
+    uint32_t last_child[DP_MAX_DEPTH];
+    int depth;
+    size_t str_bytes;        /* pool bytes for element name copies */
+} IlCtx;
+
+static int il_push(IlCtx* c, const IlRec* r) {
+    if (c->nrec == c->crec) {
+        size_t nc = c->crec ? c->crec * 2 : 256;
+        IlRec* g = (IlRec*)realloc(c->recs, nc * sizeof(IlRec));
+        if (!g) return 0;
+        c->recs = g; c->crec = nc;
+    }
+    c->recs[c->nrec++] = *r;
+    return 1;
+}
+
+static int il_push_attr(IlCtx* c, const IlAttr* a) {
+    if (c->nattr == c->cattr) {
+        size_t nc = c->cattr ? c->cattr * 2 : 128;
+        IlAttr* g = (IlAttr*)realloc(c->attrs, nc * sizeof(IlAttr));
+        if (!g) return 0;
+        c->attrs = g; c->cattr = nc;
+    }
+    c->attrs[c->nattr++] = *a;
+    return 1;
+}
+
+static int ws_only(const char* p, size_t n) {
+    for (size_t q = 0; q < n; q++)
+        if (!IS_WS(p[q])) return 0;
+    return 1;
+}
+
+/* Stream phase: 1 = parsed (root_out/trail set), 0 = bail. */
+static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
+                   uint32_t* root_out, size_t* trail_off,
+                   size_t* trail_len) {
+    size_t i = 0;
+    const int line_ok = len < 0x7FFFFFFFu;
+    *root_out = IL_NONE;
+    *trail_off = *trail_len = 0;
+
+    if (len >= 3 && (unsigned char)s[0] == 0xEF &&
+        (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF)
+        i = 3;
+    while (i < len && IS_WS(s[i])) i++;   /* prolog ws — dropped */
+    if (i >= len) return 0;
+
+    for (;;) {
+        /* ----- open tag at s[i] == '<' ----- */
+        if (i + 1 >= len) return 0;
+        char k = s[i + 1];
+        if (k == '!' || k == '?') return 0;
+        size_t j = i + 1;
+        if (!IS_NAME_START(s[j])) return 0;
+        size_t n0 = j;
+        while (j < len && IS_NAME_CHAR(s[j])) j++;
+        size_t nl = j - n0;
+
+        IlRec r;
+        memset(&r, 0, sizeof(r));
+        r.off = (uint32_t)n0;
+        r.len = (uint32_t)nl;
+        r.line = line_ok ? (uint32_t)i + 1u : 0u;
+        r.parent = c->depth ? c->open[c->depth - 1] : IL_NONE;
+        r.has_open_parent = c->depth ? 1u : 0u;
+        r.next_sib = IL_NONE;
+        r.first_attr = IL_NONE;
+        if (nl >= 3)
+            for (size_t q = n0; q < n0 + nl; q++)
+                if (s[q] == ':') { r.open_prefixed = 1; break; }
+
+        uint32_t acount = 0;
+        for (;;) {
+            while (j < len && IS_WS(s[j])) j++;
+            if (j >= len) return 0;
+            if (s[j] == '>') { j++; break; }
+            if (s[j] == '/' && j + 1 < len && s[j + 1] == '>') {
+                j += 2; r.self_closing = 1; break;
+            }
+            if (!IS_NAME_START(s[j])) return 0;
+            size_t a0 = j;
+            while (j < len && IS_NAME_CHAR(s[j])) j++;
+            size_t al = j - a0;
+            if (al >= 5 && s[a0] == 'x' && s[a0 + 1] == 'm' &&
+                s[a0 + 2] == 'l' && s[a0 + 3] == 'n' &&
+                s[a0 + 4] == 's')
+                return 0;   /* xmlns — classic owns ns machinery */
+            while (j < len && IS_WS(s[j])) j++;
+            if (j >= len || s[j] != '=') return 0;
+            j++;
+            while (j < len && IS_WS(s[j])) j++;
+            if (j >= len || (s[j] != '"' && s[j] != '\'')) return 0;
+            char qc = s[j++];
+            size_t v0 = j;
+            uint32_t aws = 0;
+            while (j < len && s[j] != qc) {
+                char v = s[j];
+                if (v == '&') return 0;
+                if (v == '\t' || v == '\n' || v == '\r') aws = 1;
+                j++;
+            }
+            if (j >= len) return 0;
+            size_t vl = j - v0;
+            j++;
+            IlAttr a = { (uint32_t)a0, (uint32_t)al,
+                         (uint32_t)v0, (uint32_t)vl, aws };
+            if (!il_push_attr(c, &a)) return 0;
+            if (acount == 0) r.first_attr = (uint32_t)(c->nattr - 1);
+            acount++;
+        }
+        r.attr_count = acount;
+        r.start_tag_end = line_ok ? (uint32_t)j : 0u;
+        if (r.self_closing) r.elem_end = r.start_tag_end;
+        if (!il_push(c, &r)) return 0;
+        uint32_t ri = (uint32_t)(c->nrec - 1);
+        c->str_bytes += nl + 1;
+        if (r.has_open_parent && c->last_child[c->depth - 1] != IL_NONE)
+            c->recs[c->last_child[c->depth - 1]].next_sib = ri;
+        c->last_child[c->depth - 1] = ri;
+
+        if (!r.self_closing) {
+            extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
+            int max_depth = g_leptris_max_depth > 0
+                ? g_leptris_max_depth : DP_MAX_DEPTH;
+            if (c->depth >= max_depth) return 0;
+            c->open[c->depth] = ri;
+            c->last_child[c->depth] = IL_NONE;
+            c->depth++;
+        } else if (c->depth == 0) {
+            *root_out = ri;
+            size_t t0 = j;
+            while (j < len && IS_WS(s[j])) j++;
+            if (j != len) return 0;
+            *trail_off = t0; *trail_len = j - t0;
+            return 1;
+        }
+
+        /* ----- content until the matching close ----- */
+        for (;;) {
+            size_t t0 = j;
+            while (j < len && s[j] != '<') {
+                if (s[j] == '&') return 0;
+                j++;
+            }
+            if (j >= len) return 0;
+            size_t tl = j - t0;
+            if (tl > 0 && !(drop_ws && ws_only(s + t0, tl))) {
+                IlRec tr;
+                memset(&tr, 0, sizeof(tr));
+                tr.kind = 1;
+                tr.off = (uint32_t)t0;
+                tr.len = (uint32_t)tl;
+                tr.parent = c->open[c->depth - 1];
+                tr.has_open_parent = 1;
+                tr.next_sib = IL_NONE;
+                tr.line = line_ok ? (uint32_t)t0 + 1u : 0u;
+                if (!il_push(c, &tr)) return 0;
+                uint32_t ti = (uint32_t)(c->nrec - 1);
+                if (c->last_child[c->depth - 1] != IL_NONE)
+                    c->recs[c->last_child[c->depth - 1]].next_sib = ti;
+                c->last_child[c->depth - 1] = ti;
+            }
+            if (j + 1 >= len) return 0;
+            char ck = s[j + 1];
+            if (ck == '!' || ck == '?') return 0;
+            if (ck != '/') {
+                i = j;          /* nested open tag */
+                break;          /* -> outer loop */
+            }
+            size_t cs = j + 2;
+            if (cs >= len || !IS_NAME_START(s[cs])) return 0;
+            size_t c0 = cs;
+            while (cs < len && IS_NAME_CHAR(s[cs])) cs++;
+            size_t ccl = cs - c0;
+            while (cs < len && IS_WS(s[cs])) cs++;
+            if (cs >= len || s[cs] != '>') return 0;
+            cs++;
+            if (c->depth == 0) return 0;
+            uint32_t or_ = c->open[c->depth - 1];
+            IlRec* o = &c->recs[or_];
+            const char* cl = s + c0;
+            size_t cll = ccl;
+            if (o->open_prefixed) {
+                const char* colon =
+                    (const char*)memchr(s + c0, ':', ccl);
+                if (colon) {
+                    cll = ccl - (size_t)(colon + 1 - (s + c0));
+                    cl = colon + 1;
+                }
+            }
+            if ((size_t)o->len != cll ||
+                memcmp(s + o->off, cl, cll) != 0)
+                return 0;
+            o->elem_end = line_ok ? (uint32_t)cs : 0u;
+            c->depth--;
+            if (c->depth == 0) {
+                *root_out = or_;
+                size_t t0b = cs;
+                while (cs < len && IS_WS(s[cs])) cs++;
+                if (cs != len) return 0;
+                *trail_off = t0b; *trail_len = cs - t0b;
+                return 1;
+            }
+            j = cs;             /* continue content at this depth */
+        }
+    }
+}
+
+
+/* Post-pass: build the public tree from the streams, replaying the
+ * classic lane's exact stores. Returns NULL on OOM (caller frees). */
+static struct leptris_document* dp_il_build(
+    const char* xml, size_t len, IlCtx* c, uint32_t root_rec,
+    size_t trail_off, size_t trail_len, int drop_ws) {
+    extern LeptrisArena* leptris_arena_create(size_t);
+    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
+        LeptrisArena*, int);
+    extern void leptris_arena_destroy(LeptrisArena*);
+
+    char* scratch = (char*)malloc(len + 65);
+    char* pristine = (char*)malloc(len + 1);
+    if (!scratch || !pristine) goto oom_early;
+    memcpy(scratch, xml, len);
+    memset(scratch + len, 0, 65);
+    memcpy(pristine, xml, len);
+    pristine[len] = '\0';
+
+    {
+    size_t need = c->nrec * sizeof(struct leptris_element) +
+                  c->nrec * sizeof(LeptrisTextNode) +
+                  c->nattr * sizeof(struct leptris_attribute) +
+                  c->str_bytes + 8 * 1024 + 64 * 1024;
+    LeptrisArena* arena = leptris_arena_create(need);
+    if (!arena) goto oom_early;
+    LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
+    if (!pool) { leptris_arena_destroy(arena); goto oom_early; }
+
+    struct leptris_document* doc =
+        (struct leptris_document*)leptris_pool_alloc(
+            pool, sizeof(struct leptris_document));
+    if (!doc) goto oom_pool;
+    memset(doc, 0, sizeof(*doc));
+    doc->doc_pool_allocated = 1;
+    doc->strict_mode = g_leptris_strict_mode;
+    doc->pool = pool;
+    doc->page_base = leptris_pool_get_base(pool);
+    doc->ref_count = 1;
+    doc->xml_buffer = pristine;
+    doc->xml_buffer_len = len;
+    doc->xml_buffer_needs_free = 1;
+    doc->xml_buffer_slack = 0u;
+    doc->parse_scratch = scratch;
+
+    /* line-breaks table (classic parity) */
+    if (len < 0x7FFFFFFFu) {
+        size_t cap = 256, n_ = 0;
+        uint32_t* brks = (uint32_t*)malloc(cap * sizeof(uint32_t));
+        if (!brks) goto oom_pool;
+        for (size_t q = 0; q < len; q++) {
+            if (scratch[q] != '\n') continue;
+            if (n_ == cap) {
+                cap *= 2;
+                uint32_t* g = (uint32_t*)realloc(
+                    brks, cap * sizeof(uint32_t));
+                if (!g) { free(brks); goto oom_pool; }
+                brks = g;
+            }
+            brks[n_++] = (uint32_t)q;
+        }
+        doc->line_breaks = brks;
+        doc->line_break_count = n_;
+    }
+
+    /* Bulk struct blocks, exact counts. */
+    struct leptris_element* eblk = NULL;
+    LeptrisTextNode* tblk = NULL;
+    struct leptris_attribute* ablk = NULL;
+    size_t nelem = 0, ntext = 0;
+    if (c->nrec) {
+        eblk = (struct leptris_element*)leptris_pool_alloc(
+            pool, c->nrec * sizeof(struct leptris_element));
+        if (!eblk) goto oom_pool;
+        memset(eblk, 0, c->nrec * sizeof(struct leptris_element));
+        tblk = (LeptrisTextNode*)leptris_pool_alloc(
+            pool, c->nrec * sizeof(LeptrisTextNode));
+        if (!tblk) goto oom_pool;
+        memset(tblk, 0, c->nrec * sizeof(LeptrisTextNode));
+    }
+    if (c->nattr) {
+        ablk = (struct leptris_attribute*)leptris_pool_alloc(
+            pool, c->nattr * sizeof(struct leptris_attribute));
+        if (!ablk) goto oom_pool;
+        memset(ablk, 0, c->nattr * sizeof(struct leptris_attribute));
+    }
+    /* Pool string arena for element names (writable — split_hash
+     * NULs the colon there, as classic does on its copies). */
+    char* strb = NULL;
+    if (c->str_bytes) {
+        strb = (char*)leptris_pool_alloc(pool, c->str_bytes);
+        if (!strb) goto oom_pool;
+    }
+    size_t strused = 0;
+
+    DParser pp;
+    memset(&pp, 0, sizeof(pp));
+    pp.pool = pool;
+    pp.doc = doc;
+
+    /* struct map + per-record last-child STRUCT (for dp_wire_child's
+     * last_child_stack) and depths. */
+    LeptrisNode** smap = (LeptrisNode**)calloc(
+        c->nrec ? c->nrec : 1, sizeof(LeptrisNode*));
+    uint32_t* rdepth = (uint32_t*)calloc(
+        c->nrec ? c->nrec : 1, sizeof(uint32_t));
+    LeptrisNode** lc = (LeptrisNode**)calloc(
+        c->nrec ? c->nrec : 1, sizeof(LeptrisNode*));
+    if (!smap || !rdepth || !lc) {
+        free(smap); free(rdepth); free(lc); goto oom_pool;
+    }
+
+    for (size_t i = 0; i < c->nrec; i++) {
+        IlRec* r = &c->recs[i];
+        rdepth[i] = (r->parent == IL_NONE)
+            ? 0 : rdepth[r->parent] + 1;
+        if (r->kind == 0) {
+            LeptrisElement e = &eblk[nelem++];
+            e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
+            e->base.line = r->line;
+            e->base.frozen = 1;
+            e->start_tag_end_off = r->start_tag_end;
+            e->element_end_off = r->elem_end;
+            char* nm = strb + strused;
+            memcpy(nm, scratch + r->off, r->len);
+            nm[r->len] = '\0';
+            strused += r->len + 1;
+            dp_split_hash_name(&pp, e, nm, r->len);
+
+            /* attrs: dup first-wins + wiring (classic tail).
+             * attr_count counts WIRED attrs only — the dup path
+             * returns before the classic counter increment. */
+            if (r->first_attr != IL_NONE) {
+                uint32_t wired = 0;
+                struct leptris_attribute* tail = NULL;
+                for (uint32_t ai = 0; ai < r->attr_count; ai++) {
+                    IlAttr* a = &c->attrs[r->first_attr + ai];
+                    struct leptris_attribute* at =
+                        &ablk[r->first_attr + ai];
+                    /* NUL the name's trailing '=' in scratch —
+                     * accessors like attr_cname read it as a C
+                     * string; views alone aren't enough (RNG/CLI
+                     * diag text shipped "version='1"). The byte is
+                     * dead after the stream scan, so the write is
+                     * free. */
+                    scratch[a->name_off + a->name_len] = '\0';
+                    at->name_view = leptris_sv_from_ptr(
+                        scratch + a->name_off, a->name_len);
+                    if (a->has_ws) {
+                        char* norm = (char*)leptris_pool_alloc(
+                            pool, a->val_len + 1);
+                        if (!norm) { free(smap); free(rdepth);
+                                     free(lc); goto oom_pool; }
+                        for (uint32_t w = 0; w < a->val_len; w++) {
+                            char ch = scratch[a->val_off + w];
+                            norm[w] = (ch == '\t' || ch == '\n' ||
+                                       ch == '\r') ? ' ' : ch;
+                        }
+                        norm[a->val_len] = '\0';
+                        leptris_attr_value_set_heap(
+                            at, leptris_sv_from_cstr(norm));
+                    } else {
+                        scratch[a->val_off + a->val_len] = '\0';
+                        leptris_attr_value_set_heap(
+                            at, leptris_sv_from_ptr(
+                                scratch + a->val_off, a->val_len));
+                    }
+                    at->name_hash = 0;  /* lazy-hash sentinel */
+                    at->ns_cache_off = 0;
+                    at->next_cp = 0;
+                    /* dup detection — first wins (#1200) */
+                    int dup = 0;
+                    for (struct leptris_attribute* d =
+                             leptris_element_get_first_attribute(e);
+                         d; d = leptris_attr_next(d)) {
+                        if (d->name_view.length == a->name_len &&
+                            d->name_view.data[0] ==
+                                scratch[a->name_off] &&
+                            memcmp(d->name_view.data,
+                                   scratch + a->name_off,
+                                   a->name_len) == 0) {
+                            dup = 1;
+                            break;
+                        }
+                    }
+                    if (dup) {
+                        if (doc) {
+                            extern struct LeptrisDiag* leptris_diag_emit(
+                                struct LeptrisDiag**, int*, int*,
+                                LeptrisDiagKind, LeptrisNodeRef,
+                                const char*, ...);
+                            char qn[130];
+                            size_t ql = a->name_len < 129
+                                ? a->name_len : 129;
+                            memcpy(qn, scratch + a->name_off, ql);
+                            qn[ql] = '\0';
+                            leptris_diag_emit(
+                                &doc->parse_diags,
+                                &doc->parse_diag_count,
+                                &doc->parse_diag_cap,
+                                LEPTRIS_DIAG_RECOVER, NULL,
+                                "Attribute %s redefined", qn);
+                        }
+                        continue;
+                    }
+                    if (!tail) {
+                        e->first_attribute_off =
+                            leptris_compact_int32_encode_inline(
+                                e, at, &e->first_attribute_off);
+                    } else {
+                        leptris_attr_set_next(tail, at);
+                    }
+                    tail = at;
+                    wired++;
+                }
+                e->attr_count = (uint8_t)wired;
+            }
+
+            smap[i] = (LeptrisNode*)e;
+            if (r->parent != IL_NONE) {
+                pp.depth = (int)rdepth[r->parent] + 1;
+                pp.last_child_stack[pp.depth - 1] = lc[r->parent];
+                dp_wire_child(&pp,
+                    (LeptrisElement)smap[r->parent], (LeptrisNode*)e);
+                lc[r->parent] = (LeptrisNode*)e;
+            } else {
+                doc->root = e;
+                doc->new_dom_root = e;
+            }
+        } else {
+            LeptrisTextNode* tn = &tblk[ntext++];
+            const char* content = scratch + r->off;
+            scratch[r->off + r->len] = '\0';
+            tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
+            tn->base.frozen = 1;
+            tn->base.line = r->line;
+            tn->content = (char*)content;
+            tn->content_len = r->len;
+            tn->pool = pool;
+            tn->borrowed = 1;
+            tn->parent_off = 0;
+            tn->next_sibling_off = 0;
+            smap[i] = (LeptrisNode*)tn;
+            pp.depth = (int)rdepth[r->parent] + 1;
+            pp.last_child_stack[pp.depth - 1] = lc[r->parent];
+            dp_wire_child(&pp,
+                (LeptrisElement)smap[r->parent], (LeptrisNode*)tn);
+            lc[r->parent] = (LeptrisNode*)tn;
+        }
+    }
+
+    /* doc-children chain: root (+ trailing top-level ws text) */
+    {
+        LeptrisNode* rn = smap[root_rec];
+        doc->doc_children_head = rn;
+        doc->doc_children_tail = rn;
+        /* trailing doc-level ws: classic trims it after the loop —
+         * not chained. (trail_off/trail_len retained for slices 3+
+         * if the #580 chain parity ever needs it.) */
+        (void)trail_off; (void)trail_len;
+    }
+
+    leptris_root_doc_register(doc->root, doc);
+    free(smap); free(rdepth); free(lc);
+    return doc;
+
+oom_pool:
+    leptris_pool_destroy(pool);
+    free(scratch);
+    free(pristine);
+    return NULL;
+    }
+oom_early:
+    free(scratch);
+    free(pristine);
+    return NULL;
+}
+
+/* Public-gate: the interleaved lane try. NULL = bail to classic. */
+static struct leptris_document* dp_il_try(const char* xml, size_t len,
+                                          int drop_ws, int keep_ent,
+                                          int dtd_attrs) {
+    /* Per-parse getenv (uncached): ~100-200ns against ~ms parses,
+     * and it lets tests toggle the lane per-case in one process. */
+    if (!getenv("LEPTRIS_INTERLEAVED")) return NULL;
+    if (keep_ent || dtd_attrs) return NULL;
+    if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
+
+    IlCtx c;
+    memset(&c, 0, sizeof(c));
+    uint32_t root;
+    size_t toff, tlen;
+    if (!il_scan(xml, len, drop_ws, &c, &root, &toff, &tlen)) {
+        free(c.recs); free(c.attrs);
+        return NULL;
+    }
+    struct leptris_document* d =
+        dp_il_build(xml, len, &c, root, toff, tlen, drop_ws);
+    free(c.recs); free(c.attrs);
+    /* Uncached like the gate above: a cached stats flag keeps
+     * printing after the env is unset (caught by the canary spec). */
+    if (getenv("LEPTRIS_IL_STATS"))
+        fprintf(stderr, "il: records=%zu attrs=%zu\n", c.nrec, c.nattr);
+    return d;
+}
+
 /* Public: copy the input then parse (standard path).
  *
  * The copy and the arena-sizing pre-scan are ONE fused SIMD pass
@@ -1966,6 +2526,10 @@ fail:
  * arena holds only nodes and strings. */
 struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
+    {
+        struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
+        if (d) return d;
+    }
     return direct_parse_internal((char*)xml, len, 2, 0, 0, 0);
 }
 
@@ -1973,6 +2537,14 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
 struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                            unsigned parse_flags) {
     if (!xml || len == 0) return NULL;
+    {
+        struct leptris_document* d = dp_il_try(
+            xml, len,
+            (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT) ? 1 : 0,
+            (parse_flags & LEPTRIS_PARSE_KEEP_ENTITY_REFS) ? 1 : 0,
+            (parse_flags & LEPTRIS_PARSE_DTDATTR) ? 1 : 0);
+        if (d) return d;
+    }
     return direct_parse_internal((char*)xml, len, 2,
                                  (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT)
                                      ? 1 : 0,
