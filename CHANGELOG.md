@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.213] - 2026-09-21
+
+### Added — the op:date and yearMonth families (#1182, lever 6)
+
+- **op-date arithmetic (#1265)**: date/time/dateTime +/- dayTimeDuration — 6 QT3 sets, 128/128. Shared lexical shifter (`leptris_dt_shift`), time arithmetic wrapping the day, ISO date-shaped string comparisons. Fixed two corpus-caught bugs: zoned times misclassified as dateTimes, and dateTime results printing the input's seconds instead of the shifted instant's.
+- **yearMonthDuration family (#1266)**: 11 QT3 sets, 264/264 — months arithmetic (PnYnM canonical, llrint tie rule), month-end clamping for date/dateTime shifts (leap-aware), negative-year printing. The lt/gt sets rode the existing months comparison hook untouched.
+
+Both batches survived the 32-bit-long portability classes (MSVC/ILP32): int64-range instant math and every %lld argument now use long long — the CI legs caught three occurrences of the width/specifier mismatch family.
+
 ## [1.9.212] - 2026-09-21
 
 ### Added — the QT3 date/time family (lever 6 stage-2, #1182)
