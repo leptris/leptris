@@ -74,9 +74,11 @@ LEPTRIS_API void leptris_thread_cleanup(void) {
     extern void leptris_xpath_drain_thread_caches(void);
     extern void leptris_root_doc_drain_thread_caches(void);
     extern void leptris_pool_drain_recycler(void);
+    extern void leptris_arena_retain_drain(void);
     leptris_xpath_drain_thread_caches();
     leptris_root_doc_drain_thread_caches();
     leptris_pool_drain_recycler();
+    leptris_arena_retain_drain();
 }
 
 /* ---- Memory management API ---- */
