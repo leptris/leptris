@@ -275,6 +275,7 @@ void run_test_set(const char* set_path,
          * anything else is unsupported -> skip. */
         LeptrisDocument doc = scratch;
         std::vector<std::pair<std::string, std::string>>* params = nullptr;
+        std::vector<std::pair<std::string, std::string>> inline_store;
         if (env) {
             const char* ref = leptris_element_attribute(env, "ref");
             LeptrisDocument found = NULL;
@@ -286,14 +287,44 @@ void run_test_set(const char* set_path,
                         if (pe.first == ref) { params = &pe.second; break; }
             }
             if (!found && !params) {
-                skipped++;
-                continue;
+                /* INLINE environment (no ref): bind its <param>
+                 * children directly — the parse-ietf-date family
+                 * carries its comparison dateTime this way. */
+                std::vector<std::pair<std::string, std::string>>
+                    inline_params;
+                for (LeptrisElement pm = find_child(env, "param"); pm;
+                     pm = next_elem(pm)) {
+                    const char* pn = leptris_element_attribute(pm, "name");
+                    const char* ps = leptris_element_attribute(pm, "select");
+                    if (pn && ps)
+                        inline_params.emplace_back(pn, ps);
+                }
+                if (inline_params.empty()) {
+                    skipped++;
+                    continue;
+                }
+                inline_store = std::move(inline_params);
+                params = &inline_store;
             }
             if (found) doc = found;
         }
 
         run++;
-        LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
+        /* QT3 queries reference <param> variables WITHOUT declaring
+         * them (the environment implies external bindings);
+         * eval_params binds declared externals — prepend the
+         * declarations. */
+        std::string qtext;
+        if (params) {
+            for (const auto& pr : *params) {
+                if (strstr(q, ("declare variable $" + pr.first).c_str()))
+                    continue;
+                qtext += "declare variable $" + pr.first + " external; ";
+            }
+        }
+        qtext += q;
+        LeptrisXQuery xq = leptris_xquery_parse(qtext.c_str(),
+                                                qtext.size());
         LeptrisXPathResult r = NULL;
         if (xq && params) {
             std::vector<const char*> pnames, pselects;
@@ -401,6 +432,29 @@ TEST(Qt3Subset, DateExtractors) {
     run_test_set("fn/minutes-from-time.xml", {}, 25);
     run_test_set("fn/seconds-from-dateTime.xml", {}, 25);
     run_test_set("fn/seconds-from-time.xml", {}, 25);
+}
+
+/* Timezone family + RFC 5322 parsing (lever 6 stage-2 dates,
+ * batch 2): timezone-from-* accessors (new registrations),
+ * implicit-timezone, and parse-ietf-date (new function — the
+ * fraction substring is carried verbatim). */
+TEST(Qt3Subset, TimezoneAndIetf) {
+    /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
+     * timezone results is the op:duration batch — the exclusions
+     * wait on it (the concat E-notation precedent). local:* helper
+     * functions are outside the engine surface. */
+    const std::vector<const char*> dur_arith = {
+        " fn:timezone-from-", "fn:min(fn:timezone", "fn:max(fn:timezone",
+        "local:", " * 0", " * -0", "implicit-timezone() - ",
+        "= implicit-timezone()",
+        " + xs:dayTimeDuration", "ge xs:dayTimeDuration",
+        "le xs:dayTimeDuration",
+    };
+    run_test_set("fn/timezone-from-dateTime.xml", {}, 15, dur_arith);
+    run_test_set("fn/timezone-from-date.xml", {}, 17, dur_arith);
+    run_test_set("fn/timezone-from-time.xml", {}, 16, dur_arith);
+    run_test_set("fn/implicit-timezone.xml", {}, 2, dur_arith);
+    run_test_set("fn/parse-ietf-date.xml", {}, 40);
 }
 
 TEST(Qt3Subset, FnStringJoin) {
