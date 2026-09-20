@@ -2029,7 +2029,7 @@ static int il_push_attr(IlCtx* c, const IlAttr* a) {
     return 1;
 }
 
-static int ws_only(const char* p, size_t n) {
+static int il_ws_only(const char* p, size_t n) {
     for (size_t q = 0; q < n; q++)
         if (!IS_WS(p[q])) return 0;
     return 1;
@@ -2149,7 +2149,7 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
             }
             if (j >= len) return 0;
             size_t tl = j - t0;
-            if (tl > 0 && !(drop_ws && ws_only(s + t0, tl))) {
+            if (tl > 0 && !(drop_ws && il_ws_only(s + t0, tl))) {
                 IlRec tr;
                 memset(&tr, 0, sizeof(tr));
                 tr.kind = 1;
