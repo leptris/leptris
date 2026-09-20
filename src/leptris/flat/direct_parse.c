@@ -2036,9 +2036,32 @@ static int il_ws_only(const char* p, size_t n) {
 }
 
 /* Stream phase: 1 = parsed (root_out/trail set), 0 = bail. */
-static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
+/* Slice 2: il_scan reads the SCRATCH copy (65-byte NUL runway
+ * past len), so scans stop on the sentinel instead of paying a
+ * bounds test per byte — classic's endgame discipline. Inline
+ * probes of up to 48 bytes are safe: start <= len means
+ * start+48 <= len+48 < len+65. */
+static LEPTRIS_ALWAYS_INLINE size_t il_name_end(const char* s,
+                                                size_t j) {
+    const char* p = s + j;
+    for (;;) {
+        char c = p[0];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) break;
+        c = p[1];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { p += 1; break; }
+        c = p[2];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { p += 2; break; }
+        c = p[3];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) { p += 3; break; }
+        p += 4;
+    }
+    return (size_t)(p - s);
+}
+
+static int il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
                    uint32_t* root_out, size_t* trail_off,
                    size_t* trail_len) {
+    const char* send = s + len;
     size_t i = 0;
     const int line_ok = len < 0x7FFFFFFFu;
     *root_out = IL_NONE;
@@ -2047,7 +2070,7 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
     if (len >= 3 && (unsigned char)s[0] == 0xEF &&
         (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF)
         i = 3;
-    while (i < len && IS_WS(s[i])) i++;   /* prolog ws — dropped */
+    while (IS_WS(s[i])) i++;   /* prolog ws — dropped (NUL stops) */
     if (i >= len) return 0;
 
     for (;;) {
@@ -2058,7 +2081,7 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
         size_t j = i + 1;
         if (!IS_NAME_START(s[j])) return 0;
         size_t n0 = j;
-        while (j < len && IS_NAME_CHAR(s[j])) j++;
+        j = il_name_end(s, j);
         size_t nl = j - n0;
 
         IlRec r;
@@ -2076,37 +2099,57 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
 
         uint32_t acount = 0;
         for (;;) {
-            while (j < len && IS_WS(s[j])) j++;
-            if (j >= len) return 0;
+            while (IS_WS(s[j])) j++;
             if (s[j] == '>') { j++; break; }
-            if (s[j] == '/' && j + 1 < len && s[j + 1] == '>') {
+            if (s[j] == '/' && s[j + 1] == '>') {
                 j += 2; r.self_closing = 1; break;
             }
             if (!IS_NAME_START(s[j])) return 0;
             size_t a0 = j;
-            while (j < len && IS_NAME_CHAR(s[j])) j++;
+            j = il_name_end(s, j);
             size_t al = j - a0;
             if (al >= 5 && s[a0] == 'x' && s[a0 + 1] == 'm' &&
                 s[a0 + 2] == 'l' && s[a0 + 3] == 'n' &&
                 s[a0 + 4] == 's')
                 return 0;   /* xmlns — classic owns ns machinery */
-            while (j < len && IS_WS(s[j])) j++;
-            if (j >= len || s[j] != '=') return 0;
+            while (IS_WS(s[j])) j++;
+            if (s[j] != '=') return 0;
             j++;
-            while (j < len && IS_WS(s[j])) j++;
-            if (j >= len || (s[j] != '"' && s[j] != '\'')) return 0;
+            while (IS_WS(s[j])) j++;
+            if (s[j] != '"' && s[j] != '\'') return 0;
             char qc = s[j++];
             size_t v0 = j;
+            /* FUSED value scan (classic TODO 184 shape): 48 bytes
+             * inline catching quote/&/ws in one pass, then memchr
+             * for the quote + SIMD '&' check over the tail. The
+             * scratch runway makes the 48B probe unconditionally
+             * safe. '&' = bail (classic owns entities). */
             uint32_t aws = 0;
-            while (j < len && s[j] != qc) {
-                char v = s[j];
+            const char* q = s + v0;
+            const char* vend = NULL;
+            while (q < s + v0 + 48) {
+                char v = *q;
+                if (v == qc) { vend = q; goto vdone; }
                 if (v == '&') return 0;
                 if (v == '\t' || v == '\n' || v == '\r') aws = 1;
-                j++;
+                q++;
             }
-            if (j >= len) return 0;
-            size_t vl = j - v0;
-            j++;
+            if (q >= send) return 0;   /* ran to the sentinel */
+            vend = (const char*)memchr(q, qc, (size_t)(send - q));
+            if (!vend) return 0;
+            if (q < vend &&
+                leptris_text_contains(q, (size_t)(vend - q), '&'))
+                return 0;
+            for (const char* w = q; w < vend; w++) {
+                if (*w == '\t' || *w == '\n' || *w == '\r') {
+                    aws = 1;
+                    break;
+                }
+            }
+        vdone:
+            ;
+            size_t vl = (size_t)(vend - (s + v0));
+            j = (size_t)(vend - s) + 1;
             IlAttr a = { (uint32_t)a0, (uint32_t)al,
                          (uint32_t)v0, (uint32_t)vl, aws };
             if (!il_push_attr(c, &a)) return 0;
@@ -2134,8 +2177,8 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
         } else if (c->depth == 0) {
             *root_out = ri;
             size_t t0 = j;
-            while (j < len && IS_WS(s[j])) j++;
-            if (j != len) return 0;
+            while (IS_WS(s[j])) j++;
+            if (s[j] != '\0') return 0;
             *trail_off = t0; *trail_len = j - t0;
             return 1;
         }
@@ -2143,12 +2186,27 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
         /* ----- content until the matching close ----- */
         for (;;) {
             size_t t0 = j;
-            while (j < len && s[j] != '<') {
-                if (s[j] == '&') return 0;
-                j++;
+            /* FUSED text scan: 48 bytes inline for '<'/'&' (the
+             * common text run is short), then memchr('<') + SIMD
+             * '&' over the tail. '&' = bail (classic owns entities). */
+            const char* tq = s + t0;
+            const char* tend = NULL;
+            while (tq < s + t0 + 48) {
+                char v = *tq;
+                if (v == '<') { tend = tq; goto tdone; }
+                if (v == '&') return 0;
+                tq++;
             }
-            if (j >= len) return 0;
-            size_t tl = j - t0;
+            if (tq >= send) return 0;   /* ran to the sentinel */
+            tend = (const char*)memchr(tq, '<', (size_t)(send - tq));
+            if (!tend) return 0;
+            if (tq < tend &&
+                leptris_text_contains(tq, (size_t)(tend - tq), '&'))
+                return 0;
+        tdone:
+            ;
+            size_t tl = (size_t)(tend - (s + t0));
+            j = (size_t)(tend - s);
             if (tl > 0 && !(drop_ws && il_ws_only(s + t0, tl))) {
                 IlRec tr;
                 memset(&tr, 0, sizeof(tr));
@@ -2173,12 +2231,12 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
                 break;          /* -> outer loop */
             }
             size_t cs = j + 2;
-            if (cs >= len || !IS_NAME_START(s[cs])) return 0;
+            if (!IS_NAME_START(s[cs])) return 0;
             size_t c0 = cs;
-            while (cs < len && IS_NAME_CHAR(s[cs])) cs++;
+            cs = il_name_end(s, cs);
             size_t ccl = cs - c0;
-            while (cs < len && IS_WS(s[cs])) cs++;
-            if (cs >= len || s[cs] != '>') return 0;
+            while (IS_WS(s[cs])) cs++;
+            if (s[cs] != '>') return 0;
             cs++;
             if (c->depth == 0) return 0;
             uint32_t or_ = c->open[c->depth - 1];
@@ -2201,8 +2259,8 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
             if (c->depth == 0) {
                 *root_out = or_;
                 size_t t0b = cs;
-                while (cs < len && IS_WS(s[cs])) cs++;
-                if (cs != len) return 0;
+                while (IS_WS(s[cs])) cs++;
+                if (s[cs] != '\0') return 0;
                 *trail_off = t0b; *trail_len = cs - t0b;
                 return 1;
             }
@@ -2215,19 +2273,18 @@ static int il_scan(const char* s, size_t len, int drop_ws, IlCtx* c,
 /* Post-pass: build the public tree from the streams, replaying the
  * classic lane's exact stores. Returns NULL on OOM (caller frees). */
 static struct leptris_document* dp_il_build(
-    const char* xml, size_t len, IlCtx* c, uint32_t root_rec,
+    char* scratch, size_t len, IlCtx* c, uint32_t root_rec,
     size_t trail_off, size_t trail_len, int drop_ws) {
     extern LeptrisArena* leptris_arena_create(size_t);
     extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
         LeptrisArena*, int);
     extern void leptris_arena_destroy(LeptrisArena*);
 
-    char* scratch = (char*)malloc(len + 65);
+    /* scratch (with its NUL runway) is caller-built and becomes the
+     * document's parse_scratch; pristine is the immutable copy. */
     char* pristine = (char*)malloc(len + 1);
-    if (!scratch || !pristine) goto oom_early;
-    memcpy(scratch, xml, len);
-    memset(scratch + len, 0, 65);
-    memcpy(pristine, xml, len);
+    if (!pristine) goto oom_early;
+    memcpy(pristine, scratch, len);
     pristine[len] = '\0';
 
     {
@@ -2502,16 +2559,25 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
     if (keep_ent || dtd_attrs) return NULL;
     if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
 
+    /* Scratch is built UP FRONT (slice 2): il_scan reads it with
+     * the NUL-sentinel discipline, and dp_il_build reuses the same
+     * buffer for the two-buffer model. */
+    char* scratch = (char*)malloc(len + 65);
+    if (!scratch) return NULL;
+    memcpy(scratch, xml, len);
+    memset(scratch + len, 0, 65);
+
     IlCtx c;
     memset(&c, 0, sizeof(c));
     uint32_t root;
     size_t toff, tlen;
-    if (!il_scan(xml, len, drop_ws, &c, &root, &toff, &tlen)) {
+    if (!il_scan(scratch, len, drop_ws, &c, &root, &toff, &tlen)) {
         free(c.recs); free(c.attrs);
+        free(scratch);
         return NULL;
     }
     struct leptris_document* d =
-        dp_il_build(xml, len, &c, root, toff, tlen, drop_ws);
+        dp_il_build(scratch, len, &c, root, toff, tlen, drop_ws);
     free(c.recs); free(c.attrs);
     /* Uncached like the gate above: a cached stats flag keeps
      * printing after the env is unset (caught by the canary spec). */
