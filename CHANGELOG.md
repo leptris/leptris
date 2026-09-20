@@ -2,19 +2,26 @@
 
 ## [1.9.211] - 2026-09-20
 
-### Fixed
-
-- MSVC-portable env toggles for the interleaved spec (test)
-- rename lane ws_only to il_ws_only (amalgamated TU collision) (parse)
-
 ### Performance
 
-- interleaved slice 3a — upfront record capacity + NUL-view element names (parse)
-- interleaved slice 2 — sentinel discipline + fused scans in il_scan (parse)
-- interleaved-parse lane slice 1 (env-gated, bails to classic) (parse)
-- validated single-slot append-tail memo on the exec (#682) (xslt)
-
-
+- **Interleaved parse lane, slices 1-3a (#1258).** The first
+  pugixml-style interleaved rewrite landed behind
+  `LEPTRIS_INTERLEAVED=1` (opt-in; every input outside the covered
+  surface bails to the classic parser before any state). The lane
+  streams `IlRec`/`IlAttr` records with buffer-relative views, then
+  replays the classic public stores in one linear post-pass:
+  sentinel-discipline scans (no per-byte bounds tests; fused 48-byte
+  quote/'&'/whitespace probes with SIMD tails), upfront stream
+  capacity from the input size, and element/attribute names as
+  NUL'd views into the parse scratch (no per-name copies). Parity is
+  gated by a dedicated spec plus running the FULL test suite with
+  the lane forced on: 1633/1633 identical. `LEPTRIS_IL_STATS=1`
+  prints an engagement canary for diagnosing whether the lane ran.
+- **XSLT append-tail memo (#1259).** `out_append_child` keeps a
+  validated single-slot (parent, last-child) hint and feeds
+  `leptris_element_append_child_tail` — result-tree placement no
+  longer re-walks sibling chains (the hottest dispatch-heavy
+  profile leaf, ~17% of samples).
 
 ## [1.9.210] - 2026-09-20
 
