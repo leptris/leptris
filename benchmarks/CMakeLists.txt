@@ -232,6 +232,19 @@ leptris_add_benchmark(bench_xslt_subtree_copy xslt/bench_subtree_copy.c utils.c)
 # ----------------------------------------------------------------------------
 leptris_add_benchmark(bench_iterparse   sax/bench_iterparse.c)
 
+# Interleaved-parse gate (#1222): leptris vs pugixml on identical
+# fixtures, run by the CI Benchmark legs (quiet runners).
+if(PUGIXML_AVAILABLE)
+    leptris_add_benchmark(bench_parse_ab CXX parse/bench_parse_ab.cpp)
+    target_compile_definitions(bench_parse_ab PRIVATE HAVE_PUGIXML=1)
+    if(PUGIXML_TARGET)
+        target_link_libraries(bench_parse_ab PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(bench_parse_ab PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(bench_parse_ab PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+endif()
+
 # ----------------------------------------------------------------------------
 # SAX benchmarks (leptris vs libxml2).  TODO 101.
 # ----------------------------------------------------------------------------
