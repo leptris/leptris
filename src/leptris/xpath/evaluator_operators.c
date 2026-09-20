@@ -112,7 +112,7 @@ void leptris_dur_format(double secs, char* buf, size_t cap) {
     if (rem == (double)(long)rem) {
         snprintf(sec, sizeof sec, "%lldS", (long long)rem);
     } else {
-        long ip = (long)rem;
+        long long ip = (long long)rem;
         double fr = rem - ip;
         char raw[32];
         snprintf(raw, sizeof raw, "%.9f", fr);
