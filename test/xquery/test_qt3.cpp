@@ -472,6 +472,28 @@ TEST(Qt3Subset, OpDateArithmetic) {
     run_test_set("op/subtract-dayTimeDuration-from-time.xml", {}, 22, no_local);
 }
 
+/* yearMonthDuration family (lever 6 stage-2 dates, batch 5):
+ * months arithmetic, comparisons, and month +/- date{,Time}. */
+TEST(Qt3Subset, OpYearMonthDuration) {
+    /* Half-tie rounding rows (0.5/3.5/80.5 months) pin a vendor
+     * tie convention that needs decimal arithmetic to settle —
+     * excluded until that batch (the concat E-notation precedent). */
+    const std::vector<const char*> no_local = {
+        "local:", " * $i", "div $i", "* 2.3",
+    };
+    run_test_set("op/add-yearMonthDurations.xml", {}, 24, no_local);
+    run_test_set("op/subtract-yearMonthDurations.xml", {}, 24, no_local);
+    run_test_set("op/multiply-yearMonthDuration.xml", {}, 26, no_local);
+    run_test_set("op/divide-yearMonthDuration.xml", {}, 24, no_local);
+    run_test_set("op/divide-yearMonthDuration-by-yearMonthDuration.xml", {}, 22, no_local);
+    run_test_set("op/yearMonthDuration-less-than.xml", {}, 28, no_local);
+    run_test_set("op/yearMonthDuration-greater-than.xml", {}, 28, no_local);
+    run_test_set("op/add-yearMonthDuration-to-date.xml", {}, 22, no_local);
+    run_test_set("op/add-yearMonthDuration-to-dateTime.xml", {}, 22, no_local);
+    run_test_set("op/subtract-yearMonthDuration-from-date.xml", {}, 23, no_local);
+    run_test_set("op/subtract-yearMonthDuration-from-dateTime.xml", {}, 21, no_local);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions
