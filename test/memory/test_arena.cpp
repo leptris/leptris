@@ -192,11 +192,25 @@ TEST(Arena, AllPointersWithinSpanForCompactEncoding) {
 
 /* ---- Retained-block free list (parse fault fix) ---------------------- */
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ARENA_TESTS_ASAN 1
+#endif
+#elif defined(__SANITIZE_ADDRESS__)
+#define ARENA_TESTS_ASAN 1
+#endif
+
 TEST(LeptrisArena, RetainsAndReusesLargeBlocks) {
     /* Blocks >= 256 KB must round-trip through the free list: the
      * next same-size create gets the SAME mapping back (no munmap,
      * no page faults). Machine-independent by construction: it
      * asserts pointer identity, not timing. */
+    /* Under ASAN the retain cache frees for real (no TLS
+     * destructor; parked blocks read as LSan leaks) — the reuse
+     * contract is deliberately disabled there. */
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "retain cache disabled under ASAN";
+#endif
     const size_t big = 512u * 1024u;
     LeptrisArena* a1 = leptris_arena_create(big);
     ASSERT_NE(a1, nullptr);
@@ -239,6 +253,13 @@ TEST(LeptrisArena, SmallBlocksStillMallocSemantics) {
 }
 
 TEST(LeptrisArena, BufferRoundTripReusesMapping) {
+/* Under ASAN the retain cache frees for real (no TLS
+     * destructor; parked blocks read as LSan leaks) — the reuse
+     * contract is deliberately disabled there. */
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "retain cache disabled under ASAN";
+#endif
+
     char* b1 = leptris_arena_buffer_alloc(512u * 1024u);
     ASSERT_NE(b1, nullptr);
     memset(b1, 1, 512u * 1024u);
