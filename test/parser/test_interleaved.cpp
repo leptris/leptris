@@ -17,6 +17,17 @@
 #include "leptris.h"
 #include "leptris/error.h"
 
+/* MSVC has no setenv/unsetenv; _putenv_s(k, "") leaves an EMPTY
+ * value in the environment, so the lane gates in direct_parse.c
+ * treat empty-string values as off. */
+#ifdef _WIN32
+static void set_env(const char* k, const char* v) { _putenv_s(k, v); }
+static void unset_env(const char* k) { _putenv_s(k, ""); }
+#else
+static void set_env(const char* k, const char* v) { setenv(k, v, 1); }
+static void unset_env(const char* k) { unsetenv(k); }
+#endif
+
 namespace {
 
 const char* kFixtures[] = {
@@ -44,8 +55,8 @@ const char* kBail[] = {
 };
 
 std::string parse_str(const char* xml, bool lane) {
-    if (lane) setenv("LEPTRIS_INTERLEAVED", "1", 1);
-    else unsetenv("LEPTRIS_INTERLEAVED");
+    if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
+    else unset_env("LEPTRIS_INTERLEAVED");
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
     std::string out = d ? "" : "(null)";
@@ -57,7 +68,7 @@ std::string parse_str(const char* xml, bool lane) {
     } else {
         out += std::to_string((int)st);
     }
-    unsetenv("LEPTRIS_INTERLEAVED");
+    unset_env("LEPTRIS_INTERLEAVED");
     return out;
 }
 
@@ -74,8 +85,8 @@ static void walk(LeptrisElement e, std::string* out) {
 }
 
 std::string shape_str(const char* xml, bool lane) {
-    if (lane) setenv("LEPTRIS_INTERLEAVED", "1", 1);
-    else unsetenv("LEPTRIS_INTERLEAVED");
+    if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
+    else unset_env("LEPTRIS_INTERLEAVED");
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
     std::string out = d ? "" : "(null)";
@@ -83,7 +94,7 @@ std::string shape_str(const char* xml, bool lane) {
         walk(leptris_document_root(d), &out);
         leptris_document_free(d);
     }
-    unsetenv("LEPTRIS_INTERLEAVED");
+    unset_env("LEPTRIS_INTERLEAVED");
     return out;
 }
 
@@ -116,7 +127,7 @@ TEST(InterleavedParity, BailFixturesByteIdentical) {
 
 TEST(InterleavedParity, AttrAndNameAccessIdentical) {
     const char* xml = "<r k='v' n='m'><child z='9'>tx</child></r>";
-    setenv("LEPTRIS_INTERLEAVED", "1", 1);
+    set_env("LEPTRIS_INTERLEAVED", "1");
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
     ASSERT_NE(d, nullptr);
@@ -133,7 +144,7 @@ TEST(InterleavedParity, AttrAndNameAccessIdentical) {
     /* line = byte offset of '<' + 1 (classic source-position parity) */
     EXPECT_STREQ(leptris_element_text(child), "tx");
     leptris_document_free(d);
-    unsetenv("LEPTRIS_INTERLEAVED");
+    unset_env("LEPTRIS_INTERLEAVED");
 }
 
 #ifndef _WIN32
@@ -174,8 +185,8 @@ TEST(InterleavedParity, EngagementCanaryFiresOnlyWhenLaneRuns) {
         return n;
     };
 
-    setenv("LEPTRIS_INTERLEAVED", "1", 1);
-    setenv("LEPTRIS_IL_STATS", "1", 1);
+    set_env("LEPTRIS_INTERLEAVED", "1");
+    set_env("LEPTRIS_IL_STATS", "1");
     char lane[512] = {0};
     ssize_t n = capture(lane, sizeof(lane));
     ASSERT_GT(n, 0) << "no stderr captured";
@@ -183,21 +194,21 @@ TEST(InterleavedParity, EngagementCanaryFiresOnlyWhenLaneRuns) {
         << "lane canary missing, interleaved path did not run: " << lane;
     EXPECT_NE(strstr(lane, "attrs=1"), nullptr) << lane;
 
-    unsetenv("LEPTRIS_IL_STATS");
+    unset_env("LEPTRIS_IL_STATS");
     char classic[512] = {0};
     n = capture(classic, sizeof(classic));
     ASSERT_GE(n, 0);
     EXPECT_EQ(strstr(classic, "il: records="), nullptr)
         << "canary leaked into the classic path: " << classic;
-    unsetenv("LEPTRIS_INTERLEAVED");
+    unset_env("LEPTRIS_INTERLEAVED");
 }
 #endif  /* !_WIN32: canary capture uses POSIX pipe/dup2 */
 
 TEST(InterleavedParity, DupAttrDiagnosticParity) {
     const char* xml = "<r a='1' a='2'/>";
     for (int lane = 0; lane <= 1; lane++) {
-        if (lane) setenv("LEPTRIS_INTERLEAVED", "1", 1);
-        else unsetenv("LEPTRIS_INTERLEAVED");
+        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
+        else unset_env("LEPTRIS_INTERLEAVED");
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
         ASSERT_NE(d, nullptr);
@@ -207,6 +218,6 @@ TEST(InterleavedParity, DupAttrDiagnosticParity) {
         LeptrisElement root = leptris_document_root(d);
         EXPECT_STREQ(leptris_element_attribute(root, "a"), "1");
         leptris_document_free(d);
-        unsetenv("LEPTRIS_INTERLEAVED");
+        unset_env("LEPTRIS_INTERLEAVED");
     }
 }
