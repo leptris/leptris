@@ -720,6 +720,7 @@ typedef enum {
     XPATH_OP_MULTIPLY,
     XPATH_OP_DIV,
     XPATH_OP_MOD,
+    XPATH_OP_IDIV,   /* XPath 2.0 integer division, truncating */
     XPATH_OP_UNION,
     XPATH_OP_NEGATION,
     /* XSLT 3.0 expression extensions (XPath 2.0+ forms), carried on

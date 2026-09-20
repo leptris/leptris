@@ -2210,7 +2210,10 @@ TEST(XPath20Ledger, DateAccessorTail) {
     EXPECT_EQ(NumEval("hours-from-duration('P3DT2H')"), 2.0);
     EXPECT_EQ(NumEval("hours-from-duration('PT5H')"), 5.0);
     EXPECT_EQ(NumEval("minutes-from-duration('PT2H30M')"), 30.0);
-    EXPECT_EQ(NumEval("seconds-from-duration('PT90.5S')"), 90.0);
+    /* seconds keeps its fraction (F&O xs:decimal; QT3
+     * fn-seconds-from-time/dateTime corpus pins it). Was pinned to
+     * the truncated 90.0 before the QT3 date batch. */
+    EXPECT_EQ(NumEval("seconds-from-duration('PT90.5S')"), 90.5);
     /* constructor aliases are passthrough shapes. */
     EXPECT_EQ(StrEval("xs:dayTimeDuration('PT2H')"), "PT2H");
     EXPECT_EQ(StrEval("xs:yearMonthDuration('P1Y2M')"), "P1Y2M");

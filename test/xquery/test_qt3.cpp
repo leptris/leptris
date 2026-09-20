@@ -384,6 +384,25 @@ TEST(Qt3Subset, FnReplace) {
 }
 #endif
 
+/* Date/time extractor family (lever 6, stage-2 "dates"): the
+ * accessors are registered (functions_ext31) — this batch is their
+ * conformance gate. Assertion kinds are assert-eq/assert-string-value
+ * shaped; error-assertion cases skip per the harness rules. */
+TEST(Qt3Subset, DateExtractors) {
+    run_test_set("fn/year-from-dateTime.xml", {}, 25);
+    run_test_set("fn/year-from-date.xml", {}, 25);
+    run_test_set("fn/month-from-dateTime.xml", {}, 25);
+    run_test_set("fn/month-from-date.xml", {}, 25);
+    run_test_set("fn/day-from-dateTime.xml", {}, 25);
+    run_test_set("fn/day-from-date.xml", {}, 25);
+    run_test_set("fn/hours-from-dateTime.xml", {}, 25);
+    run_test_set("fn/hours-from-time.xml", {}, 25);
+    run_test_set("fn/minutes-from-dateTime.xml", {}, 25);
+    run_test_set("fn/minutes-from-time.xml", {}, 25);
+    run_test_set("fn/seconds-from-dateTime.xml", {}, 25);
+    run_test_set("fn/seconds-from-time.xml", {}, 25);
+}
+
 TEST(Qt3Subset, FnStringJoin) {
     /* The direct-constructor cases bind the ctor's SERIALIZED
      * STRING (value-level constructors) — `$e/*` from it is empty.
