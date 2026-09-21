@@ -1209,6 +1209,30 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
      * kind, markers stripped). */
     char* sv = NULL;
     if (in->select_is_dot) {
+        /* #682 borrow fast path: a TEXT context node, or an ELEMENT
+         * whose entire content is one text child, has its string-
+         * value ALREADY materialized — append that pointer instead
+         * of get_node_text's malloc + two-pass join + copy. op_text
+         * copies synchronously, so the borrow never outlives this
+         * call. */
+        int ty = ((LeptrisNode*)node)->type;
+        const char* borrowed = NULL;
+        if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+            borrowed = leptris_text_get_content((LeptrisTextNode*)node);
+        } else if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+            LeptrisNodeRef fc = leptris_elem_first_child(node);
+            if (fc && ((LeptrisNode*)fc)->type == LEPTRIS_NODE_TYPE_TEXT &&
+                !leptris_node_get_next_sibling(fc))
+                borrowed =
+                    leptris_text_get_content((LeptrisTextNode*)fc);
+        }
+        if (borrowed) {
+            op_text(ex, &(XsltInstr){ .kind = XSLT_INSTR_TEXT,
+                                      .text = (char*)borrowed,
+                                      .doe = in->doe },
+                    node);
+            return 0;
+        }
         extern char* get_node_text(void* n);
         sv = get_node_text(node);
     } else if (in->select_attr_name) {
