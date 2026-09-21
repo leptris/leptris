@@ -102,6 +102,16 @@ const char* leptris_text_get_content(LeptrisTextNode* text) {
     if (!text) return NULL;
 
     if (text->borrowed && text->pool) {
+        /* #1218 slice 2: an in-place terminated run (the parser
+         * wrote the NUL into the doc-owned input copy) is already
+         * materialized — serve it directly when it carries no
+         * entity. A run WITH '&' still takes the expansion path
+         * below (dp-borrowed nodes rely on it). */
+        if (text->content_len > 0 &&
+            text->content[text->content_len] == '\0' &&
+            memchr(text->content, '&', text->content_len) == NULL) {
+            return text->content;
+        }
         /* Entity expansion: if the borrowed content contains '&',
          * expand predefined XML entities (&amp;, &lt;, etc.) and
          * numeric character references (&#65;, &#x42;) into a new
