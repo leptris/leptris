@@ -60,6 +60,9 @@ typedef struct leptris_compact_overflow_entry {
     void* value;                  /* Actual pointer value */
     struct leptris_document* doc;   /* Document that owns this entry */
     struct leptris_compact_overflow_entry* next;
+    /* #682: per-document chain — teardown walks THIS doc's entries
+     * instead of scanning every bucket of the global table. */
+    struct leptris_compact_overflow_entry* doc_next;
 } LeptrisCompactOverflowEntry;
 
 /**
