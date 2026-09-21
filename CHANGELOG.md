@@ -2,6 +2,14 @@
 
 ## [1.9.217] - 2026-09-21
 
+### Performance
+
+- tag-id classifier stack + single-lookup start tags (#1218) (html)
+
+
+
+## [1.9.217] - 2026-09-21
+
 ### Added — plan-ABI additive v1 (descriptor materialization, PR #1275)
 
 Closes #1272, #1273, #1269 — the binding-facing plan upgrades:
