@@ -2428,3 +2428,46 @@ TEST(Dom, SetRootAcceptsMutationElementAcrossRecycledAddresses) {
         leptris_document_free(d);
     }
 }
+
+// ---- #1254: bulk attribute read face (names + values + handles) ----
+
+TEST(AttributePairs, BulkReadReturnsNamesValuesAndHandles) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<root a='1' b='2' c='3'/>";
+    LeptrisDocument doc =
+        leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    const char* names[8];
+    const char* values[8];
+    LeptrisAttribute attrs[8];
+    size_t n = leptris_element_attribute_pairs(
+        root, names, values, attrs, 8);
+    ASSERT_EQ(n, 3u);
+    EXPECT_STREQ(names[0], "a");
+    EXPECT_STREQ(values[0], "1");
+    EXPECT_STREQ(names[1], "b");
+    EXPECT_STREQ(values[1], "2");
+    EXPECT_STREQ(names[2], "c");
+    EXPECT_STREQ(values[2], "3");
+    /* Handles are live: mutating through one is visible via the
+     * scalar accessor. */
+    ASSERT_NE(attrs[0], nullptr);
+    EXPECT_STREQ(leptris_attribute_get_name(attrs[0]), "a");
+    EXPECT_STREQ(leptris_attribute_get_value(root, attrs[0]), "1");
+
+    /* Count-only query (all columns NULL). */
+    EXPECT_EQ(leptris_element_attribute_pairs(root, NULL, NULL, NULL, 0),
+              3u);
+    /* Truncated cap. */
+    EXPECT_EQ(leptris_element_attribute_pairs(root, names, values, attrs,
+                                              2),
+              2u);
+    /* NULL elem is 0. */
+    EXPECT_EQ(leptris_element_attribute_pairs(nullptr, names, values,
+                                              attrs, 8),
+              0u);
+    leptris_document_free(doc);
+}
