@@ -1259,6 +1259,34 @@ LEPTRIS_API const char* leptris_attribute_get_value(LeptrisElement elem, Leptris
     return attr_cvalue(attr);
 }
 
+LEPTRIS_API size_t leptris_element_attribute_pairs(
+    LeptrisElement elem, const char** out_names, const char** out_values,
+    LeptrisAttribute* out_attrs, size_t max_count) {
+    if (!elem) return 0;
+
+    /* Count-only query when every column is skipped. */
+    if (!out_names && !out_values && !out_attrs) {
+        size_t n = 0;
+        for (struct leptris_attribute* a =
+                 leptris_element_get_first_attribute(elem);
+             a; a = leptris_attr_next(a))
+            n++;
+        return n;
+    }
+
+    size_t written = 0;
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(elem);
+         a; a = leptris_attr_next(a)) {
+        if (written >= max_count) break;
+        if (out_names) out_names[written] = attr_cname(a);
+        if (out_values) out_values[written] = attr_cvalue(a);
+        if (out_attrs) out_attrs[written] = (LeptrisAttribute)a;
+        written++;
+    }
+    return written;
+}
+
 LEPTRIS_API size_t leptris_element_namespace_count(LeptrisElement elem) {
     if (!elem) return 0;
     size_t count = 0;

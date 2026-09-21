@@ -1847,6 +1847,36 @@ LEPTRIS_API const char* leptris_attribute_get_name(LeptrisAttribute attr);
 LEPTRIS_API const char* leptris_attribute_get_value(LeptrisElement elem, LeptrisAttribute attr);
 
 /**
+ * Bulk attribute read face (#1254): one C pass per element returns
+ * names, values, AND attribute handles in parallel — the shape
+ * bindings need to replace the 4-calls-per-attribute chain
+ * (first / get_name / get_value / next) with a single dispatch.
+ *
+ * Names and values are the element's canonical attribute list in
+ * source order (xmlns declarations excluded — they live in the
+ * separate namespace channel, matching
+ * leptris_element_first_attribute). Handles let mutation-capable
+ * consumers keep native attribute references; pass NULL for any
+ * column to skip it.
+ *
+ * @param elem Element
+ * @param out_names Output array of name strings, or NULL to skip
+ * @param out_values Output array of value strings (parallel), or
+ *                   NULL to skip
+ * @param out_attrs Output array of attribute handles (parallel), or
+ *                  NULL to skip
+ * @param max_count Capacity of the non-NULL output arrays
+ * @return The total attribute count (min(total, max_count) copied)
+ *
+ * Memory: Strings and handles are owned by the element/document.
+ * Do not free separately. Handles stay valid until the attribute
+ * is removed or the document is freed.
+ */
+LEPTRIS_API size_t leptris_element_attribute_pairs(
+    LeptrisElement elem, const char** out_names, const char** out_values,
+    LeptrisAttribute* out_attrs, size_t max_count);
+
+/**
  * Get number of child elements
  *
  * @param elem Element
