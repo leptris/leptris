@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.216] - 2026-09-21
+
+### Fixed
+
+- generation-checked root-doc memo (#1242 strike-12 class) (dom)
+
+
+
 ## [1.9.215] - 2026-09-21
 
 ### Added — XQuery order-by (QT3 OrderByClause 138/205)
