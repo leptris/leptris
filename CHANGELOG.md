@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.218] - 2026-09-21
+
+### Performance
+
+- borrowed string-value for value-of select='.' (#682) (xslt)
+
+
+
 ## [1.9.217] - 2026-09-21
 
 ### Performance
