@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.219] - 2026-09-21
+
+### Performance
+
+- authoritative content_len in the text-join passes (#1285 slice 1) (dom)
+
+
+
 ## [1.9.218] - 2026-09-21
 
 ### Performance
