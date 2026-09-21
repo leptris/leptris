@@ -4,7 +4,18 @@
 
 ### Fixed
 
-- generation-checked root-doc memo (#1242 strike-12 class) (dom)
+- **#1242** — generation-checked root→document memo. The TLS
+  last-hit memo was keyed on the root's address alone; the iterparse
+  yield path primed it with a subtree the consumer frees, and the
+  allocator recycled that address for the NEXT document's root —
+  the stale pair resolved all-NULL attribute reads and
+  `set_root`'s "element belongs to a different document" false
+  positive. Every map mutation now bumps a generation counter; a
+  memo hit requires the prime-time generation to match, so
+  invalidation is deterministic instead of allocator luck. The
+  transform steady state the #682 lever targets still hits (one
+  pointer compare); TDD-covered by
+  `DomBasics.RootDocMemoDiesOnAnyMapMutationAfterPrime`.
 
 
 
