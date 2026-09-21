@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.214] - 2026-09-21
+
+### Added
+
+- QT3 lane-15 core batch — switch/group-by/if gated (60 cases) (xquery)
+- QT3 fn-items batch — function-name/arity gated + QName-verbatim fix (xquery)
+
+
+
 ## [1.9.213] - 2026-09-21
 
 ### Added — the op:date and yearMonth families (#1182, lever 6)
