@@ -2,16 +2,23 @@
 
 ## [1.9.215] - 2026-09-21
 
-### Added
+### Added — XQuery order-by (QT3 OrderByClause 138/205)
 
-- QT3 OrderByClause batch — 138/205 adopted (xquery)
+- Expression-level `order by` on FLWOR: string-typed keys compare by
+  codepoint (`collation`-shaped strmode mask), repeated `order by`
+  clauses chain as sequential stable sorts keyed by clause index.
+- libxml2 number-spelling parity stays pinned for XPath 1.0/XSLT;
+  XQuery gets its own channel (integral plain ≤1e18, plain
+  fractions ≥1e-18, INF/-INF) selected at eval entry.
+- `/a/b/string()` fn-step rehang + `//` twin root-match fast path
+  (#692); base-uri declaration support.
 
 ### Fixed
 
-- deep-copy owned head nodeset in evaluate_location_path (xpath)
-- drop manual free before set_nodeset + deep-copy attrs (xpath)
-- set_nodeset frees prior nodeset (ASAN leak) (xpath)
-- clone attr/ns on tuple rebind (ASAN UAF) (xquery)
+- ASAN chain from the orderby gate: deep-copy owned head nodesets
+  in `evaluate_location_path`; `set_nodeset` frees a prior nodeset
+  instead of leaking; tuple rebind clones attr/ns; variable lookup
+  deep-copies owned attributes/namespaces.
 
 
 
