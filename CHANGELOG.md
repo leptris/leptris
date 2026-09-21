@@ -2,12 +2,30 @@
 
 ## [1.9.217] - 2026-09-21
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added — plan-ABI additive v1 (descriptor materialization, PR #1275)
 
-### Changed
+Closes #1272, #1273, #1269 — the binding-facing plan upgrades:
 
-- (describe changes here)
+- **#1272 attribute-predicate rows**: child rows and attribute plans
+  accept `leptris_attr_predicate` pairs; same-wire siblings partition
+  by predicate (AND across pairs, exclusive routing only when
+  predicates are present — the #1115 multi-namespace behavior is
+  untouched).
+- **#1273 document-order identity**: every result value carries an
+  `order_index` cumulative across rows (strictly increasing in
+  document order); `LEPTRIS_PLAN_FLAG_EMIT_ORDER_SPINE` optionally
+  appends unmatched text runs so interleavings reconstruct without
+  fragment re-parses.
+- **#1269 in-pass types + fusion**: rows carry a `type_tag`
+  (1=int / 2=float / 3=bool) executed during the walk with soft-fail
+  to string; `leptris_plan_materialize` fuses parse→walk→free into
+  one call for the binding hot path.
+- New accessors: `leptris_plan_value_node_kind/_order_index/_int/
+  _float/_bool`. `LEPTRIS_PLAN_ABI_VERSION` stays 1 — all additions
+  are trailing fields, aggregate initializers keep compiling.
+
+Five new specs in `test/abi/test_descriptor.cpp` (Plan1272/1273/
+1269a/1269b); full ctest green across all 24 CI legs.
 
 
 ## [1.9.216] - 2026-09-21
