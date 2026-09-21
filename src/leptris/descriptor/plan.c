@@ -14,8 +14,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
+#include "../common/port.h"
 #include "leptris.h"
 #include "leptris/descriptor.h"
 
@@ -320,6 +320,17 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
             d->attribute_count = s->attribute_count;
             for (uint32_t a = 0; a < s->attribute_count; a++) {
                 d->attribute_plans[a] = s->attribute_plans[a];
+                /* Additive-ABI contract (#1272): a host that
+                 * mallocs (not value-initializes) the spec leaves
+                 * the new trailing fields garbage — zero them here
+                 * so `predicate_count = 0` really means "no filter"
+                 * and free never derefs an uninitialized pointer. */
+                if (!s->attribute_plans[a].predicates ||
+                    !s->attribute_plans[a].predicate_count) {
+                    d->attribute_plans[a].predicates = NULL;
+                    d->attribute_plans[a].predicate_count = 0;
+                    d->attribute_plans[a].pad_pred = 0;
+                }
                 if (s->attribute_plans[a].wire_name) {
                     d->attribute_plans[a].wire_name =
                         dp_strdup(s->attribute_plans[a].wire_name);
@@ -374,6 +385,15 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                     return NULL;
                 }
                 d->child_plans[c] = *sc;
+                /* Additive-ABI contract (#1272): zero the new
+                 * trailing fields when the spec left them unset —
+                 * malloc-initialized hosts get "no filter" and a
+                 * safe free. */
+                if (!sc->predicates || !sc->predicate_count) {
+                    d->child_plans[c].predicates = NULL;
+                    d->child_plans[c].predicate_count = 0;
+                    d->child_plans[c].pad_pred = 0;
+                }
                 if (sc->wire_name) {
                     d->child_plans[c].wire_name = dp_strdup(sc->wire_name);
                     if (!d->child_plans[c].wire_name) goto oom;
