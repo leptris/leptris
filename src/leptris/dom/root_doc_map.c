@@ -111,8 +111,31 @@ static size_t bucket_index(LeptrisElement root) {
 static LEPTRIS_THREAD_LOCAL LeptrisElement g_memo_root;
 static LEPTRIS_THREAD_LOCAL struct leptris_document* g_memo_doc;
 
+/* #1242 strike-12: the memo was keyed on the root ADDRESS alone.
+ * The iterparse yield path primes it with a subtree root the
+ * consumer frees; the allocator then recycles that address —
+ * frequently for the NEXT parsed document's root — and the stale
+ * (address, old-doc) pair resolved the new root to the OLD
+ * document. Both observed symptoms come from that one resolution:
+ * all-NULL attribute reads (wrong-doc bail upstream of the
+ * ATTR_MISS dump) and set_root's "element belongs to a different
+ * document" false positive on a same-document element.
+ *
+ * The fix is a generation counter: every map mutation
+ * (register / unregister / doc sweep / explicit invalidate) bumps
+ * it, and a memo hit requires the prime-time generation to match.
+ * The transform steady state the #682 lever targets performs
+ * lookups only, so the memo keeps hitting there; any churn —
+ * precisely the strike interleaving — kills it deterministically
+ * instead of by allocator luck. */
+static LEPTRIS_THREAD_LOCAL uint64_t g_rootmap_generation;
+static LEPTRIS_THREAD_LOCAL uint64_t g_memo_generation;
+
+static void rootmap_generation_bump(void) { g_rootmap_generation++; }
+
 void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc) {
     if (!root || !doc) return;
+    rootmap_generation_bump();
     size_t idx = bucket_index(root);
     if (rootmap_marked(root)) {
         /* Possibly already present: walk to update. */
@@ -169,13 +192,11 @@ void leptris_root_doc_drain_thread_caches(void) {
 void leptris_root_doc_unregister(LeptrisElement root) {
     if (!root) return;
     if (!rootmap_marked(root)) return;  /* never registered: O(1) out */
-    /* #1242: the (root, doc) memo trusts the root ADDRESS. An
-     * element-level unregister frees that address while the doc
-     * lives — the doc-keyed invalidation never fires, and the
-     * allocator recycling the address into another element's climb
-     * target made get_document return the WRONG document. Same
-     * exposure class #1038 closed for the map; the memo needs it
-     * at element granularity. */
+    /* #1242: any map mutation kills the memo (generation bump).
+     * The address-match clear below stays as the immediate drop;
+     * the generation covers the prime-then-churn interleaving the
+     * address match cannot see. */
+    rootmap_generation_bump();
     if (g_memo_root == root) {
         g_memo_root = NULL;
         g_memo_doc = NULL;
@@ -218,6 +239,8 @@ void leptris_root_doc_unregister(LeptrisElement root) {
 size_t leptris_root_doc_unregister_doc(struct leptris_document* doc) {
     if (!doc) return 0;
     size_t removed = 0;
+    /* #1242: doc sweep mutates the map — kill the memo. */
+    rootmap_generation_bump();
     RootDocEntry* e = (RootDocEntry*)doc->map_entries;
     doc->map_entries = NULL;
     while (e) {
@@ -272,16 +295,22 @@ void leptris_root_doc_memo_prime(LeptrisElement root,
     if (!root || !doc) return;
     g_memo_root = root;
     g_memo_doc = doc;
+    g_memo_generation = g_rootmap_generation;
 }
 
 void leptris_root_doc_memo_invalidate(const struct leptris_document* doc) {
     if (g_memo_doc == doc) {
+        rootmap_generation_bump();
         g_memo_root = NULL;
         g_memo_doc = NULL;
     }
 }
 
+/* Test hook (#1242): the memo root the engine would TRUST — NULL
+ * when the memo is generation-stale (primed before a map
+ * mutation), even if the pair fields still hold values. */
 LeptrisElement leptris_root_doc_memo_root_for_tests(void) {
+    if (g_memo_generation != g_rootmap_generation) return NULL;
     return g_memo_root;
 }
 
@@ -293,6 +322,11 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
      * fused name pass is reverted — this push isolates the TLS
      * hoist against the macos small-doc parse-ratio guard. */
     LeptrisElement memo_root = g_memo_root;
+    /* #1242: the memo hit requires the prime-time generation to
+     * match — a map mutation since the prime means the primed
+     * root may be freed and its address recycled, so the pair is
+     * untrustworthy regardless of the address match. */
+    uint64_t memo_generation = g_memo_generation;
     for (;;) {
         /* #1189: a namebp-carrying element is UNATTACHED by
          * definition - its document lives statelessly in the name
@@ -300,7 +334,8 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
          * address memo. A freed root's address recycled by the
          * allocator made the memo hit with a stale document
          * before the authoritative namebp was consulted. */
-        if (cur == memo_root && !leptris_elem_has_namebp(cur))
+        if (cur == memo_root && memo_generation == g_rootmap_generation &&
+            !leptris_elem_has_namebp(cur))
             return g_memo_doc;
         LeptrisElement parent = leptris_elem_parent(cur);
         if (!parent) break;
@@ -315,6 +350,7 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
     if (d) {
         g_memo_root = cur;
         g_memo_doc = d;
+        g_memo_generation = g_rootmap_generation;
         return d;
     }
     /* Round 21: unattached mutation elements carry their doc in the
