@@ -2099,16 +2099,35 @@ static int xq_rebind(XPathContext* ctx, const XqTuple* t) {
         if (!one) return 0;
         for (size_t j = 0; j < t->counts[i]; j++) {
             if (t->nodes[i][j]) {
-                xpath_nodeset_add(one, t->nodes[i][j]);
+                void* nd = t->nodes[i][j];
+                int ty = XPATH_NODE_TYPE(nd);
+                /* Attribute/namespace members are CLONED into the
+                 * varset so the binding is freed independently of
+                 * the tuple — sharing left a UAF when group-by
+                 * freed the source tuples while the last rebind's
+                 * vars still held the pointers (ASAN on
+                 * OrderByClause). Document elements stay shared. */
+                if (ty == LEPTRIS_NODE_ATTRIBUTE ||
+                    ty == LEPTRIS_NODE_NAMESPACE) {
+                    void* c = xq_clone_synth(nd);
+                    if (!c) {
+                        xpath_nodeset_free(one);
+                        return 0;
+                    }
+                    xpath_nodeset_add(one, c);
+                    if (ty == LEPTRIS_NODE_ATTRIBUTE)
+                        one->owns_attributes = 1;
+                    else
+                        one->owns_namespaces = 1;
+                } else {
+                    xpath_nodeset_add(one, nd);
+                }
             } else if (t->contents[i][j]) {
                 XPathTextNode* tn = xpath_synth_text(
                     t->contents[i][j], strlen(t->contents[i][j]));
                 if (tn) xpath_nodeset_add(one, tn);
             }
         }
-        /* nodeset_free frees only synthetic-text members; document
-         * nodes are skipped by the kind dispatch — safe for mixed
-         * group sequences. */
         one->owns_synthetic_text = 1;
         XPathVariable* var = xpath_variable_set_add(
             (XPathVariableSet*)ctx->variable_set, t->names[i],
@@ -2815,6 +2834,10 @@ static LeptrisXPathResult xq_eval_impl(
                 free(gparts);
                 free(gmembers);
                 free(gcounts);
+                /* Drop the last group-key rebind before disposing
+                 * the source tuples (xq_rebind clones attrs, but
+                 * clear vars so nothing can still observe them). */
+                xq_unbind_all(ctx, q->clauses, q->nclauses);
                 for (size_t ti = 0; ti < n_tuples; ti++)
                     xq_tuple_free(&tuples[ti]);
                 free(tuples);
