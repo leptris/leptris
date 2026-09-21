@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.215] - 2026-09-21
+
+### Added
+
+- QT3 OrderByClause batch — 138/205 adopted (xquery)
+
+### Fixed
+
+- deep-copy owned head nodeset in evaluate_location_path (xpath)
+- drop manual free before set_nodeset + deep-copy attrs (xpath)
+- set_nodeset frees prior nodeset (ASAN leak) (xpath)
+- clone attr/ns on tuple rebind (ASAN UAF) (xquery)
+
+
+
 ## [1.9.214] - 2026-09-21
 
 ### Added — QT3 lane-15 core: switch / group-by / if (lever 6 stage-2)
