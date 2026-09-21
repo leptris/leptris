@@ -12,6 +12,8 @@ LeptrisElement leptris_root_doc_memo_root_for_tests(void);
 void leptris_root_doc_register(LeptrisElement root,
                                struct leptris_document* doc);
 void leptris_root_doc_unregister(LeptrisElement root);
+void leptris_root_doc_memo_prime(LeptrisElement root,
+                                 struct leptris_document* doc);
 struct leptris_document* leptris_element_get_document(LeptrisElement elem);
 }
 #include "../leptris/memory/pool.h"
@@ -168,6 +170,48 @@ TEST(DomBasics, RootDocMemoClearedWhenRootUnregisters) {
     leptris_root_doc_unregister(e);
     EXPECT_EQ(leptris_root_doc_memo_root_for_tests(), nullptr)
         << "stale (root, doc) memo survived root unregistration";
+    leptris_document_free(doc);
+}
+
+/* #1242 strike-12 class: the iterparse yield path PRIMES the memo
+ * with a subtree root that the consumer frees on release. The
+ * allocator recycles that address — often for the NEXT parsed
+ * document's root — and the stale (address, old-doc) pair then
+ * resolves the new root to the OLD document: all-NULL attribute
+ * reads and set_root's cross-document false positive, exactly the
+ * reported strikes. Address-match alone cannot discriminate, so
+ * ANY map mutation (register / unregister / doc sweep) after a
+ * prime must kill the memo — a generation counter makes that
+ * deterministic instead of allocator-luck. */
+TEST(DomBasics, RootDocMemoDiesOnAnyMapMutationAfterPrime) {
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_element_create(doc, "r");
+    ASSERT_NE(e, nullptr);
+    leptris_root_doc_register(e, doc);
+    /* Iterparse-style prime of a subtree root. */
+    leptris_root_doc_memo_prime(e, doc);
+    ASSERT_EQ(leptris_root_doc_memo_root_for_tests(), e);
+
+    /* Churn: a NEW document parses and registers its root (the
+     * recycled-address interleaving of every strike). */
+    {
+        LeptrisDocument doc2 = leptris_document_create();
+        ASSERT_NE(doc2, nullptr);
+        LeptrisElement e2 = leptris_element_create(doc2, "s");
+        ASSERT_NE(e2, nullptr);
+        leptris_root_doc_register(e2, doc2);
+        leptris_root_doc_unregister(e2);
+        leptris_document_free(doc2);
+    }
+    /* The memo must be DEAD: the primed root may already be freed
+     * and its address recycled, so a stale pair must never be
+     * trusted by get_document. */
+    EXPECT_EQ(leptris_root_doc_memo_root_for_tests(), nullptr)
+        << "stale memo survived a map mutation after prime";
+    /* And get_document on the ORIGINAL element still resolves
+     * correctly through the authoritative path. */
+    EXPECT_EQ(leptris_element_get_document(e), doc);
     leptris_document_free(doc);
 }
 
