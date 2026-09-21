@@ -29,7 +29,7 @@ extern XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
 
 /* ---- query model ---- */
 
-typedef enum { XQ_DECL_VAR, XQ_DECL_NS, XQ_DECL_FN,
+typedef enum { XQ_DECL_VAR, XQ_DECL_NS, XQ_DECL_FN, XQ_DECL_DEFAULT_NS,
                  XQ_DECL_SKIP } XqDeclKind;
 
 typedef struct {
@@ -64,6 +64,13 @@ typedef struct {
 typedef struct {
     XPathASTNode* key;
     int descending;
+    int empty_least;   /* `empty least` — the default empty mode is
+                        * greatest (XQuery 3.0 impl-defined; Saxon) */
+    int strmode;       /* key evaluated to xs:string — codepoint
+                        * order, never numerically re-parsed */
+    size_t clause;     /* which `order by` clause this key came
+                        * from — clauses apply as sequential stable
+                        * sorts (XQuery 3.0 allows repeated order by) */
 } XqOrderKey;
 
 struct LeptrisXQueryInternal {
@@ -671,17 +678,33 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
         s->p = (e.p < e.end) ? e.p + 1 : e.end;   /* ';' */
         return 1;
     }
+    if (word_is(w, wl, "base-uri")) {
+        /* `declare base-uri "URI";` — accepted and skipped: it only
+         * anchors RELATIVE collation URIs, and codepoint ordering
+         * is URI-independent (QT3 orderBy60). */
+        scan_ws(s);
+        if (s->p >= s->end || (*s->p != '"' && *s->p != '\''))
+            return 0;
+        scan_string(s);
+        scan_ws(s);
+        if (s->p < s->end && *s->p == ';') s->p++;
+        out->kind = XQ_DECL_SKIP;
+        return 1;
+    }
     if (word_is(w, wl, "default")) {
         /* `declare default function namespace "URI";` (also
          * element/function collation variants — accepted and
          * skipped: local-name resolution is unchanged, which is
-         * what the corpus gates). */
+         * what the corpus gates). `default element namespace` is
+         * CAPTURED: unprefixed path names and constructed elements
+         * resolve in it. */
         scan_ws(s);
         wl = scan_word(s, &w);
         s->p = w + wl;
         if (!wl) return 0;
         if (word_is(w, wl, "function") || word_is(w, wl, "element") ||
             word_is(w, wl, "collation") || word_is(w, wl, "order")) {
+            int is_elem = word_is(w, wl, "element");
             /* optional "empty" / "namespace" filler words */
             scan_ws(s);
             Scan t2 = *s;
@@ -692,10 +715,20 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
                 scan_ws(s);
             }
             if (s->p >= s->end || (*s->p != '"' && *s->p != '\'')) return 0;
-            scan_string(s);
+            if (is_elem && w2l && word_is(w, w2l, "namespace")) {
+                const char* lit = s->p;
+                scan_string(s);
+                size_t ll = (size_t)(s->p - lit);
+                if (ll >= 2) {
+                    out->uri = span_dup(lit + 1, lit + ll - 1);
+                    if (!out->uri) return 0;
+                }
+            } else {
+                scan_string(s);
+            }
             scan_ws(s);
             if (s->p < s->end && *s->p == ';') s->p++;
-            out->kind = XQ_DECL_SKIP;   /* accepted, semantically inert */
+            out->kind = is_elem ? XQ_DECL_DEFAULT_NS : XQ_DECL_SKIP;
             return 1;
         }
         return 0;
@@ -1388,6 +1421,32 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             }
                             s.p = iw + iwl;
                         } else {
+                            /* optional `as SequenceType` — accepted
+                             * and ignored (value model is dynamic) */
+                            {
+                                Scan at2 = s;
+                                const char* aw2;
+                                size_t aw2l = scan_word(&at2, &aw2);
+                                if (aw2l && word_is(aw2, aw2l, "as")) {
+                                    at2.p = aw2 + aw2l;
+                                    scan_ws(&at2);
+                                    const char* tw3 = at2.p;
+                                    while (at2.p < at2.end &&
+                                           (isalnum((unsigned char)*at2.p) ||
+                                            *at2.p == ':' || *at2.p == '_' ||
+                                            *at2.p == '.' || *at2.p == '-'))
+                                        at2.p++;
+                                    if (at2.p > tw3) {
+                                        scan_ws(&at2);
+                                        if (at2.p < at2.end &&
+                                            (*at2.p == '?' || *at2.p == '*' ||
+                                             *at2.p == '+'))
+                                            at2.p++;
+                                        s = at2;
+                                        scan_ws(&s);
+                                    }
+                                }
+                            }
                             if (s.p + 1 >= s.end || s.p[0] != ':' ||
                                 s.p[1] != '=') {
                                 free(var);
@@ -1576,6 +1635,8 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         return NULL;
                     }
                     s.p = bw + bwl;
+                    size_t kclause =
+                        q->nkeys ? q->keys[q->nkeys - 1].clause + 1 : 0;
                     for (;;) {
                         scan_ws(&s);
                         Scan e = s;
@@ -1586,6 +1647,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             return NULL;
                         }
                         int desc = 0;
+                        int eleast = 0;
                         s = e;
                         scan_ws(&s);
                         const char* dw;
@@ -1594,9 +1656,46 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         if (dwl && (word_is(dw, dwl, "descending"))) {
                             desc = 1;
                             s.p = dw + dwl;
+                            scan_ws(&s);
+                            dt = s;
+                            dwl = scan_word(&dt, &dw);
                         } else if (dwl &&
                                    word_is(dw, dwl, "ascending")) {
                             s.p = dw + dwl;
+                            scan_ws(&s);
+                            dt = s;
+                            dwl = scan_word(&dt, &dw);
+                        }
+                        /* `empty greatest|least` — the empty-sequence
+                         * ordering mode; optional `collation "URI"`
+                         * is accepted (codepoint ordering). */
+                        if (dwl && word_is(dw, dwl, "empty")) {
+                            Scan et = dt;
+                            const char* ew;
+                            size_t ewl = scan_word(&et, &ew);
+                            if (ewl &&
+                                (word_is(ew, ewl, "least") ||
+                                 word_is(ew, ewl, "greatest"))) {
+                                eleast = word_is(ew, ewl, "least");
+                                s.p = ew + ewl;
+                                scan_ws(&s);
+                                dt = s;
+                                dwl = scan_word(&dt, &dw);
+                            }
+                        }
+                        if (dwl && word_is(dw, dwl, "collation")) {
+                            Scan ct2 = dt;
+                            const char* cw2;
+                            size_t c2l = scan_word(&ct2, &cw2);
+                            (void)c2l;
+                            (void)cw2;
+                            s.p = dw + dwl;
+                            scan_ws(&s);
+                            if (s.p < s.end &&
+                                (*s.p == '"' || *s.p == '\'')) {
+                                scan_string(&s);
+                                scan_ws(&s);
+                            }
                         }
                         XqOrderKey* grown = (XqOrderKey*)realloc(
                             q->keys, (q->nkeys + 1) * sizeof(XqOrderKey));
@@ -1608,6 +1707,8 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         q->keys = grown;
                         q->keys[q->nkeys].key = key;
                         q->keys[q->nkeys].descending = desc;
+                        q->keys[q->nkeys].empty_least = eleast;
+                        q->keys[q->nkeys].clause = kclause;
                         q->nkeys++;
                         scan_ws(&s);
                         if (s.p < s.end && *s.p == ',') {
@@ -2074,7 +2175,18 @@ static int key_cmp(const char* a, const char* b) {
     double vb = strtod(b, &eb);
     int na = ea && *ea == '\0' && ea != a;
     int nb = eb && *eb == '\0' && eb != b;
-    if (na && nb) return (va < vb) ? -1 : (va > vb) ? 1 : 0;
+    if (na && nb) {
+        /* XQuery order by (Saxon/QT3): NaN sorts as the LEAST
+         * numeric value — first ascending, last descending; INF
+         * sorts above every finite value. */
+        int ana = (va != va);
+        int bnb = (vb != vb);
+        if (ana || bnb) {
+            if (ana && bnb) return 0;
+            return ana ? -1 : 1;
+        }
+        return (va < vb) ? -1 : (va > vb) ? 1 : 0;
+    }
     return strcmp(a, b);
 }
 
@@ -2423,6 +2535,7 @@ static LeptrisXPathResult xq_eval_impl(
     /* Prolog in order: namespaces, then variables/functions as
      * declared (each sees the earlier ones). */
     int err = 0;
+    ctx->xquery_spelling = 1;
     for (size_t i = 0; i < q->ndecls && !err; i++) {
         XqDecl* d = &q->decls[i];
         if (d->kind == XQ_DECL_NS) {
@@ -2450,6 +2563,11 @@ static LeptrisXPathResult xq_eval_impl(
             }
             ctx->namespace_count++;
             ctx->namespaces_collected = 1;   /* keep ours */
+        } else if (d->kind == XQ_DECL_DEFAULT_NS) {
+            /* unprefixed names resolve in the default element
+             * namespace (XQuery §4.2.3): path tests and
+             * constructed elements */
+            ctx->xquery_default_ns = d->uri;
         } else if (d->kind == XQ_DECL_VAR) {
             struct leptris_xpath_result* v = NULL;
             if (d->external) {
@@ -2758,6 +2876,10 @@ static LeptrisXPathResult xq_eval_impl(
                             struct leptris_xpath_result* r =
                                 evaluate_expr(ctx, q->keys[k].key);
                             char* ks = r ? xpath_to_string(r) : NULL;
+                            if (ti == 0)
+                                q->keys[k].strmode =
+                                    (r &&
+                                     r->type == XPATH_RESULT_STRING);
                             xpath_result_free(r);
                             tuples[ti].keys[k] = ks ? ks : strdup("");
                         }
@@ -2765,15 +2887,41 @@ static LeptrisXPathResult xq_eval_impl(
                 }
             }
             if (!err) {
-                /* Stable order-by: insertion sort over key lists. */
+                /* Stable order-by: insertion sort over key lists,
+                 * ONE SORT PER `order by` CLAUSE (repeated clauses
+                 * are legal XQuery 3.0; stability makes later
+                 * clauses refine earlier orderings). */
+                size_t nkey_clauses = 0;
+                for (size_t k = 0; k < q->nkeys; k++)
+                    if (q->keys[k].clause + 1 > nkey_clauses)
+                        nkey_clauses = q->keys[k].clause + 1;
+                for (size_t c = 0; c < nkey_clauses; c++) {
                 for (size_t i = 1; i < n_tuples; i++) {
                     XqTuple tmp = tuples[i];
                     size_t j = i;
                     while (j > 0) {
                         int cmp = 0;
                         for (size_t k = 0; k < q->nkeys && !cmp; k++) {
-                            int c = key_cmp(tuples[j - 1].keys[k],
-                                            tmp.keys[k]);
+                            if (q->keys[k].clause != c) continue;
+                            const char* ka = tuples[j - 1].keys[k];
+                            const char* kb = tmp.keys[k];
+                            int c;
+                            int ea = !ka || !ka[0];
+                            int eb = !kb || !kb[0];
+                            if (ea || eb) {
+                                /* empty-sequence keys order by the
+                                 * key's empty mode (greatest default) */
+                                if (ea && eb)
+                                    c = 0;
+                                else if (q->keys[k].empty_least)
+                                    c = ea ? -1 : 1;
+                                else
+                                    c = ea ? 1 : -1;
+                            } else if (q->keys[k].strmode) {
+                                c = strcmp(ka, kb);
+                            } else {
+                                c = key_cmp(ka, kb);
+                            }
                             cmp = q->keys[k].descending ? -c : c;
                         }
                         if (cmp > 0) {
@@ -2784,6 +2932,7 @@ static LeptrisXPathResult xq_eval_impl(
                         }
                     }
                     tuples[j] = tmp;
+                }
                 }
 
                 /* Phase 2: rebind in output order, evaluate return. */
@@ -2823,11 +2972,80 @@ static LeptrisXPathResult xq_eval_impl(
                                 result = r;
                                 adopted = 1;
                             } else {
-                                char* s = xpath_to_string(r);
-                                XPathTextNode* tn = xpath_synth_text(
-                                    s ? s : "", s ? strlen(s) : 0);
-                                free(s);
-                                if (tn) xpath_nodeset_add(out, tn);
+                                /* element results keep their NODE
+                                 * identity — the ctor wrap and
+                                 * assert-xml serialize them; text
+                                 * stays a synthetic member */
+                                int kept = 0;
+                                if (r->type == XPATH_RESULT_NODESET &&
+                                    r->value.nodeset_value) {
+                                    XPathNodeSet* rn =
+                                        r->value.nodeset_value;
+                                    for (size_t mi = 0; mi < rn->count;
+                                         mi++) {
+                                        void* nd = rn->nodes[mi];
+                                        if (nd && XPATH_NODE_TYPE(nd) ==
+                                                     LEPTRIS_NODE_ELEMENT) {
+                                            xpath_nodeset_add(out, nd);
+                                            kept = 1;
+                                        }
+                                    }
+                                }
+                                if (!kept) {
+                                    /* a multi-member sequence result
+                                     * spreads one member per item
+                                     * (K2: `return ($i, 2)` is TWO
+                                     * members, not their first) */
+                                    int spread = 0;
+                                    if (r->type ==
+                                            XPATH_RESULT_NODESET &&
+                                        r->value.nodeset_value &&
+                                        r->value.nodeset_value
+                                                ->count > 1) {
+                                        spread = 1;
+                                        for (size_t mi = 0;
+                                             mi <
+                                             r->value.nodeset_value
+                                                     ->count;
+                                             mi++) {
+                                            char* s2 = get_node_text(
+                                                r->value
+                                                    .nodeset_value
+                                                    ->nodes[mi]);
+                                            XPathTextNode* tn =
+                                                xpath_synth_text(
+                                                    s2 ? s2 : "",
+                                                    s2 ? strlen(s2)
+                                                       : 0);
+                                            free(s2);
+                                            if (tn)
+                                                xpath_nodeset_add(out,
+                                                                  tn);
+                                        }
+                                    }
+                                    if (!spread) {
+                                        /* Atomic returns render with
+                                         * the XQuery number spelling
+                                         * (xq_number_to_string), not
+                                         * the libxml2-parity XPath
+                                         * printer. */
+                                        char* s =
+                                            (r->type ==
+                                                 XPATH_RESULT_NUMBER &&
+                                             !r->is_int)
+                                                ? xpath_number_to_string_xq(
+                                                      r->value
+                                                          .number_value)
+                                                : xpath_to_string(r);
+                                        XPathTextNode* tn =
+                                            xpath_synth_text(
+                                                s ? s : "",
+                                                s ? strlen(s) : 0);
+                                        free(s);
+                                        if (tn)
+                                            xpath_nodeset_add(out, tn);
+                                    }
+                                }
                                 xpath_result_free(r);
                             }
                         }
@@ -2854,48 +3072,71 @@ static LeptrisXPathResult xq_eval_impl(
     xpath_context_cleanup(ctx);
     /* Hoisted ctor wrapper (`<tag>{ FLWOR }</tag>`): the element
      * wraps the WHOLE FLWOR result sequence once (the hoist moved
-     * it out of the per-tuple return). */
+     * it out of the per-tuple return). Element members serialize;
+     * under a default element namespace the wrapper carries it. */
     if (result && q->wrap_tag &&
         leptris_xpath_result_type(result) == LEPTRIS_XPATH_NODESET) {
         size_t n = leptris_xpath_result_count(result);
         size_t tl = strlen(q->wrap_tag);
-        size_t len = tl * 2 + 5 + n;
+        size_t dnl = (ctx->xquery_default_ns &&
+                      !strchr(q->wrap_tag, ':'))
+                         ? strlen(ctx->xquery_default_ns)
+                         : 0;
+        size_t len = tl * 2 + 5 + n + (dnl ? dnl + 10 : 0);
+        char** ser = (char**)calloc(n ? n : 1, sizeof(char*));
+        if (!ser) return result;
         for (size_t i = 0; i < n; i++) {
-            const char* v =
-                leptris_xpath_result_node_value(result, i);
-            len += v ? strlen(v) : 0;
-        }
-        char* s = (char*)malloc(len + 1);
-        if (s) {
-            size_t w2 = 0;
-            memcpy(s + w2, "<", 1);
-            w2 += 1;
-            memcpy(s + w2, q->wrap_tag, tl);
-            w2 += tl;
-            s[w2++] = '>';
-            for (size_t i = 0; i < n; i++) {
+            LeptrisElement el = leptris_xpath_result_get(result, i);
+            if (el)
+                ser[i] = leptris_element_serialize(el, NULL);
+            if (!ser[i]) {
                 const char* v =
                     leptris_xpath_result_node_value(result, i);
-                if (i) s[w2++] = ' ';
-                if (v) {
-                    size_t vl = strlen(v);
-                    memcpy(s + w2, v, vl);
-                    w2 += vl;
-                }
+                ser[i] = leptris_strdup(v ? v : "");
             }
-            s[w2++] = '<';
-            s[w2++] = '/';
-            memcpy(s + w2, q->wrap_tag, tl);
-            w2 += tl;
-            s[w2++] = '>';
-            s[w2] = 0;
-            leptris_xpath_result_free(result);
-            result = xpath_result_new(XPATH_RESULT_STRING);
-            if (result)
-                result->value.string_value = s;
-            else
-                free(s);
+            len += strlen(ser[i]);
         }
+        char* s = (char*)malloc(len + 1);
+        if (!s) {
+            for (size_t i = 0; i < n; i++) leptris_free_string(ser[i]);
+            free(ser);
+            return result;
+        }
+        size_t w2 = 0;
+        memcpy(s + w2, "<", 1);
+        w2 += 1;
+        memcpy(s + w2, q->wrap_tag, tl);
+        w2 += tl;
+        if (dnl) {
+            w2 += (size_t)snprintf(s + w2, len + 1 - w2,
+                                   " xmlns=\"%s\"",
+                                   ctx->xquery_default_ns);
+        }
+        s[w2++] = '>';
+        for (size_t i = 0; i < n; i++) {
+            LeptrisElement el = leptris_xpath_result_get(result, i);
+            if (!el && i) s[w2++] = ' ';   /* text members join with
+                                             * spaces (XQuery sequence
+                                             * string form); elements
+                                             * sit adjacent */
+            size_t vl = strlen(ser[i]);
+            memcpy(s + w2, ser[i], vl);
+            w2 += vl;
+            leptris_free_string(ser[i]);
+        }
+        free(ser);
+        s[w2++] = '<';
+        s[w2++] = '/';
+        memcpy(s + w2, q->wrap_tag, tl);
+        w2 += tl;
+        s[w2++] = '>';
+        s[w2] = 0;
+        leptris_xpath_result_free(result);
+        result = xpath_result_new(XPATH_RESULT_STRING);
+        if (result)
+            result->value.string_value = s;
+        else
+            free(s);
     }
     return result;
 }

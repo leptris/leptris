@@ -81,6 +81,54 @@ char* xpath_number_to_string(double number) {
     return leptris_strdup(start);
 }
 
+/* XQuery-atomic number spelling (Saxon/QT3): integral doubles print
+ * PLAIN up to 1e18, fractions print PLAIN down to 1e-18, everything
+ * else scientific; INF/-INF for infinities. The XPath 1.0 surface
+ * keeps libxml2 xmlXPathFormatNumber parity (pinned by
+ * XsltNumberFormat.MatchesLibxml2 and the libxslt suite), so this
+ * spelling is only used where the context sets xquery_spelling. */
+char* xpath_number_to_string_xq(double number) {
+    if (isnan(number)) return leptris_strdup("NaN");
+    if (isinf(number))
+        return leptris_strdup(number > 0 ? "INF" : "-INF");
+    if (number == 0.0) return leptris_strdup("0");
+    if (number > -1e18 && number < 1e18 &&
+        number == (double)(long long)number) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%lld", (long long)number);
+        return leptris_strdup(buf);
+    }
+
+    char work[128];
+    int size;
+    double absolute_value = fabs(number);
+    if (absolute_value > 1e18 || absolute_value < 1e-18) {
+        size = (int)snprintf(work, sizeof(work), "%21.14e", number);
+        while (size > 0 && work[size] != 'e') size--;
+    } else {
+        /* Fraction budget: integer digits first, the fraction spends
+         * the remaining significant digits (33 places floor for the
+         * 1e-18 tail). */
+        int integer_place = (int)floor(log10(absolute_value));
+        int fraction_place = integer_place > 0
+                                 ? 15 - integer_place - 1
+                                 : 15 - integer_place;
+        if (fraction_place > 33) fraction_place = 33;
+        if (fraction_place < 0) fraction_place = 0;
+        size = (int)snprintf(work, sizeof(work), "%0.*f",
+                             fraction_place, number);
+    }
+
+    char* start = work;
+    while (*start == ' ') start++;
+    char* after = work + size;
+    char* ptr = after;
+    while (ptr > start && *(--ptr) == '0') { }
+    if (*ptr != '.') ptr++;
+    memmove(ptr, after, strlen(after) + 1);
+    return leptris_strdup(start);
+}
+
 /* Get the XPath string-value of a node (all node kinds). Returns a
  * malloc'd string the caller owns. */
 char* get_node_text(void* node) {

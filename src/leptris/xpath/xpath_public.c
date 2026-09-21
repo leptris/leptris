@@ -440,13 +440,21 @@ LEPTRIS_API double leptris_xpath_result_number(LeptrisXPathResult result) {
             }
         case XPATH_RESULT_NODESET:
             if (result->value.nodeset_value && result->value.nodeset_value->count > 0) {
-                LeptrisElement elem = (LeptrisElement)result->value.nodeset_value->nodes[0];
-                const char* text = leptris_element_text(elem);
+                /* kind-aware string value: synthetic text members
+                 * (sequence items carry the \x03N numeric marker)
+                 * are not elements — get_node_text covers every
+                 * kind and strips the marker. */
+                char* text = get_node_text(
+                    result->value.nodeset_value->nodes[0]);
                 if (text && text[0] != '\0') {
                     char* endptr;
                     double val = strtod(text, &endptr);
-                    return (endptr == text || *endptr != '\0') ? (NAN) : val;
+                    int ok = !(endptr == text || *endptr != '\0');
+                    LEPTRIS_FREE(text);
+                    if (ok) return val;
+                    return NAN;
                 }
+                if (text) LEPTRIS_FREE(text);
             }
             return NAN;
         default:

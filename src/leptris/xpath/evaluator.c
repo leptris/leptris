@@ -140,6 +140,8 @@ void xpath_context_init(XPathContext* context,
     context->owned_docs = NULL;
     context->n_owned_docs = 0;
     context->cap_owned_docs = 0;
+    context->xquery_default_ns = NULL;
+    context->xquery_spelling = 0;
 }
 
 void xpath_context_free(XPathContext* context) {

@@ -723,6 +723,45 @@ TEST(Qt3Subset, Lane15Core) {
     run_test_set("prod/IfExpr.xml", {}, 24, ex);
 }
 
+/* OrderByClause (lever 6 stage-2, batch 8): 205 cases. Engine
+ * levers: default element namespace, expression-level order by
+ * (parser FOR node + collected sort), empty modes, NaN-least
+ * ordering, INF spelling, integral/fraction plain printing,
+ * synthetic-node identity proxy for `is`, sequence spread in
+ * FLWOR returns, let as-Type skip. */
+TEST(Qt3Subset, OrderByClause) {
+    /* Excluded with rationale: the double-canonical E-notation
+     * family — QT3/Saxon serialize xs:double/xs:float results as
+     * `1.0E6` while our value model is double-only and prints
+     * integral values plain (the decimal-vs-double type channel
+     * is the follow-up slice; the same boundary as the decimal
+     * tie-rounding exclusions). Also excluded: xs:hexBinary
+     * ordering (type not materialized), comment{...} computed
+     * comments, the `"SEP"` two-FLWOR sequences, boolean((for
+     * ...)) predicate syntax, and `/DataValues/(expr)` — the
+     * parenthesized simple-map after a path needs node-valued
+     * results (the `!` map stringifies members). */
+    const std::vector<const char*> ex = {
+        "xs:float(",
+        "xs:double(",
+        "xs:hexBinary(",
+        "comment{",
+        ", \"SEP\",",
+        "avg(for",
+        "order by 1 collation",
+        "(-0.000000000000000001,",
+        "let $i := (<e>1</e>, <e>3</e>, <e>2</e>)",
+        "boolean((for",
+        "/DataValues/(",
+        "($x * -1)",
+        "<results> { for $x in (<a>A String</a>",
+    };
+    run_test_set("prod/OrderByClause.xml",
+                 {{"orderdata", "prod/OrderByClause/orderData.xml"},
+                  {"orderdata2", "prod/OrderByClause/orderData.xml"}},
+                 138, ex);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions

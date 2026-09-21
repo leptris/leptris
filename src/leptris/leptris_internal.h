@@ -703,6 +703,17 @@ typedef struct xpath_context {
     struct leptris_document** owned_docs;
     size_t n_owned_docs;
     size_t cap_owned_docs;
+
+    /* XQuery `declare default element namespace` — unprefixed name
+     * tests match elements in THIS namespace, and unprefixed
+     * constructed elements carry it. Borrowed (query-owned). */
+    const char* xquery_default_ns;
+
+    /* Atomic results render with the XQuery number spelling
+     * (Saxon/QT3: integral plain to 1e18, fractions plain to
+     * 1e-18, INF/-INF) instead of the libxml2-parity XPath 1.0
+     * printer. Set by the XQuery eval entry. */
+    int xquery_spelling;
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */

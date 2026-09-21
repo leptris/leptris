@@ -199,7 +199,11 @@ XPathNodeSet* xpath_map_fn_over(XPathContext* ctx, XPathNodeSet* ns,
             xpath_nodeset_free(out);
             return NULL;
         }
-        char* piece = xpath_to_string(item);
+        char* piece =
+            (ctx->xquery_spelling &&
+             item->type == XPATH_RESULT_NUMBER && !item->is_int)
+                ? xpath_number_to_string_xq(item->value.number_value)
+                : xpath_to_string(item);
         xpath_result_free(item);
         XPathTextNode* tn =
             synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
@@ -431,6 +435,15 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
      * join space-separated (the sequence's string form). */
     if (op == XPATH_OP_FOR) {
         if (ast->child_count < 2 || !ast->value) return NULL;
+        /* order-by keys ride as key,NUMBER-flag pairs after the
+         * return child (expression-level for) */
+        typedef struct { char** keys; XPathTextNode* tn; } ObItem;
+        size_t n_obk = (ast->child_count > 2)
+                           ? (ast->child_count - 2) / 2 : 0;
+        ObItem* obitems = NULL;
+        size_t n_obit = 0;
+        unsigned ob_strmask = 0;   /* bit k: key k is xs:string-typed
+                                    * (codepoint order) */
         /* A bare eval context carries no variable set — own a
          * scratch one for the loop binding. */
         XPathVariableSet* scratch = NULL;
@@ -611,12 +624,120 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         ctx->variable_set, loop_var);
                     continue;
                 }
-                char* piece = xpath_to_string(item);
+                /* a multi-member sequence result spreads: one member
+                 * per output item (K2: `return ($i, 2)` is TWO
+                 * members, not their first) */
+                if (item->type == XPATH_RESULT_NODESET &&
+                    item->value.nodeset_value &&
+                    item->value.nodeset_value->count > 1) {
+                    XPathNodeSet* sq = item->value.nodeset_value;
+                    for (size_t si = 0; si < sq->count; si++) {
+                        char* piece = get_node_text(sq->nodes[si]);
+                        XPathTextNode* tn =
+                            synth_text(piece ? piece : "",
+                                       piece ? strlen(piece) : 0);
+                        free(piece);
+                        if (!tn) continue;
+                        if (n_obk) {
+                            /* order-by collect (keys, member) */
+                            char** ks =
+                                (char**)calloc(n_obk, sizeof(char*));
+                            if (!ks) {
+                                xpath_nodeset_add(out, tn);
+                                continue;
+                            }
+                            for (size_t ki = 0; ki < n_obk; ki++) {
+                                struct leptris_xpath_result* kr =
+                                    evaluate_expr(
+                                        ctx,
+                                        ast->children[2 + ki * 2]);
+                                char* kv =
+                                    kr ? xpath_to_string(kr) : NULL;
+                                if (n_obit == 0 && kr &&
+                                    kr->type == XPATH_RESULT_STRING)
+                                    ob_strmask |= 1u << ki;
+                                if (kr) xpath_result_free(kr);
+                                ks[ki] = kv ? kv
+                                            : leptris_strdup("");
+                            }
+                            ObItem* grown = (ObItem*)realloc(
+                                obitems,
+                                (n_obit + 1) * sizeof(ObItem));
+                            if (grown) {
+                                obitems = grown;
+                                obitems[n_obit].keys = ks;
+                                obitems[n_obit].tn = tn;
+                                n_obit++;
+                            } else {
+                                for (size_t ki = 0; ki < n_obk; ki++)
+                                    free(ks[ki]);
+                                free(ks);
+                                xpath_nodeset_add(out, tn);
+                            }
+                        } else {
+                            xpath_nodeset_add(out, tn);
+                        }
+                    }
+                    xpath_result_free(item);
+                    if (pos_var)
+                        xpath_variable_set_remove(
+                            ctx->variable_set, pos_var);
+                    xpath_variable_set_remove(
+                        ctx->variable_set, loop_var);
+                    continue;
+                }
+                char* piece =
+                    (ctx->xquery_spelling &&
+                     item->type == XPATH_RESULT_NUMBER && !item->is_int)
+                        ? xpath_number_to_string_xq(
+                              item->value.number_value)
+                        : xpath_to_string(item);
                 xpath_result_free(item);
                 XPathTextNode* tn = synth_text(piece ? piece : "",
                                                piece ? strlen(piece) : 0);
                 free(piece);
-                if (tn) xpath_nodeset_add(out, tn);
+                if (n_obk && tn) {
+                    /* order-by: collect (keys, member) — the sort
+                     * runs after the loop; keys evaluated with the
+                     * loop variable still bound */
+                    char** ks = (char**)calloc(n_obk, sizeof(char*));
+                    if (ks) {
+                        int ok2 = 1;
+                        for (size_t ki = 0; ki < n_obk && ok2; ki++) {
+                            struct leptris_xpath_result* kr =
+                                evaluate_expr(ctx, ast->children[2 + ki * 2]);
+                            char* kv = kr ? xpath_to_string(kr) : NULL;
+                            if (n_obit == 0 && kr &&
+                                kr->type == XPATH_RESULT_STRING)
+                                ob_strmask |= 1u << ki;
+                            if (kr) xpath_result_free(kr);
+                            ks[ki] = kv ? kv : leptris_strdup("");
+                            if (!ks[ki]) ok2 = 0;
+                        }
+                        if (ok2) {
+                            ObItem* grown = (ObItem*)realloc(
+                                obitems,
+                                (n_obit + 1) * sizeof(ObItem));
+                            if (grown) {
+                                obitems = grown;
+                                obitems[n_obit].keys = ks;
+                                obitems[n_obit].tn = tn;
+                                n_obit++;
+                                ks = NULL;
+                                tn = NULL;
+                            }
+                        }
+                        for (size_t ki = 0; ki < n_obk; ki++)
+                            if (ks && ks[ki]) {
+                                free(ks[ki]);
+                                ks[ki] = NULL;
+                            }
+                        free(ks);
+                    }
+                    if (tn) xpath_nodeset_add(out, tn);
+                } else if (tn) {
+                    xpath_nodeset_add(out, tn);
+                }
             }
             /* The variable OWNS the nodeset after set_nodeset —
              * remove frees it; do not double-free. */
@@ -624,6 +745,73 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 xpath_variable_set_remove(ctx->variable_set, pos_var);
             xpath_variable_set_remove(ctx->variable_set, loop_var);
         }
+        /* order-by: stable insertion sort over the collected
+         * (keys, member) pairs, then append in order. Flags: bit0
+         * descending, bit1 empty-least (default greatest). */
+        if (n_obit > 1) {
+            for (size_t i = 1; i < n_obit; i++) {
+                ObItem tmp = obitems[i];
+                size_t j = i;
+                while (j > 0) {
+                    int cmp = 0;
+                    for (size_t k = 0; k < n_obk && !cmp; k++) {
+                        int flag = (int)ast->children[3 + k * 2]
+                                       ->number_value;
+                        const char* ka = obitems[j - 1].keys[k];
+                        const char* kb = tmp.keys[k];
+                        int c;
+                        int ea = !ka || !ka[0];
+                        int eb = !kb || !kb[0];
+                        if (ea || eb) {
+                            if (ea && eb)
+                                c = 0;
+                            else if (flag & 2)
+                                c = ea ? -1 : 1;
+                            else
+                                c = ea ? 1 : -1;
+                        } else if ((ob_strmask >> k) & 1) {
+                            c = strcmp(ka, kb);
+                        } else {
+                            char *ea2 = NULL, *eb2 = NULL;
+                            double va = strtod(ka, &ea2);
+                            double vb = strtod(kb, &eb2);
+                            int na2 = ea2 && *ea2 == '\0' && ea2 != ka;
+                            int nb2 = eb2 && *eb2 == '\0' && eb2 != kb;
+                            if (na2 && nb2) {
+                                int ana = (va != va);
+                                int bnb = (vb != vb);
+                                if (ana || bnb) {
+                                    if (ana && bnb)
+                                        c = 0;
+                                    else
+                                        c = ana ? -1 : 1;
+                                } else {
+                                    c = (va < vb) ? -1
+                                                  : (va > vb) ? 1 : 0;
+                                }
+                            } else {
+                                c = strcmp(ka, kb);
+                            }
+                        }
+                        cmp = (flag & 1) ? -c : c;
+                    }
+                    if (cmp > 0) {
+                        obitems[j] = obitems[j - 1];
+                        j--;
+                    } else {
+                        break;
+                    }
+                }
+                obitems[j] = tmp;
+            }
+        }
+        for (size_t i = 0; i < n_obit; i++) {
+            if (obitems[i].tn) xpath_nodeset_add(out, obitems[i].tn);
+            for (size_t k = 0; k < n_obk; k++) free(obitems[i].keys[k]);
+            free(obitems[i].keys);
+        }
+        free(obitems);
+
         /* Restore the shadowed bindings (snapshot above); entries
          * that fail to re-bind fall through to the frees below. */
         if (sv.had) {
@@ -1380,6 +1568,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         buf[0] = 0;
         const char* name = ast->value ? ast->value : "e";
         len += (size_t)snprintf(buf, cap, "<%s", name);
+        /* XQuery default element namespace: unprefixed constructed
+         * elements carry it (serialized as the xmlns declaration). */
+        if (ctx->xquery_default_ns && ctx->xquery_default_ns[0] &&
+            !strchr(name, ':')) {
+            size_t need = len + strlen(ctx->xquery_default_ns) + 11;
+            while (need + 1 > cap) {
+                cap *= 2;
+                char* nb = (char*)realloc(buf, cap);
+                if (!nb) { free(buf); return NULL; }
+                buf = nb;
+            }
+            len += (size_t)snprintf(buf + len, cap - len,
+                                    " xmlns=\"%s\"",
+                                    ctx->xquery_default_ns);
+        }
         for (size_t i = 0; i < ast->child_count; i++) {
             XPathASTNode* c = ast->children[i];
             size_t attr_n = 1;
@@ -2055,7 +2258,13 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 is->owns_namespaces = 0;
                 is->owns_synthetic_text = 0;
             } else {
-                char* piece = xpath_to_string(item);
+                char* piece =
+                    (ctx->xquery_spelling &&
+                     item->type == XPATH_RESULT_NUMBER &&
+                     !item->is_int)
+                        ? xpath_number_to_string_xq(
+                              item->value.number_value)
+                        : xpath_to_string(item);
                 if (item->type == XPATH_RESULT_NUMBER) {
                     /* "\x03N" marks numeric members for per-member
                      * type checks (instance of); get_node_text
@@ -2555,7 +2764,25 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (!lnode || !rnode) {
                 result->value.boolean_value = 0;
             } else if (op == XPATH_OP_IS) {
-                result->value.boolean_value = (lnode == rnode);
+                /* synthetic members are deep-copied at each variable
+                 * read (let-unwind safety) — pointer identity would
+                 * be false for `$x is $x`. Content+kind equality is
+                 * the identity proxy for them; DOM nodes keep
+                 * pointer identity. */
+                int lty = XPATH_NODE_TYPE(lnode);
+                int rty = XPATH_NODE_TYPE(rnode);
+                if (lty == LEPTRIS_NODE_TEXT ||
+                    rty == LEPTRIS_NODE_TEXT) {
+                    char* ls = get_node_text(lnode);
+                    char* rs = get_node_text(rnode);
+                    result->value.boolean_value =
+                        lty == rty && ls && rs &&
+                        strcmp(ls, rs) == 0;
+                    free(ls);
+                    free(rs);
+                } else {
+                    result->value.boolean_value = (lnode == rnode);
+                }
             } else if (lnode == rnode) {
                 result->value.boolean_value = 0;
             } else {
