@@ -67,7 +67,28 @@ static size_t gen_entities(char* out, int paras) {
     return len;
 }
 
+/* Table-of-rows shape (#1218): well-formed medium HTML — one big
+ * tbody, no error-recovery cases, matching the serialbench
+ * medium.html fixture class the issue reports 3.4-7x on. */
+static size_t gen_table_rows(char* out, int rows) {
+    size_t len = 0;
+    len += (size_t)sprintf(out + len,
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>Report</title></head><body>"
+        "<table class='data'><thead><tr><th>Id</th><th>Name</th>"
+        "<th>Value</th></tr></thead><tbody>");
+    for (int r = 0; r < rows; r++)
+        len += (size_t)sprintf(out + len,
+            "<tr class='r%d'><td>%d</td><td>row-%d</td>"
+            "<td data-v='%d'>%d.%02d</td></tr>",
+            r & 1, r, r, r, r, r & 99);
+    len += (size_t)sprintf(out + len,
+        "</tbody></table></body></html>");
+    return len;
+}
+
 int main(void) {
+    const char* only = getenv("HTML_BENCH_ONLY"); /* page|entities|table */
     size_t cap = 1u << 22;
     char* html = (char*)malloc(cap);
     if (!html) return 1;
@@ -80,6 +101,7 @@ int main(void) {
 
     int reps = getenv("HTML_BENCH_REPS") ? atoi(getenv("HTML_BENCH_REPS")) : 9;
     double best = 1e18;
+    if (!only || strcmp(only, "page") == 0) {
     for (int i = 0; i < reps; i++) {
         double t0 = benchmark_time_us();
         LeptrisDocument d = leptris_parse_html_string(html, len, &st);
@@ -89,8 +111,10 @@ int main(void) {
     }
     printf("leptris html parse: %zu bytes, %.0f us, %.1f MB/s (best of %d)\n",
            len, best, (double)len / best, reps);
+    }
 
     /* Entity-laden second shape (nokogiri reference: same page). */
+    if (!only || strcmp(only, "entities") == 0) {
     len = gen_entities(html, 20000);
     warm = leptris_parse_html_string(html, len, &st);
     if (!warm) { printf("entity parse failed\n"); return 1; }
@@ -106,6 +130,26 @@ int main(void) {
     printf("leptris html parse (entity-laden): %zu bytes, %.0f us, "
            "%.1f MB/s (best of %d)\n",
            len, best, (double)len / best, reps);
+    }
+
+    /* Table-of-rows ~2MB shape (#1218, serialbench medium class). */
+    if (!only || strcmp(only, "table") == 0) {
+    len = gen_table_rows(html, 32000);
+    warm = leptris_parse_html_string(html, len, &st);
+    if (!warm) { printf("table parse failed\n"); return 1; }
+    leptris_document_free(warm);
+    best = 1e18;
+    for (int i = 0; i < reps; i++) {
+        double t0 = benchmark_time_us();
+        LeptrisDocument d = leptris_parse_html_string(html, len, &st);
+        double us = benchmark_time_us() - t0;
+        leptris_document_free(d);
+        if (us < best) best = us;
+    }
+    printf("leptris html parse (table-rows): %zu bytes, %.0f us, "
+           "%.1f MB/s (best of %d)\n",
+           len, best, (double)len / best, reps);
+    }
     free(html);
     return 0;
 }

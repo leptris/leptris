@@ -2121,17 +2121,8 @@ static int h_isalnum(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9');
 }
-/* Void elements: never take children; their start tag is complete. */
-static const char* const k_void[] = {
-    "area", "base", "basefont", "bgsound", "br", "col", "embed",
-    "frame", "hr", "img", "input", "keygen", "link", "meta", "param",
-    "source", "track", "wbr", NULL,
-};
-static int h_is_void(const char* name) {
-    for (int i = 0; k_void[i]; i++)
-        if (strcmp(name, k_void[i]) == 0) return 1;
-    return 0;
-}
+/* Void / frameset-ok-clear classifications live in HTagInfo.
+ * fo_void (bit0 void, bit1 frameset-ok clear) — see h_tag_infos. */
 
 /* Raw-text elements: content runs to the case-insensitive close
  * tag, no markup inside. script/style take entities verbatim. */
@@ -2197,6 +2188,10 @@ typedef struct {
     uint8_t closes;    /* bit0: h_p_closes implied-end set; bit1:
                         * k_p_closers — replaced the per-close-tag
                         * strcmp scans (#1218 profile). */
+    uint8_t fo_void;   /* bit0: void element; bit1: start tag
+                        * clears frameset-ok (13.2.5.4.4) —
+                        * replaced the k_void/k_fo_clear strcmp
+                        * scans (#1218 profile). */
 } HTagInfo;
 
 static const HTagInfo* h_tag_lookup(const char* n);
@@ -2316,6 +2311,21 @@ static char* h_decode_ex(LeptrisMemoryPool* pool, const char* s,
  * returned length is the compacted one; the string is NUL-free). */
 static char* h_decode_body(LeptrisMemoryPool* pool, const char* s,
                            const char* e, int whatwg, size_t* out_len) {
+    size_t len = (size_t)(e - s);
+    /* #1218: entity-free, NUL-free runs — the dominant case on
+     * well-formed pages — skip the entity state machine and the
+     * NUL-strip pass: one bump alloc + memcpy. Identical output
+     * (decode_ex passes non-'&' bytes verbatim; the strip is a
+     * no-op without NULs). */
+    if (len && !memchr(s, '&', len) && !memchr(s, '\0', len)) {
+        char* fast = (char*)leptris_pool_alloc(pool, len + 1);
+        if (!fast) return NULL;
+        memcpy(fast, s, len);
+        fast[len] = 0;
+        if (out_len) *out_len = len;
+        return fast;
+    }
+    {
     size_t n = 0;
     char* d = h_decode_ex(pool, s, e, 0, whatwg, &n);
     if (!d) return NULL;
@@ -2327,6 +2337,7 @@ static char* h_decode_body(LeptrisMemoryPool* pool, const char* s,
     d[w] = 0;
     if (out_len) *out_len = w;
     return d;
+    }
 }
 static size_t h_utf8_encode(uint32_t cp, char* out) {
     if (cp < 0x80) { out[0] = (char)cp; return 1; }
@@ -2725,6 +2736,12 @@ typedef struct {
      * whole child chain, which is quadratic on table/text-heavy
      * pages. Slots are refreshed on push (NULL) and by hb_put. */
     LeptrisNodeRef open_tail[256];
+    /* #1218: per-slot tag id (h_tag_infos index, 255 unknown) —
+     * the in-select / template-fence / table-context stack walks
+     * become integer compares instead of per-element name fetch +
+     * strcmp chains. Set at push; pops truncate depth, so the
+     * parallel array needs no pop logic. */
+    uint8_t open_id[256];
     size_t depth;
     LeptrisElement root;        /* first top-level element */
     LeptrisNodeRef top_head;    /* top-level chain: text, comments, root */
@@ -3064,90 +3081,90 @@ static int h_is_formatting(const char* n) {
  * no-formatting sets. */
 
 static const HTagInfo h_tag_infos[] = {
-    {"address", 7, 1, 1, 3},
-    {"applet", 6, 1, 0, 0},
-    {"area", 4, 1, 0, 0},
-    {"article", 7, 1, 1, 3},
-    {"aside", 5, 1, 1, 3},
-    {"base", 4, 1, 1, 0},
-    {"basefont", 8, 1, 1, 0},
-    {"bgsound", 7, 1, 1, 0},
-    {"blockquote", 10, 1, 1, 3},
-    {"body", 4, 1, 1, 0},
-    {"br", 2, 1, 0, 0},
-    {"button", 6, 1, 0, 0},
-    {"caption", 7, 1, 1, 0},
-    {"center", 6, 1, 1, 1},
-    {"col", 3, 1, 1, 0},
-    {"colgroup", 8, 1, 1, 0},
-    {"dd", 2, 1, 1, 1},
-    {"details", 7, 1, 1, 3},
-    {"dialog", 6, 1, 1, 3},
-    {"dir", 3, 1, 1, 3},
-    {"div", 3, 1, 1, 3},
-    {"dl", 2, 1, 1, 3},
-    {"dt", 2, 1, 1, 1},
-    {"embed", 5, 1, 0, 0},
-    {"fieldset", 8, 1, 1, 3},
-    {"figcaption", 10, 1, 1, 3},
-    {"figure", 6, 1, 1, 3},
-    {"footer", 6, 1, 1, 3},
-    {"form", 4, 1, 1, 3},
-    {"frame", 5, 1, 1, 0},
-    {"frameset", 8, 1, 1, 0},
-    {"h1", 2, 1, 1, 3},
-    {"h2", 2, 1, 1, 3},
-    {"h3", 2, 1, 1, 3},
-    {"h4", 2, 1, 1, 3},
-    {"h5", 2, 1, 1, 3},
-    {"h6", 2, 1, 1, 3},
-    {"head", 4, 1, 1, 0},
-    {"header", 6, 1, 1, 3},
-    {"hgroup", 6, 1, 1, 3},
-    {"hr", 2, 1, 1, 3},
-    {"html", 4, 1, 1, 0},
-    {"iframe", 6, 1, 0, 0},
-    {"img", 3, 1, 0, 0},
-    {"input", 5, 1, 0, 0},
-    {"keygen", 6, 1, 0, 0},
-    {"li", 2, 1, 1, 3},
-    {"link", 4, 1, 1, 0},
-    {"listing", 7, 1, 1, 1},
-    {"main", 4, 1, 1, 3},
-    {"marquee", 7, 1, 0, 0},
-    {"menu", 4, 1, 1, 3},
-    {"meta", 4, 1, 1, 0},
-    {"nav", 3, 1, 1, 3},
-    {"noembed", 7, 1, 0, 0},
-    {"noframes", 8, 1, 1, 0},
-    {"noscript", 8, 1, 0, 0},
-    {"object", 6, 1, 0, 0},
-    {"ol", 2, 1, 1, 3},
-    {"p", 1, 1, 1, 3},
-    {"param", 5, 1, 0, 0},
-    {"plaintext", 9, 1, 1, 1},
-    {"pre", 3, 1, 1, 3},
-    {"script", 6, 1, 1, 0},
-    {"search", 6, 1, 1, 1},
-    {"section", 7, 1, 1, 3},
-    {"select", 6, 1, 0, 0},
-    {"source", 6, 1, 0, 0},
-    {"style", 5, 1, 1, 0},
-    {"summary", 7, 1, 1, 1},
-    {"table", 5, 1, 1, 2},
-    {"tbody", 5, 1, 1, 0},
-    {"td", 2, 1, 1, 0},
-    {"template", 8, 1, 1, 0},
-    {"textarea", 8, 1, 1, 0},
-    {"tfoot", 5, 1, 1, 0},
-    {"th", 2, 1, 1, 0},
-    {"thead", 5, 1, 1, 0},
-    {"title", 5, 1, 1, 0},
-    {"tr", 2, 1, 1, 0},
-    {"track", 5, 1, 0, 0},
-    {"ul", 2, 1, 1, 3},
-    {"wbr", 3, 1, 0, 0},
-    {"xmp", 3, 1, 0, 1},
+    {"address", 7, 1, 1, 3, 0},
+    {"applet", 6, 1, 0, 0, 2},
+    {"area", 4, 1, 0, 0, 3},
+    {"article", 7, 1, 1, 3, 0},
+    {"aside", 5, 1, 1, 3, 0},
+    {"base", 4, 1, 1, 0, 1},
+    {"basefont", 8, 1, 1, 0, 1},
+    {"bgsound", 7, 1, 1, 0, 1},
+    {"blockquote", 10, 1, 1, 3, 0},
+    {"body", 4, 1, 1, 0, 0},
+    {"br", 2, 1, 0, 0, 3},
+    {"button", 6, 1, 0, 0, 2},
+    {"caption", 7, 1, 1, 0, 0},
+    {"center", 6, 1, 1, 1, 0},
+    {"col", 3, 1, 1, 0, 1},
+    {"colgroup", 8, 1, 1, 0, 0},
+    {"dd", 2, 1, 1, 1, 2},
+    {"details", 7, 1, 1, 3, 0},
+    {"dialog", 6, 1, 1, 3, 0},
+    {"dir", 3, 1, 1, 3, 0},
+    {"div", 3, 1, 1, 3, 0},
+    {"dl", 2, 1, 1, 3, 0},
+    {"dt", 2, 1, 1, 1, 2},
+    {"embed", 5, 1, 0, 0, 3},
+    {"fieldset", 8, 1, 1, 3, 0},
+    {"figcaption", 10, 1, 1, 3, 0},
+    {"figure", 6, 1, 1, 3, 0},
+    {"footer", 6, 1, 1, 3, 0},
+    {"form", 4, 1, 1, 3, 0},
+    {"frame", 5, 1, 1, 0, 1},
+    {"frameset", 8, 1, 1, 0, 0},
+    {"h1", 2, 1, 1, 3, 0},
+    {"h2", 2, 1, 1, 3, 0},
+    {"h3", 2, 1, 1, 3, 0},
+    {"h4", 2, 1, 1, 3, 0},
+    {"h5", 2, 1, 1, 3, 0},
+    {"h6", 2, 1, 1, 3, 0},
+    {"head", 4, 1, 1, 0, 0},
+    {"header", 6, 1, 1, 3, 0},
+    {"hgroup", 6, 1, 1, 3, 0},
+    {"hr", 2, 1, 1, 3, 3},
+    {"html", 4, 1, 1, 0, 0},
+    {"iframe", 6, 1, 0, 0, 2},
+    {"img", 3, 1, 0, 0, 3},
+    {"input", 5, 1, 0, 0, 3},
+    {"keygen", 6, 1, 0, 0, 3},
+    {"li", 2, 1, 1, 3, 2},
+    {"link", 4, 1, 1, 0, 1},
+    {"listing", 7, 1, 1, 1, 2},
+    {"main", 4, 1, 1, 3, 0},
+    {"marquee", 7, 1, 0, 0, 2},
+    {"menu", 4, 1, 1, 3, 0},
+    {"meta", 4, 1, 1, 0, 1},
+    {"nav", 3, 1, 1, 3, 0},
+    {"noembed", 7, 1, 0, 0, 2},
+    {"noframes", 8, 1, 1, 0, 2},
+    {"noscript", 8, 1, 0, 0, 0},
+    {"object", 6, 1, 0, 0, 2},
+    {"ol", 2, 1, 1, 3, 0},
+    {"p", 1, 1, 1, 3, 0},
+    {"param", 5, 1, 0, 0, 1},
+    {"plaintext", 9, 1, 1, 1, 2},
+    {"pre", 3, 1, 1, 3, 2},
+    {"script", 6, 1, 1, 0, 0},
+    {"search", 6, 1, 1, 1, 0},
+    {"section", 7, 1, 1, 3, 0},
+    {"select", 6, 1, 0, 0, 2},
+    {"source", 6, 1, 0, 0, 1},
+    {"style", 5, 1, 1, 0, 0},
+    {"summary", 7, 1, 1, 1, 0},
+    {"table", 5, 1, 1, 2, 2},
+    {"tbody", 5, 1, 1, 0, 0},
+    {"td", 2, 1, 1, 0, 0},
+    {"template", 8, 1, 1, 0, 0},
+    {"textarea", 8, 1, 1, 0, 2},
+    {"tfoot", 5, 1, 1, 0, 0},
+    {"th", 2, 1, 1, 0, 0},
+    {"thead", 5, 1, 1, 0, 0},
+    {"title", 5, 1, 1, 0, 0},
+    {"tr", 2, 1, 1, 0, 0},
+    {"track", 5, 1, 0, 0, 1},
+    {"ul", 2, 1, 1, 3, 0},
+    {"wbr", 3, 1, 0, 0, 3},
+    {"xmp", 3, 1, 0, 1, 2},
 };
 
 /* bucket[first_char] = start index; bucket[first_char+1] = end */
@@ -3157,7 +3174,11 @@ static const uint8_t h_tag_bucket[27] = {
     63, 70, 81, 82, 82, 83, 84, 84, 84,
 };
 
-/* Resolve a (lowercased) tag name's flags; NULL when unknown. */
+/* Resolve a (lowercased) tag name's flags; NULL when unknown.
+ * strncmp first: it stops at n's terminator, so the n[t->len]
+ * terminator probe below only runs when n really has t->len
+ * matching bytes (the old n[t->len]-first form read past short
+ * names — UB clang exploited under new inlining contexts). */
 static const HTagInfo* h_tag_lookup(const char* n) {
     if (!n) return NULL;
     unsigned char c = (unsigned char)n[0];
@@ -3165,11 +3186,45 @@ static const HTagInfo* h_tag_lookup(const char* n) {
     for (int i = h_tag_bucket[c - 'a'];
          i < h_tag_bucket[c - 'a' + 1]; i++) {
         const HTagInfo* t = &h_tag_infos[i];
-        if ((uint8_t)n[t->len] == 0 && t->name[t->len - 1] == n[t->len - 1] &&
-            memcmp(n, t->name, t->len) == 0)
+        if (t->name[1] == n[1] &&
+            strncmp(n, t->name, t->len) == 0 &&
+            (uint8_t)n[t->len] == 0)
             return t;
     }
     return NULL;
+}
+
+/* #1218: tag ids + per-id LUTs. The sampler pinned the strcmp
+ * scans (h_is_void 18 names, h_clears_frameset_ok 26 names) and
+ * the open-stack walks (name fetch + strcmp per element) at the
+ * top of WHATWG self-time on table-heavy pages. ids are
+ * h_tag_infos indexes, so one first-char bucket walk per start
+ * tag serves every later classification of that name. */
+#define H_ID_UNKNOWN 255u
+static uint8_t h_tag_id(const char* n) {
+    const HTagInfo* t = h_tag_lookup(n);
+    return t ? (uint8_t)(t - h_tag_infos) : (uint8_t)H_ID_UNKNOWN;
+}
+
+static uint8_t h_id_select, h_id_template, h_id_table, h_id_tbody,
+    h_id_thead, h_id_tfoot, h_id_tr;
+
+static void h_id_luts_init(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    h_id_select = h_tag_id("select");
+    h_id_template = h_tag_id("template");
+    h_id_table = h_tag_id("table");
+    h_id_tbody = h_tag_id("tbody");
+    h_id_thead = h_tag_id("thead");
+    h_id_tfoot = h_tag_id("tfoot");
+    h_id_tr = h_tag_id("tr");
+}
+
+static int h_is_void(const char* name) {
+    const HTagInfo* t = h_tag_lookup(name);
+    return t && (t->fo_void & 1);
 }
 
 static int h_is_special_ww(const char* n) {
@@ -3287,16 +3342,11 @@ static char* h_decode_foreign(LeptrisMemoryPool* pool, const char* s,
 }
 
 
-/* 13.2.5.4.4: start tags that set frameset-ok to false. */
+/* 13.2.5.4.4: start tags that set frameset-ok to false — HTagInfo
+ * bit (see h_tag_infos). */
 static int h_clears_frameset_ok(const char* n) {
-    static const char* const yes[] = {
-        "pre", "listing", "li", "dd", "dt", "plaintext", "button",
-        "applet", "marquee", "object", "table", "area", "br",
-        "embed", "img", "keygen", "wbr", "input", "hr", "textarea",
-        "xmp", "iframe", "noembed", "noframes", "select", NULL};
-    for (int i = 0; yes[i]; i++)
-        if (strcmp(n, yes[i]) == 0) return 1;
-    return 0;
+    const HTagInfo* t = h_tag_lookup(n);
+    return t && (t->fo_void & 2);
 }
 
 /* 13.2.5.4.4 exception: <input> clears frameset-ok UNLESS its type
@@ -3552,22 +3602,20 @@ static int h_cur_ns(HBuilder* b) {
 
 /* An open <select> swallows svg/math start tags (in-select mode
  * ignores unknown start tags; the html4 entry keeps libxml2's
- * keep-everything shape). */
+ * keep-everything shape). #1218: open_id integer walk. */
 static int h_in_select(HBuilder* b) {
-    for (size_t i = b->depth; i > 0; i--) {
-        const char* on = leptris_element_name(b->open[i - 1]);
-        if (on && strcmp(on, "select") == 0) return 1;
-    }
+    h_id_luts_init();
+    for (size_t i = b->depth; i > 0; i--)
+        if (b->open_id[i - 1] == h_id_select) return 1;
     return 0;
 }
 
 /* #659: index of the nearest open <template> on the stack, or
  * -1. The in-template insertion rules fence on it. */
 static int h_template_idx(HBuilder* b) {
-    for (size_t i = b->depth; i > 0; i--) {
-        const char* n = leptris_element_name(b->open[i - 1]);
-        if (n && h_ieq_raw(n, "template")) return (int)(i - 1);
-    }
+    h_id_luts_init();
+    for (size_t i = b->depth; i > 0; i--)
+        if (b->open_id[i - 1] == h_id_template) return (int)(i - 1);
     return -1;
 }
 
@@ -3711,6 +3759,15 @@ static int h_is_table_context(LeptrisElement e) {
     return h_ieq_raw(n, "table") || h_ieq_raw(n, "tbody") ||
            h_ieq_raw(n, "thead") || h_ieq_raw(n, "tfoot") ||
            h_ieq_raw(n, "tr");
+}
+
+/* #1218: stack-slot flavor — integer compare on the push-time id
+ * (identical membership: ids were resolved from the same stored
+ * lowercase names). */
+static int h_id_table_ctx(uint8_t id) {
+    h_id_luts_init();
+    return id == h_id_table || id == h_id_tbody ||
+           id == h_id_thead || id == h_id_tfoot || id == h_id_tr;
 }
 
 /* Insert n into parent's child chain BEFORE `before`. Same surgery
@@ -3944,7 +4001,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
          * table" insertion mode - ordinary content still
          * fosters, hidden inputs insert at spot
          * (html5test-com:20). */
-        int tbl_ctx = h_is_table_context(top);
+        int tbl_ctx = h_id_table_ctx(b->open_id[b->depth - 1]);
         if (!tbl_ctx && b->depth >= 2 &&
             b->open_ns[b->depth - 1] == H_NS_HTML &&
             h_ieq_raw(leptris_element_name(top), "form") &&
@@ -3969,7 +4026,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 int oi = -1;
                 for (int k = (int)b->depth - 1; k >= 0; k--)
                     if (b->open_ns[k] == H_NS_HTML &&
-                        h_is_table_context(b->open[k])) {
+                        h_id_table_ctx(b->open_id[k])) {
                         oi = k;
                     }
                 if (oi >= 0) {
@@ -4102,12 +4159,16 @@ static LeptrisElement h_open_foreign(HBuilder* b, const char* name,
         b->open[b->depth] = e;
         b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = (uint8_t)ns;
+        b->open_id[b->depth] = h_tag_id(store);
         b->depth++;
     }
     return e;
 }
 
-static LeptrisElement h_open_element(HBuilder* b, const char* name) {
+/* Hot-path variant (#1218): the start-tag section resolves the
+ * HTagInfo once per token and passes the id down. */
+static LeptrisElement h_open_element_id(HBuilder* b, const char* name,
+                                        uint8_t tid) {
     LeptrisStringView nv = leptris_sv_from_cstr(name);
     LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
     if (!e) return NULL;
@@ -4140,9 +4201,14 @@ static LeptrisElement h_open_element(HBuilder* b, const char* name) {
         b->open[b->depth] = e;
         b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
+        b->open_id[b->depth] = tid;
         b->depth++;
     }
     return e;
+}
+
+static LeptrisElement h_open_element(HBuilder* b, const char* name) {
+    return h_open_element_id(b, name, h_tag_id(name));
 }
 
 /* Case-insensitive C-string compare (ASCII). */
@@ -4341,6 +4407,7 @@ static LeptrisElement h_afe_open_clone(HBuilder* b, LeptrisElement src) {
         b->open[b->depth] = c;
         b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
+        b->open_id[b->depth] = h_tag_id(leptris_element_name(c));
         b->depth++;
     }
     return c;
@@ -4624,6 +4691,7 @@ static LeptrisElement h_open_named(HBuilder* b, const char* name,
         b->open[b->depth] = e;
         b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = H_NS_HTML;
+        b->open_id[b->depth] = h_tag_id(name);
         b->depth++;
     }
     return e;
@@ -5325,6 +5393,7 @@ static LeptrisDocument html_parse_shared(
     b.whatwg_head_set = whatwg;
     b.whatwg_foster = whatwg;
     b.whatwg_adopt = whatwg;
+    h_id_luts_init();
 
     const char* p = buf;
     const char* end = buf + len;
@@ -5751,8 +5820,8 @@ static LeptrisDocument html_parse_shared(
                 if (dec && *dec) {
                     int tbl_ws = b.whatwg_foster &&
                                  b.depth > 0 &&
-                                 h_is_table_context(
-                                     b.open[b.depth - 1]);
+                                 h_id_table_ctx(
+                                     b.open_id[b.depth - 1]);
                     if (tbl_ws)
                         for (const char* w2 = dec; *w2; w2++)
                             if (*w2 != ' ' && *w2 != '\t' &&
@@ -6598,12 +6667,19 @@ static LeptrisDocument html_parse_shared(
          * reprocessed (tests1:90). */
         if (b.whatwg && strcmp(name, "image") == 0)
             name = h_pooled_lower(b.pool, "img", 3);
+        /* #1218: ONE classification per start tag — every
+         * downstream consumer (frameset-ok, void, open) reads the
+         * resolved entry instead of re-walking the bucket. */
+        const HTagInfo* tinfo = h_tag_lookup(name);
+        uint8_t tid = tinfo ? (uint8_t)(tinfo - h_tag_infos)
+                            : (uint8_t)H_ID_UNKNOWN;
         /* 13.2.5.4.4: the enumerated start tags clear frameset-ok;
          * <input type=hidden> does not (webkit01:51). */
         b.input_hidden_tag =
             b.whatwg && nlen == 5 && strcmp(name, "input") == 0 &&
             h_input_type_hidden(q, end);
-        if (b.whatwg && b.frameset_ok && h_clears_frameset_ok(name) &&
+        if (b.whatwg && b.frameset_ok && tinfo &&
+            (tinfo->fo_void & 2) &&
             !(nlen == 5 && strcmp(name, "input") == 0 &&
               h_input_type_hidden(q, end))) {
             b.frameset_ok = 0;
@@ -6842,8 +6918,8 @@ static LeptrisDocument html_parse_shared(
                  * wraps it (tricky01:6: the ws between
                  * </center> and <img> goes into the table). */
                 int tbl_ws = b.whatwg_foster && b.depth > 0 &&
-                             h_is_table_context(
-                                 b.open[b.depth - 1]);
+                             h_id_table_ctx(
+                                 b.open_id[b.depth - 1]);
                 if (tbl_ws) {
                     for (const char* w2 = dec; *w2; w2++)
                         if (*w2 != ' ' && *w2 != '\t' &&
@@ -7640,7 +7716,7 @@ static LeptrisDocument html_parse_shared(
 
         LeptrisElement e = (elem_ns != H_NS_HTML)
                                ? h_open_foreign(&b, name, elem_ns)
-                               : h_open_element(&b, name);
+                               : h_open_element_id(&b, name, tid);
         if (!e) goto done;
         if (strcmp(name, "html") == 0) {
             b.html_seen = 1;
@@ -7867,7 +7943,7 @@ static LeptrisDocument html_parse_shared(
          * their entry; applet/object/marquee/td/th/caption open a
          * marker scope (13.2.4.3). */
         if (b.whatwg_adopt && elem_ns == H_NS_HTML &&
-            !(self_closing || h_is_void(name))) {
+            !(self_closing || (tinfo && (tinfo->fo_void & 1)))) {
             if (h_is_formatting(name)) {
                 h_afe_push(&b, e);
             } else if (strcmp(name, "applet") == 0 ||
@@ -7884,7 +7960,7 @@ static LeptrisDocument html_parse_shared(
          * HTML elements (parse error, div stays open -
          * webkit01:46). Only foreign self-closing elements pop.
          * html4 keeps libxml2's honored-slash shape. */
-        if (h_is_void(name) ||
+        if ((tinfo && (tinfo->fo_void & 1)) ||
             (self_closing &&
              (elem_ns != H_NS_HTML || !b.whatwg)))
             b.depth--;
