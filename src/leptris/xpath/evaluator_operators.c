@@ -588,6 +588,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     free(sv);
                     if (tn) xpath_nodeset_add(one, tn);
                 }
+                /* synth members above are var-owned */
+                one->owns_synthetic_text = 1;
             }
             xpath_variable_set_nodeset(var, one);
             if (pos_var) {

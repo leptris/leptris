@@ -2908,6 +2908,13 @@ static LeptrisXPathResult xq_eval_impl(
                         }
                     }
                 }
+                /* Drop the last order-key rebind before the sort /
+                 * phase-2 rebinds. */
+                xq_unbind_all(ctx, q->clauses, q->nclauses);
+                for (size_t gi = 0; gi < q->ngroup; gi++)
+                    xpath_variable_set_remove(
+                        (XPathVariableSet*)ctx->variable_set,
+                        q->group_vars[gi]);
             }
             if (!err) {
                 /* Stable order-by: insertion sort over key lists,
