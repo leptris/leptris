@@ -239,6 +239,15 @@ int xpath_variable_set_nodeset(XPathVariable* variable, XPathNodeSet* nodeset) {
     if (!variable || variable->value.type != XPATH_VAR_TYPE_NODE_SET) {
         return 0;
     }
+    /* Replace: free the previous nodeset. xq_rebind (and any
+     * re-bind of an existing name) used to leak the old one —
+     * group-by `$x group by $x` collides for-var and group-var
+     * names in one rebind, and ASAN caught 30kB of orphaned
+     * nodesets on Lane15Core. */
+    if (variable->value.v.nodeset_value &&
+        variable->value.v.nodeset_value != nodeset) {
+        xpath_nodeset_free(variable->value.v.nodeset_value);
+    }
     variable->value.v.nodeset_value = nodeset;
     return 1;
 }
