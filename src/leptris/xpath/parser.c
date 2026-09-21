@@ -1545,6 +1545,57 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
 
     /* Check for path continuation */
     if (current_token_is(parser, TOK_SLASH) || current_token_is(parser, TOK_DOUBLE_SLASH)) {
+        int is_double = current_token_is(parser, TOK_DOUBLE_SLASH);
+        advance_token(parser);
+
+        /* Function-call step directly after the filter expr
+         * (`E/string()`): the fn maps over each item — the
+         * relative-path parser only maps NON-first steps. */
+        if (!is_double &&
+            (current_token_is(parser, TOK_NCNAME) ||
+             current_token_is(parser, TOK_QNAME)) &&
+            peek_token(parser, 1) &&
+            peek_token(parser, 1)->type == TOK_LPAREN) {
+            XPathToken nt = *current_token(parser);
+            advance_token(parser);
+            XPathASTNode* fc =
+                parse_function_call(parser, nt.value, nt.value_len);
+            if (!fc) {
+                ast_node_free(expr);
+                return NULL;
+            }
+            XPathASTNode* map = ast_node_new(XPATH_AST_OPERATOR);
+            if (!map) {
+                ast_node_free(fc);
+                ast_node_free(expr);
+                return NULL;
+            }
+            map->number_value = (double)XPATH_OP_MAP;
+            ast_node_add_child(map, expr);
+            ast_node_add_child(map, fc);
+            /* Further steps chain per item (the mapped pattern). */
+            if (current_token_is(parser, TOK_SLASH) ||
+                current_token_is(parser, TOK_DOUBLE_SLASH)) {
+                XPathASTNode* rest =
+                    parse_relative_location_path(parser);
+                if (!rest) {
+                    ast_node_free(map);
+                    return NULL;
+                }
+                XPathASTNode* map2 = ast_node_new(XPATH_AST_OPERATOR);
+                if (!map2) {
+                    ast_node_free(rest);
+                    ast_node_free(map);
+                    return NULL;
+                }
+                map2->number_value = (double)XPATH_OP_MAP;
+                ast_node_add_child(map2, map);
+                ast_node_add_child(map2, rest);
+                return map2;
+            }
+            return map;
+        }
+
         XPathASTNode* path = ast_node_new(XPATH_AST_PATH_EXPR);
         if (!path) {
             ast_node_free(expr);
@@ -1552,9 +1603,6 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
         }
 
         ast_node_add_child(path, expr);
-
-        int is_double = current_token_is(parser, TOK_DOUBLE_SLASH);
-        advance_token(parser);
 
         XPathASTNode* rel_path = parse_relative_location_path(parser);
         if (!rel_path) {
@@ -2120,6 +2168,41 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
         if (is_case) {
             XPathASTNode* test = parse_expr(parser);
             if (!test) { ast_node_free(node); return NULL; }
+            /* XQuery multi-case: `case A case B return R` —
+             * several tests share one result; carried as a
+             * sequence test the evaluator matches per member. */
+            {
+                XPathToken* nk = current_token(parser);
+                if (nk && nk->type == TOK_NCNAME &&
+                    nk->value_len == 4 &&
+                    memcmp(nk->value, "case", 4) == 0) {
+                    XPathASTNode* seq =
+                        ast_node_new(XPATH_AST_OPERATOR);
+                    if (!seq) {
+                        ast_node_free(test);
+                        ast_node_free(node);
+                        return NULL;
+                    }
+                    seq->number_value = (double)XPATH_OP_SEQUENCE;
+                    ast_node_add_child(seq, test);
+                    for (;;) {
+                        nk = current_token(parser);
+                        if (!(nk && nk->type == TOK_NCNAME &&
+                              nk->value_len == 4 &&
+                              memcmp(nk->value, "case", 4) == 0))
+                            break;
+                        advance_token(parser);
+                        XPathASTNode* t2 = parse_expr(parser);
+                        if (!t2) {
+                            ast_node_free(seq);
+                            ast_node_free(node);
+                            return NULL;
+                        }
+                        ast_node_add_child(seq, t2);
+                    }
+                    test = seq;
+                }
+            }
             XPathToken* rt = current_token(parser);
             if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
                 memcmp(rt->value, "return", 6) != 0) {
@@ -2932,24 +3015,41 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
 
     /* Check for namespace wildcard: prefix:*
      * Lexer produces: TOK_NCNAME("prefix") followed by TOK_STAR
-     * when it sees prefix:* because * is not an ncname_start char */
+     * when it sees prefix:* because * is not an ncname_start char.
+     * The same TOKEN pair occurs for a multiply (`k * 2`), so the
+     * source text decides: `prefix:*` has the colon adjacent to
+     * the name; a multiply never does. */
     if (tok->type == TOK_NCNAME) {
         XPathToken* next = peek_token(parser, 1);
 
         /* Check if next token is * (namespace wildcard pattern) */
-        if (next && next->type == TOK_STAR) {
-            /* This is prefix:* pattern */
-            XPathASTNode* node = ast_node_new(XPATH_AST_NODE_TEST_ALL);
-            if (!node) return NULL;
+        if (next && next->type == TOK_STAR &&
+            parser->lexer && parser->lexer->input) {
+            const char* nc_end = tok->value + tok->value_len;
+            const char* src_end = parser->lexer->end;
+            if (nc_end > src_end) nc_end = src_end;
+            int is_wildcard = 0;
+            if (nc_end < src_end && *nc_end == ':') {
+                const char* q = nc_end + 1;
+                while (q < src_end && isspace((unsigned char)*q))
+                    q++;
+                if (q < src_end && *q == '*') is_wildcard = 1;
+            }
+            if (is_wildcard) {
+                /* This is prefix:* pattern */
+                XPathASTNode* node =
+                    ast_node_new(XPATH_AST_NODE_TEST_ALL);
+                if (!node) return NULL;
 
-            /* Set prefix from NCName token */
-            node->prefix = token_to_string(tok);
-            node->value = leptris_strdup("*");
+                /* Set prefix from NCName token */
+                node->prefix = token_to_string(tok);
+                node->value = leptris_strdup("*");
 
-            advance_token(parser);  /* Consume NCName */
-            advance_token(parser);  /* Consume STAR */
+                advance_token(parser);  /* Consume NCName */
+                advance_token(parser);  /* Consume STAR */
 
-            return node;
+                return node;
+            }
         }
         /* Otherwise fall through to normal name test handling below */
     }

@@ -7,6 +7,7 @@
 
 #include "functions.h"
 #include "evaluator.h"
+#include "evaluator_internal.h"
 #include "../include/leptris.h"
 #include "../dom/element.h"
 #include "../dom/pi.h"
@@ -420,8 +421,18 @@ static struct leptris_xpath_result* xpath_func_string(XPathContext* context,
     if (!result) return NULL;
 
     if (arg_count == 0) {
-        /* No argument: convert context node to string */
-        result->value.string_value = get_element_text(context->context_node);
+        /* No argument: convert context node to string — the kind-
+         * aware walker covers attribute/namespace contexts (fn
+         * steps like `@b/string()`); element text stays fast. */
+        if (context->context_node &&
+            XPATH_NODE_TYPE(context->context_node) !=
+                LEPTRIS_NODE_ELEMENT) {
+            result->value.string_value =
+                get_node_text(context->context_node);
+        } else {
+            result->value.string_value =
+                get_element_text(context->context_node);
+        }
     } else {
         /* Evaluate argument and convert to string */
         struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);

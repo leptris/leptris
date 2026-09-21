@@ -173,10 +173,100 @@ char* xpath_map_lookup_result(struct leptris_xpath_result* r,
  * nodes, but synthetic text members are DEEP-copied when the source
  * owns them — the copy outlives the source's storage (let bindings
  * are unwound while results referencing them still live). */
+/* Apply a zero/one-arg fn per nodeset member (`E/fn()` steps);
+ * returns an owned synthetic-text sequence. Shared by the MAP
+ * operator and the PATH_EXPR fn-step continuation. */
+XPathNodeSet* xpath_map_fn_over(XPathContext* ctx, XPathNodeSet* ns,
+                                XPathASTNode* fc) {
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) return NULL;
+    out->owns_synthetic_text = 1;
+    out->is_sequence = 1;
+    size_t n = ns ? ns->count : 0;
+    struct leptris_element* saved_node = ctx->context_node;
+    size_t saved_pos = ctx->context_position;
+    size_t saved_size = ctx->context_size;
+    for (size_t i = 0; i < n; i++) {
+        ctx->context_node = (struct leptris_element*)ns->nodes[i];
+        ctx->context_position = i + 1;
+        ctx->context_size = n;
+        struct leptris_xpath_result* item =
+            evaluate_expr(ctx, fc);
+        if (!item) {
+            ctx->context_node = saved_node;
+            ctx->context_position = saved_pos;
+            ctx->context_size = saved_size;
+            xpath_nodeset_free(out);
+            return NULL;
+        }
+        char* piece = xpath_to_string(item);
+        xpath_result_free(item);
+        XPathTextNode* tn =
+            synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
+        free(piece);
+        if (tn) xpath_nodeset_add(out, tn);
+    }
+    ctx->context_node = saved_node;
+    ctx->context_position = saved_pos;
+    ctx->context_size = saved_size;
+    return out;
+}
+
 XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src) {
     if (!src) return NULL;
     XPathNodeSet* dst = xpath_nodeset_new_with_capacity(src->count);
     if (!dst) return NULL;
+    if (src->owns_attributes || src->owns_namespaces) {
+        /* Owned attribute/namespace members are CLONED, not
+         * shared: the copy can outlive the source (XQuery LET
+         * bindings outlive the path result that produced them —
+         * sharing left dangling attribute nodes, QT3 group-by
+         * keys came out empty). Document nodes stay shared. */
+        dst->owns_attributes = src->owns_attributes;
+        dst->owns_namespaces = src->owns_namespaces;
+        dst->owns_synthetic_text = src->owns_synthetic_text;
+        for (size_t i = 0; i < src->count; i++) {
+            void* n = src->nodes[i];
+            if (!n) continue;
+            int ty = XPATH_NODE_TYPE(n);
+            if (ty == LEPTRIS_NODE_ATTRIBUTE) {
+                LeptrisAttributeNode* a = (LeptrisAttributeNode*)n;
+                LeptrisAttributeNode* c =
+                    LEPTRIS_ALLOC(LeptrisAttributeNode);
+                if (!c) continue;
+                memset(c, 0, sizeof(*c));
+                c->node_type = LEPTRIS_NODE_ATTRIBUTE;
+                c->name = a->name ? leptris_strdup(a->name) : NULL;
+                c->value = a->value ? leptris_strdup(a->value) : NULL;
+                c->namespace_uri = a->namespace_uri
+                                       ? leptris_strdup(a->namespace_uri)
+                                       : NULL;
+                c->owner = a->owner;
+                xpath_nodeset_add(dst, c);
+            } else if (ty == LEPTRIS_NODE_NAMESPACE) {
+                LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)n;
+                LeptrisNamespaceNode* c =
+                    LEPTRIS_ALLOC(LeptrisNamespaceNode);
+                if (!c) continue;
+                memset(c, 0, sizeof(*c));
+                c->node_type = LEPTRIS_NODE_NAMESPACE;
+                c->prefix = ns->prefix ? leptris_strdup(ns->prefix)
+                                       : NULL;
+                c->uri = ns->uri ? leptris_strdup(ns->uri) : NULL;
+                c->owner = ns->owner;
+                xpath_nodeset_add(dst, c);
+            } else if (ty == LEPTRIS_NODE_TEXT &&
+                       src->owns_synthetic_text) {
+                const char* cc = ((XPathTextNode*)n)->content;
+                XPathTextNode* tn =
+                    xpath_synth_text(cc ? cc : "", cc ? strlen(cc) : 0);
+                if (tn) xpath_nodeset_add(dst, tn);
+            } else {
+                xpath_nodeset_add(dst, n);
+            }
+        }
+        return dst;
+    }
     if (!src->owns_synthetic_text) {
         for (size_t i = 0; i < src->count; i++)
             xpath_nodeset_add(dst, src->nodes[i]);
@@ -1246,7 +1336,33 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (ast->child_count >= 1) {
                 struct leptris_xpath_result* v =
                     evaluate_expr(ctx, ast->children[0]);
-                s = v ? xpath_to_string(v) : NULL;
+                if (v &&
+                    leptris_xpath_result_type(v) ==
+                        LEPTRIS_XPATH_NODESET &&
+                    leptris_xpath_result_count(v) > 1) {
+                    /* text{(a,b,c)}: the atomics join with single
+                     * spaces (XQuery 3.0 §3.7.3.1); xpath_to_string
+                     * keeps only the first member. */
+                    size_t n = leptris_xpath_result_count(v);
+                    size_t len = 0;
+                    for (size_t i = 0; i < n; i++) {
+                        const char* iv =
+                            leptris_xpath_result_node_value(v, i);
+                        len += (iv ? strlen(iv) : 0) + 1;
+                    }
+                    s = (char*)malloc(len + 1);
+                    if (s) {
+                        s[0] = 0;
+                        for (size_t i = 0; i < n; i++) {
+                            const char* iv =
+                                leptris_xpath_result_node_value(v, i);
+                            if (i) strcat(s, " ");
+                            if (iv) strcat(s, iv);
+                        }
+                    }
+                } else {
+                    s = v ? xpath_to_string(v) : NULL;
+                }
                 if (v) xpath_result_free(v);
             }
             if (!s) s = leptris_strdup("");
@@ -1566,52 +1682,55 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             evaluate_expr(ctx, ast->children[0]);
         if (!left) return NULL;
 
-        XPathNodeSet* out = xpath_nodeset_new();
-        if (!out) { xpath_result_free(left); return NULL; }
-        out->owns_synthetic_text = 1;
-        out->is_sequence = 1;
-
         XPathNodeSet* ns = (left->type == XPATH_RESULT_NODESET)
                                ? left->value.nodeset_value : NULL;
-        size_t n = ns ? ns->count : 1;
-
-        struct leptris_element* saved_node = ctx->context_node;
-        size_t saved_pos = ctx->context_position;
-        size_t saved_size = ctx->context_size;
-
-        for (size_t i = 0; i < n; i++) {
-            ctx->context_node = ns ? (struct leptris_element*)ns->nodes[i]
-                                   : ctx->context_node;
-            ctx->context_position = i + 1;
-            ctx->context_size = n;
-            struct leptris_xpath_result* item =
-                evaluate_expr(ctx, ast->children[1]);
-            if (item) {
-                char* piece = xpath_to_string(item);
-                xpath_result_free(item);
-                XPathTextNode* tn =
-                    synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
-                free(piece);
-                if (tn) xpath_nodeset_add(out, tn);
-            } else {
-                ctx->context_node = saved_node;
-                ctx->context_position = saved_pos;
-                ctx->context_size = saved_size;
-                xpath_result_free(left);
+        if (!ns) {
+            /* scalar left: map once over the ambient context
+             * (defensive parity with the old inline body) */
+            XPathNodeSet* one = xpath_nodeset_new();
+            if (one && ctx->context_node)
+                xpath_nodeset_add(one, ctx->context_node);
+            xpath_result_free(left);
+            if (!one) return NULL;
+            XPathNodeSet* out = xpath_map_fn_over(ctx, one,
+                                                  ast->children[1]);
+            xpath_nodeset_free(one);
+            if (!out) return NULL;
+            struct leptris_xpath_result* result =
+                xpath_result_new(XPATH_RESULT_NODESET);
+            if (!result) {
                 xpath_nodeset_free(out);
                 return NULL;
             }
+            result->value.nodeset_value = out;
+            return result;
         }
-        ctx->context_node = saved_node;
-        ctx->context_position = saved_pos;
-        ctx->context_size = saved_size;
-
-        xpath_result_free(left);
-        struct leptris_xpath_result* result =
-            xpath_result_new(XPATH_RESULT_NODESET);
-        if (!result) { xpath_nodeset_free(out); return NULL; }
-        result->value.nodeset_value = out;
-        return result;
+        /* delegate to the shared per-member mapper */
+        {
+            XPathNodeSet* owned = xpath_nodeset_new();
+            if (owned) {
+                for (size_t i = 0; i < ns->count; i++)
+                    xpath_nodeset_add(owned, ns->nodes[i]);
+            }
+            if (!owned) {
+                xpath_result_free(left);
+                return NULL;
+            }
+            /* map FIRST — `left` owns the synthetic members */
+            XPathNodeSet* out = xpath_map_fn_over(ctx, owned,
+                                                  ast->children[1]);
+            xpath_nodeset_free(owned);
+            xpath_result_free(left);
+            if (!out) return NULL;
+            struct leptris_xpath_result* result =
+                xpath_result_new(XPATH_RESULT_NODESET);
+            if (!result) {
+                xpath_nodeset_free(out);
+                return NULL;
+            }
+            result->value.nodeset_value = out;
+            return result;
+        }
     }
 
     /* XPath 3.1 switch (3.0 §3.9-style): first eq-matching case
@@ -1633,13 +1752,27 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             struct leptris_xpath_result* test =
                 evaluate_expr(ctx, ast->children[i]);
             if (!test) { free(ov); return NULL; }
-            char* tv = leptris_xpath_result_string(test);
-            double tn = leptris_xpath_result_number(test);
-            int hit = (ov && tv && strcmp(ov, tv) == 0) ||
+            int hit = 0;
+            size_t tcount = 0;
+            if (leptris_xpath_result_type(test) ==
+                LEPTRIS_XPATH_NODESET)
+                tcount = leptris_xpath_result_count(test);
+            if (tcount > 1) {
+                /* multi-case test (sequence): any member hits */
+                for (size_t k = 0; k < tcount && !hit; k++) {
+                    const char* iv =
+                        leptris_xpath_result_node_value(test, k);
+                    hit = (ov && iv && strcmp(ov, iv) == 0);
+                }
+            } else {
+                char* tv = leptris_xpath_result_string(test);
+                double tn = leptris_xpath_result_number(test);
+                hit = (ov && tv && strcmp(ov, tv) == 0) ||
                       (!ov && !tv) || (on == tn && ov && tv &&
                                        strcmp(ov, "NaN") != 0);
+                free(tv);
+            }
             leptris_xpath_result_free(test);
-            free(tv);
             if (hit)
                 out = evaluate_expr(ctx, ast->children[i + 1]);
         }
@@ -2251,6 +2384,17 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                            (strlen(rvs) >= 8 && rvs[4] == '-' &&
                             rvs[7] == '-'));
                 if (lok && rok) {
+                    /* time lexical 24:00:00 == 00:00:00 — fold the
+                     * hour before comparing (xs:time midnight form) */
+                    char lfold[48], rfold[48];
+                    if (lvs[2] == ':' && lvs[0] == '2' && lvs[1] == '4') {
+                        snprintf(lfold, sizeof lfold, "00%s", lvs + 2);
+                        lvs = lfold;
+                    }
+                    if (rvs[2] == ':' && rvs[0] == '2' && rvs[1] == '4') {
+                        snprintf(rfold, sizeof rfold, "00%s", rvs + 2);
+                        rvs = rfold;
+                    }
                     int c = strcmp(lvs, rvs);
                     result->value.boolean_value =
                         op == XPATH_OP_EQUAL ? c == 0
