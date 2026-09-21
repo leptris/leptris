@@ -9,6 +9,7 @@
  */
 
 #include "compact.h"
+#include "../leptris_internal.h"   /* struct leptris_document (overflow_entries) */
 #include "../common/port.h"
 #include <stdlib.h>
 #include <string.h>
@@ -158,6 +159,14 @@ int leptris_compact_overflow_set(LeptrisCompactOverflowTable* table,
     table->buckets[index] = entry;
     table->entry_count++;
 
+    /* #682: parallel per-document chain — teardown walks exactly
+     * this doc's entries instead of scanning the whole table. */
+    if (doc) {
+        entry->doc_next =
+            (struct leptris_compact_overflow_entry*)doc->overflow_entries;
+        doc->overflow_entries = entry;
+    }
+
     if (table->entry_count >= table->bucket_count) {
         overflow_table_grow(table);
     }
@@ -208,26 +217,40 @@ void leptris_compact_cleanup(void) {
 void leptris_compact_cleanup_document(struct leptris_document* doc) {
     if (!doc || !g_overflow_table) return;
 
+    /* #682: walk THIS document's entry chain (linked at set time)
+     * instead of scanning every bucket of the global table — the
+     * old full-table sweep ran on every document free and dominated
+     * apply-heavy XSLT profiles (result docs register thousands of
+     * cross-block edge entries; the sampler pinned 35% of the
+     * dispatch bench in this loop). */
+    LeptrisCompactOverflowEntry* e =
+        (LeptrisCompactOverflowEntry*)doc->overflow_entries;
+    doc->overflow_entries = NULL;
+
     size_t removed_count = 0;
-
-    for (size_t i = 0; i < g_overflow_table->bucket_count; i++) {
-        LeptrisCompactOverflowEntry** entry_ptr = &g_overflow_table->buckets[i];
-        LeptrisCompactOverflowEntry* entry = *entry_ptr;
-
-        while (entry) {
-            if (entry->doc == doc) {
-                /* Unlink only — entries live in SLABS owned by the
-                 * table; free()ing them corrupted the heap whenever
-                 * a document had overflow entries (common since the
-                 * #450 sibling-edge work routed far links here). */
-                *entry_ptr = entry->next;
-                entry = *entry_ptr;
-                removed_count++;
-            } else {
-                entry_ptr = &entry->next;
-                entry = entry->next;
+    while (e) {
+        LeptrisCompactOverflowEntry* next = e->doc_next;
+        if (e->doc == doc) {
+            /* Stale chain links (entry re-registered under another
+             * doc) are skipped — the ->doc check keeps them alive
+             * for their true owner. */
+            size_t index = hash_pointer(e->key,
+                                        g_overflow_table->bucket_count);
+            LeptrisCompactOverflowEntry** entry_ptr =
+                &g_overflow_table->buckets[index];
+            while (*entry_ptr) {
+                if (*entry_ptr == e) {
+                    /* Unlink only — entries live in SLABS owned by
+                     * the table; free()ing them corrupted the heap
+                     * (#450 sibling-edge follow-up). */
+                    *entry_ptr = e->next;
+                    removed_count++;
+                    break;
+                }
+                entry_ptr = &(*entry_ptr)->next;
             }
         }
+        e = next;
     }
 
     g_overflow_table->entry_count -= removed_count;
