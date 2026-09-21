@@ -1874,6 +1874,126 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         }
     }
 
+    /* XQuery 3.0 `order by` — order spec list before RETURN. The
+     * keys append to the FOR node AFTER the return child, each
+     * followed by a NUMBER flag child: 0 asc / 1 desc, +2 when
+     * `empty least` (default empty mode is greatest). */
+    XPathASTNode** ob_keys = NULL;
+    int* ob_flags = NULL;
+    size_t n_ob = 0;
+    {
+        XPathToken* ot = current_token(parser);
+        int saw_order = ot && ot->type == TOK_NCNAME &&
+                        ot->value_len == 5 &&
+                        memcmp(ot->value, "order", 5) == 0;
+        XPathToken* st = current_token(parser);
+        int saw_stable = st && st->type == TOK_NCNAME &&
+                         st->value_len == 6 &&
+                         memcmp(st->value, "stable", 6) == 0;
+        if (saw_stable) {
+            advance_token(parser);
+            ot = current_token(parser);
+            saw_order = ot && ot->type == TOK_NCNAME &&
+                        ot->value_len == 5 &&
+                        memcmp(ot->value, "order", 5) == 0;
+        }
+        if (saw_order) {
+            advance_token(parser);   /* order */
+            XPathToken* bt = current_token(parser);
+            if (!bt || bt->type != TOK_NCNAME || bt->value_len != 2 ||
+                memcmp(bt->value, "by", 2) != 0) {
+                snprintf(parser->error_msg, sizeof(parser->error_msg),
+                         "Expected 'by' after 'order'");
+                ast_node_free(domain);
+                ast_node_free(where_ast);
+                free(var_name);
+                free(pos_name);
+                free(ob_keys);
+                free(ob_flags);
+                return NULL;
+            }
+            advance_token(parser);
+            for (;;) {
+                XPathASTNode* key = parse_expr(parser);
+                if (!key) {
+                    ast_node_free(domain);
+                    ast_node_free(where_ast);
+                    free(var_name);
+                    free(pos_name);
+                    for (size_t i = 0; i < n_ob; i++)
+                        ast_node_free(ob_keys[i]);
+                    free(ob_keys);
+                    free(ob_flags);
+                    return NULL;
+                }
+                int desc = 0, eleast = 0;
+                XPathToken* dt2 = current_token(parser);
+                if (dt2 && dt2->type == TOK_NCNAME &&
+                    dt2->value_len == 10 &&
+                    memcmp(dt2->value, "descending", 10) == 0) {
+                    desc = 1;
+                    advance_token(parser);
+                    dt2 = current_token(parser);
+                } else if (dt2 && dt2->type == TOK_NCNAME &&
+                           dt2->value_len == 9 &&
+                           memcmp(dt2->value, "ascending", 9) == 0) {
+                    advance_token(parser);
+                    dt2 = current_token(parser);
+                }
+                if (dt2 && dt2->type == TOK_NCNAME &&
+                    dt2->value_len == 5 &&
+                    memcmp(dt2->value, "empty", 5) == 0) {
+                    advance_token(parser);
+                    XPathToken* em = current_token(parser);
+                    if (em && em->type == TOK_NCNAME &&
+                        em->value_len == 5 &&
+                        memcmp(em->value, "least", 5) == 0) {
+                        eleast = 1;
+                        advance_token(parser);
+                    } else if (em && em->type == TOK_NCNAME &&
+                               em->value_len == 8 &&
+                               memcmp(em->value, "greatest", 8) == 0) {
+                        advance_token(parser);
+                    }
+                }
+                if (dt2 && dt2->type == TOK_NCNAME &&
+                    dt2->value_len == 9 &&
+                    memcmp(dt2->value, "collation", 9) == 0) {
+                    advance_token(parser);
+                    XPathToken* lit = current_token(parser);
+                    if (lit && lit->type == TOK_STRING) advance_token(parser);
+                }
+                XPathASTNode** gk = (XPathASTNode**)realloc(
+                    ob_keys, (n_ob + 1) * sizeof(XPathASTNode*));
+                int* gf = (int*)realloc(ob_flags,
+                                        (n_ob + 1) * sizeof(int));
+                if (!gk || !gf) {
+                    ast_node_free(key);
+                    ast_node_free(domain);
+                    ast_node_free(where_ast);
+                    free(var_name);
+                    free(pos_name);
+                    for (size_t i = 0; i < n_ob; i++)
+                        ast_node_free(ob_keys[i]);
+                    free(gk ? gk : ob_keys);
+                    free(gf ? gf : ob_flags);
+                    return NULL;
+                }
+                ob_keys = gk;
+                ob_flags = gf;
+                ob_keys[n_ob] = key;
+                ob_flags[n_ob] = desc + (eleast ? 2 : 0);
+                n_ob++;
+                XPathToken* cm = current_token(parser);
+                if (cm && cm->type == TOK_COMMA) {
+                    advance_token(parser);
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+
     XPathToken* rt = current_token(parser);
     if (!rt || rt->type != TOK_NCNAME || rt->value_len != 6 ||
         memcmp(rt->value, "return", 6) != 0) {
@@ -1883,6 +2003,9 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         ast_node_free(where_ast);
         free(var_name);
         free(pos_name);
+        for (size_t i = 0; i < n_ob; i++) ast_node_free(ob_keys[i]);
+        free(ob_keys);
+        free(ob_flags);
         return NULL;
     }
     advance_token(parser);
@@ -1893,6 +2016,9 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         ast_node_free(where_ast);
         free(var_name);
         free(pos_name);
+        for (size_t i = 0; i < n_ob; i++) ast_node_free(ob_keys[i]);
+        free(ob_keys);
+        free(ob_flags);
         return NULL;
     }
 
@@ -1950,6 +2076,20 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
     }
     ast_node_add_child(node, domain);
     ast_node_add_child(node, ret);
+    /* order-by keys ride after the return child: key, NUMBER-flag
+     * pairs (0 asc / 1 desc, +2 for `empty least`) */
+    for (size_t i = 0; i < n_ob; i++) {
+        XPathASTNode* fl = ast_node_new(XPATH_AST_NUMBER);
+        if (!fl) {
+            ast_node_free(ob_keys[i]);
+            continue;
+        }
+        fl->number_value = (double)ob_flags[i];
+        ast_node_add_child(node, ob_keys[i]);
+        ast_node_add_child(node, fl);
+    }
+    free(ob_keys);
+    free(ob_flags);
     return node;
 }
 
@@ -2617,6 +2757,24 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
             if (!rel) {
                 ast_node_free(node);
                 return NULL;
+            }
+            if (rel->type == XPATH_AST_OPERATOR) {
+                /* Postfix fn-step rehang (#692, single-slash twin):
+                 * a trailing `path/fn(.)` parses the fn as a MAP over
+                 * a RELATIVE_PATH — fold those steps into this
+                 * ABSOLUTE_PATH and hand it back as the map's left,
+                 * so `/A/B/string()` maps per member instead of
+                 * evaluating once against the document root. */
+                XPathASTNode* m = rel;
+                while (m->children[0]->type == XPATH_AST_OPERATOR)
+                    m = m->children[0];
+                XPathASTNode* r = m->children[0];
+                for (size_t i = 0; i < r->child_count; i++)
+                    ast_node_add_child(node, r->children[i]);
+                r->child_count = 0;
+                ast_node_free(r);
+                m->children[0] = node;
+                return rel;
             }
             ast_node_add_child(node, rel);
         }

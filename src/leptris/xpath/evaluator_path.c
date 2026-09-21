@@ -159,6 +159,11 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
                 if (!ctx || !ctx->document || !ctx->document->has_namespaces)
                     return 1;   /* namespace-free document: no gate */
                 const char* uri = leptris_element_get_namespace_uri(elem);
+                /* XQuery `declare default element namespace`: the
+                 * unprefixed test resolves IN that namespace. */
+                if (ctx->xquery_default_ns && ctx->xquery_default_ns[0])
+                    return uri && uri[0] &&
+                           strcmp(uri, ctx->xquery_default_ns) == 0;
                 return !uri || !uri[0];
             }
 
@@ -1205,6 +1210,24 @@ normal_absolute_path:
                         step_result->value.nodeset_value = NULL;
                         xpath_result_free(step_result);
                     }
+                }
+            } else if (rel_path && rel_path->type == XPATH_AST_STEP &&
+                       path->child_count > 1) {
+                /* Direct STEP children (fn-step rehang): children[0]
+                 * matched the root; run the remaining steps. */
+                for (size_t j = 1; j < path->child_count; j++) {
+                    XPathASTNode* step = path->children[j];
+                    if (step->type != XPATH_AST_STEP) continue;
+                    struct leptris_xpath_result* step_result =
+                        evaluate_step(ctx, step, current);
+                    if (!step_result) {
+                        xpath_nodeset_free(current);
+                        return NULL;
+                    }
+                    xpath_nodeset_free(current);
+                    current = step_result->value.nodeset_value;
+                    step_result->value.nodeset_value = NULL;
+                    xpath_result_free(step_result);
                 }
             }
             /* If rel_path has only 1 child (the step that matched), we're done - just return root */

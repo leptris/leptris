@@ -441,7 +441,13 @@ static struct leptris_xpath_result* xpath_func_string(XPathContext* context,
             return NULL;
         }
 
-        result->value.string_value = result_to_string(arg_result);
+        result->value.string_value =
+            (context->xquery_spelling &&
+             arg_result->type == XPATH_RESULT_NUMBER &&
+             !arg_result->is_int)
+                ? xpath_number_to_string_xq(
+                      arg_result->value.number_value)
+                : result_to_string(arg_result);
         xpath_result_free(arg_result);
     }
 
