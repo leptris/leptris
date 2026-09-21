@@ -1002,9 +1002,21 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
             return xpath_result_new(XPATH_RESULT_NODESET);
         }
         if (head->value.nodeset_value) {
-            for (size_t i = 0; i < head->value.nodeset_value->count; i++)
-                xpath_nodeset_add(current,
-                                  head->value.nodeset_value->nodes[i]);
+            XPathNodeSet* source = head->value.nodeset_value;
+            if (source->owns_synthetic_text || source->owns_attributes ||
+                source->owns_namespaces) {
+                XPathNodeSet* copy = xpath_nodeset_deep_copy(source);
+                if (!copy) {
+                    xpath_result_free(head);
+                    xpath_nodeset_free(current);
+                    return NULL;
+                }
+                xpath_nodeset_free(current);
+                current = copy;
+            } else {
+                for (size_t i = 0; i < source->count; i++)
+                    xpath_nodeset_add(current, source->nodes[i]);
+            }
         }
         xpath_result_free(head);
         /* Process remaining children as steps. */
