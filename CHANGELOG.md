@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+## [1.9.214] - 2026-09-21
+
+### Added — QT3 lane-15 core: switch / group-by / if (lever 6 stage-2)
+
+Two batches close the lane-15 expression families:
+
+- **fn-items (#1268)**: `fn:function-name` / `fn:function-arity` gated on the vendored sets; `fn:function-name` returns the lexical QName verbatim (no `fn:` prefixing).
+- **lane-15 core (#1270)**: `prod/SwitchExpr` (16), `prod/GroupByClause` (20, works-mod + docvar externals) and `prod/IfExpr` (24) — every adopted case agrees; full suite 1640/1640.
+
+Engine fixes the corpus drove:
+
+- **group by**: bare `$k` grouping variables, comma-separated multi-spec grouping on the key tuple, optional `as SequenceType`/`collation` specs, WHERE-after-GROUP-BY filtering the grouped tuples.
+- **ctor-enclosed FLWOR** (`<out>{ for … group by … }</out>`): the ctor is hoisted and wraps the result sequence once.
+- **node lifetime**: attribute/namespace nodes in FLWOR tuples and LET bindings are cloned and tuple-owned (group-by keys dangled after unbind and read empty); external-variable selects evaluate on the query context so `parse-xml()` documents stay anchored.
+- **constructors**: nested direct ctors inside enclosed expressions splice recursively; `text{(a,b,c)}` joins atomics with spaces; 0-arity `string()` is kind-aware for attribute/text contexts; fn steps (`E/string()`) map per member after a filter expr; the `!` map no longer frees its left nodeset before mapping.
+- **`prefix:*` vs multiply**: the NCNAME+STAR token pair is disambiguated from the source text (`k * 2` mis-parsed as `k:*`).
+- multi-case `switch` (`case A case B return R`); `xs:float` registered; two `%lld` 32-bit-long print fixes (xsl:number, month-shift seconds).
+
+
+
 ## [1.9.213] - 2026-09-21
 
 ### Added — the op:date and yearMonth families (#1182, lever 6)
