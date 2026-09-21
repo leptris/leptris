@@ -62,6 +62,13 @@ typedef enum {
 #define LEPTRIS_PLAN_FLAG_ORDERED 0x2u       /* matches within a row keep document order (default) */
 #define LEPTRIS_PLAN_FLAG_CDATA 0x4u         /* CDATA sections count as text runs */
 #define LEPTRIS_PLAN_FLAG_NS_LENIENT 0x8u    /* #754: bind out-of-namespace children anyway */
+/* #1273: when set, the walk ALSO emits unmatched sibling non-element
+ * nodes (text runs / comments / PIs) as SCALAR values with
+ * `position` and `node_kind` populated, so ordered/mixed-content
+ * hosts can rebuild `element_order` without re-parsing the source.
+ * Document-order identity already covers element children; the
+ * spine closes the gap for runs between matched elements. */
+#define LEPTRIS_PLAN_FLAG_EMIT_ORDER_SPINE 0x10u
 
 /* Namespace matching form for binding an element. */
 typedef enum {
@@ -72,8 +79,22 @@ typedef enum {
 
 typedef struct {
     const char* wire_name; /* XML attribute name as it appears on the wire */
+    const char* expected_value; /* string-equal match (non-nil); host-owned */
+} leptris_attr_predicate;
+
+typedef struct {
+    const char* wire_name; /* XML attribute name as it appears on the wire */
     uint8_t kind;          /* LeptrisPlanKind: SCALAR | COLLECTION | CALLBACK */
     uint8_t type_tag;      /* host-defined; echoed back verbatim */
+    /* #1272: filter rows to require every (attr_name, expected_value)
+     * pair (AND across pairs). Multiple rows with the same wire_name
+     * and different predicates partition the match space
+     * (exclusive — first matching row wins per occurrence, no
+     * double-capture). Trailing additive field; `predicate_count = 0`
+     * preserves historical behavior. Strings deep-copied at build. */
+    uint16_t predicate_count;
+    uint16_t pad_pred;
+    const leptris_attr_predicate* predicates;
 } leptris_attr_plan;
 
 typedef struct {
@@ -91,6 +112,11 @@ typedef struct {
     uint8_t ns_form;       /* LeptrisPlanNsForm */
     uint8_t pad0;
     const char* ns_uri;    /* LEPTRIS_PLAN_NS_EXACT only */
+    /* #1272: element-side predicates. Same semantics as attr_predicate
+     * (AND across pairs, exclusive same-name rows). */
+    uint16_t predicate_count;
+    uint16_t pad_pred;
+    const leptris_attr_predicate* predicates;
 } leptris_child_plan;
 
 typedef struct {
@@ -168,6 +194,14 @@ LEPTRIS_API const char* leptris_plan_value_string(const LeptrisPlanResult v);
 LEPTRIS_API size_t leptris_plan_value_length(const LeptrisPlanResult v);
 /* CALLBACK: document byte offset of the source node (0 unknown). */
 LEPTRIS_API size_t leptris_plan_value_position(const LeptrisPlanResult v);
+/* #1273: LEPTRIS_NODE_TYPE_* of the value's source node, or 0 for
+ * ELEMENT/COLLECTION wrappers and synthesized text. */
+LEPTRIS_API uint8_t leptris_plan_value_node_kind(const LeptrisPlanResult v);
+/* #1273: dense sibling rank inside the producing element (0 if
+ * unranked). Useful when byte offsets are 0 (mutated docs) or
+ * when hosts sort by document order without byte-offset helpers. */
+LEPTRIS_API uint32_t leptris_plan_value_order_index(
+    const LeptrisPlanResult v);
 /* ELEMENT: child-value count. COLLECTION: item count. */
 LEPTRIS_API size_t leptris_plan_value_count(const LeptrisPlanResult v);
 /* ELEMENT child value / COLLECTION item at i; NULL out of range. */
@@ -176,6 +210,30 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v,
 /* ELEMENT: attribute value by wire_name; NULL when absent. */
 LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                                      const char* wire_name);
+
+/* #1269a in-pass type execution (#1269a): for SCALAR/RAW values
+ * whose producing row carried type_tag in {1=int, 2=float, 3=bool},
+ * the walk parses the string once and stores typed values. The str
+ * field is always populated for backward compatibility. Accessors
+ * return 0 on success (matches type) and non-zero on parse failure
+ * (host may fall back to `string`). NULL in or non-numeric value is
+ * a failure. */
+LEPTRIS_API int leptris_plan_value_int(const LeptrisPlanResult v,
+                                       int64_t* out);
+LEPTRIS_API int leptris_plan_value_float(const LeptrisPlanResult v,
+                                         double* out);
+/* `true` / `1` (case-insensitive) -> 1, `false` / `0` -> 0, anything
+ * else leaves *out untouched and returns non-zero. */
+LEPTRIS_API int leptris_plan_value_bool(const LeptrisPlanResult v, int* out);
+
+/* #1269b fused parse+walk entry. v1 = parse_string + walk(root) +
+ * free(doc) — byte-parity with Descriptor#materialize. Returns the
+ * same result type as leptris_plan_walk; status reports
+ * LEPTRIS_ERROR_PARSE on syntax error. NULL doc / plan / status
+ * handled. The caller still owns plan lifetime. */
+LEPTRIS_API LeptrisPlanResult leptris_plan_materialize(
+    const char* source, size_t source_len,
+    LeptrisPlan plan, LeptrisStatus* status);
 
 #ifdef __cplusplus
 }
