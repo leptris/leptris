@@ -979,10 +979,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         }
                         free(sv);
                     }
-                    /* set_nodeset overwrites without freeing —
-                     * cover the name a previous tuple bound. */
-                    if (var->value.v.nodeset_value)
-                        xpath_nodeset_free(var->value.v.nodeset_value);
+                    /* set_nodeset frees any previous binding. */
                     xpath_variable_set_nodeset(var, one);
                 }
 

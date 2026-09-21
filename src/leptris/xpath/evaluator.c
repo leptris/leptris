@@ -1065,10 +1065,15 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
                      * within a single eval call). */
                     XPathNodeSet* var_ns = xpath_variable_get_nodeset(var);
                     if (var_ns && var_ns->count > 0) {
-                        /* Synthetic members must be deep-copied: the
-                         * variable's storage can be freed while the
-                         * result lives (let bindings unwind). */
-                        if (var_ns->owns_synthetic_text) {
+                        /* Owned members (synth text / attributes /
+                         * namespaces) must be deep-copied: the
+                         * variable's storage can be replaced or
+                         * freed while the result lives (let/for
+                         * rebind — ASAN UAF when set_nodeset freed
+                         * the prior binding under a shallow copy). */
+                        if (var_ns->owns_synthetic_text ||
+                            var_ns->owns_attributes ||
+                            var_ns->owns_namespaces) {
                             XPathNodeSet* copy =
                                 xpath_nodeset_deep_copy(var_ns);
                             if (!copy) return NULL;
