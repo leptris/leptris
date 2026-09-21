@@ -4457,7 +4457,8 @@ static void emit_formatted_numbers(const unsigned long long* values, int nv,
             unsigned zcp = nd_zero[i < ns ? i : ns - 1];
             int wdt = nd_width[i < ns ? i : ns - 1];
             char dec[48];
-            snprintf(dec, sizeof(dec), "%lu", values[i]);
+            snprintf(dec, sizeof(dec), "%llu",
+                     (unsigned long long)values[i]);
             size_t dl = strlen(dec);
             size_t pad = (dl < (size_t)wdt) ? (size_t)wdt - dl : 0;
             size_t co = 0;

@@ -1030,6 +1030,37 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
                     step_result->value.nodeset_value = NULL;
                     xpath_result_free(step_result);
                 }
+            } else if (child->type == XPATH_AST_OPERATOR &&
+                       (XPathOperatorType)child->number_value ==
+                           XPATH_OP_MAP &&
+                       child->child_count >= 2) {
+                /* fn-step continuation (`E/…/fn()`): the MAP's
+                 * left-relative steps apply to `current`, then the
+                 * fn maps per member. */
+                XPathASTNode* rel = child->children[0];
+                if (rel->type == XPATH_AST_RELATIVE_PATH) {
+                    for (size_t j = 0; j < rel->child_count; j++) {
+                        XPathASTNode* step = rel->children[j];
+                        struct leptris_xpath_result* step_result =
+                            evaluate_step(ctx, step, current);
+                        if (!step_result) {
+                            xpath_nodeset_free(current);
+                            return NULL;
+                        }
+                        xpath_nodeset_free(current);
+                        current = step_result->value.nodeset_value;
+                        step_result->value.nodeset_value = NULL;
+                        xpath_result_free(step_result);
+                    }
+                }
+                XPathNodeSet* mapped = xpath_map_fn_over(
+                    ctx, current, child->children[1]);
+                if (!mapped) {
+                    xpath_nodeset_free(current);
+                    return NULL;
+                }
+                xpath_nodeset_free(current);
+                current = mapped;
             }
         }
         struct leptris_xpath_result* result =

@@ -2357,7 +2357,8 @@ int leptris_dt_shift(const char* ds, double delta, char* buf,
     /* seconds from the SHIFTED instant; a fractional input second
      * survives the whole-second delta untouched */
     if (se == (double)(long)se)
-        snprintf(secs, sizeof secs, "%02ld", rem % 60);
+        snprintf(secs, sizeof secs, "%02lld",
+                 (long long)(rem % 60));
     else {
         long ip = rem % 60;
         double fr = se - (double)(long)se;
@@ -2451,6 +2452,31 @@ int leptris_dt_shift_months(const char* ds, double delta_months,
                  nm + 1, (long long)nd, zone);
     }
     return 1;
+}
+
+/* xs:time as a NORMALIZING constructor: folds the 24:00:00
+ * midnight form to 00:00:00 so every downstream comparison (eq,
+ * switch cases, min/max) agrees with the spec. */
+static struct leptris_xpath_result* fn_time_ctor(
+        XPathContext* ctx, XPathASTNode** a, size_t n) {
+    char* in = re_str_arg(ctx, a, 0);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    if (in && in[0] == '2' && in[1] == '4' && in[2] == ':') {
+        char* norm = (char*)malloc(strlen(in) + 3);
+        if (norm) {
+            snprintf(norm, strlen(in) + 3, "00%s", in + 2);
+            out->value.string_value = norm;
+        } else {
+            out->value.string_value = leptris_strdup("");
+        }
+        free(in);
+    } else {
+        out->value.string_value = in ? in : leptris_strdup("");
+    }
+    (void)n;
+    return out;
 }
 
 ADJUST_TZ(adjust_dttz, 1)
@@ -5193,6 +5219,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:anyURI", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:integer", fn_xs_integer, 1, 1);
     xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);
+    xpath_function_registry_register(registry, "xs:float", fn_xs_double, 1, 1);
     xpath_function_registry_register(registry, "xs:decimal", fn_xs_decimal, 1, 1);
     xpath_function_registry_register(registry, "xs:int", fn_xs_int, 1, 1);
     xpath_function_registry_register(registry, "xs:long", fn_xs_long, 1, 1);
@@ -5205,10 +5232,11 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:nonNegativeInteger", fn_xs_nonneg, 1, 1);
     xpath_function_registry_register(registry, "xs:boolean", fn_xs_boolean, 1, 1);
     xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:time", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:time", fn_time_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:QName", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "implicit-timezone", fn_implicit_tz, 0, 0);
     xpath_function_registry_register(registry, "current-dateTime", fn_current_dt, 0, 0);
     xpath_function_registry_register(registry, "current-date", fn_current_date, 0, 0);

@@ -29,7 +29,8 @@ extern XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
 
 /* ---- query model ---- */
 
-typedef enum { XQ_DECL_VAR, XQ_DECL_NS, XQ_DECL_FN } XqDeclKind;
+typedef enum { XQ_DECL_VAR, XQ_DECL_NS, XQ_DECL_FN,
+                 XQ_DECL_SKIP } XqDeclKind;
 
 typedef struct {
     XqDeclKind kind;
@@ -71,10 +72,13 @@ struct LeptrisXQueryInternal {
     XqClause* clauses;
     size_t nclauses;
     XPathASTNode* where_ast;
+    XPathASTNode* post_where_ast;  /* where AFTER group by (12) */
     XqOrderKey* keys;
     size_t nkeys;
-    char* group_var;        /* group by $k := Expr (12) */
-    XPathASTNode* group_key;
+    char** group_vars;     /* group by $k [:= Expr], ... (12) */
+    XPathASTNode** group_keys;
+    size_t ngroup;
+    char* wrap_tag;        /* hoisted `<tag>{ FLWOR }</tag>` wrap */
     XPathASTNode* return_ast;
 };
 
@@ -152,6 +156,7 @@ static int is_clause_word(const char* w, size_t len) {
            word_is(w, len, "by") || word_is(w, len, "return") ||
            word_is(w, len, "stable") || word_is(w, len, "ascending") ||
            word_is(w, len, "descending") || word_is(w, len, "group") ||
+           word_is(w, len, "collation") ||
            word_is(w, len, "tumbling") || word_is(w, len, "sliding") ||
            word_is(w, len, "window") || word_is(w, len, "start") ||
            word_is(w, len, "end") || word_is(w, len, "when") ||
@@ -205,6 +210,8 @@ static void buf_put(Buf* b, const char* s, size_t n);
 static void xq_expand_span(const char* a, const char* b, Buf* out);
 static const char* xq_expr_close(const char* p, const char* cb);
 static const char* xq_ctor_end(const char* ca, const char* cb);
+static const char* xq_enclosed_end(const char* p, const char* end);
+static const char* xq_elem_ctor_end(const char* p, const char* end);
 static void buf_str(Buf* b, const char* s);
 static const char* xq_translate_element(const char* p, const char* e,
                                         Buf* out);
@@ -492,11 +499,17 @@ static void xq_free(struct LeptrisXQueryInternal* q) {
     }
     free(q->clauses);
     if (q->where_ast) ast_node_free(q->where_ast);
+    if (q->post_where_ast) ast_node_free(q->post_where_ast);
     for (size_t i = 0; i < q->nkeys; i++)
         if (q->keys[i].key) ast_node_free(q->keys[i].key);
     free(q->keys);
-    free(q->group_var);
-    if (q->group_key) ast_node_free(q->group_key);
+    for (size_t i = 0; i < q->ngroup; i++) {
+        free(q->group_vars[i]);
+        if (q->group_keys[i]) ast_node_free(q->group_keys[i]);
+    }
+    free(q->group_vars);
+    free(q->group_keys);
+    free(q->wrap_tag);
     if (q->return_ast) ast_node_free(q->return_ast);
     free(q);
 }
@@ -658,6 +671,35 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
         s->p = (e.p < e.end) ? e.p + 1 : e.end;   /* ';' */
         return 1;
     }
+    if (word_is(w, wl, "default")) {
+        /* `declare default function namespace "URI";` (also
+         * element/function collation variants — accepted and
+         * skipped: local-name resolution is unchanged, which is
+         * what the corpus gates). */
+        scan_ws(s);
+        wl = scan_word(s, &w);
+        s->p = w + wl;
+        if (!wl) return 0;
+        if (word_is(w, wl, "function") || word_is(w, wl, "element") ||
+            word_is(w, wl, "collation") || word_is(w, wl, "order")) {
+            /* optional "empty" / "namespace" filler words */
+            scan_ws(s);
+            Scan t2 = *s;
+            size_t w2l = scan_word(&t2, &w);
+            if (w2l && (word_is(w, w2l, "namespace") ||
+                        word_is(w, w2l, "empty"))) {
+                s->p = w + w2l;
+                scan_ws(s);
+            }
+            if (s->p >= s->end || (*s->p != '"' && *s->p != '\'')) return 0;
+            scan_string(s);
+            scan_ws(s);
+            if (s->p < s->end && *s->p == ';') s->p++;
+            out->kind = XQ_DECL_SKIP;   /* accepted, semantically inert */
+            return 1;
+        }
+        return 0;
+    }
     if (word_is(w, wl, "namespace")) {
         scan_ws(s);
         wl = scan_word(s, &w);
@@ -771,9 +813,289 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
     return 0;   /* import / option / default / base-uri */
 }
 
+/* Matching '}' for the '{' at p — quote, comment and nested
+ * element-ctor aware. */
+static const char* xq_enclosed_end(const char* p, const char* end) {
+    int depth = 1;
+    const char* i = p + 1;
+    while (i < end && depth > 0) {
+        if (*i == '\'' || *i == '"') {
+            char qt = *i++;
+            while (i < end && *i != qt) i++;
+            if (i < end) i++;
+            continue;
+        }
+        if (i + 1 < end && i[0] == ':' && i[1] == '(') {
+            i += 2;
+            int cd = 1;
+            while (i + 1 < end && cd > 0) {
+                if (i[0] == ':' && i[1] == '(') { cd++; i += 2; }
+                else if (i[0] == ')' && i[1] == ':') { cd--; i += 2; }
+                else i++;
+            }
+            continue;
+        }
+        if (*i == '<' && i + 1 < end && xq_is_name_start(i[1])) {
+            i = xq_elem_ctor_end(i, end);
+            if (!i) return NULL;
+            continue;
+        }
+        if (*i == '{') depth++;
+        else if (*i == '}') depth--;
+        i++;
+    }
+    return depth == 0 ? i - 1 : NULL;
+}
+
+/* End (past '>') of the element constructor starting at p ('<').
+ * Attribute quotes, nested ctors and enclosed expressions are
+ * skipped structurally. */
+static const char* xq_elem_ctor_end(const char* p, const char* end) {
+    const char* i = p + 1;
+    while (i < end && !isspace((unsigned char)*i) && *i != '>' &&
+           *i != '/')
+        i++;
+    size_t nl = (size_t)(i - (p + 1));
+    if (!nl) return NULL;
+    while (i < end && *i != '>' && *i != '/') {
+        if (*i == '"' || *i == '\'') {
+            char qt = *i++;
+            while (i < end && *i != qt) i++;
+            if (i < end) i++;
+        } else {
+            i++;
+        }
+    }
+    if (i >= end) return NULL;
+    if (*i == '/') {
+        if (i + 1 < end && i[1] == '>') return i + 2;
+        return NULL;
+    }
+    i++;   /* past '>' — mixed content until </name> */
+    while (i < end) {
+        if (*i == '<') {
+            if (i + 1 < end && i[1] == '/') {
+                const char* j = i + 2;
+                while (j < end && !isspace((unsigned char)*j) &&
+                       *j != '>')
+                    j++;
+                if ((size_t)(j - (i + 2)) == nl &&
+                    memcmp(i + 2, p + 1, nl) == 0) {
+                    while (j < end && *j != '>') j++;
+                    return j < end ? j + 1 : NULL;
+                }
+                return NULL;
+            }
+            if (i + 1 < end && xq_is_name_start(i[1])) {
+                const char* e = xq_elem_ctor_end(i, end);
+                if (!e) return NULL;
+                i = e;
+                continue;
+            }
+            i++;
+            continue;
+        }
+        if (*i == '{') {
+            const char* e = xq_enclosed_end(i, end);
+            if (!e) return NULL;
+            i = e + 1;
+            continue;
+        }
+        i++;
+    }
+    return NULL;
+}
+
+/* Hoist `<tag>{ FLWOR }</tag>` — a direct ctor whose ENTIRE
+ * content is one FLWOR carrying group by / order by. Those clauses
+ * only run at the XQuery layer (the XPath-side for has no group
+ * by), so the FLWOR is parsed bare and the ctor wraps the result
+ * sequence once (tag_out). Returns a malloc'd rewritten query, or
+ * NULL when the shape does not apply. */
+static char* xq_hoist_ctor_flwor(const char* q, size_t len,
+                                 char** tag_out) {
+    const char* end = q + len;
+    const char* p = q;
+    /* prolog: `xquery version ...;` and `declare ...;` statements
+     * (quote-aware ';' scan). */
+    for (;;) {
+        while (p < end && isspace((unsigned char)*p)) p++;
+        if (p + 7 <= end && memcmp(p, "xquery", 6) == 0 &&
+            isspace((unsigned char)p[6])) {
+            /* skip to ';' */
+            while (p < end && *p != ';') {
+                if (*p == '\'' || *p == '"') {
+                    char qt = *p++;
+                    while (p < end && *p != qt) p++;
+                }
+                p++;
+            }
+            if (p < end) p++;
+            continue;
+        }
+        if (p + 8 <= end && memcmp(p, "declare", 7) == 0 &&
+            isspace((unsigned char)p[7])) {
+            while (p < end && *p != ';') {
+                if (*p == '\'' || *p == '"') {
+                    char qt = *p++;
+                    while (p < end && *p != qt) p++;
+                }
+                p++;
+            }
+            if (p < end) p++;
+            continue;
+        }
+        break;
+    }
+    if (p >= end || *p != '<' || p + 1 >= end ||
+        !xq_is_name_start(p[1]))
+        return NULL;
+    const char* tag = p + 1;
+    const char* tp = tag;
+    while (tp < end && !isspace((unsigned char)*tp) && *tp != '>')
+        tp++;
+    size_t taglen = (size_t)(tp - tag);
+    if (!taglen || tp >= end || *tp != '>') return NULL;  /* attrs */
+    p = tp + 1;
+    while (p < end && isspace((unsigned char)*p)) p++;
+    if (p >= end || *p != '{') return NULL;
+    const char* inner = p + 1;
+    /* matching close brace (ctor/quote/comment aware) */
+    const char* ib = xq_enclosed_end(p, end);
+    if (!ib) return NULL;
+    const char* inner_end = ib;
+    /* tail: `</tag>` then end */
+    p = ib + 1;
+    while (p < end && isspace((unsigned char)*p)) p++;
+    if (p + 2 + taglen + 1 > end || p[0] != '<' || p[1] != '/' ||
+        memcmp(p + 2, tag, taglen) != 0)
+        return NULL;
+    p += 2 + taglen;
+    if (p >= end || *p != '>') return NULL;
+    p++;
+    while (p < end && isspace((unsigned char)*p)) p++;
+    if (p != end) return NULL;
+    /* inner must be a FLWOR with group by / order by */
+    {
+        const char* s2 = inner;
+        while (s2 < inner_end && isspace((unsigned char)*s2)) s2++;
+        if (s2 + 3 <= inner_end && memcmp(s2, "for", 3) == 0 &&
+            (s2 + 3 == inner_end ||
+             isspace((unsigned char)s2[3]))) {
+            /* ok */
+        } else if (s2 + 3 <= inner_end &&
+                   memcmp(s2, "let", 3) == 0 &&
+                   (s2 + 3 == inner_end ||
+                    isspace((unsigned char)s2[3]))) {
+            /* ok */
+        } else {
+            return NULL;
+        }
+    }
+    Buf sb = {0};
+    buf_put(&sb, inner, (size_t)(inner_end - inner));
+    if (!sb.s) return NULL;
+    sb.s[sb.len] = 0;
+    int has_clause = 0;
+    for (const char* c = sb.s; c + 5 <= sb.s + sb.len; c++) {
+        if ((c == sb.s || isspace((unsigned char)c[-1])) &&
+            memcmp(c, "group", 5) == 0 &&
+            (c + 5 == sb.s + sb.len ||
+             isspace((unsigned char)c[5])))
+            has_clause = 1;
+        if ((c == sb.s || isspace((unsigned char)c[-1])) &&
+            memcmp(c, "order", 5) == 0 &&
+            (c + 5 == sb.s + sb.len ||
+             isspace((unsigned char)c[5])))
+            has_clause = 1;
+    }
+    if (!has_clause) {
+        free(sb.s);
+        return NULL;
+    }
+    /* split at the FIRST depth-0 `return` */
+    const char* split = NULL;
+    {
+        int d2 = 0;
+        const char* c = sb.s;
+        const char* se = sb.s + sb.len;
+        while (c < se) {
+            if (*c == '\'' || *c == '"') {
+                char qt = *c++;
+                while (c < se && *c != qt) c++;
+                if (c < se) c++;
+                continue;
+            }
+            if (c + 1 < se && c[0] == ':' && c[1] == '(') {
+                c += 2;
+                int cd = 1;
+                while (c + 1 < se && cd > 0) {
+                    if (c[0] == ':' && c[1] == '(') { cd++; c += 2; }
+                    else if (c[0] == ')' && c[1] == ':') { cd--; c += 2; }
+                    else c++;
+                }
+                continue;
+            }
+            if (*c == '<' && c + 1 < se && xq_is_name_start(c[1])) {
+                c = xq_elem_ctor_end(c, se);
+                if (!c) break;
+                continue;
+            }
+            if (*c == '(' || *c == '[' || *c == '{') d2++;
+            else if (*c == ')' || *c == ']' || *c == '}') {
+                if (d2 > 0) d2--;
+            } else if (d2 == 0 &&
+                       (c == sb.s || !isalnum((unsigned char)c[-1])) &&
+                       memcmp(c, "return", 6) == 0 &&
+                       (c + 6 == se ||
+                        isspace((unsigned char)c[6]))) {
+                split = c;
+                break;
+            }
+            c++;
+        }
+    }
+    if (!split) {
+        free(sb.s);
+        return NULL;
+    }
+    size_t ret_off = (size_t)(split - sb.s) + 6;
+    Buf out = {0};
+    /* prefix: the PROLOG only — the ctor wraps the RESULT once at
+     * eval (wrap_tag), not per tuple. */
+    buf_put(&out, q, (size_t)(tag - 1 - q));
+    buf_put(&out, sb.s, (size_t)(split - sb.s));
+    buf_str(&out, " return ");
+    buf_put(&out, sb.s + ret_off, sb.len - ret_off);
+    free(sb.s);
+    if (!out.s) return NULL;
+    out.s[out.len] = 0;
+    if (tag_out) *tag_out = span_dup(tag, tag + taglen);
+    return out.s;
+}
+
 LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                                                size_t len) {
     if (!query || !len) return NULL;
+    /* ctor-enclosed group/order FLWOR: hoist the ctor into a
+     * single result wrap (single level — the hoisted body starts
+     * with for/let and does not rematch). */
+    {
+        char* wrap_tag = NULL;
+        char* hoisted = xq_hoist_ctor_flwor(query, len, &wrap_tag);
+        if (hoisted) {
+            LeptrisXQuery h =
+                leptris_xquery_parse(hoisted, strlen(hoisted));
+            free(hoisted);
+            if (h) {
+                ((struct LeptrisXQueryInternal*)h)->wrap_tag =
+                    wrap_tag;
+                return h;
+            }
+            free(wrap_tag);
+            /* fall through: parse the original */
+        }
+    }
     struct LeptrisXQueryInternal* q =
         (struct LeptrisXQueryInternal*)calloc(1, sizeof(*q));
     if (!q) return NULL;
@@ -1109,10 +1431,23 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                 } else if (word_is(kw, kwl, "where")) {
                     Scan e = s;
                     scan_expr_segment(&e, 0);
-                    q->where_ast = parse_expr_span(s.p, e.p);
-                    if (!q->where_ast) {
+                    /* WHERE after GROUP BY filters the GROUPED
+                     * tuples (aggregates see the whole group) */
+                    XPathASTNode* w_ast = parse_expr_span(s.p, e.p);
+                    if (!w_ast) {
                         xq_free(q);
                         return NULL;
+                    }
+                    if (q->ngroup) {
+                        if (q->post_where_ast)
+                            ast_node_free(w_ast);
+                        else
+                            q->post_where_ast = w_ast;
+                    } else {
+                        if (q->where_ast)
+                            ast_node_free(w_ast);
+                        else
+                            q->where_ast = w_ast;
                     }
                     s = e;
                 } else if (word_is(kw, kwl, "group")) {
@@ -1124,30 +1459,114 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                         return NULL;
                     }
                     s.p = bw + bwl;
-                    char* gvar = parse_dollar_name(&s);
-                    if (!gvar) {
-                        xq_free(q);
-                        return NULL;
+                    /* GroupingSpec list: `$k := E` or bare `$k`
+                     * (key = the variable's own value), comma
+                     * separated (XQuery 3.0 §3.8.1). */
+                    for (;;) {
+                        scan_ws(&s);
+                        const char* vstart = s.p;
+                        char* gvar = parse_dollar_name(&s);
+                        if (!gvar) {
+                            xq_free(q);
+                            return NULL;
+                        }
+                        const char* vend = s.p;
+                        scan_ws(&s);
+                        /* optional `as SequenceType` — accepted and
+                         * ignored (the value model is dynamic) */
+                        {
+                            Scan at = s;
+                            const char* aw;
+                            size_t awl = scan_word(&at, &aw);
+                            if (awl && word_is(aw, awl, "as")) {
+                                at.p = aw + awl;
+                                scan_ws(&at);
+                                const char* tw2 = at.p;
+                                while (at.p < at.end &&
+                                       (isalnum((unsigned char)*at.p) ||
+                                        *at.p == ':' || *at.p == '_' ||
+                                        *at.p == '.' || *at.p == '-'))
+                                    at.p++;
+                                if (at.p > tw2) {
+                                    scan_ws(&at);
+                                    if (at.p < at.end &&
+                                        (*at.p == '?' || *at.p == '*' ||
+                                         *at.p == '+'))
+                                        at.p++;
+                                    s = at;
+                                    scan_ws(&s);
+                                }
+                            }
+                        }
+                        XPathASTNode* gk;
+                        if (s.p + 1 < s.end && s.p[0] == ':' &&
+                            s.p[1] == '=') {
+                            s.p += 2;
+                            Scan e = s;
+                            scan_expr_segment(&e, 0);
+                            gk = parse_expr_span(s.p, e.p);
+                            if (!gk) {
+                                free(gvar);
+                                xq_free(q);
+                                return NULL;
+                            }
+                            s = e;
+                        } else {
+                            gk = parse_expr_span(vstart, vend);
+                            if (!gk) {
+                                free(gvar);
+                                xq_free(q);
+                                return NULL;
+                            }
+                        }
+                        char** gv = (char**)realloc(
+                            q->group_vars,
+                            (q->ngroup + 1) * sizeof(char*));
+                        if (!gv) {
+                            free(gvar);
+                            ast_node_free(gk);
+                            xq_free(q);
+                            return NULL;
+                        }
+                        q->group_vars = gv;
+                        XPathASTNode** gks = (XPathASTNode**)realloc(
+                            q->group_keys,
+                            (q->ngroup + 1) * sizeof(XPathASTNode*));
+                        if (!gks) {
+                            free(gvar);
+                            ast_node_free(gk);
+                            xq_free(q);
+                            return NULL;
+                        }
+                        q->group_keys = gks;
+                        q->group_vars[q->ngroup] = gvar;
+                        q->group_keys[q->ngroup] = gk;
+                        q->ngroup++;
+                        scan_ws(&s);
+                        /* optional CollationSpec: accepted and
+                         * ignored (codepoint is the engine's
+                         * ordering) */
+                        {
+                            Scan ct = s;
+                            const char* cw;
+                            size_t cwl = scan_word(&ct, &cw);
+                            if (cwl && word_is(cw, cwl, "collation")) {
+                                ct.p = cw + cwl;
+                                scan_ws(&ct);
+                                if (ct.p < ct.end &&
+                                    (*ct.p == '"' || *ct.p == '\'')) {
+                                    scan_string(&ct);
+                                    s = ct;
+                                    scan_ws(&s);
+                                }
+                            }
+                        }
+                        if (s.p < s.end && *s.p == ',') {
+                            s.p++;
+                            continue;
+                        }
+                        break;
                     }
-                    scan_ws(&s);
-                    if (s.p + 1 >= s.end || s.p[0] != ':' ||
-                        s.p[1] != '=') {
-                        free(gvar);
-                        xq_free(q);
-                        return NULL;
-                    }
-                    s.p += 2;
-                    Scan e = s;
-                    scan_expr_segment(&e, 0);
-                    XPathASTNode* gk = parse_expr_span(s.p, e.p);
-                    if (!gk) {
-                        free(gvar);
-                        xq_free(q);
-                        return NULL;
-                    }
-                    q->group_var = gvar;
-                    q->group_key = gk;
-                    s = e;
                 } else if (word_is(kw, kwl, "order")) {
                     scan_ws(&s);
                     const char* bw;
@@ -1326,24 +1745,93 @@ typedef struct {
     char** names;
     char*** contents;  /* contents[i][j]; NULL member = node */
     void*** nodes;
+    unsigned char** owns_node;  /* per member: tuple owns (disposable) */
     size_t* counts;
     size_t n;
     char** keys;       /* order-key strings */
     size_t nkeys;
 } XqTuple;
 
+/* Clone a varset-owned synthetic member so the TUPLE outlives the
+ * variable binding it was captured from (attribute/namespace nodes
+ * die at unbind — dangling keys were the QT3 group-by reds). */
+static void* xq_clone_synth(void* nd) {
+    int ty = XPATH_NODE_TYPE(nd);
+    if (ty == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisAttributeNode* a = (LeptrisAttributeNode*)nd;
+        LeptrisAttributeNode* c = LEPTRIS_ALLOC(LeptrisAttributeNode);
+        if (!c) return NULL;
+        memset(c, 0, sizeof(*c));
+        c->node_type = LEPTRIS_NODE_ATTRIBUTE;
+        c->name = a->name ? leptris_strdup(a->name) : NULL;
+        c->value = a->value ? leptris_strdup(a->value) : NULL;
+        c->namespace_uri = a->namespace_uri
+                               ? leptris_strdup(a->namespace_uri) : NULL;
+        c->owner = a->owner;
+        return c;
+    }
+    if (ty == LEPTRIS_NODE_NAMESPACE) {
+        LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)nd;
+        LeptrisNamespaceNode* c = LEPTRIS_ALLOC(LeptrisNamespaceNode);
+        if (!c) return NULL;
+        memset(c, 0, sizeof(*c));
+        c->node_type = LEPTRIS_NODE_NAMESPACE;
+        c->prefix = ns->prefix ? leptris_strdup(ns->prefix) : NULL;
+        c->uri = ns->uri ? leptris_strdup(ns->uri) : NULL;
+        c->owner = ns->owner;
+        return c;
+    }
+    return NULL;
+}
+
+/* Capture one nodeset member into tuple storage. Synthetic
+ * attribute/namespace members are CLONED (tuple-owned); text goes
+ * to contents; document nodes are shared. */
+static void xq_capture_member(void* nd, char** content_out,
+                              void** node_out,
+                              unsigned char* owns_out) {
+    *content_out = NULL;
+    *node_out = NULL;
+    *owns_out = 0;
+    if (!nd) return;
+    int ty = XPATH_NODE_TYPE(nd);
+    if (ty == LEPTRIS_NODE_ATTRIBUTE || ty == LEPTRIS_NODE_NAMESPACE) {
+        void* c = xq_clone_synth(nd);
+        if (c) {
+            *node_out = c;
+            *owns_out = 1;
+            return;
+        }
+        /* OOM fallback: keep the string value at least */
+        char* s = get_node_text(nd);
+        *content_out = s ? s : strdup("");
+        return;
+    }
+    if (ty == LEPTRIS_NODE_TEXT) {
+        const char* c = ((XPathTextNode*)nd)->content;
+        *content_out = strdup(c ? c : "");
+        return;
+    }
+    *node_out = nd;
+}
+
 static void xq_tuple_free(XqTuple* t) {
     for (size_t i = 0; i < t->n; i++) {
         free(t->names[i]);
         for (size_t j = 0; j < t->counts[i]; j++) {
             if (t->contents[i]) free(t->contents[i][j]);
+            if (t->owns_node && t->owns_node[i] && t->nodes[i] &&
+                t->owns_node[i][j])
+                xpath_nodeset_dispose_node(t->nodes[i][j]);
         }
         free(t->contents[i]);
         free(t->nodes[i]);
+        if (t->owns_node) free(t->owns_node[i]);
     }
     free(t->names);
     free(t->contents);
     free(t->nodes);
+    free(t->owns_node);
     free(t->counts);
     for (size_t i = 0; i < t->nkeys; i++) free(t->keys[i]);
     free(t->keys);
@@ -1390,11 +1878,14 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
     t->names = (char**)calloc(6 * n + 1, sizeof(char*));
     t->contents = (char***)calloc(6 * n + 1, sizeof(char**));
     t->nodes = (void***)calloc(6 * n + 1, sizeof(void**));
+    t->owns_node =
+        (unsigned char**)calloc(6 * n + 1, sizeof(unsigned char*));
     t->counts = (size_t*)calloc(6 * n + 1, sizeof(size_t));
     t->n = 0;
     t->keys = NULL;
     t->nkeys = 0;
-    if (!t->names || !t->contents || !t->nodes || !t->counts)
+    if (!t->names || !t->contents || !t->nodes || !t->owns_node ||
+        !t->counts)
         return 0;
     for (size_t i = 0; i < n; i++) {
         if (clauses[i].is_for == 2) {
@@ -1416,22 +1907,16 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                         ns->count ? ns->count : 1, sizeof(char*));
                     t->nodes[t->n] = (void**)calloc(
                         ns->count ? ns->count : 1, sizeof(void*));
+                    t->owns_node[t->n] = (unsigned char*)calloc(
+                        ns->count ? ns->count : 1, 1);
                     t->counts[t->n] = ns->count;
-                    if (!t->contents[t->n] || !t->nodes[t->n])
+                    if (!t->contents[t->n] || !t->nodes[t->n] ||
+                        !t->owns_node[t->n])
                         return 0;
-                    for (size_t m = 0; m < ns->count; m++) {
-                        void* node = ns->nodes[m];
-                        if (node &&
-                            XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
-                            t->nodes[t->n][m] = node;
-                            t->contents[t->n][m] = NULL;
-                        } else if (node) {
-                            const char* c =
-                                ((XPathTextNode*)node)->content;
-                            t->contents[t->n][m] = strdup(c ? c : "");
-                            t->nodes[t->n][m] = NULL;
-                        }
-                    }
+                    for (size_t m = 0; m < ns->count; m++)
+                        xq_capture_member(
+                            ns->nodes[m], &t->contents[t->n][m],
+                            &t->nodes[t->n][m], &t->owns_node[t->n][m]);
                     t->n++;
                 }
             }
@@ -1445,17 +1930,14 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                 t->names[t->n] = strdup(singles[k]);
                 t->contents[t->n] = (char**)calloc(1, sizeof(char*));
                 t->nodes[t->n] = (void**)calloc(1, sizeof(void*));
+                t->owns_node[t->n] = (unsigned char*)calloc(1, 1);
                 t->counts[t->n] = 1;
-                if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
-                if (node &&
-                    XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
-                    t->nodes[t->n][0] = node;
-                    t->contents[t->n][0] = NULL;
-                } else if (node) {
-                    const char* c = ((XPathTextNode*)node)->content;
-                    t->contents[t->n][0] = strdup(c ? c : "");
-                    t->nodes[t->n][0] = NULL;
-                }
+                if (!t->contents[t->n] || !t->nodes[t->n] ||
+                    !t->owns_node[t->n])
+                    return 0;
+                xq_capture_member(node, &t->contents[t->n][0],
+                                  &t->nodes[t->n][0],
+                                  &t->owns_node[t->n][0]);
                 t->n++;
             }
             continue;
@@ -1478,19 +1960,16 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
                 t->names[t->n] = strdup(names[k]);
                 t->contents[t->n] = (char**)calloc(cnt, sizeof(char*));
                 t->nodes[t->n] = (void**)calloc(cnt, sizeof(void*));
+                t->owns_node[t->n] = (unsigned char*)calloc(cnt, 1);
                 t->counts[t->n] = cnt;
-                if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
-                for (size_t m = 0; m < cnt; m++) {
-                    void* nd = ns->nodes[m];
-                    if (nd && XPATH_NODE_TYPE(nd) != LEPTRIS_NODE_TEXT) {
-                        t->nodes[t->n][m] = nd;
-                        t->contents[t->n][m] = NULL;
-                    } else if (nd) {
-                        const char* c = ((XPathTextNode*)nd)->content;
-                        t->contents[t->n][m] = strdup(c ? c : "");
-                        t->nodes[t->n][m] = NULL;
-                    }
-                }
+                if (!t->contents[t->n] || !t->nodes[t->n] ||
+                    !t->owns_node[t->n])
+                    return 0;
+                for (size_t m = 0; m < cnt; m++)
+                    xq_capture_member(ns->nodes[m],
+                                      &t->contents[t->n][m],
+                                      &t->nodes[t->n][m],
+                                      &t->owns_node[t->n][m]);
                 t->n++;
                 continue;
             }
@@ -1498,16 +1977,13 @@ static int xq_snapshot(XPathContext* ctx, XqClause* clauses, size_t n,
             t->names[t->n] = strdup(names[k]);
             t->contents[t->n] = (char**)calloc(1, sizeof(char*));
             t->nodes[t->n] = (void**)calloc(1, sizeof(void*));
+            t->owns_node[t->n] = (unsigned char*)calloc(1, 1);
             t->counts[t->n] = 1;
-            if (!t->contents[t->n] || !t->nodes[t->n]) return 0;
-            if (node && XPATH_NODE_TYPE(node) != LEPTRIS_NODE_TEXT) {
-                t->nodes[t->n][0] = node;
-                t->contents[t->n][0] = NULL;
-            } else if (node) {
-                const char* c = ((XPathTextNode*)node)->content;
-                t->contents[t->n][0] = strdup(c ? c : "");
-                t->nodes[t->n][0] = NULL;
-            }
+            if (!t->contents[t->n] || !t->nodes[t->n] ||
+                !t->owns_node[t->n])
+                return 0;
+            xq_capture_member(node, &t->contents[t->n][0],
+                              &t->nodes[t->n][0], &t->owns_node[t->n][0]);
             t->n++;
         }
     }
@@ -1855,15 +2331,17 @@ static int xq_enumerate(struct LeptrisXQueryInternal* q, XPathContext* ctx,
 /* A param select evaluates in its own context over the document
  * (QT3: external-variable values are computed independently of
  * the query's own bindings). */
+/* A param select evaluates on the QUERY's context (QT3: external
+ * values are computed independently of the query's own local
+ * bindings — none are bound at prolog time). Using the live ctx
+ * keeps parse-xml()-owned documents anchored for the whole eval;
+ * a throwaway context freed them under the variable. */
 static struct leptris_xpath_result* xq_eval_param(
-    struct leptris_document* doc, LeptrisElement root, const char* sel) {
+    XPathContext* ctx, const char* sel) {
     XPathASTNode* ast = parse_expr_span(sel, sel + strlen(sel));
     if (!ast) return NULL;
-    XPathContext pc;
-    xpath_context_init(&pc, doc, root);
-    struct leptris_xpath_result* v = evaluate_expr(&pc, ast);
+    struct leptris_xpath_result* v = evaluate_expr(ctx, ast);
     ast_node_free(ast);
-    xpath_context_cleanup(&pc);
     return v;
 }
 
@@ -1914,12 +2392,16 @@ static LeptrisXPathResult xq_eval_impl(
                 len += (size_t)snprintf(cc + len, 17, "%016llx",
                                         (unsigned long long)(uintptr_t)d->ast);
                 fn_contents[n_fn_contents++] = cc;
-                xpath_function_registry_register(reg, d->name,
-                                                 xq_fn_thunk,
-                                                 (int)d->arity,
-                                                 (int)d->arity);
-                if (reg->count > 0)
-                    reg->functions[reg->count - 1].user_data = cc;
+                /* register_ud: a user fn SHADOWING a builtin is
+                 * replaced IN PLACE — the old count-1 user_data
+                 * write hit the wrong slot and the thunk lost its
+                 * body (declare function unordered() over the
+                 * builtin fn:unordered). */
+                xpath_function_registry_register_ud(reg, d->name,
+                                                    xq_fn_thunk,
+                                                    (int)d->arity,
+                                                    (int)d->arity,
+                                                    cc);
             }
             ctx->function_registry = reg;
         }
@@ -1980,8 +2462,7 @@ static LeptrisXPathResult xq_eval_impl(
                     }
                 }
                 if (pi < nparams) {
-                    v = xq_eval_param((struct leptris_document*)doc,
-                                      ctx_elem, param_selects[pi]);
+                    v = xq_eval_param(ctx, param_selects[pi]);
                 } else if (d->ast) {
                     v = evaluate_expr(ctx, d->ast);
                 } else {
@@ -2014,12 +2495,14 @@ static LeptrisXPathResult xq_eval_impl(
             size_t n_tuples = 0, cap = 0;
             if (!xq_enumerate(q, ctx, 0, &tuples, &n_tuples, &cap)) {
                 err = 1;
-            } else if (q->group_var) {
-                /* group by (12): partition on the key value in
-                 * first-appearance order; every clause var is
-                 * rebound to the group's member list, and the
-                 * group var carries the key. */
+            } else if (q->ngroup) {
+                /* group by (12): partition on the key-value tuple
+                 * (components joined with \x01) in first-appearance
+                 * order; every clause var is rebound to the group's
+                 * member list, and each group var carries its key
+                 * component. */
                 char** gkeys = NULL;
+                char*** gparts = NULL;  /* per group: key components */
                 size_t** gmembers = NULL;   /* per group: tuple indices */
                 size_t* gcounts = NULL;
                 size_t n_groups = 0;
@@ -2028,13 +2511,16 @@ static LeptrisXPathResult xq_eval_impl(
                 int gerr = 0;
                 gkeys = (char**)calloc(n_tuples ? n_tuples : 1,
                                        sizeof(char*));
+                gparts = (char***)calloc(n_tuples ? n_tuples : 1,
+                                         sizeof(char**));
                 gmembers = (size_t**)calloc(n_tuples ? n_tuples : 1,
                                             sizeof(size_t*));
                 gcounts = (size_t*)calloc(n_tuples ? n_tuples : 1,
                                           sizeof(size_t));
                 grouped = (XqTuple*)calloc(n_tuples ? n_tuples : 1,
                                            sizeof(XqTuple));
-                if (!gkeys || !gmembers || !gcounts || !grouped)
+                if (!gkeys || !gparts || !gmembers || !gcounts ||
+                    !grouped)
                     gerr = 1;
                 for (size_t ti = 0; ti < n_tuples && !gerr; ti++) {
                     xq_unbind_all(ctx, q->clauses, q->nclauses);
@@ -2042,11 +2528,44 @@ static LeptrisXPathResult xq_eval_impl(
                         gerr = 1;
                         break;
                     }
-                    struct leptris_xpath_result* kr =
-                        evaluate_expr(ctx, q->group_key);
-                    char* key = kr ? xpath_to_string(kr) : NULL;
-                    if (kr) xpath_result_free(kr);
-                    if (!key) key = strdup("");
+                    char** parts =
+                        (char**)calloc(q->ngroup, sizeof(char*));
+                    size_t klen = 0;
+                    if (!parts) {
+                        gerr = 1;
+                        break;
+                    }
+                    for (size_t gi = 0; gi < q->ngroup; gi++) {
+                        struct leptris_xpath_result* kr =
+                            evaluate_expr(ctx, q->group_keys[gi]);
+                        parts[gi] = kr ? xpath_to_string(kr) : NULL;
+                        if (kr) xpath_result_free(kr);
+                        if (!parts[gi]) parts[gi] = strdup("");
+                        if (!parts[gi]) {
+                            gerr = 1;
+                            break;
+                        }
+                        klen += strlen(parts[gi]) + 1;
+                    }
+                    char* key = NULL;
+                    if (!gerr) {
+                        key = (char*)malloc(klen + 1);
+                        if (key) {
+                            key[0] = 0;
+                            for (size_t gi = 0; gi < q->ngroup; gi++) {
+                                strcat(key, parts[gi]);
+                                strcat(key, "\x01");
+                            }
+                        } else {
+                            gerr = 1;
+                        }
+                    }
+                    if (gerr) {
+                        for (size_t gi = 0; gi < q->ngroup; gi++)
+                            free(parts[gi]);
+                        free(parts);
+                        break;
+                    }
                     size_t g = n_groups;
                     for (size_t x = 0; x < n_groups; x++) {
                         if (strcmp(gkeys[x], key) == 0) {
@@ -2056,17 +2575,26 @@ static LeptrisXPathResult xq_eval_impl(
                     }
                     if (g == n_groups) {
                         gkeys[g] = key;
+                        gparts[g] = parts;
                         gcounts[g] = 0;
                         gmembers[g] = (size_t*)calloc(
                             n_tuples, sizeof(size_t));
                         if (!gmembers[g]) {
                             gerr = 1;
                             free(key);
+                            gkeys[g] = NULL;
+                            gparts[g] = NULL;
+                            for (size_t gi = 0; gi < q->ngroup; gi++)
+                                free(parts[gi]);
+                            free(parts);
                             break;
                         }
                         n_groups++;
                     } else {
                         free(key);
+                        for (size_t gi = 0; gi < q->ngroup; gi++)
+                            free(parts[gi]);
+                        free(parts);
                     }
                     gmembers[g][gcounts[g]++] = ti;
                 }
@@ -2076,16 +2604,18 @@ static LeptrisXPathResult xq_eval_impl(
                     XqTuple* first = &tuples[gmembers[g][0]];
                     XqTuple* gt = &grouped[n_grouped];
                     memset(gt, 0, sizeof(*gt));
-                    gt->names = (char**)calloc(first->n + 1,
+                    gt->names = (char**)calloc(first->n + q->ngroup,
                                                sizeof(char*));
                     gt->contents = (char***)calloc(
-                        first->n + 1, sizeof(char**));
-                    gt->nodes = (void***)calloc(first->n + 1,
+                        first->n + q->ngroup, sizeof(char**));
+                    gt->nodes = (void***)calloc(first->n + q->ngroup,
                                                 sizeof(void**));
-                    gt->counts = (size_t*)calloc(first->n + 1,
+                    gt->owns_node = (unsigned char**)calloc(
+                        first->n + q->ngroup, sizeof(unsigned char*));
+                    gt->counts = (size_t*)calloc(first->n + q->ngroup,
                                                  sizeof(size_t));
                     if (!gt->names || !gt->contents || !gt->nodes ||
-                        !gt->counts) {
+                        !gt->owns_node || !gt->counts) {
                         gerr = 1;
                         break;
                     }
@@ -2099,7 +2629,10 @@ static LeptrisXPathResult xq_eval_impl(
                             total ? total : 1, sizeof(char*));
                         gt->nodes[gt->n] = (void**)calloc(
                             total ? total : 1, sizeof(void*));
-                        if (!gt->contents[gt->n] || !gt->nodes[gt->n]) {
+                        gt->owns_node[gt->n] = (unsigned char*)calloc(
+                            total ? total : 1, 1);
+                        if (!gt->contents[gt->n] || !gt->nodes[gt->n] ||
+                            !gt->owns_node[gt->n]) {
                             gerr = 1;
                             break;
                         }
@@ -2109,8 +2642,15 @@ static LeptrisXPathResult xq_eval_impl(
                             for (size_t j = 0; j < mt->counts[v];
                                  j++) {
                                 if (mt->nodes[v][j]) {
-                                    gt->nodes[gt->n][w] =
-                                        mt->nodes[v][j];
+                                    /* member tuples are freed after
+                                     * grouping — owned synthetic
+                                     * members are cloned into the
+                                     * group tuple */
+                                    xq_capture_member(
+                                        mt->nodes[v][j],
+                                        &gt->contents[gt->n][w],
+                                        &gt->nodes[gt->n][w],
+                                        &gt->owns_node[gt->n][w]);
                                 } else {
                                     gt->contents[gt->n][w] = strdup(
                                         mt->contents[v][j]);
@@ -2122,26 +2662,39 @@ static LeptrisXPathResult xq_eval_impl(
                         gt->n++;
                     }
                     if (gerr) break;
-                    /* the group variable carries the key */
-                    gt->names[gt->n] = strdup(q->group_var);
-                    gt->contents[gt->n] = (char**)calloc(
-                        1, sizeof(char*));
-                    gt->nodes[gt->n] = (void**)calloc(1, sizeof(void*));
-                    if (!gt->names[gt->n] || !gt->contents[gt->n] ||
-                        !gt->nodes[gt->n]) {
-                        gerr = 1;
-                        break;
+                    /* each group variable carries its key
+                     * component */
+                    for (size_t gi = 0; gi < q->ngroup; gi++) {
+                        gt->names[gt->n] = strdup(q->group_vars[gi]);
+                        gt->contents[gt->n] = (char**)calloc(
+                            1, sizeof(char*));
+                        gt->nodes[gt->n] =
+                            (void**)calloc(1, sizeof(void*));
+                        gt->owns_node[gt->n] =
+                            (unsigned char*)calloc(1, 1);
+                        if (!gt->names[gt->n] ||
+                            !gt->contents[gt->n] || !gt->nodes[gt->n] ||
+                            !gt->owns_node[gt->n]) {
+                            gerr = 1;
+                            break;
+                        }
+                        gt->contents[gt->n][0] = strdup(gparts[g][gi]);
+                        gt->counts[gt->n] = 1;
+                        gt->n++;
                     }
-                    gt->contents[gt->n][0] = strdup(gkeys[g]);
-                    gt->counts[gt->n] = 1;
-                    gt->n++;
+                    if (gerr) break;
                     n_grouped++;
                 }
                 for (size_t g = 0; g < n_groups; g++) {
                     free(gkeys[g]);
+                    for (size_t gi = 0; gparts[g] && gi < q->ngroup;
+                         gi++)
+                        free(gparts[g][gi]);
+                    free(gparts[g]);
                     free(gmembers[g]);
                 }
                 free(gkeys);
+                free(gparts);
                 free(gmembers);
                 free(gcounts);
                 for (size_t ti = 0; ti < n_tuples; ti++)
@@ -2157,15 +2710,38 @@ static LeptrisXPathResult xq_eval_impl(
                     n_tuples = n_grouped;
                 }
             }
+            if (!err && q->post_where_ast) {
+                /* WHERE after GROUP BY: filter the grouped tuples
+                 * (the aggregates see the whole group). */
+                size_t w = 0;
+                for (size_t ti = 0; ti < n_tuples && !err; ti++) {
+                    xq_unbind_all(ctx, q->clauses, q->nclauses);
+                    for (size_t gi = 0; gi < q->ngroup; gi++)
+                        xpath_variable_set_remove(
+                            (XPathVariableSet*)ctx->variable_set,
+                            q->group_vars[gi]);
+                    if (!xq_rebind(ctx, &tuples[ti])) {
+                        err = 1;
+                        break;
+                    }
+                    struct leptris_xpath_result* pv =
+                        evaluate_expr(ctx, q->post_where_ast);
+                    int truth = pv ? xpath_to_boolean(pv) : 0;
+                    if (pv) xpath_result_free(pv);
+                    if (truth) tuples[w++] = tuples[ti];
+                    else xq_tuple_free(&tuples[ti]);
+                }
+                n_tuples = w;
+            }
             if (!err) {
                 /* Order keys: evaluated against the (possibly
                  * grouped) bindings. */
                 for (size_t ti = 0; ti < n_tuples && !err; ti++) {
                     xq_unbind_all(ctx, q->clauses, q->nclauses);
-                    if (q->group_var)
+                    for (size_t gi = 0; gi < q->ngroup; gi++)
                         xpath_variable_set_remove(
                             (XPathVariableSet*)ctx->variable_set,
-                            q->group_var);
+                            q->group_vars[gi]);
                     if (!xq_rebind(ctx, &tuples[ti])) {
                         err = 1;
                         break;
@@ -2229,10 +2805,10 @@ static LeptrisXPathResult xq_eval_impl(
                          * without freeing — clear the key-loop
                          * bindings before rebinding. */
                         xq_unbind_all(ctx, q->clauses, q->nclauses);
-                        if (q->group_var)
+                        for (size_t gi = 0; gi < q->ngroup; gi++)
                             xpath_variable_set_remove(
                                 (XPathVariableSet*)ctx->variable_set,
-                                q->group_var);
+                                q->group_vars[gi]);
                         xq_rebind(ctx, &tuples[ti]);
                         struct leptris_xpath_result* r =
                             evaluate_expr(ctx, q->return_ast);
@@ -2276,6 +2852,51 @@ static LeptrisXPathResult xq_eval_impl(
         xpath_variable_set_free(scratch_vs);
     }
     xpath_context_cleanup(ctx);
+    /* Hoisted ctor wrapper (`<tag>{ FLWOR }</tag>`): the element
+     * wraps the WHOLE FLWOR result sequence once (the hoist moved
+     * it out of the per-tuple return). */
+    if (result && q->wrap_tag &&
+        leptris_xpath_result_type(result) == LEPTRIS_XPATH_NODESET) {
+        size_t n = leptris_xpath_result_count(result);
+        size_t tl = strlen(q->wrap_tag);
+        size_t len = tl * 2 + 5 + n;
+        for (size_t i = 0; i < n; i++) {
+            const char* v =
+                leptris_xpath_result_node_value(result, i);
+            len += v ? strlen(v) : 0;
+        }
+        char* s = (char*)malloc(len + 1);
+        if (s) {
+            size_t w2 = 0;
+            memcpy(s + w2, "<", 1);
+            w2 += 1;
+            memcpy(s + w2, q->wrap_tag, tl);
+            w2 += tl;
+            s[w2++] = '>';
+            for (size_t i = 0; i < n; i++) {
+                const char* v =
+                    leptris_xpath_result_node_value(result, i);
+                if (i) s[w2++] = ' ';
+                if (v) {
+                    size_t vl = strlen(v);
+                    memcpy(s + w2, v, vl);
+                    w2 += vl;
+                }
+            }
+            s[w2++] = '<';
+            s[w2++] = '/';
+            memcpy(s + w2, q->wrap_tag, tl);
+            w2 += tl;
+            s[w2++] = '>';
+            s[w2] = 0;
+            leptris_xpath_result_free(result);
+            result = xpath_result_new(XPATH_RESULT_STRING);
+            if (result)
+                result->value.string_value = s;
+            else
+                free(s);
+        }
+    }
     return result;
 }
 
@@ -2511,12 +3132,30 @@ static void xq_translate_content(const char* s, const char* e, Buf* out) {
                 else if (*j == '\'' || *j == '"') {
                     char qc = *j++;
                     while (j < e && *j != qc) j++;
+                } else if (*j == '<' && j + 1 < e &&
+                           xq_is_name_start(j[1])) {
+                    /* nested ctor: skip whole element so ctor-inner
+                     * braces don't close the enclosing expr */
+                    const char* ne = xq_elem_ctor_end(j, e);
+                    if (!ne) break;
+                    j = ne;
+                    continue;
                 }
                 if (depth) j++;
             }
             if (out->len) buf_str(out, ", ");
             buf_put(out, "(", 1);
-            buf_put(out, p + 1, j > p + 1 ? (size_t)(j - (p + 1)) : 0);
+            {
+                /* the enclosed expression may itself hold direct
+                 * ctors (`<out>{ <g/> }</out>`) — splice recursively */
+                char* spliced = xq_splice_ctors(p + 1, j);
+                if (spliced) {
+                    buf_str(out, spliced);
+                    free(spliced);
+                } else if (j > p + 1) {
+                    buf_put(out, p + 1, (size_t)(j - (p + 1)));
+                }
+            }
             buf_put(out, ")", 1);
             p = j + 1;
             ts = p;

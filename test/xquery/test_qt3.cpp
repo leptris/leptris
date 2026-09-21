@@ -22,6 +22,7 @@
 #include "leptris.h"
 #include "leptris/xquery/xquery.h"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -128,7 +129,92 @@ bool is_supported(const Assertion& a) {
         return false;
     }
     return a.kind == "assert-string-value" || a.kind == "assert-eq" ||
-           a.kind == "assert-true" || a.kind == "assert-false";
+           a.kind == "assert-true" || a.kind == "assert-false" ||
+           a.kind == "assert-xml" || a.kind == "assert-permutation";
+}
+
+/* assert-xml: serialized-fragment compare with inter-tag
+ * whitespace collapsed and self-closing tags folded open (QT3
+ * compares infosets, not serialization spelling). */
+std::string norm_xml(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0, n = s.size();
+    while (i < n) {
+        char c = s[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            size_t j = i;
+            while (j < n && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' ||
+                             s[j] == '\r'))
+                j++;
+            char prev = out.empty() ? '>' : out.back();
+            char next = j < n ? s[j] : '<';
+            if (prev != '>' && next != '<') out += ' ';
+            i = j;
+        } else {
+            out += c;
+            i++;
+        }
+    }
+    std::string r;
+    r.reserve(out.size());
+    i = 0;
+    n = out.size();
+    while (i < n) {
+        if (out[i] == '<' && i + 1 < n && out[i + 1] != '/' &&
+            out[i + 1] != '!' && out[i + 1] != '?') {
+            size_t j = out.find('>', i);
+            if (j == std::string::npos) {
+                r += out.substr(i);
+                break;
+            }
+            if (j > i + 1 && out[j - 1] == '/') {
+                std::string tag = out.substr(i + 1, j - 1 - i);
+                while (!tag.empty() &&
+                       (tag.back() == '/' || tag.back() == ' '))
+                    tag.pop_back();
+                size_t sp = tag.find(' ');
+                std::string name =
+                    sp == std::string::npos ? tag : tag.substr(0, sp);
+                r += "<" + name + "></" + name + ">";
+                i = j + 1;
+                continue;
+            }
+        }
+        r += out[i++];
+    }
+    return r;
+}
+
+/* assert-permutation expected side: comma-separated items, quotes
+ * group spaces; sort mirrors the engine's value ordering (numeric
+ * when every item is numeric, else codepoint). */
+std::vector<std::string> split_perm_items(const std::string& s) {
+    std::vector<std::string> items;
+    std::string cur;
+    char in_quote = 0;
+    for (char c : s) {
+        if (in_quote) {
+            if (c == in_quote)
+                in_quote = 0;
+            else
+                cur += c;
+        } else if (c == '"' || c == '\'') {
+            in_quote = c;
+        } else if (c == ',') {
+            items.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    items.push_back(cur);
+    for (auto& it : items) {
+        size_t b = it.find_first_not_of(" \t\r\n");
+        size_t e = it.find_last_not_of(" \t\r\n");
+        it = b == std::string::npos ? "" : it.substr(b, e - b + 1);
+    }
+    return items;
 }
 
 bool is_number(const std::string& s) {
@@ -136,6 +222,12 @@ bool is_number(const std::string& s) {
     char* end = NULL;
     strtod(s.c_str(), &end);
     return end && *end == '\0';
+}
+
+bool all_numeric(const std::vector<std::string>& v) {
+    for (const auto& s : v)
+        if (!is_number(s)) return false;
+    return !v.empty();
 }
 
 bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
@@ -148,6 +240,59 @@ bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
         return r && leptris_xpath_result_boolean(r);
     if (a.kind == "assert-false")
         return r && !leptris_xpath_result_boolean(r);
+    /* assert-xml: serialize node results and compare
+     * whitespace-normalized. */
+    if (a.kind == "assert-xml") {
+        std::string got;
+        if (r && leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
+            size_t n = leptris_xpath_result_count(r);
+            for (size_t i = 0; i < n; i++) {
+                LeptrisElement el = leptris_xpath_result_get(r, i);
+                if (!el) continue;
+                char* s = leptris_element_serialize(el, NULL);
+                if (s) {
+                    got += s;
+                    leptris_free_string(s);
+                }
+            }
+        } else if (r) {
+            got = result_string(r);
+        }
+        return norm_xml(got) == norm_xml(a.text);
+    }
+    /* assert-permutation: item-level multiset compare — sequence
+     * items surface as nodeset members, read per item. */
+    if (a.kind == "assert-permutation") {
+        if (!r) return false;
+        std::vector<std::string> got;
+        if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
+            size_t n = leptris_xpath_result_count(r);
+            for (size_t i = 0; i < n; i++) {
+                const char* v = leptris_xpath_result_node_value(r, i);
+                got.push_back(v ? v : "");
+            }
+        } else {
+            got.push_back(result_string(r));
+        }
+        std::vector<std::string> want = split_perm_items(a.text);
+        bool numeric = all_numeric(got) && all_numeric(want);
+        if (numeric) {
+            std::sort(got.begin(), got.end(),
+                      [](const std::string& x, const std::string& y) {
+                          return strtod(x.c_str(), NULL) <
+                                 strtod(y.c_str(), NULL);
+                      });
+            std::sort(want.begin(), want.end(),
+                      [](const std::string& x, const std::string& y) {
+                          return strtod(x.c_str(), NULL) <
+                                 strtod(y.c_str(), NULL);
+                      });
+        } else {
+            std::sort(got.begin(), got.end());
+            std::sort(want.begin(), want.end());
+        }
+        return got == want;
+    }
     std::string got = result_string(r);
     if (a.kind == "assert-string-value")
         return got == a.text;
@@ -226,6 +371,41 @@ void run_test_set(const char* set_path,
         if (!ps.empty()) param_envs.emplace_back(nm, std::move(ps));
     }
 
+    /* Source environments: <environment name> holding <source
+     * role="$var" file="..."> children — each binds a
+     * document-valued external variable. The value rides a
+     * parse-xml('...') select with the file inline (the vendored
+     * corpus has no apostrophes; the lexer has no quote-doubling).
+     * role="." sources stay on the explicit env_sources mapping. */
+    std::vector<std::pair<std::string,
+                          std::vector<std::pair<std::string, std::string>>>>
+        docvar_envs;
+    std::string set_dir(set_path);
+    size_t slash = set_dir.rfind('/');
+    set_dir = slash == std::string::npos ? "" : set_dir.substr(0, slash);
+    for (LeptrisElement e = first_child_elem(leptris_document_root(ts));
+         e; e = next_elem(e)) {
+        if (strcmp(local_name(leptris_element_name(e)), "environment") != 0)
+            continue;
+        const char* nm = leptris_element_attribute(e, "name");
+        if (!nm) continue;
+        std::vector<std::pair<std::string, std::string>> dvs;
+        for (LeptrisElement c = first_child_elem(e); c; c = next_elem(c)) {
+            if (strcmp(local_name(leptris_element_name(c)), "source") != 0)
+                continue;
+            const char* role = leptris_element_attribute(c, "role");
+            const char* file = leptris_element_attribute(c, "file");
+            if (!role || role[0] != '$' || !file) continue;
+            std::string src = slurp(std::string(LEPTRIS_QT3_DIR) + "/" +
+                                    (set_dir.empty() ? "" : set_dir + "/") +
+                                    file);
+            if (src.empty() || src.find('\'') != std::string::npos)
+                continue;
+            dvs.emplace_back(role + 1, "parse-xml('" + src + "')");
+        }
+        if (!dvs.empty()) docvar_envs.emplace_back(nm, std::move(dvs));
+    }
+
     LeptrisDocument scratch = leptris_parse_string("<e/>", 4, &st);
     ASSERT_NE(scratch, nullptr);
 
@@ -285,6 +465,9 @@ void run_test_set(const char* set_path,
                 if (!found)
                     for (auto& pe : param_envs)
                         if (pe.first == ref) { params = &pe.second; break; }
+                if (!found && !params)
+                    for (auto& de : docvar_envs)
+                        if (de.first == ref) { params = &de.second; break; }
             }
             if (!found && !params) {
                 /* INLINE environment (no ref): bind its <param>
@@ -507,6 +690,39 @@ TEST(Qt3Subset, FunctionItems) {
     run_test_set("fn/function-name.xml", {}, 4, nq);
 }
 
+/* lane-15 stragglers (lever 6 stage-2, batch 7): XQuery
+ * expression families — switch, group-by, if. */
+TEST(Qt3Subset, Lane15Core) {
+    /* group-013/015/016 declare the same grouping variable twice —
+     * the current spec makes that XQST0089; QT3's expected values
+     * encode an older draft. group-020 navigates a DECLARE-bound
+     * ctor ($in//File) — the ctor value model is string-level;
+     * node-materializing constructors is the follow-up slice. */
+    const std::vector<const char*> ex = {
+        "group by $y := $y, $y := $y mod 2",
+        "group by $y, $y := $x mod 2",
+        "xs:QName(\"true\")",
+        "Folder Name=\"root\"",
+        /* switch-007/008: utA-vs-numeric case matching over ctor
+         * values — same string-level ctor model. */
+        "declare variable $in := <a>42</a>",
+        "declare variable $in := \"42\"",
+        /* use-case Q4/Q5/Q7/Q8: an INNER for with order by inside
+         * the ctor content — needs order-by in the expression-level
+         * for (follow-up slice; the hoisted outer FLWOR is fine). */
+        "order by $category",
+        "xs:int($s/qty) descending",
+        "order by $b/title",
+    };
+    run_test_set("prod/SwitchExpr.xml", {}, 16, ex);
+    /* works-mod is the shared QT3 catalog environment; the
+     * GroupByUseCases sources self-bind through the harness's
+     * docvar path. */
+    run_test_set("prod/GroupByClause.xml",
+                 {{"works-mod", "docs/works-mod.xml"}}, 20, ex);
+    run_test_set("prod/IfExpr.xml", {}, 24, ex);
+}
+
 TEST(Qt3Subset, TimezoneAndIetf) {
     /* Duration VALUE arithmetic (+, -, div, le/lt/ge, min/max) on
      * timezone results is the op:duration batch — the exclusions
@@ -524,7 +740,8 @@ TEST(Qt3Subset, TimezoneAndIetf) {
 
 TEST(Qt3Subset, FnStringJoin) {
     /* The direct-constructor cases bind the ctor's SERIALIZED
-     * STRING (value-level constructors) — `$e/*` from it is empty.
-     * Node-materializing constructors is the follow-up slice. */
+     * STRING (value-level constructors) — the child axis on it
+     * is empty. Node-materializing constructors is the
+     * follow-up slice. */
     run_test_set("fn/string-join.xml", {}, 37, {"<e>", "<a xmlns="});
 }

@@ -26,6 +26,8 @@ char* xpath_int_to_string(long long v);
  * storage-independent nodeset copy (let unwind safety). */
 XPathTextNode* xpath_synth_text(const char* content, size_t len);
 XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
+XPathNodeSet* xpath_map_fn_over(XPathContext* ctx, XPathNodeSet* ns,
+                                XPathASTNode* fc);
 
 /* Fast inline nodeset_add (TODO 135). Internal-only; callers must
  * guarantee well-formed nodeset. See evaluator.c for the contract. */
