@@ -390,10 +390,13 @@ TEST(PlanBuild, CopiesTheSpecStrings) {
     LeptrisDocument doc = parse("<doc><t>v</t></doc>");
     ASSERT_NE(doc, nullptr);
 
-    /* Heap spec freed right after build — the pool must own copies. */
+    /* Heap spec freed right after build — the pool must own copies.
+     * calloc: the ABI contract is a fully-initialized spec; malloc
+     * leaves ns_form/ns_uri garbage and the walk dereferences it
+     * (bus error on CI's warm heap, invisible on fresh pages). */
     char name_buf[] = "t";
     leptris_child_plan* kids =
-        (leptris_child_plan*)malloc(sizeof(leptris_child_plan));
+        (leptris_child_plan*)calloc(1, sizeof(leptris_child_plan));
     kids[0].wire_name = name_buf;
     kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
     kids[0].type_tag = 0;
