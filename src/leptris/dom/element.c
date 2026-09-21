@@ -979,7 +979,12 @@ static size_t calculate_text_length_recursive(LeptrisNode* node) {
              * text->content_len directly. */
             const char* content = leptris_text_get_content(text);
             if (content) {
-                len += strlen(content);
+                /* #1285 slice 1: frozen (parse-created,
+                 * immutable) texts carry an authoritative
+                 * content_len — skip the scan. */
+                size_t clen = child->frozen ? text->content_len
+                                            : strlen(content);
+                len += clen;
             }
         } else if (child->type == LEPTRIS_NODE_TYPE_CDATA) {
             LeptrisCDATANode* cdata = (LeptrisCDATANode*)child;
@@ -1013,7 +1018,10 @@ static void copy_text_content_recursive(LeptrisNode* node, char* result, size_t*
             LeptrisTextNode* text = (LeptrisTextNode*)child;
             const char* content = leptris_text_get_content(text);
             if (content) {
-                size_t clen = strlen(content);
+                /* #1285 slice 1: frozen texts — authoritative
+                 * content_len (mirrors the length pass). */
+                size_t clen = child->frozen ? text->content_len
+                                            : strlen(content);
                 memcpy(result + *offset, content, clen);
                 *offset += clen;
             }
