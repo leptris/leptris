@@ -224,6 +224,17 @@ static uint64_t digest_element(LeptrisElement e, LeptrisDigestFlags flags) {
 LEPTRIS_API uint64_t leptris_node_digest(LeptrisNodeRef node,
                                          LeptrisDigestFlags flags) {
     if (!node) return 0;
+    /* #1297: process-global opt-in for ATTR_ORDER (#1200 part 1) —
+     * hosts whose binding has no flags carrier (moxml's Node#digest
+     * takes no flags parameter) set LEPTRIS_DIGEST_ATTR_ORDER. Read
+     * per call, same discipline as the LEPTRIS_INTERLEAVED lane
+     * gate; empty string counts as unset (MSVC _putenv_s(k, "")),
+     * "0" disables. ORs with explicitly passed flags. */
+    {
+        const char* env = getenv("LEPTRIS_DIGEST_ATTR_ORDER");
+        if (env && *env && *env != '0')
+            flags = (LeptrisDigestFlags)(flags | LEPTRIS_DIGEST_ATTR_ORDER);
+    }
     LeptrisNode* n = (LeptrisNode*)node;
     switch (n->type) {
         case LEPTRIS_NODE_TYPE_ELEMENT:
