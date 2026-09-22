@@ -2025,6 +2025,10 @@ fail:
      * — the fail path never reaches leptris_document_free. Free it
      * BEFORE pool_destroy reclaims the doc struct. */
     free(doc->line_breaks);
+    /* #1285 slice 3a: the element source-offset side table is
+     * malloc'd too — same fail-path rule as line_breaks. */
+    free(doc->elem_pos);
+    doc->elem_pos = NULL;
     leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
