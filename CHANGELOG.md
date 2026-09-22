@@ -4,8 +4,17 @@
 
 ### Fixed
 
-- interleaved lane drops attribute namespace URIs (#1295) (parse)
-- borrowed-text contract vs lane-dependent get_content serve modes (#1299) (dom)
+- **parse:** the interleaved lane (`LEPTRIS_INTERLEAVED=1`) dropped the
+  namespace URI of every prefixed attribute — `xml:space` lost the XML
+  namespace, breaking namespace-based whitespace handling (reported by
+  Canon, #1295). The lane now stamps the #542 ns side-cache exactly like
+  the classic parser. Regression-tested against both lanes (#1300).
+- **dom:** the borrowed-text contract is now lane-explicit: runs
+  terminated in place (HTML builder, interleaved lane) are served
+  directly by `leptris_text_get_content`; `borrowed` means non-owning,
+  not unterminated (#1299). A new CI leg runs the whole suite with the
+  lane forced, so env-gated parse paths can no longer ship divergences
+  unnoticed (#1301).
 
 
 
