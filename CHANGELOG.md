@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+## [1.9.223] - 2026-09-22
+
+### Added
+
+- bulk record drain — one-crossing whole-document event table (#1298) (sax)
+
+### Fixed
+
+- free the record table in the parity helper (ASAN leak) (test)
+- width-independent LeptrisTextNode layout assert (ILP32 = 32B) (test)
+- LEPTRIS_DIGEST_ATTR_ORDER env opt-in for leptris_node_digest (#1297) (dom)
+
+### Performance
+
+- text node 64->48B — always-terminated content, no pool/borrowed fields (#1285 slice 4) (dom)
+
+
+
 ## [1.9.222] - 2026-09-22
 
 ### Fixed
