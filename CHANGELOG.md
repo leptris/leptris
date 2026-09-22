@@ -4,12 +4,23 @@
 
 ### Fixed
 
-- free the elem_pos table on the dp fail path (mem)
-- declare worst outside the NDEBUG branch (test)
+- **mem:** the element source-offset side table (new in this
+  release) is now also freed on the direct-parse failure path,
+  which bypasses leptris_document_free — caught by CI LeakSanitizer.
+- **test:** the runner-contention perf gate
+  (SmallDocumentParseIsFast) retries across settling windows instead
+  of failing on a single contended measurement (three CI flakes in
+  one day, budget unchanged).
 
 ### Performance
 
-- element 72->64B — ns_cache_off + source-offset side table (#1285 slice 3a) (dom)
+- **dom:** elements shrink **72 -> 64 bytes** (ILP32 56 -> 48;
+  #1285 slice 3a): the namespace side-cache pointer became a
+  self-relative int32 offset (the attrs' round-19 pattern), and the
+  #1124 source offsets moved to a document-owned side table — cold
+  diagnostics-only data no longer costs hot-path cache lines.
+  Position accessors are unchanged (#1124 specs green). Part of the
+  pugi-style node-storage lane (#1222/#1238) (#1308).
 
 
 
