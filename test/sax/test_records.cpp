@@ -109,6 +109,7 @@ void expect_parity(const char* xml) {
     leptris_pull_free(p);
 
     ASSERT_EQ(rec_stream, pull_stream) << "parity divergence for: " << xml;
+    leptris_sax_records_free(r);
 }
 
 }  // namespace
