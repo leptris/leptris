@@ -49,7 +49,8 @@ typedef enum {
     LEPTRIS_ERROR_INVALID_ARG = -5, /* Invalid argument */
     LEPTRIS_ERROR_NOT_FOUND = -6,   /* Resource not found */
     LEPTRIS_ERROR_IO = -7,          /* I/O error (file not found, etc.) */
-    LEPTRIS_ERROR_NOT_IMPLEMENTED = -8 /* Feature not yet implemented */
+    LEPTRIS_ERROR_NOT_IMPLEMENTED = -8, /* Feature not yet implemented */
+    LEPTRIS_ERROR_NOT_SUPPORTED = -9    /* Construct outside this API's subset (additive, #1298) */
 } LeptrisStatus;
 
 /* ============================================================================

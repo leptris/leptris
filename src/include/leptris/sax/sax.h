@@ -596,6 +596,93 @@ LEPTRIS_API const char* leptris_iterparse_error(LeptrisIterparse it);
 
 LEPTRIS_API void leptris_iterparse_free(LeptrisIterparse it);
 
+
+/* ============================================================================
+ * Bulk SAX records (issue #1298) — one-crossing whole-document drain
+ * ============================================================================ */
+
+/** Record kinds (LeptrisSaxRecord.kind). */
+enum {
+    LEPTRIS_SAX_REC_ELEMENT = 0,   /**< start+end collapsed; tree via parent/next_sib */
+    LEPTRIS_SAX_REC_TEXT    = 1    /**< character data run (entity-free docs only) */
+};
+
+/** One element or text record. Offsets are byte positions into the
+ * buffer returned by leptris_sax_records_buffer; every view is
+ * NUL-terminated at off+len (names and text both). */
+typedef struct LeptrisSaxRecord {
+    uint32_t kind;          /**< LEPTRIS_SAX_REC_* */
+    uint32_t parent;        /**< record index, 0xFFFFFFFF for the root */
+    uint32_t next_sib;      /**< record index, 0xFFFFFFFF = last sibling */
+    uint32_t off;           /**< element: name; text: content */
+    uint32_t len;           /**< byte length at off (excl. NUL) */
+    uint32_t line;          /**< byte offset of '<' (or text start) + 1 (#1124 dp semantics) */
+    uint32_t start_tag_end; /**< byte offset after the open '>' (elements; 0 when unknown) */
+    uint32_t elem_end;      /**< byte offset after the close '>' (self-close == start) */
+    uint32_t attr_first;    /**< index into the flat attr table, 0xFFFFFFFF = none */
+    uint32_t attr_count;    /**< number of attributes */
+    uint8_t  self_closing;  /**< element written <a/> */
+} LeptrisSaxRecord;
+
+/** One attribute: flat (off,len) views + 3.3.3 normalization need. */
+typedef struct LeptrisSaxAttr {
+    uint32_t name_off, name_len;    /**< attribute name (qname, NUL-terminated at [name_len]) */
+    uint32_t value_off, value_len;  /**< raw value (NUL-terminated at [value_len]) */
+    uint8_t  value_has_ws;          /**< literal \t/\n/\r present — apply XML 1.0 3.3.3 normalization */
+} LeptrisSaxAttr;
+
+/** Opaque whole-document record table. */
+typedef struct LeptrisSaxRecords LeptrisSaxRecords;
+
+/**
+ * Parse a whole document into a flat record table (ONE call)
+ *
+ * The engine-side surface for #1298: hosts with hot SAX loops drain
+ * the entire document with a single crossing and then walk plain C
+ * structs — no per-event callback dispatch, no per-event string
+ * minting C-side. Records are (off,len) views into the parser's
+ * private copy of the input; every view is NUL-terminated in place.
+ *
+ * Coverage: the interleaved lane's scannable subset — elements,
+ * text, attributes; well-formed entity-free documents without
+ * comments/PIs/CDATA/DOCTYPE/xmlns declarations. Anything outside
+ * that subset returns LEPTRIS_ERROR_NOT_SUPPORTED (zero allocation);
+ * hosts fall back to the pull API (leptris_pull_new) for those
+ * documents. Malformed input returns LEPTRIS_ERROR_PARSE.
+ *
+ * @param xml Input (copied; the caller's buffer is untouched)
+ * @param len Input length in bytes (< 2 GiB)
+ * @param flags Reserved; pass 0
+ * @param out Receives the table handle
+ * @return LEPTRIS_OK, LEPTRIS_ERROR_NULL_ARG, LEPTRIS_ERROR_NOT_SUPPORTED,
+ *         LEPTRIS_ERROR_PARSE, or LEPTRIS_ERROR_MEMORY
+ *
+ * Memory: free with leptris_sax_records_free; all views die with it.
+ */
+LEPTRIS_API LeptrisStatus leptris_sax_records_parse(const char* xml,
+                                                    size_t len,
+                                                    unsigned flags,
+                                                    LeptrisSaxRecords** out);
+
+/** Number of records. */
+LEPTRIS_API size_t leptris_sax_records_count(const LeptrisSaxRecords* recs);
+
+/** Record array (count entries; valid until free). */
+LEPTRIS_API const LeptrisSaxRecord* leptris_sax_records_data(
+    const LeptrisSaxRecords* recs);
+
+/** Flat attribute table + its length (valid until free). */
+LEPTRIS_API const LeptrisSaxAttr* leptris_sax_records_attrs(
+    const LeptrisSaxRecords* recs, size_t* out_attr_count);
+
+/** The buffer all record/attr offsets index into (NUL-padded past
+ * len). */
+LEPTRIS_API const char* leptris_sax_records_buffer(
+    const LeptrisSaxRecords* recs);
+
+/** Free the table (invalidates every view). */
+LEPTRIS_API void leptris_sax_records_free(LeptrisSaxRecords* recs);
+
 #ifdef __cplusplus
 }
 #endif
