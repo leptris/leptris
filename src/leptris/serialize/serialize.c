@@ -1885,6 +1885,9 @@ LEPTRIS_API char* leptris_document_serialize_ext_sized(
         if (ext_size >= offsetof(LeptrisSerializeExtOptions, expand_empty) +
                             sizeof(int))
             internal.expand_empty = ext->expand_empty;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, html_method) +
+                            sizeof(int))
+            internal.html_method = ext->html_method;
     }
     return leptris_document_serialize_ex(doc, options, &internal);
 }
@@ -1917,6 +1920,9 @@ LEPTRIS_API char* leptris_element_serialize_ext_sized(
         if (ext_size >= offsetof(LeptrisSerializeExtOptions, expand_empty) +
                             sizeof(int))
             internal.expand_empty = ext->expand_empty;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, html_method) +
+                            sizeof(int))
+            internal.html_method = ext->html_method;
     }
     return leptris_element_serialize_ex(elem, options, &internal);
 }
@@ -1984,6 +1990,10 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
     /* Create buffer with indent support */
     SerializeBuffer* buf = buffer_create(indent_spaces);
     if (!buf) return NULL;
+    /* #1309: the document's HTML mode (HTML parse entries,
+     * create_html) defaults the serialization method; the extended
+     * block overrides when the caller passes options. */
+    buf->html_method = doc->html_mode;
     if (extended) {
         buf->cdata_names = extended->cdata_elements;
         buf->cdata_count = extended->cdata_element_count;
@@ -1992,7 +2002,11 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * with indent="no". The newline LAYOUT self-gates: every
          * html break site goes through buffer_append_newline, which
          * is a no-op at indent_spaces == 0. */
-        buf->html_method = extended->html_method != 0;
+        /* #1309 tri-state: 0 = document default (html_mode from the
+         * HTML parse entries / create_html), 1 = force HTML, -1 =
+         * force XML (Nokogiri's to_xml-on-HTML-doc). */
+        if (extended->html_method == -1) buf->html_method = 0;
+        else if (extended->html_method == 1) buf->html_method = 1;
         buf->indent_text = extended->indent_text != 0;
         buf->expand_empty = extended->expand_empty != 0;
         buf->indent_unit = extended->indent_unit;
@@ -2297,4 +2311,37 @@ LEPTRIS_API int leptris_document_save_file(struct leptris_document* doc,
     }
 
     return 0;  /* LEPTRIS_OK */
+}
+
+/* #1309: HTML-method convenience entries — the same output any
+ * caller could produce via leptris_document_serialize_ext_sized with
+ * ext.html_method = 1, minus the options plumbing. Forces the §16.2
+ * HTML method regardless of the document's mode (the XSLT
+ * method="html" semantic, public). */
+LEPTRIS_API char* leptris_document_serialize_html(
+    struct leptris_document* doc, const LeptrisSerializeOptions* options) {
+    LeptrisSerializeExtOptions ext;
+    memset(&ext, 0, sizeof(ext));
+    ext.html_method = 1;
+    return leptris_document_serialize_ext_sized(doc, options, &ext,
+                                                sizeof(ext));
+}
+
+LEPTRIS_API int leptris_document_save_html(struct leptris_document* doc,
+                                           const char* filepath,
+                                           const LeptrisSerializeOptions* options) {
+    if (!doc) return -4;
+    if (!filepath) return -4;
+    char* html = leptris_document_serialize_html(doc, options);
+    if (!html) return -1;
+    FILE* file = fopen(filepath, "wb");
+    if (!file) {
+        LEPTRIS_FREE(html);
+        return -7;
+    }
+    size_t len = strlen(html);
+    size_t written = fwrite(html, 1, len, file);
+    fclose(file);
+    LEPTRIS_FREE(html);
+    return written == len ? 0 : -7;
 }

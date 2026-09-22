@@ -127,6 +127,7 @@ leptris_add_test(test_bytecode_vm xpath/test_bytecode_vm.cpp)
 leptris_add_test(test_xslt        xpath/test_xslt.cpp)
 leptris_add_test(test_xquery      xquery/test_xquery.cpp)
 leptris_add_test(test_html        html/test_html.cpp)
+leptris_add_test(test_html_builder html/test_html_builder.cpp)
 leptris_add_test(test_html5lib     html/test_html5lib.cpp)
 file(GLOB html5lib_dats
      "${CMAKE_CURRENT_SOURCE_DIR}/html/html5lib-tests/tree-construction/*.dat")

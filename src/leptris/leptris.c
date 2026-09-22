@@ -210,6 +210,12 @@ LEPTRIS_API LeptrisDocument leptris_document_create(void) {
     return doc;
 }
 
+LEPTRIS_API LeptrisDocument leptris_document_create_html(void) {
+    struct leptris_document* doc = leptris_document_create();
+    if (doc) doc->html_mode = 1;
+    return doc;
+}
+
 /* Internal (issue #563): a document over a CALLER-OWNED arena.
  * The pool is arena-backed and does not own the arena — destroying
  * the document frees the pool struct and its extension blocks, the
