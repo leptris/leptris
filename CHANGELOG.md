@@ -4,17 +4,30 @@
 
 ### Added
 
-- bulk record drain — one-crossing whole-document event table (#1298) (sax)
+- **sax:** `leptris_sax_records_parse` — a bulk record drain for hot SAX
+  loops (#1298, reported by Canon): ONE call returns the whole document
+  as a flat record table (element tree edges, start/end offsets, flat
+  attribute table with XML 1.0 §3.3.3 normalization flags), all
+  NUL-terminated views into a parser-owned buffer. Unsupported
+  constructs (comments/PIs/CDATA/DOCTYPE/entities/xmlns) return
+  `LEPTRIS_ERROR_NOT_SUPPORTED` — fall back to the pull API. New
+  additive status code (#1305).
 
 ### Fixed
 
-- free the record table in the parity helper (ASAN leak) (test)
-- width-independent LeptrisTextNode layout assert (ILP32 = 32B) (test)
-- LEPTRIS_DIGEST_ATTR_ORDER env opt-in for leptris_node_digest (#1297) (dom)
+- **dom:** `LEPTRIS_DIGEST_ATTR_ORDER` is now actually honored — the
+  1.9.205 flag shipped only as a C enum with no env reader and no
+  binding carrier, so `strings` never found it in shipped bundles
+  (#1297, reported by Canon). `leptris_node_digest` reads the env
+  per call and ORs it into the passed flags (#1304).
 
 ### Performance
 
-- text node 64->48B — always-terminated content, no pool/borrowed fields (#1285 slice 4) (dom)
+- **dom:** text nodes shrink **64 → 48 bytes** (#1285 slice 4): the
+  `pool`/`borrowed` fields are gone — every parse lane terminates
+  text in place and entities decode eagerly at parse time, so
+  `leptris_text_get_content` is a plain field read. Content is
+  always NUL-terminated; `content_len` is authoritative (#1303).
 
 
 
