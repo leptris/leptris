@@ -4210,8 +4210,43 @@ static LeptrisElement h_open_element_id(HBuilder* b, const char* name,
     return e;
 }
 
+/* #1285 slice 5: zero-re-copy element open. `name` is a NUL-
+ * terminated POOL-OWNED lowercased string (h_pooled_lower) or a
+ * static literal — both live for the document, so the element
+ * borrows it directly: no create_with_view copy, no QName split
+ * (HTML keeps qualified names literally, tests14:1/3 — the whole
+ * token IS the wanted name), no colon re-copy undoing the split.
+ * Ownership matches create_with_view's pool copy exactly (rename
+ * replaces, never frees). */
+static LeptrisElement h_open_element_borrowed(HBuilder* b, char* name,
+                                              uint8_t tid) {
+    LeptrisElement e = (LeptrisElement)leptris_pool_alloc(
+        b->pool, sizeof(struct leptris_element));
+    if (!e) return NULL;
+    memset(e, 0, sizeof(struct leptris_element));
+    e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
+    e->name = name;
+    size_t nl = strlen(name);
+    e->name_len = (nl > 254) ? 0xFF : (uint8_t)nl;
+    e->name_hash = leptris_name_hash_compute(name);
+    leptris_root_doc_register(e, b->doc);
+    b->left_initial = 1;
+    h_append(b, (LeptrisNodeRef)e);
+    if (b->depth == 0 && !b->root) b->root = e;
+    if (b->depth < 256) {
+        b->open[b->depth] = e;
+        b->open_tail[b->depth] = NULL;
+        b->open_ns[b->depth] = H_NS_HTML;
+        b->open_id[b->depth] = tid;
+        b->depth++;
+    }
+    return e;
+}
+
 static LeptrisElement h_open_element(HBuilder* b, const char* name) {
-    return h_open_element_id(b, name, h_tag_id(name));
+    /* Synthesized opens pass string literals (process lifetime) —
+     * the borrowed path stores them with zero copies. */
+    return h_open_element_borrowed(b, (char*)name, h_tag_id(name));
 }
 
 /* Case-insensitive C-string compare (ASCII). */
@@ -7699,7 +7734,7 @@ static LeptrisDocument html_parse_shared(
 
         LeptrisElement e = (elem_ns != H_NS_HTML)
                                ? h_open_foreign(&b, name, elem_ns)
-                               : h_open_element_id(&b, name, tid);
+                               : h_open_element_borrowed(&b, name, tid);
         if (!e) goto done;
         if (strcmp(name, "html") == 0) {
             b.html_seen = 1;
