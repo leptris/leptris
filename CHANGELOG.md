@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.226] - 2026-09-22
+
+### Performance
+
+- zero-re-copy element opens — borrowed names (#1285 slice 5) (html)
+
+
+
 ## [1.9.225] - 2026-09-22
 
 ### Added
