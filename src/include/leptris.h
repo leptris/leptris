@@ -191,9 +191,14 @@ LEPTRIS_API size_t leptris_node_child_count(LeptrisNodeRef node);
  *
  * @param node Subtree root (any node type; NULL hashes to 0)
  * @param flags LEPTRIS_DIGEST_DROP_WS_TEXT skips whitespace-only
- *              text nodes
+ *              text nodes; LEPTRIS_DIGEST_ATTR_ORDER makes attribute
+ *              ORDER identity (no sort)
  * @return 64-bit content digest
- */
+ *
+ * Environment opt-in (#1297): setting LEPTRIS_DIGEST_ATTR_ORDER=1 in
+ * the process environment ORs LEPTRIS_DIGEST_ATTR_ORDER into every
+ * call — the carrier for hosts whose binding exposes no flags
+ * parameter. "0" or an empty value leaves the passed flags alone. */
 LEPTRIS_API uint64_t leptris_node_digest(LeptrisNodeRef node,
                                          LeptrisDigestFlags flags);
 
