@@ -204,6 +204,65 @@ TEST(InterleavedParity, EngagementCanaryFiresOnlyWhenLaneRuns) {
 }
 #endif  /* !_WIN32: canary capture uses POSIX pipe/dup2 */
 
+/* #1295: namespace accessors on prefixed attributes. The il lane
+ * built attributes without the #542 ns side-cache stamp, so
+ * leptris_attribute_namespace_uri (and prefix) returned NULL for
+ * every prefixed attribute — xml: included, which broke Canon's
+ * namespace-based xml:space handling. This fixture keeps the il
+ * lane engaged: the lane defers xmlns-bearing documents to classic
+ * (il_scan bails on declarations), and xml: needs no declaration. */
+TEST(InterleavedParity, XmlAttrNamespaceParity) {
+    const char* kXmlNs = "http://www.w3.org/XML/1998/namespace";
+    const char* xml = "<root><code xml:space='preserve'>t</code></root>";
+    for (int lane = 0; lane <= 1; lane++) {
+        SCOPED_TRACE(lane ? "interleaved" : "classic");
+        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
+        else unset_env("LEPTRIS_INTERLEAVED");
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        ASSERT_NE(d, nullptr);
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr);
+        LeptrisElement code = leptris_element_first_child(root, NULL);
+        ASSERT_NE(code, nullptr);
+        LeptrisAttribute a = leptris_element_first_attribute(code);
+        ASSERT_NE(a, nullptr);
+        EXPECT_STREQ(leptris_attribute_prefix(a), "xml");
+        EXPECT_STREQ(leptris_attribute_namespace_uri(a), kXmlNs);
+        /* expanded-name lookup rides the element-side resolver and
+         * must agree with the attr-side URI */
+        EXPECT_STREQ(leptris_element_attribute_ns(code, kXmlNs, "space"),
+                     "preserve");
+        EXPECT_STREQ(leptris_element_attribute(code, "xml:space"),
+                     "preserve");
+        leptris_document_free(d);
+    }
+    unset_env("LEPTRIS_INTERLEAVED");
+}
+
+/* Declared-prefix parity. The il lane bails to classic on xmlns
+ * today, so this runs classic twice in practice — but if the
+ * declaration bail ever lifts, the ns stamp must come with it. */
+TEST(InterleavedParity, DeclaredPrefixNamespaceParity) {
+    const char* xml = "<d xmlns:q='http://example/q' q:k='v'/>";
+    for (int lane = 0; lane <= 1; lane++) {
+        SCOPED_TRACE(lane ? "interleaved" : "classic");
+        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
+        else unset_env("LEPTRIS_INTERLEAVED");
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        ASSERT_NE(d, nullptr);
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr);
+        LeptrisAttribute a = leptris_element_first_attribute(root);
+        ASSERT_NE(a, nullptr);
+        EXPECT_STREQ(leptris_attribute_prefix(a), "q");
+        EXPECT_STREQ(leptris_attribute_namespace_uri(a), "http://example/q");
+        leptris_document_free(d);
+    }
+    unset_env("LEPTRIS_INTERLEAVED");
+}
+
 TEST(InterleavedParity, DupAttrDiagnosticParity) {
     const char* xml = "<r a='1' a='2'/>";
     for (int lane = 0; lane <= 1; lane++) {

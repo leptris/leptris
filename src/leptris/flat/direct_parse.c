@@ -2441,6 +2441,39 @@ static struct leptris_document* dp_il_build(
                     at->name_hash = 0;  /* lazy-hash sentinel */
                     at->ns_cache_off = 0;
                     at->next_cp = 0;
+                    /* #542 ns side-cache stamp, parity with the
+                     * classic lane's fused pass: prefixed attrs
+                     * carry prefix + owner so the namespace
+                     * accessors resolve. Without it xml:space and
+                     * every declared prefix read as no-namespace
+                     * (#1295). The lane bails on xmlns, so any
+                     * colon here is a genuine namespaced attr. */
+                    {
+                        const char* anm = scratch + a->name_off;
+                        const char* acolon =
+                            a->name_len >= 3
+                                ? (const char*)memchr(anm, ':',
+                                                      a->name_len)
+                                : NULL;
+                        if (acolon) {
+                            struct leptris_attr_ns_cache* nc =
+                                (struct leptris_attr_ns_cache*)
+                                    leptris_pool_alloc(pool, sizeof(*nc));
+                            if (nc) {
+                                memset(nc, 0, sizeof(*nc));
+                                size_t pl = (size_t)(acolon - anm);
+                                char* pfx = (char*)leptris_pool_alloc(
+                                    pool, pl + 1);
+                                if (pfx) {
+                                    memcpy(pfx, anm, pl);
+                                    pfx[pl] = '\0';
+                                    nc->prefix = pfx;
+                                }
+                                nc->owner_elem = e;
+                                attr_set_ns_cache(at, nc);
+                            }
+                        }
+                    }
                     /* dup detection — first wins (#1200) */
                     int dup = 0;
                     for (struct leptris_attribute* d =
