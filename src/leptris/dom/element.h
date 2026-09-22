@@ -393,38 +393,61 @@ struct leptris_element {
     uint8_t name_len;                  /* 1 byte */
     uint16_t child_count;              /* 2 bytes */
 
-    /* Cached NULL-terminated strings (16 bytes).
-     * Phase 2e-B: prefix + namespace_uri merged into ns_cache (8 bytes
-     * instead of 16). name stays inline — it's accessed on every
-     * serialize/XPath hit. */
-    char* name;                        /* NULL until first access */
-    struct leptris_ns_cache* ns_cache;  /* NULL for non-namespaced elements */
+    /* Namespace side cache — self-relative int32 offset (#1285
+     * slice 3a, the attrs' round-19 pattern): 0 = no namespace
+     * activity (the dominant case, one NULL-check decode); compact
+     * encode + overflow-table fallback for >2GB spans. Reads go
+     * through elem_get_ns_cache()/elem_set_ns_cache(). */
+    int32_t ns_cache_off;
 
     /* Tree edges (12 bytes; was 16 before TODO 155 Phase C).
      * last_child_off is GONE — append operations walk the child list
-     * (O(child_count)) or use the parser-local cache during parse.
-     * Saves 4 bytes per element. */
+     * (O(child_count)) or use the parser-local cache during parse. */
     int32_t parent_off;
     int32_t first_child_off;
     int32_t next_sibling_off;
 
-    /* Attribute list (4 bytes; was 8 before TODO 155 Phase C).
-     * last_attribute_off is GONE — same reasoning. Append walks the
-     * list. Saves 4 bytes per element. */
+    /* Attribute list (4 bytes; was 8 before TODO 155 Phase C). */
     int32_t first_attribute_off;
 
-    /* Parser-recorded source offsets (#1124). Raw byte offsets into
-     * doc->xml_buffer, not the old base.line sentinel encoding:
-     * - start_tag_end_off: byte just after the start tag's '>'
-     * - element_end_off: byte just after the element's final '>'
-     * 0 means unknown (mutation-created nodes). */
-    uint32_t start_tag_end_off;
-    uint32_t element_end_off;
+    /* (#1124) source offsets moved to the document-owned side table
+     * (leptris_elem_pos_record/_lookup, elem_pos.c) — #1285 slice
+     * 3a: cold diagnostics-only data was costing hot-path cache
+     * lines. 0-means-unknown semantics preserved (absent = 0). */
+
+    /* Cached NULL-terminated name — LAST so the int32 block above
+     * packs tight against the base/header and the 8-aligned pointer
+     * lands without padding: 72 -> 64 bytes (#1285 slice 3a).
+     * Accessed on every serialize/XPath hit. */
+    char* name;                        /* NULL until first access */
 
     /* TODO 155 Phase A: `document` field is GONE — element now fits
      * one 64-byte cache line. Non-root elements reach their document
      * via leptris_element_get_document() in dom/root_doc_map.h. */
 };
+
+/* Namespace side-cache accessors (#1285 slice 3a): the cache is
+ * reached via a self-relative int32 offset (0 = none; overflow-table
+ * fallback for >2GB spans) — the attrs' round-19 pattern. */
+static inline struct leptris_ns_cache* elem_get_ns_cache(
+    struct leptris_element* e) {
+    return (struct leptris_ns_cache*)leptris_compact_int32_decode_inline(
+        e, e->ns_cache_off, &e->ns_cache_off);
+}
+static inline void elem_set_ns_cache(struct leptris_element* e,
+                                     struct leptris_ns_cache* ns) {
+    e->ns_cache_off = leptris_compact_int32_encode_inline(
+        e, ns, &e->ns_cache_off);
+}
+
+/* #1124 source-offset side table (elem_pos.c). Parse lanes record;
+ * the position accessor probes. Absent = unknown (0). */
+void leptris_elem_pos_record(struct leptris_document* doc,
+                             struct leptris_element* elem,
+                             uint32_t start_tag_end, uint32_t element_end);
+int leptris_elem_pos_lookup(const struct leptris_document* doc,
+                            const struct leptris_element* elem,
+                            uint32_t* start_tag_end, uint32_t* element_end);
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem);
 LeptrisMemoryPool* leptris_element_get_pool(LeptrisElement elem);
@@ -478,10 +501,14 @@ static inline int leptris_elem_name_is(LeptrisElement e, const char* name,
 
 /* Inline accessors — use these instead of direct field access. */
 static inline char* leptris_elem_prefix(const LeptrisElement e) {
-    return e && e->ns_cache ? e->ns_cache->prefix : NULL;
+    if (!e) return NULL;
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    return nc ? nc->prefix : NULL;
 }
 static inline char* leptris_elem_ns_uri(const LeptrisElement e) {
-    return e && e->ns_cache ? e->ns_cache->namespace_uri : NULL;
+    if (!e) return NULL;
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    return nc ? nc->namespace_uri : NULL;
 }
 
 /* Allocate ns_cache if needed, then set the prefix. Pool required
@@ -490,32 +517,36 @@ static inline char* leptris_elem_ns_uri(const LeptrisElement e) {
 static inline void leptris_elem_set_prefix(LeptrisElement e, char* prefix,
                                            LeptrisMemoryPool* pool) {
     if (!e) return;
-    if (!e->ns_cache) {
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    if (!nc) {
         if (!pool) return;
-        e->ns_cache = (struct leptris_ns_cache*)
+        nc = (struct leptris_ns_cache*)
             leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
-        if (!e->ns_cache) return;
-        e->ns_cache->prefix = NULL;
-        e->ns_cache->namespace_uri = NULL;
-        e->ns_cache->declarations = NULL;
+        if (!nc) return;
+        nc->prefix = NULL;
+        nc->namespace_uri = NULL;
+        nc->declarations = NULL;
+        elem_set_ns_cache(e, nc);
     }
-    e->ns_cache->prefix = prefix;
+    nc->prefix = prefix;
 }
 
 /* Allocate ns_cache if needed, then set the namespace URI. */
 static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
                                             LeptrisMemoryPool* pool) {
     if (!e) return;
-    if (!e->ns_cache) {
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    if (!nc) {
         if (!pool) return;
-        e->ns_cache = (struct leptris_ns_cache*)
+        nc = (struct leptris_ns_cache*)
             leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
-        if (!e->ns_cache) return;
-        e->ns_cache->prefix = NULL;
-        e->ns_cache->namespace_uri = NULL;
-        e->ns_cache->declarations = NULL;
+        if (!nc) return;
+        nc->prefix = NULL;
+        nc->namespace_uri = NULL;
+        nc->declarations = NULL;
+        elem_set_ns_cache(e, nc);
     }
-    e->ns_cache->namespace_uri = uri;
+    nc->namespace_uri = uri;
 }
 
 /* #846: split a just-stored QName copy ("p:local") into prefix +
@@ -590,32 +621,34 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
  * Returns NULL when the element has no namespace declarations
  * (the overwhelmingly common case). TODO 155 Phase B. */
 static inline struct leptris_namespace* leptris_elem_namespaces(const LeptrisElement e) {
-    return e && e->ns_cache ? e->ns_cache->declarations : NULL;
+    if (!e) return NULL;
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    return nc ? nc->declarations : NULL;
 }
 
-/* Ensure ns_cache exists (allocating if needed) and return a
- * writable pointer to the declarations head. Used by mutation
- * paths that append xmlns:* declarations. */
-static inline struct leptris_ns_cache** leptris_elem_cache_ptr(
+/* Ensure ns_cache exists (allocating if needed) and return it.
+ * Used by mutation paths that append xmlns:* declarations. */
+static inline struct leptris_ns_cache* leptris_elem_cache_ensure(
     LeptrisElement e, LeptrisMemoryPool* pool) {
     if (!e) return NULL;
-    if (!e->ns_cache) {
-        if (!pool) return NULL;
-        e->ns_cache = (struct leptris_ns_cache*)
-            leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
-        if (!e->ns_cache) return NULL;
-        e->ns_cache->prefix = NULL;
-        e->ns_cache->namespace_uri = NULL;
-        e->ns_cache->declarations = NULL;
-        e->ns_cache->raw_attrs = NULL;
-    }
-    return &e->ns_cache;
+    struct leptris_ns_cache* nc = elem_get_ns_cache(e);
+    if (nc) return nc;
+    if (!pool) return NULL;
+    nc = (struct leptris_ns_cache*)
+        leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
+    if (!nc) return NULL;
+    nc->prefix = NULL;
+    nc->namespace_uri = NULL;
+    nc->declarations = NULL;
+    nc->raw_attrs = NULL;
+    elem_set_ns_cache(e, nc);
+    return nc;
 }
 
 static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
     LeptrisElement e, LeptrisMemoryPool* pool) {
-    struct leptris_ns_cache** c = leptris_elem_cache_ptr(e, pool);
-    return c ? &(*c)->declarations : NULL;
+    struct leptris_ns_cache* c = leptris_elem_cache_ensure(e, pool);
+    return c ? &c->declarations : NULL;
 }
 
 
@@ -650,8 +683,8 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
  * pinned structs hold only pointers and int-sized scalars, so i686
  * and armv7 produce identical layouts. */
 #if SIZE_MAX == UINT64_MAX
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 72,
-    "leptris_element source positions layout: 72 bytes");
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 64,
+    "#1285 slice 3a: ns_cache_off + offsets side table -> 64 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
     "round 19 attr layout: 16+16+4+2+2 = 40");
@@ -659,8 +692,8 @@ LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
 /* ILP32: LeptrisNode 24->16 (binding_wrapper), element name +
  * ns_cache pointers 8->4 each -> 56; attribute name_view 16->8
  * (value union stays 16 via inline_value[16]) -> 32. */
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 56,
-    "leptris_element ILP32 layout: 56 bytes");
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 48,
+    "#1285 slice 3a ILP32: 48 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 32,
     "leptris_attribute ILP32 layout: 8+16+4+2+2 = 32");

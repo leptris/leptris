@@ -227,6 +227,12 @@ struct leptris_document {
      * the result in the node with the high bit set. NULL = not yet
      * built. Freed with the document. */
     uint32_t* line_breaks;
+    /* #1285 slice 3a: parser-recorded source offsets (#1124) moved
+     * OUT of the element struct — open-addressed insert-only table
+     * keyed by element pointer, cold consumers only (diagnostics).
+     * Frees in leptris_document_free. */
+    struct leptris_elem_pos_entry* elem_pos;
+    size_t elem_pos_count, elem_pos_cap;
     size_t line_break_count;
     /* Doc-level attribute-name index (mutation path): open-addressed
      * (element, name-hash) -> attr. Built lazily on the first

@@ -1493,9 +1493,9 @@ LEPTRIS_API LeptrisStatus leptris_element_remove_namespace_definition(
     if (prefix && !*prefix) prefix = NULL;
 
     /* No ns_cache = no namespace declarations on this element. */
-    if (!elem->ns_cache) return LEPTRIS_ERROR_NOT_FOUND;
+    if (!elem_get_ns_cache(elem)) return LEPTRIS_ERROR_NOT_FOUND;
 
-    struct leptris_namespace** link = &elem->ns_cache->declarations;
+    struct leptris_namespace** link = &elem_get_ns_cache(elem)->declarations;
     while (*link) {
         struct leptris_namespace* cur = *link;
         int match = (prefix == NULL) ? (cur->prefix == NULL)
@@ -1515,19 +1515,20 @@ LEPTRIS_API size_t leptris_element_attributes_raw(
     LeptrisElement elem, const char** out_qnames, const char** out_values,
     size_t max_count) {
     if (!elem) return 0;
-    if (!elem->ns_cache || !elem->ns_cache->raw_attrs) return 0;
+    struct leptris_ns_cache* nsc = elem_get_ns_cache(elem);
+    if (!nsc || !nsc->raw_attrs) return 0;
 
     /* Count-only query. */
     if (!out_qnames && !out_values) {
         size_t n = 0;
-        for (struct leptris_raw_attr* r = elem->ns_cache->raw_attrs; r;
+        for (struct leptris_raw_attr* r = nsc->raw_attrs; r;
              r = r->next)
             n++;
         return n;
     }
 
     size_t written = 0;
-    for (struct leptris_raw_attr* r = elem->ns_cache->raw_attrs; r;
+    for (struct leptris_raw_attr* r = nsc->raw_attrs; r;
          r = r->next) {
         if (written >= max_count) break;
         if (out_qnames) out_qnames[written] = r->qname;

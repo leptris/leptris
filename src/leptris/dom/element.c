@@ -425,7 +425,8 @@ const char* leptris_element_get_name(LeptrisElement elem) {
 void leptris_element_set_namespace_uri_view(LeptrisElement elem, LeptrisStringView uri_view) {
     if (!elem) return;
     if (leptris_sv_is_empty(&uri_view)) {
-        if (elem->ns_cache) elem->ns_cache->namespace_uri = NULL;
+        struct leptris_ns_cache* nsc = elem_get_ns_cache(elem);
+        if (nsc) nsc->namespace_uri = NULL;
         return;
     }
     /* Issue #525: a namespace now exists — unprefixed XPath name
