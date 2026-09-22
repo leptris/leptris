@@ -977,6 +977,9 @@ static inline void* dp_cpi_carve(DParser* p, int node_type) {
 static inline LeptrisTextNode* dp_text_create(DParser* p,
                                              const char* content,
                                              size_t content_len) {
+    /* content_len is uint32 on the node (#1285 slice 4): a single
+     * text run is capped at 4 GB. */
+    if (content_len > 0xFFFFFFFFu) return NULL;
     LeptrisTextNode* tn = p->text_cursor;
     if (DP_UNLIKELY(tn >= p->text_end)) {
         /* The lt_count bound under-counts when comments/PIs/CDATA
@@ -1003,10 +1006,12 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
     tn->base.raw = 0;
     tn->base.binding_wrapper = NULL;
     tn->base.line = 0;     /* caller stamps the offset */
+    /* #1285 slice 4: the run is NUL-terminated in place BEFORE this
+     * carve (dispatch-entry dp_nul / walker '&' NUL / EOF sentinel)
+     * — the terminator write lives with the byte's last reader, not
+     * here. */
     tn->content = (char*)content;
-    tn->content_len = content_len;
-    tn->pool = p->pool;
-    tn->borrowed = 1;
+    tn->content_len = (uint32_t)content_len;
     tn->parent_off = 0;
     tn->next_sibling_off = 0;
     return tn;
@@ -1362,18 +1367,27 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 p.line_offsets_ok
                     ? (uint32_t)(text_start - p.buf) + 1u : 0u;
             char* lt = NULL;
+            /* #1285 slice 4: '&' tracking fused into the scan (one
+             * predicted compare per byte) — the flush below needs
+             * it and a separate memchr per run cost ~7% parse on
+             * entity-free docs. The memchr fallback covers the
+             * >48-byte tail region only. */
+            int has_amp = 0;
             {
                 const char* q = p.pos;
                 const char* probe_end = p.probe_slack
                     ? q + 48
                     : ((p.end - q > 48) ? q + 48 : p.end);
                 while (q < probe_end) {
-                    if (*q == '<') { lt = (char*)q; goto text_done; }
+                    char ch = *q;
+                    if (ch == '<') { lt = (char*)q; goto text_done; }
+                    has_amp |= (ch == '&');
                     q++;
                 }
                 if (q >= p.end) goto text_done;
                 lt = (char*)memchr(q, '<', p.end - q);
                 if (!lt) lt = p.end;
+                has_amp |= memchr(q, '&', (size_t)((char*)lt - q)) != NULL;
             }
         text_done:
             p.pos = lt ? lt : p.end;
@@ -1400,7 +1414,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * character references still expand lazily on read);
              * named references become ENTITY_REF nodes. A '&' that
              * is not a well-formed reference stays literal text. */
-            if (p.keep_entity_refs && memchr(text_start, '&', tlen)) {
+            if (p.keep_entity_refs && has_amp) {
                 const char* seg = text_start;
                 const char* tq = text_start;
                 const char* t_end = text_start + tlen;
@@ -1415,9 +1429,33 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         continue;
                     }
                     if (tq > seg) {
-                        LeptrisTextNode* rt =
-                            dp_text_create(&p, seg, (size_t)(tq - seg));
-                        if (!rt) goto fail;
+                        /* Segment text decodes eagerly (predefined +
+                         * numeric refs; malformed ones stay literal)
+                         * — get_content no longer expands lazily
+                         * (#1285 slice 4). */
+                        LeptrisTextNode* rt = NULL;
+                        size_t slen = (size_t)(tq - seg);
+                        if (memchr(seg, '&', slen) != NULL) {
+                            LeptrisStringView ssv =
+                                leptris_sv_from_ptr(seg, slen);
+                            char* sexp =
+                                leptris_decode_entities_view(&ssv, pool);
+                            if (sexp) {
+                                rt = leptris_text_create(
+                                    sexp, strlen(sexp), pool);
+                            }
+                        }
+                        if (!rt) {
+                            rt = dp_text_create(&p, seg, slen);
+                            if (!rt) goto fail;
+                            /* #1285 slice 4: terminate the segment.
+                             * The '&' is dead: the walker has passed
+                             * it, the ref name starts at tq+1, and
+                             * seg moves past it below. A LONE '&' is
+                             * never NUL'd — it is literal text of
+                             * the NEXT segment. */
+                            dp_nul(&p, (char*)tq);
+                        }
                         rt->base.line = text_off;
                         if (!rt->base.frozen) rt->base.frozen = 1;
                         dp_wire_child(&p, p.open_stack[p.depth - 1],
@@ -1433,9 +1471,23 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     seg = tq;
                 }
                 if (t_end > seg) {
-                    LeptrisTextNode* rt =
-                        dp_text_create(&p, seg, (size_t)(t_end - seg));
-                    if (!rt) goto fail;
+                    /* Tail segment: same eager decode as the inner
+                     * ones (#1285 slice 4). Terminator: the '<' at
+                     * t_end is NUL'd at dispatch entry; at p.end the
+                     * buffer sentinel stands. */
+                    LeptrisTextNode* rt = NULL;
+                    size_t slen = (size_t)(t_end - seg);
+                    if (memchr(seg, '&', slen) != NULL) {
+                        LeptrisStringView ssv = leptris_sv_from_ptr(seg, slen);
+                        char* sexp = leptris_decode_entities_view(&ssv, pool);
+                        if (sexp) {
+                            rt = leptris_text_create(sexp, strlen(sexp), pool);
+                        }
+                    }
+                    if (!rt) {
+                        rt = dp_text_create(&p, seg, slen);
+                        if (!rt) goto fail;
+                    }
                     rt->base.line = text_off;
                     if (!rt->base.frozen) rt->base.frozen = 1;
                     dp_wire_child(&p, p.open_stack[p.depth - 1],
@@ -1443,12 +1495,21 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 }
                 continue;
             }
+            /* Entity-bearing runs decode EAGERLY now (#1285 slice
+             * 4): get_content is a plain field read, so the old
+             * no-DTD lazy expansion (which mutated the node on
+             * first read) has no home. Without a DTD, predefined
+             * + numeric refs decode; with a DTD, defined entities
+             * decode too and an undefined one falls back to the
+             * raw terminated run. Entity-free runs pay one memchr
+             * and stay zero-copy. */
             LeptrisTextNode* tn;
-            if (p.dtd && tlen > 0 &&
-                memchr(text_start, '&', tlen) != NULL) {
+            if (has_amp) {
                 LeptrisStringView sv = leptris_sv_from_ptr(text_start, tlen);
-                char* expanded = leptris_decode_entities_view_with_dtd(
-                    &sv, p.dtd, pool);
+                char* expanded = p.dtd
+                    ? leptris_decode_entities_view_with_dtd(
+                          &sv, p.dtd, pool)
+                    : leptris_decode_entities_view(&sv, pool);
                 if (expanded) {
                     tn = leptris_text_create(expanded, strlen(expanded), pool);
                 } else {
@@ -1467,6 +1528,16 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         /* '<' — dispatch. */
         if (p.end - p.pos < 2) goto fail;
         char next = p.pos[1];
+        /* #1285 slice 4: terminate the text run that just ended at
+         * this '<'. The byte is dead NOW: every branch below has
+         * already loaded `next` and advances p.pos past the '<'
+         * (start tag p.pos++, close +=2, comment/CDATA/PI/doctype
+         * scan to the construct end, default fails out) without
+         * re-reading p.pos[0]. This is the termination point for
+         * every dp text flush — plain, DTD-fallback, entity-split
+         * tail, and the doc-level ws flush (all end at this '<'
+         * or at p.end, where the buffer sentinel stands). */
+        dp_nul(&p, p.pos);
 
         if (IS_NAME_START(next)) {
             /* Element. Snapshot line BEFORE scanning the open tag so
@@ -2542,8 +2613,8 @@ static struct leptris_document* dp_il_build(
             tn->base.line = r->line;
             tn->content = (char*)content;
             tn->content_len = r->len;
-            tn->pool = pool;
-            tn->borrowed = 1;
+            /* (slice 4: pool/borrowed fields gone; the il scratch
+             * run is already NUL-terminated at carve) */
             tn->parent_off = 0;
             tn->next_sibling_off = 0;
             smap[i] = (LeptrisNode*)tn;

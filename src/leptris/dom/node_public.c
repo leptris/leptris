@@ -328,17 +328,8 @@ LEPTRIS_API LeptrisNodeRef leptris_text_node_create(LeptrisDocument doc,
     if (!doc->pool) return NULL;
     if (!content) content = "";
     size_t len = strlen(content);
-    LeptrisTextNode* n = leptris_text_create_borrowed(content, len, doc->pool);
-    if (!n) return NULL;
-    /* Materialize a pool-owned NUL-terminated copy so future reads via
-     * leptris_text_node_get_content don't have to lazy-alloc. */
-    char* copy = node_public_pool_strdup(doc->pool, content, len);
-    if (copy) {
-        n->content = copy;
-        n->content_len = len;
-        n->borrowed = 0;
-    }
-    return (LeptrisNodeRef)n;
+    LeptrisTextNode* n = leptris_text_create(content, len, doc->pool);
+    return n ? (LeptrisNodeRef)n : NULL;
 }
 
 LEPTRIS_API LeptrisNodeRef leptris_comment_node_create(LeptrisDocument doc,
@@ -407,18 +398,14 @@ LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,
     if (!content) content = "";
     size_t len = strlen(content);
     LeptrisTextNode* t = (LeptrisTextNode*)node;
-    if (!t->pool) {
-        /* Use parent doc pool if the node's own pool is unset
-         * (happens after manual construction in some paths). */
-        LeptrisDocument doc = node_public_document(node);
-        if (!doc || !doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
-        t->pool = doc->pool;
-    }
-    char* copy = node_public_pool_strdup(t->pool, content, len);
+    /* #1285 slice 4: the pool field is gone — allocate the
+     * NUL-terminated copy from the owning document's pool. */
+    LeptrisDocument doc = node_public_document(node);
+    if (!doc || !doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
+    char* copy = node_public_pool_strdup(doc->pool, content, len);
     if (!copy) return LEPTRIS_ERROR_MEMORY;
     t->content = copy;
-    t->content_len = len;
-    t->borrowed = 0;
+    t->content_len = (uint32_t)len;
     return LEPTRIS_OK;
 }
 

@@ -933,16 +933,12 @@ static int ser_children_have_text(LeptrisNode* fc) {
     for (LeptrisNode* c = fc; c; c = leptris_node_get_next_sibling(c)) {
         if (c->type == LEPTRIS_NODE_TYPE_CDATA) return 1;
         if (c->type == LEPTRIS_NODE_TYPE_TEXT) {
+            /* #1285 slice 4: content is always NUL-terminated and
+             * entity-decoded at parse time — length-bounded read,
+             * no serve-mode branch. */
             LeptrisTextNode* tn = (LeptrisTextNode*)c;
-            const char* tc;
-            size_t tl;
-            if (tn->borrowed && tn->content_len > 0) {
-                tc = tn->content;
-                tl = tn->content_len;
-            } else {
-                tc = leptris_text_get_content(tn);
-                tl = tc ? tn->content_len : 0;
-            }
+            const char* tc = tn->content;
+            size_t tl = tc ? tn->content_len : 0;
             for (size_t i = 0; i < tl; i++) {
                 if (tc[i] != ' ' && tc[i] != '\t' &&
                     tc[i] != '\n' && tc[i] != '\r') {
@@ -1020,15 +1016,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 cur->type == LEPTRIS_NODE_TYPE_TEXT &&
                 !((sp > 0) && st[sp - 1].mixed)) {
                 LeptrisTextNode* wsn = (LeptrisTextNode*)cur;
-                const char* wsc;
-                size_t wsl;
-                if (wsn->borrowed && wsn->content_len > 0) {
-                    wsc = wsn->content;
-                    wsl = wsn->content_len;
-                } else {
-                    wsc = leptris_text_get_content(wsn);
-                    wsl = wsc ? wsn->content_len : 0;
-                }
+                const char* wsc = wsn->content;
+                size_t wsl = wsc ? wsn->content_len : 0;
                 int ws_only = 1;
                 for (size_t i = 0; i < wsl; i++) {
                     if (wsc[i] != ' ' && wsc[i] != '\t' &&
@@ -1044,14 +1033,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             if (buf->indent_text && buf->indent_spaces > 0 &&
                 cur->type == LEPTRIS_NODE_TYPE_TEXT) {
                 LeptrisTextNode* itn = (LeptrisTextNode*)cur;
-                const char* isc;
-                size_t isl;
-                if (itn->borrowed && itn->content_len > 0) {
-                    isc = itn->content; isl = itn->content_len;
-                } else {
-                    isc = leptris_text_get_content(itn);
-                    isl = isc ? itn->content_len : 0;
-                }
+                const char* isc = itn->content;
+                size_t isl = isc ? itn->content_len : 0;
                 int ws_only = 1;
                 for (size_t k = 0; k < isl; k++) {
                     char c = isc[k];
@@ -1191,16 +1174,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * NUL-terminate, which the escaper doesn't need
                  * (it's length-bounded). Entity-bearing text still
                  * materializes for correct expansion. */
-                const char* tc0;
-                size_t tl0;
-                if (tn0->borrowed && tn0->content_len > 0 &&
-                    !memchr(tn0->content, '&', tn0->content_len)) {
-                    tc0 = tn0->content;
-                    tl0 = tn0->content_len;
-                } else {
-                    tc0 = leptris_text_get_content(tn0);
-                    tl0 = tc0 ? tn0->content_len : 0;
-                }
+                const char* tc0 = tn0->content;
+                size_t tl0 = tc0 ? tn0->content_len : 0;
                 /* Pretty mode fuses newline + indent + open + text +
                  * close into the same single reservation — leaves
                  * otherwise pay ~8 capacity-checked appends each
@@ -1570,16 +1545,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             }
             if (buf->indent_spaces == 0) {
                 LeptrisTextNode* tn = (LeptrisTextNode*)fc;
-                const char* tc;
-                size_t tlen;
-                if (tn->borrowed && tn->content_len > 0 &&
-                    !memchr(tn->content, '&', tn->content_len)) {
-                    tc = tn->content;
-                    tlen = tn->content_len;
-                } else {
-                    tc = leptris_text_get_content(tn);
-                    tlen = tc ? tn->content_len : 0;
-                }
+                const char* tc = tn->content;
+                size_t tlen = tc ? tn->content_len : 0;
                 buffer_ensure_capacity(buf, 2 + epl + nl + 6 * tlen + 2 + 1);
                 char* te = buf->data + buf->size;
                 *te++ = '>';

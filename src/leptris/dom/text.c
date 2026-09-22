@@ -4,8 +4,6 @@
 
 #include "text.h"
 #include "../memory/pool.h"
-#include "../common/entities.h"
-#include "../common/string_view.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,8 +34,6 @@ LeptrisTextNode* leptris_text_create(const char* content,
      * recycles dirty pages — a stale binding_wrapper would hand
      * bindings a dangling pointer. */
     node->base.binding_wrapper = NULL;
-    node->pool = NULL;       /* content is pool-resident + NUL-terminated */
-    node->borrowed = 0;
     node->parent_off = 0;
     node->next_sibling_off = 0;
 
@@ -46,7 +42,7 @@ LeptrisTextNode* leptris_text_create(const char* content,
     }
     content_storage[content_len] = '\0';
     node->content = content_storage;
-    node->content_len = content_len;
+    node->content_len = (uint32_t)content_len;
 
     return node;
 }
@@ -55,8 +51,10 @@ LeptrisTextNode* leptris_text_create(const char* content,
  *
  * Allocates only sizeof(LeptrisTextNode) from the pool — no content
  * copy. Stores the caller's pointer + length; content is NOT
- * NUL-terminated. The pool is kept on the node so a later
- * leptris_text_get_content call can materialize a NUL-terminated copy. */
+ * run is already NUL-terminated at content[content_len] and outlives
+ * the document (every parse lane terminates the run in the doc-owned
+ * input copy before carving). The node struct itself still comes from
+ * the parser's pool. */
 LeptrisTextNode* leptris_text_create_borrowed(const char* content,
                                              size_t content_len,
                                              LeptrisMemoryPool* pool) {
@@ -72,10 +70,9 @@ LeptrisTextNode* leptris_text_create_borrowed(const char* content,
      * uninitialized raw bit silently flips DOE/cdata behavior by
      * build configuration. */
     node->base.raw = 0;
-    node->content = (char*)content;  /* Non-owning; caller guarantees lifetime. */
-    node->content_len = content_len;
-    node->pool = pool;
-    node->borrowed = 1;
+    node->base.binding_wrapper = NULL;
+    node->content = (char*)content;  /* Non-owning; caller guarantees lifetime + termination. */
+    node->content_len = (uint32_t)content_len;
     node->parent_off = 0;
     node->next_sibling_off = 0;
 
@@ -94,74 +91,12 @@ void leptris_text_free(LeptrisTextNode* text) {
 
 /* Get text content.
  *
- * For a borrowed (non-NUL-terminated) node this lazily materializes a
- * NUL-terminated copy into the node's pool and flips the node out of
- * borrowed mode, so subsequent calls are O(1). The materialized copy
- * is pool-owned and freed by leptris_document_free. */
+ * #1285 slice 4: content is ALWAYS NUL-terminated — pooled copies and
+ * in-place parse-buffer runs alike — so this is a plain field read.
+ * Entities are expanded at parse time (the XML dp decodes '&' runs
+ * eagerly; the HTML builder routes them to its decode path), never
+ * here. */
 const char* leptris_text_get_content(LeptrisTextNode* text) {
     if (!text) return NULL;
-
-    if (text->borrowed && text->pool) {
-        /* #1218 slice 2: an in-place terminated run (the parser
-         * wrote the NUL into the doc-owned input copy) is already
-         * materialized — serve it directly when it carries no
-         * entity. A run WITH '&' still takes the expansion path
-         * below (dp-borrowed nodes rely on it). */
-        if (text->content_len > 0 &&
-            text->content[text->content_len] == '\0' &&
-            memchr(text->content, '&', text->content_len) == NULL) {
-            return text->content;
-        }
-        /* Entity expansion: if the borrowed content contains '&',
-         * expand predefined XML entities (&amp;, &lt;, etc.) and
-         * numeric character references (&#65;, &#x42;) into a new
-         * pool allocation. DTD-defined entities are NOT expanded
-         * here — inputs with DOCTYPE internal subsets are routed to
-         * the legacy parser which handles them eagerly. This lazy
-         * path lets the fast direct_parse/flat_parse parsers handle
-         * the common case of predefined-entity-only inputs at full
-         * speed (zero entity cost on the parse hot path; expansion
-         * only happens when text content is actually read). */
-        if (text->content_len > 0 &&
-            memchr(text->content, '&', text->content_len) != NULL) {
-            LeptrisStringView sv = leptris_sv_from_ptr(text->content,
-                                                      text->content_len);
-            char* expanded = leptris_decode_entities_view(&sv, text->pool);
-            if (expanded) {
-                text->content = expanded;
-                text->content_len = strlen(expanded);
-                text->borrowed = 0;
-                return text->content;
-            }
-            /* Expansion failed (malformed entity, OOM) — fall
-             * through to raw materialization so callers still get
-             * a NUL-terminated string. */
-        }
-        char* storage = (char*)leptris_pool_alloc(text->pool, text->content_len + 1);
-        if (!storage) return text->content;  /* Out of pool; return what we have. */
-        if (text->content_len > 0) {
-            memcpy(storage, text->content, text->content_len);
-        }
-        storage[text->content_len] = '\0';
-        text->content = storage;
-        text->borrowed = 0;
-    }
-
-    return text->content;
-}
-
-/* Set text content */
-void leptris_text_set_content(LeptrisTextNode* text, const char* content) {
-    if (!text) return;
-
-    if (text->content && !text->borrowed) free(text->content);
-    if (content) {
-        text->content_len = strlen(content);
-        text->content = leptris_strdup(content);
-    } else {
-        text->content_len = 0;
-        text->content = NULL;
-    }
-    text->borrowed = 0;
-    text->pool = NULL;
+    return text->content ? text->content : "";
 }
