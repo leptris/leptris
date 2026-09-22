@@ -779,6 +779,19 @@ LEPTRIS_API const char* leptris_pi_node_get_data(LeptrisNodeRef node);
 LEPTRIS_API LeptrisDocument leptris_document_create(void);
 
 /**
+ * Create an empty HTML-mode document (#1309)
+ *
+ * Identical to leptris_document_create except the document carries
+ * html_mode: the default serializer emits §16.2 HTML output (void
+ * elements unclosed, raw-text script/style, HTML attribute
+ * escaping). Build with the regular element APIs.
+ *
+ * @return New empty HTML document, or NULL on failure
+ * Memory: free with leptris_document_free.
+ */
+LEPTRIS_API LeptrisDocument leptris_document_create_html(void);
+
+/**
  * Attach an element as the document's root element
  *
  * The element must have been created against @p doc (via
@@ -2455,6 +2468,35 @@ LEPTRIS_API char* leptris_document_serialize_ext_sized(LeptrisDocument doc,
     const LeptrisSerializeOptions* options,
     const LeptrisSerializeExtOptions* ext,
     size_t ext_size);
+
+/**
+ * Serialize a document with the §16.2 HTML method (#1309)
+ *
+ * Forces the HTML serialization rules (void elements unclosed,
+ * raw-text script/style, HTML attribute escaping) regardless of the
+ * document's mode — the XSLT method="html" semantic, public.
+ * HTML-parsed and create_html documents get this behavior by
+ * default; this entry forces it on any document.
+ *
+ * @param doc Document
+ * @param options Frozen serialize options (NULL = defaults)
+ * @return Serialized HTML string
+ * Memory: Caller must call leptris_free_string() when done.
+ */
+LEPTRIS_API char* leptris_document_serialize_html(
+    LeptrisDocument doc, const LeptrisSerializeOptions* options);
+
+/**
+ * Save a document as HTML to a file (#1309)
+ *
+ * @param doc Document
+ * @param filepath Destination path
+ * @param options Frozen serialize options (NULL = defaults)
+ * @return LEPTRIS_OK (0), or a negative LeptrisStatus on failure
+ */
+LEPTRIS_API int leptris_document_save_html(LeptrisDocument doc,
+                                           const char* filepath,
+                                           const LeptrisSerializeOptions* options);
 
 /**
  * Extended element serialization (issue #882): the same option

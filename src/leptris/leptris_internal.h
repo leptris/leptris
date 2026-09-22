@@ -226,6 +226,9 @@ struct leptris_document {
      * xml_buffer) and resolves queries via binary search, caching
      * the result in the node with the high bit set. NULL = not yet
      * built. Freed with the document. */
+    int html_mode;   /* #1309: HTML-parsed / create_html documents
+                          serialize with the §16.2 HTML method by
+                          default (libxml2/Nokogiri behavior). */
     uint32_t* line_breaks;
     /* #1285 slice 3a: parser-recorded source offsets (#1124) moved
      * OUT of the element struct — open-addressed insert-only table

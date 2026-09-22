@@ -12,11 +12,25 @@ extern "C" {
 
 namespace {
 
+/* Tree-shape dumps force the XML method (ext.html_method = -1,
+ * #1309): the HTML parse entries now default documents to HTML
+ * serialization, and these specs compare TREE shape — void-element
+ * form and head spelling are covered by test_html_builder. */
+static char* dump_xml(LeptrisDocument doc) {
+    LeptrisSerializeOptions opts;
+    memset(&opts, 0, sizeof(opts));
+    LeptrisSerializeExtOptions ext;
+    memset(&ext, 0, sizeof(ext));
+    ext.html_method = -1;
+    return leptris_document_serialize_ext_sized(doc, &opts, &ext,
+                                                sizeof(ext));
+}
+
 std::string Html(const char* in) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_html_string(in, std::strlen(in), &st);
     if (!doc) return "(parse-failed)";
-    char* out = leptris_document_serialize(doc, nullptr);
+    char* out = dump_xml(doc);
     std::string r = out ? out : "(null)";
     leptris_free_string(out);
     leptris_document_free(doc);
@@ -59,7 +73,7 @@ std::string Html4(const char* in) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_html4_string(in, std::strlen(in), &st);
     if (!doc) return "(parse-failed)";
-    char* out = leptris_document_serialize(doc, nullptr);
+    char* out = dump_xml(doc);
     std::string r = out ? out : "(null)";
     leptris_free_string(out);
     leptris_document_free(doc);
@@ -150,7 +164,7 @@ TEST(HtmlParse, LeadingCommentsBelongToTheDocument) {
     char* o1 = leptris_document_serialize(d1, nullptr);
     ASSERT_NE(o1, nullptr);
     EXPECT_STREQ(o1,
-        "<!-- lead --><html><head/><body><p>hi</p></body></html>");
+        "<!-- lead --><html><head></head><body><p>hi</p></body></html>");
     leptris_free_string(o1);
     leptris_document_free(d1);
 
@@ -160,7 +174,7 @@ TEST(HtmlParse, LeadingCommentsBelongToTheDocument) {
     char* o2 = leptris_document_serialize(d2, nullptr);
     ASSERT_NE(o2, nullptr);
     EXPECT_STREQ(o2,
-        "<!-- a --><!-- b --><html><head/><body><p>x</p></body>"
+        "<!-- a --><!-- b --><html><head></head><body><p>x</p></body>"
         "</html>");
     leptris_free_string(o2);
     leptris_document_free(d2);
@@ -172,7 +186,7 @@ TEST(HtmlParse, LeadingCommentsBelongToTheDocument) {
     ASSERT_NE(d3, nullptr);
     char* o3 = leptris_document_serialize(d3, nullptr);
     ASSERT_NE(o3, nullptr);
-    EXPECT_STREQ(o3, "<html><head/><body>hi<!-- c --></body></html>");
+    EXPECT_STREQ(o3, "<html><head></head><body>hi<!-- c --></body></html>");
     leptris_free_string(o3);
     leptris_document_free(d3);
 
@@ -335,7 +349,7 @@ TEST(HtmlParse, HeadCommentsNestIntoHead) {
     ASSERT_NE(o1, nullptr);
     EXPECT_STREQ(o1,
         "<!DOCTYPE html><html><head><!--c-->"
-        "<meta charset=\"utf8\"/></head><body/></html>");
+        "<meta charset=\"utf8\"></head><body></body></html>");
     leptris_free_string(o1);
     leptris_document_free(d1);
 
@@ -346,7 +360,7 @@ TEST(HtmlParse, HeadCommentsNestIntoHead) {
     char* o2 = leptris_document_serialize(d2, nullptr);
     ASSERT_NE(o2, nullptr);
     EXPECT_STREQ(o2,
-        "<html><head><meta/><!--c--><title>T</title></head>"
+        "<html><head><meta><!--c--><title>T</title></head>"
         "<body><p>x</p></body></html>");
     leptris_free_string(o2);
     leptris_document_free(d2);
@@ -359,7 +373,7 @@ TEST(HtmlParse, HeadCommentsNestIntoHead) {
     ASSERT_NE(o3, nullptr);
     EXPECT_STREQ(o3,
         "<!DOCTYPE html><html><body><!--c-->"
-        "<meta charset=\"utf8\"/></body></html>");
+        "<meta charset=\"utf8\"></body></html>");
     leptris_free_string(o3);
     leptris_document_free(d3);
 }
@@ -1717,7 +1731,7 @@ std::string HtmlN(const char* in, size_t len) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_html_string(in, len, &st);
     if (!doc) return "(parse-failed)";
-    char* out = leptris_document_serialize(doc, nullptr);
+    char* out = dump_xml(doc);
     std::string r = out ? out : "(null)";
     leptris_free_string(out);
     leptris_document_free(doc);

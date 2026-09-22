@@ -343,6 +343,11 @@ typedef struct {
      * Applies to the XML method only — HTML void elements keep
      * their HTML shapes. */
     int expand_empty;
+    /* §16.2 HTML method control (#1309): 0 = document default
+     * (HTML-parsed and create_html documents serialize as HTML),
+     * 1 = force HTML on any document, -1 = force XML (to_xml on an
+     * HTML document). XSLT method="html" maps to 1. */
+    int html_method;
 } LeptrisSerializeExtOptions;
 
 /* ============================================================================

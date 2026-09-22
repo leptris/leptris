@@ -5424,6 +5424,9 @@ static LeptrisDocument html_parse_shared(
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;
     }
+    /* #1309: HTML documents serialize with the HTML method by
+     * default (libxml2/Nokogiri behavior) — <br>, not <br/>. */
+    doc->html_mode = 1;
     HBuilder b;
     memset(&b, 0, sizeof(b));
     b.frameset_ok = 1;
