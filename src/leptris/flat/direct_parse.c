@@ -21,6 +21,7 @@
  * entities), the caller falls back to flat_parse + promote.
  */
 #include "direct_parse.h"
+#include "il_scan.h"
 #include "../memory/arena.h"
 #include "../dom/element.h"
 #include "../dom/root_doc_map.h"
@@ -2046,37 +2047,7 @@ fail:
  * ============================================================================
  */
 
-#define IL_NONE 0xFFFFFFFFu
 
-typedef struct IlRec {
-    uint32_t off;            /* elem: raw name incl. prefix; text: content */
-    uint32_t len;
-    uint32_t parent;         /* record index, IL_NONE for the root */
-    uint32_t next_sib;       /* record index, IL_NONE = last sibling */
-    uint32_t line;           /* byte offset of '<' (or text start) + 1 */
-    uint32_t start_tag_end;  /* byte offset after '>' (0 when !line_ok) */
-    uint32_t elem_end;       /* after close '>' (self-close = start) */
-    uint32_t first_attr;     /* attr array index, IL_NONE = none */
-    uint32_t attr_count;
-    uint8_t  kind;           /* 0 = element, 1 = text */
-    uint8_t  self_closing;
-    uint8_t  open_prefixed;
-    uint8_t  has_open_parent;
-} IlRec;
-
-typedef struct IlAttr {
-    uint32_t name_off, name_len, val_off, val_len;
-    uint32_t has_ws;         /* literal \t/\n/\r — §3.3.3 normalization */
-} IlAttr;
-
-typedef struct IlCtx {
-    IlRec* recs; size_t nrec, crec;
-    IlAttr* attrs; size_t nattr, cattr;
-    uint32_t open[DP_MAX_DEPTH];
-    uint32_t last_child[DP_MAX_DEPTH];
-    int depth;
-
-} IlCtx;
 
 static int il_push(IlCtx* c, const IlRec* r) {
     if (c->nrec == c->crec) {
@@ -2129,7 +2100,7 @@ static LEPTRIS_ALWAYS_INLINE size_t il_name_end(const char* s,
     return (size_t)(p - s);
 }
 
-static int il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
+int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
                    uint32_t* root_out, size_t* trail_off,
                    size_t* trail_len) {
     const char* send = s + len;
@@ -2654,6 +2625,46 @@ oom_early:
 }
 
 /* Public-gate: the interleaved lane try. NULL = bail to classic. */
+int leptris_il_run(const char* xml, size_t len, int drop_ws,
+                   IlCtx* c, char** scratch_out, uint32_t* root_out) {
+    *scratch_out = NULL;
+    c->recs = c->attrs = NULL;
+    c->nrec = c->crec = c->nattr = c->cattr = 0;
+    c->depth = 0;
+    if (!xml || len == 0 || len >= 0x7FFFFFFFu) return 0;
+
+    char* scratch = (char*)malloc(len + 65);
+    if (!scratch) return 0;
+    memcpy(scratch, xml, len);
+    memset(scratch + len, 0, 65);
+
+    memset(c, 0, sizeof(*c));
+    /* Same upfront-capacity policy as dp_il_try slice 3a. */
+    c->crec = len / 24 + 64;
+    c->recs = (IlRec*)malloc(c->crec * sizeof(IlRec));
+    c->cattr = len / 48 + 32;
+    c->attrs = (IlAttr*)malloc(c->cattr * sizeof(IlAttr));
+    if (!c->recs || !c->attrs) {
+        leptris_il_run_free(c, scratch);
+        return 0;
+    }
+    size_t toff, tlen;
+    if (!leptris_il_scan(scratch, len, drop_ws, c, root_out, &toff,
+                         &tlen)) {
+        leptris_il_run_free(c, scratch);
+        return 0;
+    }
+    *scratch_out = scratch;
+    return 1;
+}
+
+void leptris_il_run_free(IlCtx* c, char* scratch) {
+    free(c ? c->recs : NULL);
+    free(c ? c->attrs : NULL);
+    if (c) { c->recs = NULL; c->attrs = NULL; }
+    free(scratch);
+}
+
 static struct leptris_document* dp_il_try(const char* xml, size_t len,
                                           int drop_ws, int keep_ent,
                                           int dtd_attrs) {
@@ -2691,7 +2702,7 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
     }
     uint32_t root;
     size_t toff, tlen;
-    if (!il_scan(scratch, len, drop_ws, &c, &root, &toff, &tlen)) {
+    if (!leptris_il_scan(scratch, len, drop_ws, &c, &root, &toff, &tlen)) {
         free(c.recs); free(c.attrs);
         free(scratch);
         return NULL;
