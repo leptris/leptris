@@ -47,19 +47,31 @@ TEST(TextBorrowed, ParsedTextNodeIsTerminatedInPlace) {
     leptris_document_free(doc);
 }
 
-TEST(TextBorrowed, NodeStructIs48Bytes) {
+TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
     /* #1285 slice 4: pool + borrowed removed, content_len is uint32.
-     * 64 -> 48 bytes: the LeptrisNode base is 24 (binding_wrapper),
-     * and the content pointer forces 8-byte alignment, so 24+8+4+4+4
-     * rounds to 48 — the issue's 32B sketch assumed a 12-byte base.
-     * Going lower needs content as an int32 pool offset (slice 4b).
-     * The parse-time bulk strides (dp text block, il lane table)
-     * hardcode this layout economics — a silent size growth would
-     * erode the #1222 parse win this slice exists for. */
-    static_assert(sizeof(LeptrisTextNode) == 48,
-                  "LeptrisTextNode must stay 48 bytes (base 24 + ptr 8 + "
-                  "uint32 len 4 + int32 next 4 + int32 parent 4 + pad)");
+     * The width-independent invariant: base + ONE content pointer +
+     * three int32s (len, next, parent), rounded to pointer alignment
+     * — nothing else. 64 -> 48 on LP64; 32 on ILP32. The issue's
+     * 32B sketch assumed a 12-byte base and a 64-bit host; going
+     * lower needs content as an int32 pool offset (slice 4b). The
+     * parse-time bulk strides (dp text block, il lane table) hardcode
+     * this layout economics — a silent field growth would erode the
+     * #1222 parse win this slice exists for. */
+    /* C++11: no constexpr lambda — inline the round-up expression. */
+    constexpr size_t kRaw = sizeof(LeptrisNode) + sizeof(void*) +
+                            3 * sizeof(int32_t);
+    constexpr size_t kA = alignof(void*);
+    constexpr size_t kAligned = (kRaw + kA - 1) / kA * kA;
+    static_assert(sizeof(LeptrisTextNode) == kAligned,
+                  "LeptrisTextNode must be base + one content pointer + "
+                  "uint32 len + int32 next + int32 parent (aligned) — "
+                  "no pool/borrowed fields (#1285 slice 4)");
+    EXPECT_EQ(sizeof(LeptrisTextNode), kAligned);
+#if defined(__LP64__) || defined(_WIN64)
     EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)48);
+#else
+    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)32);
+#endif
 }
 
 TEST(TextBorrowed, PublicAccessorsReturnCorrectContent) {
