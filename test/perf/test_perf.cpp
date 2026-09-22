@@ -94,6 +94,7 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * regimes and flaked on shared CI runners — the parse side is
      * CPU-bound while the cache-resident memcpy sails through.) */
     double best = 1e18;
+    double worst = 0.0;
     /* Parse does far more work than memcpy over the same bytes, but
      * the multiple is a property of the algorithm, not the machine.
      * Healthy parse measures in the low hundreds x memcpy. min-of-4
@@ -105,7 +106,6 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * windows and fails only when EVERY attempt breaches. */
 #if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
     bool ok = false;
-    double worst = 0.0;
     for (int attempt = 0; attempt < 3 && !ok; attempt++) {
         if (attempt) std::this_thread::sleep_for(
             std::chrono::milliseconds(2000));
