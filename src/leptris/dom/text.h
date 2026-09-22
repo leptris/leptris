@@ -11,34 +11,26 @@
 #include "node.h"
 #include "compact.h"  /* compact-pointer helpers (TODO 121, TODO 178) */
 
-/* Text node - inherits from LeptrisNode.
- * TODO 179 Phase B: next_sibling is a 2-byte compact pointer (cp16,
- * scaled by 8). Covers ±256 KB — never overflows for realistic docs.
+/* Text node - inherits from LeptrisNode. 48 bytes (#1285 slice 4,
+ * was 64 — the pool/borrowed fields are gone because content is
+ * ALWAYS NUL-terminated: every producer terminates in place, so
+ * leptris_text_get_content is a plain field read).
  *
- * TODO 115 Phase A: content_len is the byte length of `content`,
- * excluding the NUL terminator.
- *
- * TODO 115 Phase B: a "borrowed" text node stores a pointer into a
- * caller-owned buffer (typically the parser's writable input buffer)
- * instead of pool-resident storage. `content_len` is the only
- * authoritative size — the run MAY be terminated in place (the HTML
- * builder and the interleaved XML lane write the terminator into the
- * doc-owned copy) or not (classic XML lane defers the NUL). The
- * `pool` field holds the pool for lazy materialization:
- * leptris_text_get_content serves terminated, entity-free runs in
- * place (no allocation, the node stays borrowed) and materializes a
- * pool-owned NUL-terminated copy otherwise, flipping the node out of
- * borrowed mode. (#1299: serve mode is lane-dependent by design;
- * both uphold the terminated-view contract.)
+ * #1285 slice 4 invariants:
+ * - `content` is NUL-terminated at content[content_len] in ALL
+ *   cases — pooled copies (leptris_text_create) and in-place runs
+ *   into the doc-owned input buffer alike (every parse lane
+ *   terminates the run at carve time).
+ * - content_len is uint32: a single text run is capped at 4 GB
+ *   (dp_text_create rejects beyond that); parse buffers that size
+ *   are outside every supported target.
  *
  * Issue #168: parent_off mirrors next_sibling_off so the parent of a
  * text node can be queried in O(1). */
 typedef struct leptris_text_node {
     LeptrisNode base;                   /* MUST be first */
-    char* content;                    /* Text content - NEVER trim! */
-    size_t content_len;               /* Byte length of content (excl. NUL) */
-    LeptrisMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
-    int borrowed;                     /* 1 = non-owning view; 0 = pool-resident (materialized). Not "unterminated": in-place-terminated runs stay borrowed (#1299). */
+    char* content;                    /* Text content - NEVER trim! NUL-terminated at [content_len] */
+    uint32_t content_len;             /* Byte length (excl. NUL); 4 GB cap */
     /* (#450) int32 sibling edge — was cp16 (±256 KB). Text nodes
      * link to ELEMENT siblings across the parse-time element↔text
      * block gap, which scales with document size and regularly
@@ -65,18 +57,14 @@ LeptrisTextNode* leptris_text_create(const char* content,
                                     size_t content_len,
                                     LeptrisMemoryPool* pool);
 
-/* Create a borrowed text node (TODO 115 Phase B).
+/* Create a text node borrowing the caller's bytes (parse hot path).
  *
- * Stores `content` as a non-owning pointer into the caller's buffer.
- * Content is NOT NUL-terminated; `content_len` is authoritative.
- *
- * The pool is stored on the node so that leptris_text_get_content can
- * lazily allocate a NUL-terminated copy on demand. Callers must ensure
- * `content` outlives the document (e.g. point into `doc->xml_buffer`).
- *
- * Use when the source bytes already live in a long-lived buffer and
- * the per-node pool allocation + memcpy that leptris_text_create would
- * do is worth avoiding on the parse hot path. */
+ * The node struct is pool-allocated; `content` is stored as a
+ * non-owning pointer into the caller's buffer — no memcpy. CALLER
+ * CONTRACT (#1285 slice 4): the run MUST already be NUL-terminated
+ * at content[content_len] and must outlive the document (parse
+ * lanes terminate the run in the doc-owned input copy before
+ * carving the node). */
 LeptrisTextNode* leptris_text_create_borrowed(const char* content,
                                              size_t content_len,
                                              LeptrisMemoryPool* pool);

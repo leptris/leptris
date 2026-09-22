@@ -1,18 +1,12 @@
-// test/dom/test_text_borrowed.cpp — TODO 115 Phase B/C: borrowed text nodes.
+// test/dom/test_text_borrowed.cpp — text node storage invariants.
 //
-// Verifies that the parser hands text nodes a non-owning view into the
-// document's writable input buffer (no per-node pool allocation for
-// content), that consumers see correct content despite a possibly
-// missing NUL terminator, and that leptris_text_get_content produces a
-// stable NUL-terminated view.
-//
-// #1299: the get_content serve mode is lane-dependent. When the parser
-// terminated the run in place (HTML builder, interleaved XML lane),
-// get_content serves the doc-owned pointer directly — no allocation,
-// the borrowed flag stays 1. Otherwise (classic XML lane, deferred
-// NUL) it materializes a pool-owned copy and flips the flag to 0.
-// Both modes must uphold the documented contract: correct bytes,
-// NUL-terminated view, pointer-stable across calls.
+// History: TODO 115 Phase B introduced borrowed (non-owning) text
+// content; #1299 documented lane-dependent get_content serve modes.
+// #1285 slice 4 COLLAPSED the model: content is ALWAYS NUL-terminated
+// (every parse lane terminates the run in the doc-owned buffer before
+// carving the node), the pool/borrowed fields are gone (node 64 -> 48
+// bytes), and leptris_text_get_content is a plain field read. These
+// tests now pin the slice-4 invariants.
 
 #include <gtest/gtest.h>
 #include <cstring>
@@ -26,7 +20,7 @@ extern "C" {
 #include "text.h"
 }
 
-TEST(TextBorrowed, ParsedTextNodeIsBorrowedFromInputBuffer) {
+TEST(TextBorrowed, ParsedTextNodeIsTerminatedInPlace) {
     const char xml[] = "<r>hello world</r>";
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
@@ -40,26 +34,32 @@ TEST(TextBorrowed, ParsedTextNodeIsBorrowedFromInputBuffer) {
     ASSERT_EQ(child->type, LEPTRIS_NODE_TYPE_TEXT);
 
     LeptrisTextNode* text = (LeptrisTextNode*)child;
-    EXPECT_EQ(text->borrowed, 1) << "text node should be borrowed from xml_buffer";
     EXPECT_EQ(text->content_len, std::strlen("hello world"));
-    /* The borrowed pointer does NOT point at the stack-local caller
-     * buffer: leptris_parse_string copies the input into doc->xml_buffer
-     * (lifetime = document's) and the borrowed view lands inside that
-     * copy. Just verify the pointer is non-NULL — the address range
-     * itself is internal to the document. */
-    EXPECT_NE(text->content, nullptr);
-
-    /* Serve mode is lane-dependent (#1299): a run terminated in place
-     * (HTML builder, interleaved lane) is served directly — the
-     * returned pointer IS the borrowed pointer and the flag stays 1;
-     * the classic lane materializes a fresh pool copy and flips to 0.
-     * Either way the view must be correct and pointer-stable. */
-    const char* first = leptris_text_get_content(text);
-    EXPECT_STREQ(first, "hello world");
-    EXPECT_EQ(leptris_text_get_content(text), first)
-        << "served view must be pointer-stable across calls";
+    /* #1285 slice 4: the run is NUL-terminated IN PLACE in the
+     * doc-owned input copy — no pool copy, no serve mode. */
+    ASSERT_NE(text->content, nullptr);
+    EXPECT_EQ(text->content[text->content_len], '\0')
+        << "run must be terminated at [content_len]";
+    /* get_content is a plain field read: same pointer, stable. */
+    EXPECT_EQ(leptris_text_get_content(text), text->content);
+    EXPECT_STREQ(leptris_text_get_content(text), "hello world");
 
     leptris_document_free(doc);
+}
+
+TEST(TextBorrowed, NodeStructIs48Bytes) {
+    /* #1285 slice 4: pool + borrowed removed, content_len is uint32.
+     * 64 -> 48 bytes: the LeptrisNode base is 24 (binding_wrapper),
+     * and the content pointer forces 8-byte alignment, so 24+8+4+4+4
+     * rounds to 48 — the issue's 32B sketch assumed a 12-byte base.
+     * Going lower needs content as an int32 pool offset (slice 4b).
+     * The parse-time bulk strides (dp text block, il lane table)
+     * hardcode this layout economics — a silent size growth would
+     * erode the #1222 parse win this slice exists for. */
+    static_assert(sizeof(LeptrisTextNode) == 48,
+                  "LeptrisTextNode must stay 48 bytes (base 24 + ptr 8 + "
+                  "uint32 len 4 + int32 next 4 + int32 parent 4 + pad)");
+    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)48);
 }
 
 TEST(TextBorrowed, PublicAccessorsReturnCorrectContent) {
@@ -128,9 +128,8 @@ TEST(TextBorrowed, MaterializationIsStableAcrossCalls) {
 
     LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
     LeptrisTextNode* text = (LeptrisTextNode*)child;
-    /* The flip is a materialize-path side effect, not the contract
-     * (#1299): in-place serve keeps borrowed at 1 — the mode is
-     * owned by ServeContractHoldsInBothParseLanes below. */
+    EXPECT_EQ(leptris_text_get_content(text), text->content)
+        << "get_content is a plain field read (#1285 slice 4)";
 
     const char* second = leptris_element_text(root);
     EXPECT_EQ(second, first) << "repeated calls return the same pointer";
@@ -167,16 +166,16 @@ TEST(TextBorrowed, ServeContractHoldsInBothParseLanes) {
         ASSERT_EQ(child->type, LEPTRIS_NODE_TYPE_TEXT);
 
         LeptrisTextNode* text = (LeptrisTextNode*)child;
-        /* non-owning in both lanes */
-        EXPECT_EQ(text->borrowed, 1);
         EXPECT_EQ(text->content_len, std::strlen("hello world"));
+        /* terminated in place in BOTH lanes (#1285 slice 4) */
+        ASSERT_NE(text->content, nullptr);
+        EXPECT_EQ(text->content[text->content_len], '\0');
 
         const char* a = leptris_text_get_content(text);
         ASSERT_NE(a, nullptr);
         EXPECT_STREQ(a, "hello world");
-        EXPECT_EQ(leptris_text_get_content(text), a)
-            << "served view must be pointer-stable across calls";
-        /* still correct after the first access */
+        EXPECT_EQ(a, text->content)
+            << "get_content returns the in-place pointer in both lanes";
         EXPECT_STREQ(leptris_element_text(root), "hello world");
 
         leptris_document_free(doc);

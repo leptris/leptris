@@ -3035,17 +3035,12 @@ static void strip_source_whitespace(XsltExec* ex) {
             if (!ws_only(t)) continue;
             /* Empty in place — never unlink (compact-parse text
              * nodes link via int32 offsets that unlinking can
-             * orphan for following siblings) and never call
-             * leptris_text_set_content: get_content may have
-             * materialized the content into POOL memory which
-             * set_content would free(). Direct field writes with
-             * borrowed=1 + pool=NULL leave the node readable ("")
-             * and safe from every free path. */
+             * orphan for following siblings). Direct field write
+             * to a static "" keeps the node readable and the
+             * pointer NUL-terminated (#1285 slice 4 contract). */
             LeptrisTextNode* tn = (LeptrisTextNode*)c;
             tn->content = (char*)"";
             tn->content_len = 0;
-            tn->borrowed = 1;
-            tn->pool = NULL;
         }
     }
 }
