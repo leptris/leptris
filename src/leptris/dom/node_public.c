@@ -662,8 +662,8 @@ LEPTRIS_API void leptris_node_source_position(LeptrisNodeRef node,
 
     if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) return;
     LeptrisElement elem = (LeptrisElement)node;
-    size_t start_tag_end = elem->start_tag_end_off;
-    size_t element_end = elem->element_end_off;
+    uint32_t start_tag_end = 0, element_end = 0;
+    leptris_elem_pos_lookup(doc, elem, &start_tag_end, &element_end);
     if (start_tag_end > doc->xml_buffer_len || element_end > doc->xml_buffer_len)
         return;
 

@@ -903,7 +903,7 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
 }
 static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
                                                 LeptrisElement elem) {
-    if (elem->ns_cache) return elem->ns_cache;
+    if (elem_get_ns_cache(elem)) return elem_get_ns_cache(elem);
     struct leptris_ns_cache* c;
     if (p->nsc_cursor < p->nsc_end) {
         c = p->nsc_cursor++;
@@ -921,7 +921,7 @@ static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
     c->doc_next = NULL;
     c->prefix_heap = 0;
     c->uri_heap = 0;
-    elem->ns_cache = c;
+    elem_set_ns_cache(elem, c);
     return c;
 }
 
@@ -1594,9 +1594,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
             if (self_closing < 0) goto fail;
-            elem->start_tag_end_off = p.line_offsets_ok
-                ? (uint32_t)(p.pos - p.buf) : 0u;
-            if (self_closing) elem->element_end_off = elem->start_tag_end_off;
+            if (p.line_offsets_ok) {
+                uint32_t ste = (uint32_t)(p.pos - p.buf);
+                leptris_elem_pos_record(p.doc, elem, ste,
+                                        self_closing ? ste : 0u);
+            }
 
             /* NOW safe to NUL-terminate the name — dp_parse_attrs
              * has finished scanning the open tag. */
@@ -1709,8 +1711,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                               close_local_len) != 0) {
                 goto fail;
             }
-            open->element_end_off = p.line_offsets_ok
-                ? (uint32_t)(p.pos - p.buf) : 0u;
+            if (p.line_offsets_ok) {
+                uint32_t ste = 0, ee = (uint32_t)(p.pos - p.buf);
+                leptris_elem_pos_lookup(p.doc, open, &ste, NULL);
+                leptris_elem_pos_record(p.doc, open, ste, ee);
+            }
             p.depth--;
             /* Clear the closed level's tail cache (AFTER the
              * decrement: at max depth the pre-decrement index would
@@ -2433,8 +2438,9 @@ static struct leptris_document* dp_il_build(
             e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
             e->base.line = r->line;
             e->base.frozen = 1;
-            e->start_tag_end_off = r->start_tag_end;
-            e->element_end_off = r->elem_end;
+            if (r->start_tag_end)
+                leptris_elem_pos_record(doc, e, r->start_tag_end,
+                                        r->elem_end);
             /* Element name as a NUL'd scratch view — the byte
              * after the name (ws/'>'/'/') is dead after the scan,
              * same as attr names/values. Removes the per-element

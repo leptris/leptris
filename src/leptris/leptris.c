@@ -957,6 +957,10 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
      * inplace documents that don't own the xml_buffer. */
     free(doc->line_breaks);
     doc->line_breaks = NULL;
+    /* #1285 slice 3a: element source-offset side table. */
+    free(doc->elem_pos);
+    doc->elem_pos = NULL;
+    doc->elem_pos_count = doc->elem_pos_cap = 0;
     if (doc->xml_buffer && doc->xml_buffer_needs_free) {
         /* Release through the retained-buffer free list (see
          * memory/arena.c): large inputs would otherwise be munmapped
