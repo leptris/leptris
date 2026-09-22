@@ -4,7 +4,15 @@
 
 ### Performance
 
-- zero-re-copy element opens — borrowed names (#1285 slice 5) (html)
+- **html:** zero-re-copy element opens (#1285 slice 5, #1315): HTML
+  element names dropped from two pool allocations + copies per open to
+  one — the builder stores the lowercased pooled name (or the static
+  literal of a synthesized open) directly, with no second copy, no QName
+  split, and no colon re-copy. Local table-row parse (the #1218
+  fixture): 33.1 → 35.3 MB/s best-of on a contended arm64 host; the CI
+  benchmark leg is the authoritative read. Semantics pinned by 8 new
+  specs (case folding, literal QNames, attributes across every
+  delimiter shape, hidden-input gating, image→img).
 
 
 
