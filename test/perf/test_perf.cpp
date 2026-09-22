@@ -20,10 +20,12 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <thread>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include "leptris.h"
 
-#include <chrono>
 #include <string>
 
 #if defined(__has_feature)
@@ -92,27 +94,36 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * regimes and flaked on shared CI runners — the parse side is
      * CPU-bound while the cache-resident memcpy sails through.) */
     double best = 1e18;
-    for (int rep = 0; rep < 4; rep++) {
-        double ratio = ParseBenchUs(xml, std::strlen(xml), 5000) /
-                       MemcpyRefUs(xml, std::strlen(xml), 5000);
-        if (ratio < best) best = ratio;
-    }
     /* Parse does far more work than memcpy over the same bytes, but
      * the multiple is a property of the algorithm, not the machine.
-     * Healthy parse measures in the low hundreds x memcpy (measured
-     * 160-180 on a debug build locally). Sustained CPU contention on
-     * shared macOS runners inflates the CPU-bound parse side while
-     * the cache-resident memcpy reference is unaffected — observed
-     * band tops out just past 1000 even with min-of-4 (which only
-     * filters TRANSIENT preemption). 1500 keeps >4x detection margin
-     * against a real 10x algorithmic regression (>= 1700) while
-     * absorbing the sustained-contention band; three CI reruns were
-     * burned on this before the band was measured. */
+     * Healthy parse measures in the low hundreds x memcpy. min-of-4
+     * filters TRANSIENT preemption but not SUSTAINED contention: the
+     * 1500 budget was breached three times in one day (2026-09-22,
+     * Windows 2455 + macOS runners) while the algorithm was
+     * unchanged. A real 10x regression (>= 1700) is PERSISTENT;
+     * contention is not — so the gate retries across settling
+     * windows and fails only when EVERY attempt breaches. */
 #if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
-        EXPECT_LT(best, 1500.0)
-            << "Small-doc parse regression: parse/memcpy ratio " << best;
+    bool ok = false;
+    double worst = 0.0;
+    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+        if (attempt) std::this_thread::sleep_for(
+            std::chrono::milliseconds(2000));
+        best = INFINITY;
+        for (int rep = 0; rep < 4; rep++) {
+            double ratio = ParseBenchUs(xml, std::strlen(xml), 5000) /
+                           MemcpyRefUs(xml, std::strlen(xml), 5000);
+            if (ratio < best) best = ratio;
+        }
+        if (best > worst) worst = best;
+        ok = best < 1500.0;
+    }
+    EXPECT_TRUE(ok)
+        << "Small-doc parse regression: parse/memcpy ratio breached "
+               "1500 on all 3 attempts (worst " << worst << ")";
 #else
     (void)best;
+    (void)worst;
 #endif
 }
 #endif  // Apple Intel skip
