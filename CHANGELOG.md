@@ -2,12 +2,20 @@
 
 ## [1.9.225] - 2026-09-22
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **html: public HTML construction + serialization surface (#1309,
+  #1311).** HTML documents now serialize AS HTML by default
+  (libxml2/Nokogiri behavior): void elements unclosed (`<br>`,
+  `<meta charset="utf-8">`), raw-text script/style verbatim,
+  childless non-voids explicitly closed, no XML declaration. New:
+  `leptris_document_create_html()`, `leptris_document_serialize_html()`,
+  `leptris_document_save_html()`, and `LeptrisSerializeExtOptions.html_method`
+  (tri-state: 0 = document default, 1 = force HTML, -1 = force XML —
+  to_xml on an HTML doc). Element-level `html_method` maps through the
+  ext serializer too. HTML-parsed documents (whatwg + html4 modes)
+  carry the mode automatically; XSLT `method="html"` output unchanged
+  (#1312).
 
 
 ## [1.9.224] - 2026-09-22
