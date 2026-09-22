@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.224] - 2026-09-22
+
+### Fixed
+
+- free the elem_pos table on the dp fail path (mem)
+- declare worst outside the NDEBUG branch (test)
+
+### Performance
+
+- element 72->64B — ns_cache_off + source-offset side table (#1285 slice 3a) (dom)
+
+
+
 ## [1.9.223] - 2026-09-22
 
 ### Added
