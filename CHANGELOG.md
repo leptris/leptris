@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.222] - 2026-09-22
+
+### Fixed
+
+- interleaved lane drops attribute namespace URIs (#1295) (parse)
+- borrowed-text contract vs lane-dependent get_content serve modes (#1299) (dom)
+
+
+
 ## [1.9.221] - 2026-09-22
 
 ### Performance
