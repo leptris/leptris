@@ -210,6 +210,39 @@ jobs:
           '
 
 
+  test-interleaved-lane:
+    # #1299 gate: the env-gated interleaved parse lane is invisible to
+    # the default suite (it only runs when LEPTRIS_INTERLEAVED=1), so
+    # lane divergences ship unnoticed — 1.9.221 carried two
+    # TextBorrowed contract breaks a forced run exposes immediately.
+    name: Test suite with interleaved parse lane forced
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libutf8proc-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_ENABLE_ICONV=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests (LEPTRIS_INTERLEAVED=1)
+        env:
+          LEPTRIS_INTERLEAVED: "1"
+        run: ctest --test-dir build --output-on-failure --build-config Release
+
   test-amalgamated:
     name: Amalgamated build (single TU)
     runs-on: ubuntu-latest

@@ -20,10 +20,16 @@
  *
  * TODO 115 Phase B: a "borrowed" text node stores a pointer into a
  * caller-owned buffer (typically the parser's writable input buffer)
- * instead of pool-resident storage. Its `content` is NOT NUL-terminated
- * — `content_len` is the only authoritative size. The `pool` field
- * holds the pool to use for lazy materialization when a consumer asks
- * for a NUL-terminated view via leptris_text_get_content.
+ * instead of pool-resident storage. `content_len` is the only
+ * authoritative size — the run MAY be terminated in place (the HTML
+ * builder and the interleaved XML lane write the terminator into the
+ * doc-owned copy) or not (classic XML lane defers the NUL). The
+ * `pool` field holds the pool for lazy materialization:
+ * leptris_text_get_content serves terminated, entity-free runs in
+ * place (no allocation, the node stays borrowed) and materializes a
+ * pool-owned NUL-terminated copy otherwise, flipping the node out of
+ * borrowed mode. (#1299: serve mode is lane-dependent by design;
+ * both uphold the terminated-view contract.)
  *
  * Issue #168: parent_off mirrors next_sibling_off so the parent of a
  * text node can be queried in O(1). */
@@ -32,7 +38,7 @@ typedef struct leptris_text_node {
     char* content;                    /* Text content - NEVER trim! */
     size_t content_len;               /* Byte length of content (excl. NUL) */
     LeptrisMemoryPool* pool;           /* Pool for lazy materialization (NULL if content is NUL-term'd) */
-    int borrowed;                     /* 1 = content is borrowed (non-NUL-term'd) */
+    int borrowed;                     /* 1 = non-owning view; 0 = pool-resident (materialized). Not "unterminated": in-place-terminated runs stay borrowed (#1299). */
     /* (#450) int32 sibling edge — was cp16 (±256 KB). Text nodes
      * link to ELEMENT siblings across the parse-time element↔text
      * block gap, which scales with document size and regularly
