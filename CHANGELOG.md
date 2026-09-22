@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.221] - 2026-09-22
+
+### Performance
+
+- per-document overflow teardown (#682 dispatch row) (dom)
+
+
+
 ## [1.9.220] - 2026-09-21
 
 ### Performance
