@@ -2382,6 +2382,98 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
         }
     }
 }
+
+/* String literal body -> decoded value (malloc'd). XQuery 3.1
+ * 3.1.1: character references (&#xD;, &#x41;, &#x1F600;) expand to
+ * the referenced codepoint -- EXEMPT from line-end normalization
+ * (QT3 K-CodepointToStringFunc-13) -- and the five predefined
+ * entity refs expand likewise. A '&' that is not a well-formed
+ * reference stays literal (the text-path leniency). Codepoints are
+ * UTF-8 encoded, so astral refs work. */
+static char* decode_string_literal(const char* p, size_t n) {
+    char* out = (char*)malloc(n + 1);
+    if (!out) return NULL;
+    size_t o = 0;
+    const char* pe = p + n;
+    while (p < pe) {
+        if (*p != '&') {
+            out[o++] = *p++;
+            continue;
+        }
+        const char* semi = memchr(p, ';', (size_t)(pe - p));
+        static const char* const k_predef[] = { "amp", "lt", "gt",
+                                                "quot", "apos" };
+        static const char k_predef_ch[] = { '&', '<', '>', '"', '\'' };
+        int handled = 0;
+        if (semi && (size_t)(semi - p) <= 12) {
+            size_t rl = (size_t)(semi - p - 1);
+            const char* r = p + 1;
+            if (*r == '#') {
+                r++;
+                int hex = 0;
+                if (r < semi && (*r == 'x' || *r == 'X')) {
+                    hex = 1;
+                    r++;
+                }
+                unsigned long cp = 0;
+                const char* ds = r;
+                while (r < semi) {
+                    char c = *r;
+                    int dv = hex ? (c >= '0' && c <= '9')
+                                       ? c - '0'
+                                       : (c >= 'a' && c <= 'f')
+                                             ? c - 'a' + 10
+                                             : (c >= 'A' && c <= 'F')
+                                                   ? c - 'A' + 10
+                                                   : -1
+                                : (c >= '0' && c <= '9') ? c - '0' : -1;
+                    if (dv < 0) break;
+                    cp = cp * (hex ? 16ul : 10ul) + (unsigned long)dv;
+                    if (cp > 0x110000ul) cp = 0x110001ul;
+                    r++;
+                }
+                if (r == semi && r > ds &&
+                    (cp == 0x9ul || cp == 0xAul || cp == 0xDul ||
+                     (cp >= 0x20ul && cp <= 0x10FFFFul)) &&
+                    (cp < 0xD800ul || cp > 0xDFFFul)) {
+                    if (cp < 0x80ul) {
+                        out[o++] = (char)cp;
+                    } else if (cp < 0x800ul) {
+                        out[o++] = (char)(0xC0 | (cp >> 6));
+                        out[o++] = (char)(0x80 | (cp & 0x3F));
+                    } else if (cp < 0x10000ul) {
+                        out[o++] = (char)(0xE0 | (cp >> 12));
+                        out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                        out[o++] = (char)(0x80 | (cp & 0x3F));
+                    } else {
+                        out[o++] = (char)(0xF0 | (cp >> 18));
+                        out[o++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                        out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                        out[o++] = (char)(0x80 | (cp & 0x3F));
+                    }
+                    handled = 1;
+                }
+            } else {
+                for (int i = 0; i < 5; i++) {
+                    if (rl == strlen(k_predef[i]) &&
+                        memcmp(r, k_predef[i], rl) == 0) {
+                        out[o++] = k_predef_ch[i];
+                        handled = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (handled) {
+            p = semi + 1;
+        } else {
+            out[o++] = *p++;
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
 static XPathASTNode* parse_primary_expr(XPathParser* parser) {
     XPathToken* tok = current_token(parser);
     if (!tok) {
@@ -2423,13 +2515,21 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathASTNode* node = ast_node_new(XPATH_AST_STRING);
         if (!node) return NULL;
 
-        /* Remove quotes */
+        /* Remove quotes; expand references when present. The scan
+         * for '&' keeps the plain-literal path a memcpy (the common
+         * case pays nothing). */
         if (tok->value_len >= 2) {
-            size_t len = tok->value_len - 2;
-            node->value = LEPTRIS_ALLOC_N(char, len + 1);
-            if (node->value) {
-                memcpy(node->value, tok->value + 1, len);
-                node->value[len] = '\0';
+            const char* bp = tok->value + 1;
+            size_t blen = tok->value_len - 2;
+            if (blen && memchr(bp, '&', blen)) {
+                node->value = decode_string_literal(bp, blen);
+            }
+            if (!node->value) {
+                node->value = LEPTRIS_ALLOC_N(char, blen + 1);
+                if (node->value) {
+                    memcpy(node->value, bp, blen);
+                    node->value[blen] = '\0';
+                }
             }
         }
         advance_token(parser);
