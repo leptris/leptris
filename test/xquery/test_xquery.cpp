@@ -793,3 +793,31 @@ TEST(XQueryCore, StringLiteralCharacterReferences) {
     EXPECT_EQ(seq_string(doc, "string(\"a&b\")"), "a&b");
     leptris_document_free(doc);
 }
+
+TEST(XQueryLeaks, RepeatedFunctionDeclarationEvalsDoNotLeak) {
+    /* The per-eval registry path: every eval with a `declare
+     * function` prolog built a fresh fn registry whose cleanup was
+     * gated on context.registry_borrowed — a flag xpath_context_init
+     * left as stack garbage on the common no-custom-fns path, so
+     * the registry (and its table) leaked whenever the bytes read
+     * nonzero. Surfaced as the CI-ASAN abort on Qt3Subset.FnCount
+     * (fn-count corpus, 200+ declare-function evals). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    const char* q =
+        "declare function local:f($n as xs:integer) as xs:integer "
+        "{ $n + 1 }; local:f(41)";
+    for (int i = 0; i < 64; i++) {
+        LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
+        ASSERT_NE(xq, nullptr);
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, nullptr);
+        ASSERT_NE(r, nullptr);
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr);
+        EXPECT_STREQ(s, "42");
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}

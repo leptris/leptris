@@ -126,6 +126,12 @@ void xpath_context_init(XPathContext* context,
     context->input_len = 0;
 
     extern XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document*);
+    /* The borrow flag MUST be established on every init: the
+     * context is stack storage and cleanup's registry-free is
+     * gated on this flag — stale stack bytes read as borrowed=1
+     * and leak the per-eval XQuery registry (the common no-custom
+     * -fns path never wrote the flag). */
+    context->registry_borrowed = 0;
     context->function_registry = leptris_xpath_build_custom_registry(document);
     if (!context->function_registry) {
         context->function_registry = xpath_function_registry_get_standard();
