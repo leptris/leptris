@@ -3908,7 +3908,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 w9++;
         if (t9 && w9 && t9[w9]) {
             LeptrisTextNode* tn9 = (LeptrisTextNode*)n;
-            tn9->content = t9 + w9;
+            leptris_textnode_set_content_ptr(tn9, t9 + w9);
             tn9->content_len -= w9;
         } else if (t9 && w9 && !t9[w9]) {
             return;   /* pure before-head ws: dropped (tests7:7) */

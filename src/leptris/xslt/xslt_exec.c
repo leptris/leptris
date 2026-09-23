@@ -460,7 +460,9 @@ static char* string_value_deep(LeptrisElement e) {
         LeptrisNodeRef n = stack[--sp];
         int ty = leptris_node_get_type(n);
         if (ty == LEPTRIS_NODE_TYPE_TEXT || ty == LEPTRIS_NODE_TYPE_CDATA) {
-            const char* t = leptris_text_get_content((LeptrisTextNode*)n);
+            const char* t = (ty == LEPTRIS_NODE_TYPE_CDATA)
+                ? leptris_cdata_get_content((LeptrisCDATANode*)n)
+                : leptris_text_get_content((LeptrisTextNode*)n);
             if (t) {
                 size_t tl = strlen(t);
                 if (len + tl + 1 > cap) {
@@ -2734,8 +2736,12 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
         if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
             copy_node_deep(ex, (LeptrisElement)c, e);
         } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
+            /* #1285 slice 4b: text and CDATA structs no longer
+             * share `content`'s offset — use the CDATA accessor on
+             * CDATA nodes; the cross-cast `text_get_content((TextNode*)c)`
+             * reads garbage here. */
             const char* t =
-                leptris_text_get_content((LeptrisTextNode*)c);
+                leptris_cdata_get_content((LeptrisCDATANode*)c);
             LeptrisNodeRef cc = (LeptrisNodeRef)leptris_cdata_create(
                 t, t ? strlen(t) : 0,
                 ((struct leptris_document*)ex->result)->pool);
@@ -3035,11 +3041,12 @@ static void strip_source_whitespace(XsltExec* ex) {
             if (!ws_only(t)) continue;
             /* Empty in place — never unlink (compact-parse text
              * nodes link via int32 offsets that unlinking can
-             * orphan for following siblings). Direct field write
-             * to a static "" keeps the node readable and the
-             * pointer NUL-terminated (#1285 slice 4 contract). */
+             * orphan for following siblings). Store the shared
+             * EMPTY sentinel: the node stays readable and the
+             * content decodes to a NUL-terminated "" (#1285 slice
+             * 4b — no overflow-table entry per stripped node). */
             LeptrisTextNode* tn = (LeptrisTextNode*)c;
-            tn->content = (char*)"";
+            leptris_textnode_set_content_ptr(tn, "");
             tn->content_len = 0;
         }
     }

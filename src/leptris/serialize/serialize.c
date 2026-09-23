@@ -937,7 +937,7 @@ static int ser_children_have_text(LeptrisNode* fc) {
              * entity-decoded at parse time — length-bounded read,
              * no serve-mode branch. */
             LeptrisTextNode* tn = (LeptrisTextNode*)c;
-            const char* tc = tn->content;
+            const char* tc = leptris_textnode_content(tn);
             size_t tl = tc ? tn->content_len : 0;
             for (size_t i = 0; i < tl; i++) {
                 if (tc[i] != ' ' && tc[i] != '\t' &&
@@ -1016,7 +1016,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 cur->type == LEPTRIS_NODE_TYPE_TEXT &&
                 !((sp > 0) && st[sp - 1].mixed)) {
                 LeptrisTextNode* wsn = (LeptrisTextNode*)cur;
-                const char* wsc = wsn->content;
+                const char* wsc = leptris_textnode_content(wsn);
                 size_t wsl = wsc ? wsn->content_len : 0;
                 int ws_only = 1;
                 for (size_t i = 0; i < wsl; i++) {
@@ -1033,7 +1033,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             if (buf->indent_text && buf->indent_spaces > 0 &&
                 cur->type == LEPTRIS_NODE_TYPE_TEXT) {
                 LeptrisTextNode* itn = (LeptrisTextNode*)cur;
-                const char* isc = itn->content;
+                const char* isc = leptris_textnode_content(itn);
                 size_t isl = isc ? itn->content_len : 0;
                 int ws_only = 1;
                 for (size_t k = 0; k < isl; k++) {
@@ -1174,7 +1174,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * NUL-terminate, which the escaper doesn't need
                  * (it's length-bounded). Entity-bearing text still
                  * materializes for correct expansion. */
-                const char* tc0 = tn0->content;
+                const char* tc0 = leptris_textnode_content(tn0);
                 size_t tl0 = tc0 ? tn0->content_len : 0;
                 /* Pretty mode fuses newline + indent + open + text +
                  * close into the same single reservation — leaves
@@ -1545,7 +1545,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             }
             if (buf->indent_spaces == 0) {
                 LeptrisTextNode* tn = (LeptrisTextNode*)fc;
-                const char* tc = tn->content;
+                const char* tc = leptris_textnode_content(tn);
                 size_t tlen = tc ? tn->content_len : 0;
                 buffer_ensure_capacity(buf, 2 + epl + nl + 6 * tlen + 2 + 1);
                 char* te = buf->data + buf->size;

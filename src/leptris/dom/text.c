@@ -38,7 +38,9 @@ LeptrisTextNode* leptris_text_create(const char* content,
         memcpy(content_storage, content, content_len);
     }
     content_storage[content_len] = '\0';
-    node->content = content_storage;
+    /* Contiguous with the node in the same pool alloc — the offset
+     * is a small positive delta (never table-spilled). */
+    leptris_textnode_set_content_ptr(node, content_storage);
     node->content_len = (uint32_t)content_len;
 
     return node;
@@ -67,7 +69,9 @@ LeptrisTextNode* leptris_text_create_borrowed(const char* content,
      * uninitialized raw bit silently flips DOE/cdata behavior by
      * build configuration. */
     node->base.raw = 0;
-    node->content = (char*)content;  /* Non-owning; caller guarantees lifetime + termination. */
+    /* Non-owning view into the doc-owned buffer; caller guarantees
+     * lifetime + termination (#1285 slice 4). */
+    leptris_textnode_set_content_ptr(node, content);
     node->content_len = (uint32_t)content_len;
     node->parent_off = 0;
     node->next_sibling_off = 0;
@@ -95,5 +99,6 @@ void leptris_text_free(LeptrisTextNode* text) {
  * here. */
 const char* leptris_text_get_content(LeptrisTextNode* text) {
     if (!text) return NULL;
-    return text->content ? text->content : "";
+    const char* c = leptris_textnode_content(text);
+    return c ? c : "";
 }

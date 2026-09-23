@@ -175,8 +175,12 @@ char* get_node_text(void* node) {
                 int ty = leptris_node_get_type(c);
                 if (ty == LEPTRIS_NODE_TYPE_TEXT ||
                     ty == LEPTRIS_NODE_TYPE_CDATA) {
-                    const char* t =
-                        leptris_text_get_content((LeptrisTextNode*)c);
+                    /* #1285 slice 4b: text and CDATA structs no
+                     * longer share `content`'s offset — use the
+                     * matching accessor. */
+                    const char* t = (ty == LEPTRIS_NODE_TYPE_CDATA)
+                        ? leptris_cdata_get_content((LeptrisCDATANode*)c)
+                        : leptris_text_get_content((LeptrisTextNode*)c);
                     if (t && *t) {
                         any_text = 1;
                         size_t tl = strlen(t);

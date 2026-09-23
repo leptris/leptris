@@ -1010,7 +1010,7 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
      * carve (dispatch-entry dp_nul / walker '&' NUL / EOF sentinel)
      * — the terminator write lives with the byte's last reader, not
      * here. */
-    tn->content = (char*)content;
+    leptris_textnode_set_content_ptr(tn, content);
     tn->content_len = (uint32_t)content_len;
     tn->parent_off = 0;
     tn->next_sibling_off = 0;
@@ -2592,7 +2592,7 @@ static struct leptris_document* dp_il_build(
             tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
             tn->base.frozen = 1;
             tn->base.line = r->line;
-            tn->content = (char*)content;
+            leptris_textnode_set_content_ptr(tn, content);
             tn->content_len = r->len;
             /* (slice 4: pool/borrowed fields gone; the il scratch
              * run is already NUL-terminated at carve) */

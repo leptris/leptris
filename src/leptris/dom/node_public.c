@@ -416,7 +416,7 @@ LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,
     if (!doc || !doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
     char* copy = node_public_pool_strdup(doc->pool, content, len);
     if (!copy) return LEPTRIS_ERROR_MEMORY;
-    t->content = copy;
+    leptris_textnode_set_content_ptr(t, copy);
     t->content_len = (uint32_t)len;
     return LEPTRIS_OK;
 }

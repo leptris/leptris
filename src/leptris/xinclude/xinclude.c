@@ -170,9 +170,10 @@ static LeptrisNode* deep_copy_node(const LeptrisNode* src,
 
         case LEPTRIS_NODE_TYPE_TEXT: {
             const LeptrisTextNode* t = (const LeptrisTextNode*)src;
-            /* Source text may be borrowed (non-NUL-terminated) — content_len
-             * is authoritative. TODO 115 Phase B. */
-            return (LeptrisNode*)leptris_text_create(t->content, t->content_len, target_pool);
+            /* #1285 slice 4: runs are always NUL-terminated;
+             * content_len is authoritative. TODO 115 Phase B. */
+            return (LeptrisNode*)leptris_text_create(leptris_textnode_content(t),
+                                                     t->content_len, target_pool);
         }
 
         case LEPTRIS_NODE_TYPE_CDATA: {
