@@ -55,8 +55,16 @@ const char* kBail[] = {
 };
 
 std::string parse_str(const char* xml, bool lane) {
-    if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
-    else unset_env("LEPTRIS_INTERLEAVED");
+    if (lane) {
+        set_env("LEPTRIS_INTERLEAVED", "1");
+        /* #1258: fixtures are far below the 64KB default minimum —
+         * force the lane's floor to 1 byte so parity specs exercise
+         * the lane, never a silent classic fallback. */
+        set_env("LEPTRIS_IL_MIN", "1");
+    } else {
+        unset_env("LEPTRIS_INTERLEAVED");
+        unset_env("LEPTRIS_IL_MIN");
+    }
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
     std::string out = d ? "" : "(null)";
@@ -128,6 +136,7 @@ TEST(InterleavedParity, BailFixturesByteIdentical) {
 TEST(InterleavedParity, AttrAndNameAccessIdentical) {
     const char* xml = "<r k='v' n='m'><child z='9'>tx</child></r>";
     set_env("LEPTRIS_INTERLEAVED", "1");
+    set_env("LEPTRIS_IL_MIN", "1");
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
     ASSERT_NE(d, nullptr);
@@ -186,6 +195,7 @@ TEST(InterleavedParity, EngagementCanaryFiresOnlyWhenLaneRuns) {
     };
 
     set_env("LEPTRIS_INTERLEAVED", "1");
+    set_env("LEPTRIS_IL_MIN", "1");
     set_env("LEPTRIS_IL_STATS", "1");
     char lane[512] = {0};
     ssize_t n = capture(lane, sizeof(lane));
@@ -195,6 +205,7 @@ TEST(InterleavedParity, EngagementCanaryFiresOnlyWhenLaneRuns) {
     EXPECT_NE(strstr(lane, "attrs=1"), nullptr) << lane;
 
     unset_env("LEPTRIS_IL_STATS");
+    unset_env("LEPTRIS_IL_MIN");
     char classic[512] = {0};
     n = capture(classic, sizeof(classic));
     ASSERT_GE(n, 0);
@@ -216,8 +227,10 @@ TEST(InterleavedParity, XmlAttrNamespaceParity) {
     const char* xml = "<root><code xml:space='preserve'>t</code></root>";
     for (int lane = 0; lane <= 1; lane++) {
         SCOPED_TRACE(lane ? "interleaved" : "classic");
-        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
-        else unset_env("LEPTRIS_INTERLEAVED");
+        if (lane) { set_env("LEPTRIS_INTERLEAVED", "1");
+                    set_env("LEPTRIS_IL_MIN", "1"); }
+        else { unset_env("LEPTRIS_INTERLEAVED");
+               unset_env("LEPTRIS_IL_MIN"); }
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
         ASSERT_NE(d, nullptr);
@@ -247,8 +260,10 @@ TEST(InterleavedParity, DeclaredPrefixNamespaceParity) {
     const char* xml = "<d xmlns:q='http://example/q' q:k='v'/>";
     for (int lane = 0; lane <= 1; lane++) {
         SCOPED_TRACE(lane ? "interleaved" : "classic");
-        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
-        else unset_env("LEPTRIS_INTERLEAVED");
+        if (lane) { set_env("LEPTRIS_INTERLEAVED", "1");
+                    set_env("LEPTRIS_IL_MIN", "1"); }
+        else { unset_env("LEPTRIS_INTERLEAVED");
+               unset_env("LEPTRIS_IL_MIN"); }
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
         ASSERT_NE(d, nullptr);
@@ -266,8 +281,10 @@ TEST(InterleavedParity, DeclaredPrefixNamespaceParity) {
 TEST(InterleavedParity, DupAttrDiagnosticParity) {
     const char* xml = "<r a='1' a='2'/>";
     for (int lane = 0; lane <= 1; lane++) {
-        if (lane) set_env("LEPTRIS_INTERLEAVED", "1");
-        else unset_env("LEPTRIS_INTERLEAVED");
+        if (lane) { set_env("LEPTRIS_INTERLEAVED", "1");
+                    set_env("LEPTRIS_IL_MIN", "1"); }
+        else { unset_env("LEPTRIS_INTERLEAVED");
+               unset_env("LEPTRIS_IL_MIN"); }
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
         ASSERT_NE(d, nullptr);
@@ -280,3 +297,52 @@ TEST(InterleavedParity, DupAttrDiagnosticParity) {
         unset_env("LEPTRIS_INTERLEAVED");
     }
 }
+
+
+#ifndef _WIN32
+/* #1258: the size floor. Below LEPTRIS_IL_MIN (default 64KB) the
+ * lane defers to the classic parser even when the gate is on —
+ * small documents cannot amortize the record pass (canon measured
+ * ~25% slower at 24KB). Forced floor (IL_MIN=1) restores engagement. */
+TEST(InterleavedParity, SizeFloorDefersSmallDocsToClassic) {
+    const char* xml = "<r><a x='1'>t</a></r>";
+    set_env("LEPTRIS_INTERLEAVED", "1");
+    set_env("LEPTRIS_IL_STATS", "1");
+    unset_env("LEPTRIS_IL_MIN");   /* default floor: 64KB */
+
+    /* stderr capture, same pipe discipline as the canary spec. */
+    auto capture_one = [&](char* buf, size_t bufsz) -> void {
+        int fds[2];
+        ASSERT_EQ(pipe(fds), 0);
+        int saved = dup(STDERR_FILENO);
+        fflush(stderr);
+        dup2(fds[1], STDERR_FILENO);
+        close(fds[1]);
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        if (d) leptris_document_free(d);
+        fflush(stderr);
+        dup2(saved, STDERR_FILENO);
+        close(saved);
+        ssize_t n = read(fds[0], buf, bufsz - 1);
+        if (n >= 0) buf[n] = '\0';
+        close(fds[0]);
+    };
+
+    char small[512] = {0};
+    capture_one(small, sizeof(small));
+    EXPECT_EQ(strstr(small, "il: records="), nullptr)
+        << "small doc must NOT engage the lane under the default floor: "
+        << small;
+
+    set_env("LEPTRIS_IL_MIN", "1");
+    char forced[512] = {0};
+    capture_one(forced, sizeof(forced));
+    EXPECT_NE(strstr(forced, "il: records="), nullptr)
+        << "forced floor must restore engagement";
+
+    unset_env("LEPTRIS_IL_STATS");
+    unset_env("LEPTRIS_IL_MIN");
+    unset_env("LEPTRIS_INTERLEAVED");
+}
+#endif  /* !_WIN32: pipe/dup2 capture */
