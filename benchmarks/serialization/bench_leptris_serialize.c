@@ -35,7 +35,7 @@ static char* load_file(const char* path, size_t* size) {
 // Benchmark: Serialize small document
 static void bench_serialize_small(void) {
     size_t size;
-    char* xml = load_file("benchmarks/fixtures/small.xml", &size);
+    char* xml = load_file("fixtures/small.xml", &size);
     if (!xml) {
         printf("ERROR: Could not load small.xml\n");
         return;
@@ -68,7 +68,7 @@ static void bench_serialize_small(void) {
 // Benchmark: Serialize medium document
 static void bench_serialize_medium(void) {
     size_t size;
-    char* xml = load_file("benchmarks/fixtures/medium.xml", &size);
+    char* xml = load_file("fixtures/medium.xml", &size);
     if (!xml) {
         printf("ERROR: Could not load medium.xml\n");
         return;
@@ -101,7 +101,7 @@ static void bench_serialize_medium(void) {
 // Benchmark: Serialize large document
 static void bench_serialize_large(void) {
     size_t size;
-    char* xml = load_file("benchmarks/fixtures/large.xml", &size);
+    char* xml = load_file("fixtures/large.xml", &size);
     if (!xml) {
         printf("ERROR: Could not load large.xml\n");
         return;
@@ -134,7 +134,7 @@ static void bench_serialize_large(void) {
 // Benchmark: Pretty-print vs compact
 static void bench_format_comparison(void) {
     size_t size;
-    char* xml = load_file("benchmarks/fixtures/small.xml", &size);
+    char* xml = load_file("fixtures/small.xml", &size);
     if (!xml) {
         printf("ERROR: Could not load small.xml\n");
         return;

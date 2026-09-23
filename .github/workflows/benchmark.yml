@@ -71,6 +71,11 @@ jobs:
         run: |
           set -u
           mkdir -p results
+          # SSOT paths: every harness runs with CWD=build/benchmarks and
+          # reads fixtures/ + writes results/ relative to it. Stage both
+          # once here instead of each harness knowing repo-root paths.
+          mkdir -p ../build/benchmarks/results
+          cp -r fixtures ../build/benchmarks/
           {
             echo "# Benchmark results — ${{ matrix.os }}"
             echo

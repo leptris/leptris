@@ -513,7 +513,7 @@ int main(int argc, char** argv) {
     snprintf(size_medium, sizeof(size_medium), "%.1fKB", medium_len / 1024.0);
     snprintf(size_large, sizeof(size_large), "%.1fKB", large_len / 1024.0);
 
-    write_json_results("benchmarks/results/phase17.5_session1.json",
+    write_json_results("results/phase17.5_session1.json",
                        size_small, size_medium, size_large,
                        &small_results, &medium_results, &large_results,
                        iterations);
