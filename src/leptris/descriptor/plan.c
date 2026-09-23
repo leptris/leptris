@@ -244,7 +244,7 @@ static void dp_plan_free(LeptrisPlan p) {
     for (uint32_t i = 0; i < p->plan_count; i++) {
         dp_plan* d = &p->plans[i];
         for (uint32_t a = 0; a < d->attribute_count; a++) {
-            free(d->attribute_plans[a].wire_name);
+            free((char *)d->attribute_plans[a].wire_name);
             for (uint16_t pi = 0;
                  pi < d->attribute_plans[a].predicate_count; pi++) {
                 free((char*)d->attribute_plans[a]
@@ -255,7 +255,7 @@ static void dp_plan_free(LeptrisPlan p) {
             free((leptris_attr_predicate*)d->attribute_plans[a].predicates);
         }
         for (uint32_t c = 0; c < d->child_count; c++) {
-            free(d->child_plans[c].wire_name);
+            free((char *)d->child_plans[c].wire_name);
             for (uint16_t pi = 0;
                  pi < d->child_plans[c].predicate_count; pi++) {
                 free((char*)d->child_plans[c]
