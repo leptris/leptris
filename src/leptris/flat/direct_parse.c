@@ -2686,6 +2686,25 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
     if (!gate || !*gate) return NULL;
     if (keep_ent || dtd_attrs) return NULL;
     if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
+    /* #1258: small documents do not amortize the record pass.
+     * Canon's moxml shape (24KB / 902 elements) measured ~25%
+     * SLOWER on the lane while allocations stayed identical - the
+     * two-phase scan+replay pays fixed setup that a small doc
+     * cannot win back; large docs take 0.69-0.74x. Below the
+     * minimum the lane defers to the classic parser. LEPTRIS_IL_MIN
+     * overrides (bytes; 0 = no threshold) for hosts and for the
+     * parity gates, which force it to 0 so the lane stays covered
+     * by the suite at fixture sizes. */
+    {
+        const char* mins = getenv("LEPTRIS_IL_MIN");
+        size_t min_len = 64 * 1024;
+        if (mins && *mins) {
+            long mv = strtol(mins, NULL, 10);
+            if (mv > 0) min_len = (size_t)mv;
+            else min_len = 0;   /* explicit 0 disables */
+        }
+        if (len < min_len) return NULL;
+    }
 
     /* Scratch is built UP FRONT (slice 2): il_scan reads it with
      * the NUL-sentinel discipline, and dp_il_build reuses the same

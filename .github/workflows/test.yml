@@ -241,6 +241,10 @@ jobs:
       - name: Run tests (LEPTRIS_INTERLEAVED=1)
         env:
           LEPTRIS_INTERLEAVED: "1"
+          # #1258: the lane has a 64KB default floor (small docs
+          # can't amortize the record pass); the forced gate must
+          # still exercise the lane on suite-sized fixtures.
+          LEPTRIS_IL_MIN: "0"
         run: ctest --test-dir build --output-on-failure --build-config Release
 
   test-amalgamated:
