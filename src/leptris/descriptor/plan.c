@@ -440,6 +440,29 @@ LEPTRIS_API void leptris_plan_free(LeptrisPlan plan) { dp_plan_free(plan); }
 /* ---- walk ------------------------------------------------------- */
 
 /* Namespace binding for a child element against a row's target form. */
+/* Child-row wire-name match. The ABI documents wire_name as "the
+ * XML element name as it appears on the wire": a row may carry the
+ * PREFIXED form ("w:b") or the bare local name ("b"). Rows with a
+ * colon bind prefix+local (literal prefix, per the wire contract);
+ * bare rows keep the historical local-name match with the row's
+ * ns_form doing the namespace work. The old matcher compared the
+ * local name only, so every prefixed row — the shape hosts
+ * compiling from xsd:QName schemas emit — silently bound nothing
+ * and whole subtrees hydrated empty (XSD-002 fallout). */
+static int dp_wire_name_matches(LeptrisElement child,
+                                const char* wire_name) {
+    const char* local = NULL;
+    const char* prefix = NULL;
+    leptris_element_expanded_name(child, &local, &prefix, NULL);
+    if (!wire_name || !local) return 0;
+    const char* colon = strchr(wire_name, ':');
+    if (!colon) return strcmp(local, wire_name) == 0;
+    size_t plen = (size_t)(colon - wire_name);
+    return prefix != NULL && strlen(prefix) == plen &&
+           strncmp(prefix, wire_name, plen) == 0 &&
+           strcmp(local, colon + 1) == 0;
+}
+
 static int dp_ns_binds(LeptrisElement elem, uint8_t ns_form,
                        const char* ns_uri, int lenient) {
     const char* local = NULL;
@@ -617,9 +640,8 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
                     continue;
                 LeptrisElement child = (LeptrisElement)n;
-                const char* local = NULL;
-                leptris_element_expanded_name(child, &local, NULL, NULL);
-                if (!local || strcmp(local, row->wire_name) != 0) continue;
+                if (!dp_wire_name_matches(child, row->wire_name))
+                    continue;
                 if (!dp_ns_binds(child, target->ns_form, target->ns_uri,
                                  lenient))
                     continue;
@@ -666,9 +688,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
                 continue;
             LeptrisElement child = (LeptrisElement)n;
-            const char* local = NULL;
-            leptris_element_expanded_name(child, &local, NULL, NULL);
-            if (!local || strcmp(local, row->wire_name) != 0) continue;
+            if (!dp_wire_name_matches(child, row->wire_name)) continue;
             /* #1272: same-wire-name claim — if a previous row bound
              * this node, skip it. */
             int rank = -1;
