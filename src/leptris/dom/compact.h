@@ -109,6 +109,15 @@ int32_t leptris_compact_int32_encode(void* base, void* target,
                                      const int32_t* field_addr);
 void*   leptris_compact_int32_decode(void* base, int32_t off,
                                      const int32_t* field_addr);
+/* #1320: same encoding, but the overflow-table entry is tagged with
+ * the caller's explicit document instead of the thread-local
+ * "current document" — for stamps made OUTSIDE a parse context
+ * (public node creators), where the TLS slot holds the wrong doc or
+ * NULL and a mis-tagged entry would outlive its document. */
+struct leptris_document;
+int32_t leptris_compact_int32_encode_doc(void* base, void* target,
+                                         const int32_t* field_addr,
+                                         struct leptris_document* doc);
 #ifdef __cplusplus
 }
 #endif

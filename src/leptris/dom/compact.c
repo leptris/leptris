@@ -298,6 +298,22 @@ int32_t leptris_compact_int32_encode(void* base, void* target,
     return (int32_t)d;
 }
 
+int32_t leptris_compact_int32_encode_doc(void* base, void* target,
+                                         const int32_t* field_addr,
+                                         struct leptris_document* doc) {
+    if (!target) return 0;
+    ptrdiff_t d = (char*)target - (char*)base;
+    if (d < INT32_MIN || d > INT32_MAX) {
+        LeptrisCompactOverflowTable* table = get_overflow_table();
+        if (table && leptris_compact_overflow_set(table, field_addr,
+                                                  target, doc) == 0) {
+            return LEPTRIS_INT32_OVERFLOW_SENTINEL;
+        }
+        return 0;
+    }
+    return (int32_t)d;
+}
+
 void* leptris_compact_int32_decode(void* base, int32_t off,
                                    const int32_t* field_addr) {
     if (off == 0) return NULL;

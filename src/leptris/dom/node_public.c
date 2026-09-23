@@ -296,8 +296,13 @@ static LeptrisDocument node_public_document(LeptrisNodeRef node) {
     LeptrisElement parent = leptris_node_parent(node);
     if (parent) return leptris_element_get_document(parent);
     /* Issue #519: detached non-element nodes carry their owning
-     * document — mutations must work before any attach. */
+     * document — mutations must work before any attach. Text was the
+     * one kind #519 skipped (its pool backref covered it until #1285
+     * slice 4 removed it — the #1320 regression); its stamp is an
+     * int32 offset instead of a field. */
     switch (node->type) {
+        case LEPTRIS_NODE_TYPE_TEXT:
+            return leptris_textnode_owner_doc((const LeptrisTextNode*)node);
         case LEPTRIS_NODE_TYPE_PI:
             return ((LeptrisPINode*)node)->owner_doc;
         case LEPTRIS_NODE_TYPE_COMMENT:
@@ -329,6 +334,13 @@ LEPTRIS_API LeptrisNodeRef leptris_text_node_create(LeptrisDocument doc,
     if (!content) content = "";
     size_t len = strlen(content);
     LeptrisTextNode* n = leptris_text_create(content, len, doc->pool);
+    if (n) {
+        /* #1320: stamp the owner so detached mutations can reach the
+         * doc's pool (PI/comment/CDATA do this via owner_doc fields;
+         * explicit-doc encoder — no parse context here). */
+        n->owner_doc_off = leptris_compact_int32_encode_doc(
+            n, doc, &n->owner_doc_off, doc);
+    }
     return n ? (LeptrisNodeRef)n : NULL;
 }
 
