@@ -1,4 +1,6 @@
-/* dom/root_doc_map.h — Thread-local root-element → document mapping. */
+/* dom/root_doc_map.h — root-element → document mapping (process-global
+ * state behind one mutex; per-thread memo validated by a global
+ * generation — see leptris-ruby#321). */
 #ifndef LEPTRIS_DOM_ROOT_DOC_MAP_H
 #define LEPTRIS_DOM_ROOT_DOC_MAP_H
 
