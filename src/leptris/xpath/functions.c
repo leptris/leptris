@@ -1269,23 +1269,27 @@ static struct leptris_xpath_result* xpath_func_string_length(XPathContext* conte
     }
 
     /* Codepoint count, not byte count (QT3 fn-string-length-20:
-     * an astral char is one character, not four bytes). Lead-byte
-     * length table: 2/3/4 for multi-byte sequences. */
+     * an astral char is one character, not four bytes). The table
+     * holds the CONTINUATION-byte count (len-1): the for-loop's
+     * own p++ adds the lead byte's step, so a 4-byte lead stores 3.
+     * (Storing the full length double-advanced and walked past the
+     * NUL terminator — CI-only failure, the byte past the NUL was
+     * zero locally.) */
     size_t len = 0;
     if (str) {
-        static const unsigned char sl_u8len[256] = {
+        static const unsigned char sl_u8cont[256] = {
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-            1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-            2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-            3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0
+            2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3,0,0,0,0,0,0,0,0
         };
         for (const unsigned char* p = (const unsigned char*)str; *p; p++) {
             len++;
-            p += sl_u8len[*p];
+            p += sl_u8cont[*p];
         }
     }
     LEPTRIS_FREE(str);
