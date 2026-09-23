@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.229] - 2026-09-23
+
+### Performance
+
+- text content as int32 self-relative offset — 32B nodes, doc-tagged overflow stamps (#1285 slice 4b) (dom)
+
+
+
 ## [1.9.228] - 2026-09-23
 
 ### Fixed
