@@ -632,6 +632,47 @@ TEST(Qt3Subset, FnStringLength) {
     run_test_set("fn/string-length.xml", {}, 28);
 }
 
+
+/* Stage-3 corpus slice (lever 6): sequence-cardinality families.
+ * Adopted now: empty, exists, head, tail, count. The numeric
+ * families (abs/ceiling/floor/sum/avg/min/max) are blocked on the
+ * canonical E-notation decimal/double formatter; the sequence-edit
+ * families (index-of/insert-before/remove/reverse/subsequence/
+ * distinct-values/deep-equal/string-to-codepoints/codepoints-to-
+ * string) have real behavioral reds enumerated for slice-4. */
+TEST(Qt3Subset, FnEmpty) {
+    run_test_set("fn/empty.xml", {}, 52);
+}
+
+TEST(Qt3Subset, FnExists) {
+    run_test_set("fn/exists.xml", {}, 56);
+}
+
+TEST(Qt3Subset, FnHead) {
+    run_test_set("fn/head.xml", {}, 3);
+}
+
+TEST(Qt3Subset, FnTail) {
+    run_test_set("fn/tail.xml", {}, 1);
+}
+
+TEST(Qt3Subset, FnCount) {
+    /* 299 runnable cases, 293 agree. Six engine gaps skip:
+     * - `1 to 10000000` (2 cases): the range expression caps at
+     *   100000 items, so count prints 100000/100006.
+     * - `local:strange` INF comparisons (4 cases, the lt/le
+     *   variants only): a typed-scalar function param materializes
+     *   as a synthetic text node, so `if ($n)` is truthy for
+     *   false() and xs:double('NaN') wins over xs:double('INF').
+     *   Typed var-binding channel is the slice-4 lever (also
+     *   unlocks for/let over booleans).
+     */
+    run_test_set("fn/count.xml", {}, 293,
+                 {"1 to 10000000",
+                  "lt local:strange(false())",
+                  "le local:strange(false())"});
+}
+
 /* The regex trio (matches/replace/tokenize/analyze-string) compiles
  * only where <regex.h> exists; on _WIN32 the engine stubs these
  * functions, so the regex-shaped sets cannot run there. */
