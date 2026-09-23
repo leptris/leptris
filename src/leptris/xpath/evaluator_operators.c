@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 /* ---- ISO 8601 dayTimeDuration value model (op:duration batch,
  * lever 6 stage-2). Durations ride the STRING lexicon; these
  * helpers give arithmetic and comparisons a typed view. Strictly
@@ -2037,8 +2038,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         struct leptris_xpath_result* hi_r =
             evaluate_expr(ctx, ast->children[1]);
         if (!hi_r) { xpath_result_free(lo_r); return NULL; }
-        long lo = (long)xpath_to_number(lo_r);
-        long hi = (long)xpath_to_number(hi_r);
+        double lod = xpath_to_number(lo_r);
+        double hid = xpath_to_number(hi_r);
         xpath_result_free(lo_r);
         xpath_result_free(hi_r);
 
@@ -2046,12 +2047,25 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         if (!out) return NULL;
         out->owns_synthetic_text = 1;
         out->is_sequence = 1;
-        for (long v = lo; v <= hi && v - lo < 100000; v++) {
-            char buf[28];
-            int l = snprintf(buf, sizeof buf, "\x03N%ld", v);
-            XPathTextNode* tn = synth_text(buf, (size_t)l);
-            if (!tn) break;
-            xpath_nodeset_add(out, tn);
+        /* XPath 2.0+: an empty (NaN) operand yields the empty
+         * sequence — never cast NaN to long (UB: arm64 gives 0,
+         * x86 gives INT32/64_MIN, so the "range" silently became
+         * a 75/100000-item sequence; cbcl-codepoints-to-string-020).
+         * Huge finite values clamp instead of UB-casting. */
+        if (!isnan(lod) && !isnan(hid)) {
+            long lo = lod > 9.0e18 ? LONG_MAX
+                    : lod < -9.0e18 ? LONG_MIN
+                    : (long)lod;
+            long hi = hid > 9.0e18 ? LONG_MAX
+                    : hid < -9.0e18 ? LONG_MIN
+                    : (long)hid;
+            for (long v = lo; v <= hi && v - lo < 100000; v++) {
+                char buf[28];
+                int l = snprintf(buf, sizeof buf, "\x03N%ld", v);
+                XPathTextNode* tn = synth_text(buf, (size_t)l);
+                if (!tn) break;
+                xpath_nodeset_add(out, tn);
+            }
         }
         struct leptris_xpath_result* result =
             xpath_result_new(XPATH_RESULT_NODESET);
