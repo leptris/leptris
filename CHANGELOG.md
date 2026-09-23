@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.230] - 2026-09-23
+
+### Added
+
+- QT3 stage-2 corpus slice — translate/normalize-space/substring-before/after/boolean/string-length; codepoint-correct translate + string-length; collation overloads (xquery)
+
+### Fixed
+
+- string-length walks continuation-count table (no past-NUL over-advance); pin qt3 corpus to LF checkouts (xpath)
+
+
+
 ## [1.9.229] - 2026-09-23
 
 ### Performance
