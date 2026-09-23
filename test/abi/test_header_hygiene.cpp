@@ -103,6 +103,12 @@ TEST(HeaderHygiene, ElementTreeEdgeRoundTrip) {
     alignas(kAlign) char buf[2 * sizeof(struct leptris_element)];
     struct leptris_element* a = (struct leptris_element*)buf;
     struct leptris_element* b = (struct leptris_element*)(buf + sizeof(*a));
+    /* The last_child getter WALKS the child list, so b's sibling
+     * edge is read — zero the fake nodes or the walk follows
+     * uninitialized stack garbage. (#1285 slice 3b moved the field
+     * onto a stack slot whose garbage is nonzero on x86_64, turning
+     * the latent UB into a real failure; it was always UB.) */
+    memset(buf, 0, sizeof(buf));
 
     /* parent round-trip */
     leptris_elem_set_parent(a, b);
@@ -132,6 +138,7 @@ TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
     struct leptris_element* e = (struct leptris_element*)buf;
     struct leptris_attribute* attr =
         (struct leptris_attribute*)(buf + sizeof(*e));
+    memset(buf, 0, sizeof(buf));
     leptris_attr_set_next(attr, NULL);
 
     leptris_elem_set_first_attribute(e, attr);
