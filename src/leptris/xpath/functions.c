@@ -763,7 +763,12 @@ static int de_item_equal(DeItem* a, DeItem* b) {
     if (a->kind != b->kind) return 0;
     switch (a->kind) {
         case 0: return de_node_equal(a->node, b->node);
-        case 1: return a->num == b->num;
+        case 1: {
+            /* deep-equal is atomic-eq based: NaN compares equal to
+             * NaN (F&O 17.4.1 — unlike the eq operator). */
+            if (isnan(a->num) && isnan(b->num)) return 1;
+            return a->num == b->num;
+        }
         case 2: {
             const char* as = a->str ? a->str : (a->borrow ? a->borrow : "");
             const char* bs = b->str ? b->str : (b->borrow ? b->borrow : "");
@@ -843,17 +848,33 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
         return NULL;
     }
 
-    enum { CAP = 64 };
-    DeItem ia[CAP], ib[CAP];
-    size_t na = de_collect(a, ia, CAP);
-    size_t nb = de_collect(b, ib, CAP);
+    /* Growable item arrays: corpus sequences run to tens of
+     * thousands of members (cbcl roundtrips over 65536 to 100000);
+     * a fixed cap silently compares a prefix. */
+    size_t capa = a->type == XPATH_RESULT_NODESET && a->value.nodeset_value
+        ? a->value.nodeset_value->count : 1;
+    size_t capb = b->type == XPATH_RESULT_NODESET && b->value.nodeset_value
+        ? b->value.nodeset_value->count : 1;
+    DeItem* ia = (DeItem*)malloc((capa ? capa : 1) * sizeof(DeItem));
+    DeItem* ib = (DeItem*)malloc((capb ? capb : 1) * sizeof(DeItem));
+    if (!ia || !ib) {
+        free(ia);
+        free(ib);
+        xpath_result_free(a);
+        xpath_result_free(b);
+        return NULL;
+    }
+    size_t na = de_collect(a, ia, capa);
+    size_t nb = de_collect(b, ib, capb);
 
     int equal = na == nb;
-    for (size_t i = 0; equal && i < na && i < CAP; i++)
+    for (size_t i = 0; equal && i < na; i++)
         equal = de_item_equal(&ia[i], &ib[i]);
 
-    for (size_t i = 0; i < na && i < CAP; i++) de_item_clear(&ia[i]);
-    for (size_t i = 0; i < nb && i < CAP; i++) de_item_clear(&ib[i]);
+    for (size_t i = 0; i < na; i++) de_item_clear(&ia[i]);
+    for (size_t i = 0; i < nb; i++) de_item_clear(&ib[i]);
+    free(ia);
+    free(ib);
     xpath_result_free(a);
     xpath_result_free(b);
 

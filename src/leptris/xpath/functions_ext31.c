@@ -59,7 +59,20 @@ static void seq_push_str(struct leptris_xpath_result* seq, const char* s) {
 
 static void seq_push_num(struct leptris_xpath_result* seq, double d) {
     char* s = xpath_number_to_string(d);
-    seq_push_str(seq, s ? s : "");
+    if (!s) return;
+    /* "\x03N" marks numeric members — same discipline as the
+     * sequence constructor: per-member type checks (deep-equal,
+     * instance of) must see a NUMBER, not a string that happens
+     * to look like one. String consumers strip the marker. */
+    size_t sl = strlen(s);
+    char* marked = (char*)malloc(sl + 3);
+    if (marked) {
+        marked[0] = '\x03';
+        marked[1] = 'N';
+        memcpy(marked + 2, s, sl + 1);
+        seq_push_str(seq, marked);
+        free(marked);
+    }
     free(s);
 }
 
@@ -71,6 +84,11 @@ static char* scalar_str(const struct leptris_xpath_result* r) {
             return leptris_strdup(r->value.string_value
                                       ? r->value.string_value : "");
         case XPATH_RESULT_NUMBER: {
+            /* int64 fidelity: an xs:integer-sourced number must
+             * string exactly — the double roundtrip prints
+             * 830993497117024304 as 8.30993e+17. */
+            if (r->is_int)
+                return xpath_int_to_string(r->int_value);
             char* s = xpath_number_to_string(r->value.number_value);
             return s ? s : leptris_strdup("");
         }
@@ -222,6 +240,13 @@ static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
     if (sv) leptris_xpath_result_free(sv);
     struct leptris_xpath_result* out = seq_new();
     if (out) {
+        /* F&O: a negative $length yields the empty sequence
+         * (K-SeqSubsequenceFunc-5) — len < 0 is NOT the "to end"
+         * sentinel here. */
+        if (n >= 3 && ld < 0) {
+            free_items(items, cnt);
+            return out;
+        }
         long start = (long)sd;
         long len = (n >= 3) ? (ld != ld ? -1 : (long)ld) : -1;
         seq_from_items(out, items, cnt, start, len);
@@ -257,6 +282,10 @@ static struct leptris_xpath_result* fn_insert_before(XPathContext* ctx,
     size_t icnt;
     char** ins = collect_items(ctx, args, n, 2, &icnt);
     struct leptris_xpath_result* out = seq_new();
+    /* F&O: position < 1 inserts at 1; a position beyond the tail
+     * inserts at the end (K-SeqInsertBeforeFunc-5/10/14/15). */
+    if (at < 1) at = 1;
+    if (at > (long)cnt + 1) at = (long)cnt + 1;
     if (out && ins) {
         for (long k = 1; k <= (long)(cnt + icnt); k++) {
             if (k == at)
