@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.228] - 2026-09-23
+
+### Fixed
+
+- detached text nodes resolve their owner document — set_content works before attach (#1320) (dom)
+
+
+
 ## [1.9.227] - 2026-09-23
 
 ### Fixed
