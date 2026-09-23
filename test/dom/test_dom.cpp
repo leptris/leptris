@@ -2014,6 +2014,51 @@ TEST(DetachedNodes, MutationWorksBeforeAttach) {
     leptris_document_free(doc);
 }
 
+/* Issue #1320: TEXT was the one node kind #519's detached-mutation
+ * fix skipped — no owner_doc, so after #1285 slice 4 removed the
+ * node-side pool backref, set_content on a created-but-unattached
+ * text node resolved no document and returned INVALID_ARG. moxml's
+ * create → fill → attach builder sequence hit it on every leg. */
+TEST(DetachedNodes, TextSetContentWorksBeforeAttach) {
+    /* Unattached: the discriminator that regressed (1.9.223–1.9.226
+     * returned EINVAL here; content stayed at the create-time value). */
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef t = leptris_text_node_create(doc, "abc");
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(leptris_text_node_set_content(t, "world"), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_text_node_get_content(t), "world");
+
+    /* The mutation survives attach + serialize. */
+    LeptrisElement root = leptris_element_create(doc, "r");
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_append_child(root, (LeptrisElement)t), LEPTRIS_OK);
+    char* x = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(x, nullptr);
+    EXPECT_NE(std::strstr(x, "<r>world</r>"), nullptr);
+    leptris_free_string(x);
+
+    /* Attach-then-set and set-after-parse still work (never
+     * regressed — pin them so the owner path can't shadow the
+     * parent-walk path). */
+    LeptrisNodeRef t2 = leptris_text_node_create(doc, "one");
+    ASSERT_EQ(leptris_element_append_child(root, (LeptrisElement)t2), LEPTRIS_OK);
+    EXPECT_EQ(leptris_text_node_set_content(t2, "two"), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_text_node_get_content(t2), "two");
+
+    leptris_document_free(doc);
+
+    const char xml[] = "<r>parsed</r>";
+    LeptrisDocument doc2 = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisElement root2 = leptris_document_root(doc2);
+    LeptrisNodeRef pt = leptris_node_first_child(leptris_element_as_node(root2));
+    ASSERT_NE(pt, nullptr);
+    EXPECT_EQ(leptris_text_node_set_content(pt, "replaced"), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_text_node_get_content(pt), "replaced");
+    leptris_document_free(doc2);
+}
+
 /* Issue #526: document-level PI enumeration + creation. */
 TEST(DocumentPIs, EnumerateAndAdd) {
     const char xml[] = "<?xml version='1.0'?><?docpi d1?><r/>";

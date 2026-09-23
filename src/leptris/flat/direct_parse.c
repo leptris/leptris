@@ -1014,6 +1014,7 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
     tn->content_len = (uint32_t)content_len;
     tn->parent_off = 0;
     tn->next_sibling_off = 0;
+    tn->owner_doc_off = 0;   /* #1320: parse-carved nodes attach */
     return tn;
 }
 
@@ -2597,6 +2598,7 @@ static struct leptris_document* dp_il_build(
              * run is already NUL-terminated at carve) */
             tn->parent_off = 0;
             tn->next_sibling_off = 0;
+            tn->owner_doc_off = 0;   /* #1320: parse-carved nodes attach */
             smap[i] = (LeptrisNode*)tn;
             pp.depth = (int)rdepth[r->parent] + 1;
             pp.last_child_stack[pp.depth - 1] = lc[r->parent];

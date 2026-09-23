@@ -26,7 +26,15 @@
  *   are outside every supported target.
  *
  * Issue #168: parent_off mirrors next_sibling_off so the parent of a
- * text node can be queried in O(1). */
+ * text node can be queried in O(1).
+ *
+ * Issue #1320: owner_doc_off gives DETACHED text nodes their owning
+ * document — #519 added an owner_doc field to PI/comment/CDATA but
+ * skipped text (whose pool backref covered it at the time); #1285
+ * slice 4 deleted that backref and detached set_content started
+ * returning INVALID_ARG. Stamped by the public creator only —
+ * parse-carved nodes are attached by construction. int32, so the
+ * LP64 struct keeps its 40 bytes (padding absorbs it). */
 typedef struct leptris_text_node {
     LeptrisNode base;                   /* MUST be first */
     char* content;                    /* Text content - NEVER trim! NUL-terminated at [content_len] */
@@ -40,6 +48,7 @@ typedef struct leptris_text_node {
      * 0 = NULL. */
     int32_t next_sibling_off;
     int32_t parent_off;               /* Byte offset to parent element (0=NULL) */
+    int32_t owner_doc_off;            /* Byte offset to owning document (0=unstamped; #1320) */
 } LeptrisTextNode;
 
 /* Text node creation.
@@ -108,6 +117,19 @@ static inline LeptrisElement leptris_textnode_parent(const LeptrisTextNode* t) {
 static inline void leptris_textnode_set_parent(LeptrisTextNode* t, LeptrisElement parent) {
     if (!t) return;
     t->parent_off = leptris_compact_int32_encode_inline(t, parent, &t->parent_off);
+}
+
+/* Owning-document access (issue #1320). The stamp is written by
+ * leptris_text_node_create with the explicit-doc encoder (an
+ * overflow-table entry made outside a parse context must carry the
+ * REAL document tag, not the TLS current-doc). Decode is the
+ * standard edge decode. */
+struct leptris_document;
+static inline struct leptris_document* leptris_textnode_owner_doc(const LeptrisTextNode* t) {
+    return (t && t->owner_doc_off != 0)
+        ? (struct leptris_document*)leptris_compact_int32_decode_inline(
+              (void*)t, t->owner_doc_off, &t->owner_doc_off)
+        : NULL;
 }
 
 #endif /* LEPTRIS_DOM_TEXT_H */

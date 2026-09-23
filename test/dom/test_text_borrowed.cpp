@@ -50,10 +50,10 @@ TEST(TextBorrowed, ParsedTextNodeIsTerminatedInPlace) {
 TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
     /* #1285 slice 4: pool + borrowed removed, content_len is uint32.
      * The width-independent invariant: base + ONE content pointer +
-     * three int32s (len, next, parent), rounded to pointer alignment
-     * — nothing else. 64 -> 48 on LP64; 32 on ILP32. The issue's
-     * 32B sketch assumed a 12-byte base and a 64-bit host; going
-     * lower needs content as an int32 pool offset (slice 4b). The
+     * FOUR int32s (len, next, parent, owner doc — #1320), rounded to
+     * pointer alignment — nothing else. 40 on LP64 (the owner field
+     * lands in padding; sizeof unchanged); 32 on ILP32. Going lower
+     * needs content as an int32 pool offset (slice 4b). The
      * parse-time bulk strides (dp text block, il lane table) hardcode
      * this layout economics — a silent field growth would erode the
      * #1222 parse win this slice exists for. */
@@ -63,17 +63,17 @@ TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
     constexpr size_t kA = alignof(void*);
     constexpr size_t kBaseA =
         (sizeof(LeptrisNode) + kA - 1) / kA * kA;
-    constexpr size_t kRaw = kBaseA + sizeof(void*) + 3 * sizeof(int32_t);
+    constexpr size_t kRaw = kBaseA + sizeof(void*) + 4 * sizeof(int32_t);
     constexpr size_t kAligned = (kRaw + kA - 1) / kA * kA;
     static_assert(sizeof(LeptrisTextNode) == kAligned,
                   "LeptrisTextNode must be base + one content pointer + "
-                  "uint32 len + int32 next + int32 parent (aligned) — "
-                  "no pool/borrowed fields (#1285 slice 4)");
+                  "uint32 len + int32 next + int32 parent + int32 owner "
+                  "(aligned) — no pool/borrowed fields (#1285 slice 4, #1320)");
     EXPECT_EQ(sizeof(LeptrisTextNode), kAligned);
 #if defined(__LP64__) || defined(_WIN64)
     EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)40);
 #else
-    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)28);
+    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)32);
 #endif
 }
 
