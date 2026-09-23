@@ -4,12 +4,39 @@
 
 ### Fixed
 
-- zero the fake nodes in the header-hygiene edge specs (test)
+- **test:** the header-hygiene compact-pointer edge specs zero their
+  fake stack-allocated nodes before use. The `last_child` and
+  `last_attribute` getters *walk* the sibling/attribute list, so the
+  uninitialized fake node's next-edge was read as stack garbage —
+  zero on arm64, nonzero on x86_64, where the slice-3b layout shift
+  surfaced the latent UB as a real CI failure. It was always UB.
 
 ### Performance
 
-- binding_wrapper out of the node base — element 48B, text 40B (#1285 slice 3b) (dom)
-- interleaved lane size floor — small docs defer to classic (#1258) (parse)
+- **dom: binding_wrapper out of the node base — element 48B, text
+  40B, every node type −8B (#1285 slice 3b).** `LeptrisNode` itself
+  drops 24 → 12 bytes; the element struct reaches the lane's stated
+  goal of 48 bytes. The `binding_wrapper` field (#262) was never
+  adopted — zero callers in leptris-ruby and leptris-py (both cache
+  wrappers on their own side), making it pure dead weight at 8 bytes
+  per node per document, and it carried the #421 stale-pointer bug
+  class, which the removal structurally eliminates. The public
+  `leptris_node_get/set_binding_wrapper` API is unchanged and now
+  serves from a lazily-allocated open-addressed map owned by the
+  document: documents that never wrap (all of them today) allocate
+  nothing, and entries cannot outlive their nodes because the map
+  dies with the document.
+- **parse: interleaved lane size floor — small docs defer to classic
+  (#1258).** The two-phase scan+replay lane pays a fixed setup cost
+  that small documents cannot amortize: canon's gate measured ~25%
+  slower on a 24KB readonly shape while large documents run 0.69–0.74×
+  (256KB–3.4MB). `dp_il_try` now defers to the classic parser below a
+  64KB floor (the midpoint between the measured loss and the wins);
+  `LEPTRIS_IL_MIN` overrides it in bytes, with explicit `0` disabling
+  the floor. Coverage is preserved, not narrowed: the parity suite
+  pins `LEPTRIS_IL_MIN=1` in every lane toggle, the lane-forced CI leg
+  sets it to `0` so the full suite still exercises the lane, and a new
+  spec pins the deferral itself.
 
 
 
