@@ -389,18 +389,20 @@ void leptris_node_set_next_sibling(LeptrisNode* node, LeptrisNode* sibling) {
  * lazily from the callback instead of materializing per-level
  * NodeSet/Array allocations. */
 static void node_visit_rec(LeptrisNode* n, int depth,
-                           LeptrisNodeVisitor visitor, void* user_data) {
+                           LeptrisNodeVisitor visitor, void* user_data,
+                           int entering_only) {
     int is_elem = (n->type == LEPTRIS_NODE_TYPE_ELEMENT);
     visitor(user_data, (LeptrisNodeRef)n, 1, depth);
     if (!is_elem) return;
     for (LeptrisNode* c = leptris_elem_first_child((LeptrisElement)n); c;
          c = leptris_node_get_next_sibling(c))
-        node_visit_rec(c, depth + 1, visitor, user_data);
-    visitor(user_data, (LeptrisNodeRef)n, 0, depth);
+        node_visit_rec(c, depth + 1, visitor, user_data, entering_only);
+    if (!entering_only)
+        visitor(user_data, (LeptrisNodeRef)n, 0, depth);
 }
 
-void leptris_node_visit(LeptrisNodeRef root, LeptrisNodeVisitor visitor,
-                        void* user_data) {
+static void node_visit_impl(LeptrisNodeRef root, LeptrisNodeVisitor visitor,
+                            void* user_data, int entering_only) {
     if (!root || !visitor) return;
     if (root->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
         /* Document root: children = the document child chain (#580),
@@ -413,8 +415,23 @@ void leptris_node_visit(LeptrisNodeRef root, LeptrisNodeVisitor visitor,
         if (!start) start = (LeptrisNode*)d->root;
         for (LeptrisNode* c = start; c;
              c = leptris_node_get_next_sibling(c))
-            node_visit_rec(c, 0, visitor, user_data);
+            node_visit_rec(c, 0, visitor, user_data, entering_only);
         return;
     }
-    node_visit_rec((LeptrisNode*)root, 0, visitor, user_data);
+    node_visit_rec((LeptrisNode*)root, 0, visitor, user_data,
+                   entering_only);
+}
+
+void leptris_node_visit(LeptrisNodeRef root, LeptrisNodeVisitor visitor,
+                        void* user_data) {
+    node_visit_impl(root, visitor, user_data, 0);
+}
+
+/* Issue #1332: entering-only mode — one callback per node. The
+ * family-walk consumers all discard the leaving half of
+ * leptris_node_visit; this skips those invocations at the source. */
+void leptris_node_visit_entering(LeptrisNodeRef root,
+                                 LeptrisNodeVisitor visitor,
+                                 void* user_data) {
+    node_visit_impl(root, visitor, user_data, 1);
 }

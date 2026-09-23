@@ -1196,6 +1196,23 @@ LEPTRIS_API void leptris_node_visit(LeptrisNodeRef root,
                                     void* user_data);
 
 /**
+ * Entering-only subtree visitation (issue #1332)
+ *
+ * Same walk as leptris_node_visit — document order, same depths —
+ * but the callback fires ONCE per node, on entering. Elements are
+ * not re-visited after their subtree. Halves the C-callback
+ * invocations for consumers that only act on entering=1 (the lazy
+ * family-walk shape).
+ *
+ * @param root Subtree root (any node kind, or a document node)
+ * @param visitor Callback per node (may be NULL — no-op)
+ * @param user_data Opaque context for the callback
+ */
+LEPTRIS_API void leptris_node_visit_entering(LeptrisNodeRef root,
+                                             LeptrisNodeVisitor visitor,
+                                             void* user_data);
+
+/**
  * Count the document's top-level processing instructions
  *
  * Parsed `<?target data?>` items outside the root element (and ones
