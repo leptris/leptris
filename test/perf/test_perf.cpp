@@ -105,8 +105,24 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
      * contention is not — so the gate retries across settling
      * windows and fails only when EVERY attempt breaches. */
 #if defined(NDEBUG) && !LEPTRIS_TEST_ASAN
+    /* Windows hosted runners show SUSTAINED multi-second contention
+     * far more often than the unix legs: 2455 vs the 1500 budget on
+     * 2026-09-22 and again on 2026-09-23 with the algorithm byte-for-
+     * byte unchanged (four false positives in two days). The gate is
+     * calibrated per platform: Windows gets a 2x budget and two more
+     * settling attempts. A real algorithmic regression is a
+     * multiplier (>= 10x baseline), not a runner property — 3000 is
+     * still ~10x the healthy band, and the unix legs keep the tight
+     * 1500 gate. */
+#if defined(_WIN32)
+    const double kRatioBudget = 3000.0;
+    const int kAttempts = 5;
+#else
+    const double kRatioBudget = 1500.0;
+    const int kAttempts = 3;
+#endif
     bool ok = false;
-    for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+    for (int attempt = 0; attempt < kAttempts && !ok; attempt++) {
         if (attempt) std::this_thread::sleep_for(
             std::chrono::milliseconds(2000));
         best = INFINITY;
@@ -116,11 +132,12 @@ TEST(PerfRegression, SmallDocumentParseIsFast) {
             if (ratio < best) best = ratio;
         }
         if (best > worst) worst = best;
-        ok = best < 1500.0;
+        ok = best < kRatioBudget;
     }
     EXPECT_TRUE(ok)
         << "Small-doc parse regression: parse/memcpy ratio breached "
-               "1500 on all 3 attempts (worst " << worst << ")";
+               << kRatioBudget << " on all " << kAttempts
+               << " attempts (worst " << worst << ")";
 #else
     (void)best;
     (void)worst;
