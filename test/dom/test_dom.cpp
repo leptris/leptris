@@ -2234,6 +2234,62 @@ TEST(DomBasics, NodeVisitWalksSubtreeEnterLeave) {
     leptris_document_free(doc);
 }
 
+/* Issue #1332: entering-only visit mode — one callback per node, on
+ * entering. Halves the C-callback invocations for consumers that
+ * discard the leaving half (family walks bind lazily on enter).
+ * Same walk order and depths as leptris_node_visit. */
+TEST(DomBasics, NodeVisitEnteringFiresOncePerNode) {
+    const char xml[] = "<r><a>t1</a><b><!--c--></b></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    VisitLog log;
+    leptris_node_visit_entering((LeptrisNodeRef)root, &VisitLog::visit,
+                                &log);
+    /* 5 nodes (r, a, text, b, comment) — the 3 leaving events of
+     * the full mode are gone. The event list has no L* entries. */
+    ASSERT_EQ(log.events.size(), 5u);
+    EXPECT_EQ(log.events[0], "Er:0");
+    EXPECT_EQ(log.events[1], "Ea:1");
+    EXPECT_EQ(log.events[2], "T:2");
+    EXPECT_EQ(log.events[3], "Eb:1");
+    EXPECT_EQ(log.events[4], "O:2");
+
+    /* Document-node walk behaves identically to the full mode. */
+    VisitLog dlog;
+    leptris_node_visit_entering(leptris_document_node(doc),
+                                &VisitLog::visit, &dlog);
+    ASSERT_EQ(dlog.events.size(), 5u);
+    EXPECT_EQ(dlog.events[0], "Er:0");
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, NodeVisitEnteringHalvesTheCallbackCount) {
+    /* The moxml-walk contract (#1332): elements visit TWICE in the
+     * full mode, ONCE here. */
+    const char xml[] =
+        "<r><a><b/><c><d/></c></a><e/><f><g><h/></g></f></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    int full_calls = 0, entering_calls = 0;
+    auto counter = +[](void* ud, LeptrisNodeRef, int, int) {
+        ++*static_cast<int*>(ud);
+    };
+    leptris_node_visit((LeptrisNodeRef)leptris_document_root(doc),
+                       counter, &full_calls);
+    leptris_node_visit_entering(
+        (LeptrisNodeRef)leptris_document_root(doc), counter,
+        &entering_calls);
+    EXPECT_EQ(full_calls, 18);        /* 9 elements * 2 */
+    EXPECT_EQ(entering_calls, 9);     /* 9 elements, once */
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, NodeChildrenExCarriesKinds) {
     const char xml[] =
         "<r>text<!--c--><a/><?pi x?></r>";
