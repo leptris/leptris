@@ -181,3 +181,6 @@ test/*.tests.cmake
 # Only test fixtures should be in test/fixtures/
 benchmarks/fixtures/libxml2_repo/
 benchmarks/fixtures/pugixml_repo/
+
+# Benchmark runs write here; artifacts upload from it (never committed)
+benchmarks/results/
