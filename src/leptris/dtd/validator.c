@@ -173,8 +173,10 @@ static int element_has_char_content(LeptrisElement elem) {
         unsigned t = leptris_node_get_type(child);
         if (t == LEPTRIS_NODE_TYPE_TEXT) {
             const LeptrisTextNode* tn = (const LeptrisTextNode*)child;
+            const char* tc = leptris_textnode_content(tn);
+            if (!tc) continue;
             for (size_t i = 0; i < tn->content_len; i++) {
-                if (!isspace((unsigned char)tn->content[i])) return 1;
+                if (!isspace((unsigned char)tc[i])) return 1;
             }
         } else if (t == LEPTRIS_NODE_TYPE_CDATA) {
             const LeptrisCDATANode* cn = (const LeptrisCDATANode*)child;

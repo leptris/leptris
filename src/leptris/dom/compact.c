@@ -286,7 +286,9 @@ int32_t leptris_compact_int32_encode(void* base, void* target,
                                      const int32_t* field_addr) {
     if (!target) return 0;
     ptrdiff_t d = (char*)target - (char*)base;
-    if (d < INT32_MIN || d > INT32_MAX) {
+    /* INT32_MAX is the EMPTY sentinel (compact.h) — spill exact
+     * deltas there too so raw offsets never collide with it. */
+    if (d < INT32_MIN || d >= INT32_MAX) {
         LeptrisCompactOverflowTable* table = get_overflow_table();
         struct leptris_document* doc = get_current_document();
         if (table && leptris_compact_overflow_set(table, field_addr,

@@ -11,12 +11,12 @@
 #include "node.h"
 #include "compact.h"  /* compact-pointer helpers (TODO 121, TODO 178) */
 
-/* Text node - inherits from LeptrisNode. 48 bytes (#1285 slice 4,
- * was 64 — the pool/borrowed fields are gone because content is
- * ALWAYS NUL-terminated: every producer terminates in place, so
- * leptris_text_get_content is a plain field read).
+/* Text node - inherits from LeptrisNode. 32 bytes (#1285 slice 4b +
+ * #1320, was 40 — the content pointer became an int32 self-relative
+ * byte offset and the detached-owner backref joined it; base 12 +
+ * five int32s on both LP64 and ILP32).
  *
- * #1285 slice 4 invariants:
+ * #1285 slice 4 invariants (unchanged):
  * - `content` is NUL-terminated at content[content_len] in ALL
  *   cases — pooled copies (leptris_text_create) and in-place runs
  *   into the doc-owned input buffer alike (every parse lane
@@ -24,6 +24,17 @@
  * - content_len is uint32: a single text run is capped at 4 GB
  *   (dp_text_create rejects beyond that); parse buffers that size
  *   are outside every supported target.
+ *
+ * #1285 slice 4b content_off encoding:
+ * - 0 = NULL (zero-init pool memory reads as no content).
+ * - LEPTRIS_COMPACT_INT32_EMPTY = the static "" (xsl:strip-space
+ *   field writes point at a read-only literal far from any node;
+ *   the shared sentinel avoids one overflow-table entry per
+ *   stripped node).
+ * - anything else = byte offset from the node itself; deltas beyond
+ *   int32 range spill to the overflow table (compact.h machinery,
+ *   same as parent/sibling edges — ASLR can place the pool and the
+ *   doc-owned input buffer > 2 GB apart).
  *
  * Issue #168: parent_off mirrors next_sibling_off so the parent of a
  * text node can be queried in O(1).
@@ -37,7 +48,7 @@
  * LP64 struct keeps its 40 bytes (padding absorbs it). */
 typedef struct leptris_text_node {
     LeptrisNode base;                   /* MUST be first */
-    char* content;                    /* Text content - NEVER trim! NUL-terminated at [content_len] */
+    int32_t content_off;              /* Self-relative offset to NUL-terminated content (0=NULL, EMPTY=static "") */
     uint32_t content_len;             /* Byte length (excl. NUL); 4 GB cap */
     /* (#450) int32 sibling edge — was cp16 (±256 KB). Text nodes
      * link to ELEMENT siblings across the parse-time element↔text
@@ -61,28 +72,37 @@ typedef struct leptris_text_node {
  * have a length-bounded view).  Passing 0 with non-NULL content is
  * treated as an empty string.
  *
+ * `doc` (#1285 slice 4b thread safety): the content offset is
+ * node-relative int32; the rare >2GB delta (oversized-content pool
+ * path under far-apart allocators) spills to the overflow table and
+ * MUST be tagged with the owning document — a NULL/TLS tag leaks the
+ * entry past doc teardown (Linux-ASAN/LSan catches it). Every caller
+ * has the doc.
+ *
  * Ownership: pool-allocated; leptris_document_free releases via pool. */
 LeptrisTextNode* leptris_text_create(const char* content,
                                     size_t content_len,
-                                    LeptrisMemoryPool* pool);
+                                    LeptrisMemoryPool* pool,
+                                    struct leptris_document* doc);
 
 /* Create a text node borrowing the caller's bytes (parse hot path).
  *
  * The node struct is pool-allocated; `content` is stored as a
- * non-owning pointer into the caller's buffer — no memcpy. CALLER
+ * non-owning view into the caller's buffer — no memcpy. CALLER
  * CONTRACT (#1285 slice 4): the run MUST already be NUL-terminated
  * at content[content_len] and must outlive the document (parse
  * lanes terminate the run in the doc-owned input copy before
- * carving the node). */
+ * carving the node). `doc` tags the overflow entry when the
+ * buffer-to-node distance exceeds int32 range (see leptris_text_create). */
 LeptrisTextNode* leptris_text_create_borrowed(const char* content,
                                              size_t content_len,
-                                             LeptrisMemoryPool* pool);
+                                             LeptrisMemoryPool* pool,
+                                             struct leptris_document* doc);
 
 void leptris_text_free(LeptrisTextNode* text);
 
 /* Content access */
 const char* leptris_text_get_content(LeptrisTextNode* text);
-void leptris_text_set_content(LeptrisTextNode* text, const char* content);
 
 /* Casting helpers */
 #define LEPTRIS_NODE_AS_TEXT(node) \
@@ -117,6 +137,41 @@ static inline LeptrisElement leptris_textnode_parent(const LeptrisTextNode* t) {
 static inline void leptris_textnode_set_parent(LeptrisTextNode* t, LeptrisElement parent) {
     if (!t) return;
     t->parent_off = leptris_compact_int32_encode_inline(t, parent, &t->parent_off);
+}
+
+/* Compact content accessors (#1285 slice 4b). The content pointer
+ * is a self-relative int32 byte offset — same encoding as the edges
+ * above. Writers that store an empty string land on the shared
+ * EMPTY sentinel; pooled and in-place runs are a small positive
+ * offset from the node (the create paths allocate struct + content
+ * contiguously); far targets (static literals, cross-block buffer
+ * runs) spill to the overflow table. */
+static inline const char* leptris_textnode_content(const LeptrisTextNode* t) {
+    if (!t || t->content_off == 0) return NULL;
+    if (t->content_off == LEPTRIS_COMPACT_INT32_EMPTY) return "";
+    return (const char*)leptris_compact_int32_decode_inline(
+        (void*)t, t->content_off, &t->content_off);
+}
+
+/* Doc-tagged stamp (#1285 slice 4b thread safety). Identical to
+ * set_content_ptr except the >2GB spill registers in the overflow
+ * table tagged with the EXPLICIT document (the TLS current-doc slot
+ * is unset on parse worker threads — dp is overflow-table-free by
+ * design — so a TLS-tagged entry leaks past doc teardown and Linux
+ * CI ASAN/LSan aborts the run). Parse-lane and builder sites MUST
+ * use this form; the pooled-create contiguous path never spills but
+ * takes doc anyway so the oversized-content fallback is covered. */
+static inline void leptris_textnode_set_content_ptr_doc(
+    LeptrisTextNode* t, const char* p, struct leptris_document* doc) {
+    if (!t) return;
+    if (!p) { t->content_off = 0; return; }
+    if (*p == '\0') { t->content_off = LEPTRIS_COMPACT_INT32_EMPTY; return; }
+    ptrdiff_t d = (char*)p - (char*)t;
+    if (d < INT32_MIN || d >= INT32_MAX)
+        t->content_off = leptris_compact_int32_encode_doc(
+            t, (void*)p, &t->content_off, doc);
+    else
+        t->content_off = (int32_t)d;
 }
 
 /* Owning-document access (issue #1320). The stamp is written by

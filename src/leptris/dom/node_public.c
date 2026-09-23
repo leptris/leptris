@@ -333,7 +333,7 @@ LEPTRIS_API LeptrisNodeRef leptris_text_node_create(LeptrisDocument doc,
     if (!doc->pool) return NULL;
     if (!content) content = "";
     size_t len = strlen(content);
-    LeptrisTextNode* n = leptris_text_create(content, len, doc->pool);
+    LeptrisTextNode* n = leptris_text_create(content, len, doc->pool, doc);
     if (n) {
         /* #1320: stamp the owner so detached mutations can reach the
          * doc's pool (PI/comment/CDATA do this via owner_doc fields;
@@ -416,7 +416,7 @@ LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,
     if (!doc || !doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
     char* copy = node_public_pool_strdup(doc->pool, content, len);
     if (!copy) return LEPTRIS_ERROR_MEMORY;
-    t->content = copy;
+    leptris_textnode_set_content_ptr_doc(t, copy, doc);
     t->content_len = (uint32_t)len;
     return LEPTRIS_OK;
 }

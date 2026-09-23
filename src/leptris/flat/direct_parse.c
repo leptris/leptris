@@ -991,7 +991,7 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
             p->pool, 128 * sizeof(LeptrisTextNode));
         if (!tn) {
             return leptris_text_create_borrowed(content, content_len,
-                                               p->pool);
+                                               p->pool, p->doc);
         }
         p->text_end = tn + 128;
         /* cursor == tn: carve below */
@@ -1010,7 +1010,7 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
      * carve (dispatch-entry dp_nul / walker '&' NUL / EOF sentinel)
      * — the terminator write lives with the byte's last reader, not
      * here. */
-    tn->content = (char*)content;
+    leptris_textnode_set_content_ptr_doc(tn, content, p->doc);
     tn->content_len = (uint32_t)content_len;
     tn->parent_off = 0;
     tn->next_sibling_off = 0;
@@ -1443,7 +1443,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                 leptris_decode_entities_view(&ssv, pool);
                             if (sexp) {
                                 rt = leptris_text_create(
-                                    sexp, strlen(sexp), pool);
+                                    sexp, strlen(sexp), pool, p.doc);
                             }
                         }
                         if (!rt) {
@@ -1482,7 +1482,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         LeptrisStringView ssv = leptris_sv_from_ptr(seg, slen);
                         char* sexp = leptris_decode_entities_view(&ssv, pool);
                         if (sexp) {
-                            rt = leptris_text_create(sexp, strlen(sexp), pool);
+                            rt = leptris_text_create(sexp, strlen(sexp), pool, p.doc);
                         }
                     }
                     if (!rt) {
@@ -1512,7 +1512,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                           &sv, p.dtd, pool)
                     : leptris_decode_entities_view(&sv, pool);
                 if (expanded) {
-                    tn = leptris_text_create(expanded, strlen(expanded), pool);
+                    tn = leptris_text_create(expanded, strlen(expanded), pool, p.doc);
                 } else {
                     tn = dp_text_create(&p, text_start, tlen);
                 }
@@ -2592,7 +2592,7 @@ static struct leptris_document* dp_il_build(
             tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
             tn->base.frozen = 1;
             tn->base.line = r->line;
-            tn->content = (char*)content;
+            leptris_textnode_set_content_ptr_doc(tn, content, doc);
             tn->content_len = r->len;
             /* (slice 4: pool/borrowed fields gone; the il scratch
              * run is already NUL-terminated at carve) */
@@ -2639,7 +2639,8 @@ oom_early:
 int leptris_il_run(const char* xml, size_t len, int drop_ws,
                    IlCtx* c, char** scratch_out, uint32_t* root_out) {
     *scratch_out = NULL;
-    c->recs = c->attrs = NULL;
+    c->recs = NULL;
+    c->attrs = NULL;
     c->nrec = c->crec = c->nattr = c->cattr = 0;
     c->depth = 0;
     if (!xml || len == 0 || len >= 0x7FFFFFFFu) return 0;

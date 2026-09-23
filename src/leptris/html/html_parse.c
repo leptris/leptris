@@ -3908,7 +3908,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 w9++;
         if (t9 && w9 && t9[w9]) {
             LeptrisTextNode* tn9 = (LeptrisTextNode*)n;
-            tn9->content = t9 + w9;
+            leptris_textnode_set_content_ptr_doc(tn9, t9 + w9, b->doc);
             tn9->content_len -= w9;
         } else if (t9 && w9 && !t9[w9]) {
             return;   /* pure before-head ws: dropped (tests7:7) */
@@ -3986,7 +3986,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
         if (ct && ct[cw] && cw > 0) {
             LeptrisTextNode* tail =
                 leptris_text_create(ct + cw, strlen(ct + cw),
-                                    b->pool);
+                                    b->pool, b->doc);
             ((char*)ct)[cw] = '\0';
             ((LeptrisTextNode*)n)->content_len = cw;
             leptris_element_append_child_internal_doc(
@@ -4916,7 +4916,7 @@ head_end =
                         if (w2 > tx && *w2) {
                             LeptrisTextNode* tail =
                                 leptris_text_create(
-                                    w2, strlen(w2), b->pool);
+                                    w2, strlen(w2), b->pool, b->doc);
                             if (tail) {
                                 leptris_node_set_next_sibling(
                                     (LeptrisNodeRef)tail,
@@ -5438,12 +5438,12 @@ static LeptrisTextNode* h_text_node(HBuilder* b, const char* s,
             }
         }
         *(char*)e = '\0';
-        return leptris_text_create_borrowed(s, len, b->pool);
+        return leptris_text_create_borrowed(s, len, b->pool, b->doc);
     }
     size_t dlen = 0;
     char* dec = h_decode_text(b, s, e, &dlen);
     if (!dec || !*dec) return NULL;
-    return leptris_text_create(dec, dlen, b->pool);
+    return leptris_text_create(dec, dlen, b->pool, b->doc);
 }
 
 static LeptrisDocument html_parse_shared(
@@ -5783,13 +5783,13 @@ static LeptrisDocument html_parse_shared(
                                     }
                                 }
                                 LeptrisTextNode* t =
-                                    leptris_text_create(buf, o, b.pool);
+                                    leptris_text_create(buf, o, b.pool, b.doc);
                                 if (t)
                                     h_append(&b, (LeptrisNodeRef)t);
                             }
                         } else {
                             LeptrisTextNode* t = leptris_text_create(
-                                cs, clen, b.pool);
+                                cs, clen, b.pool, b.doc);
                             if (t) h_append(&b, (LeptrisNodeRef)t);
                         }
                     }
@@ -5838,7 +5838,7 @@ static LeptrisDocument html_parse_shared(
                         if (t) h_append(&b, (LeptrisNodeRef)t);
                     }
                     LeptrisTextNode* t =
-                        leptris_text_create("</", 2, b.pool);
+                        leptris_text_create("</", 2, b.pool, b.doc);
                     if (t) h_append(&b, (LeptrisNodeRef)t);
                     p = end;
                     text = p;
@@ -7907,7 +7907,7 @@ static LeptrisDocument html_parse_shared(
                                             b.whatwg, &dlen);
                     if (dec && dlen) {
                         LeptrisTextNode* t = leptris_text_create(
-                        dec, dlen, b.pool);
+                        dec, dlen, b.pool, b.doc);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 e, (LeptrisNodeRef)t, b.doc);
@@ -7917,14 +7917,14 @@ static LeptrisDocument html_parse_shared(
                         h_nul_fffd_copy(b.pool, cs, clen, eof_fffd);
                     if (mapped && mapped[0]) {
                         LeptrisTextNode* t = leptris_text_create(
-                            mapped, strlen(mapped), b.pool);
+                            mapped, strlen(mapped), b.pool, b.doc);
                         if (t)
                             leptris_element_append_child_internal_doc(
                                 et, (LeptrisNodeRef)t, b.doc);
                     }
                 } else {
                     LeptrisTextNode* t = leptris_text_create(
-                        cs, clen, b.pool);
+                        cs, clen, b.pool, b.doc);
                     if (t)
                         leptris_element_append_child_internal_doc(
                             et, (LeptrisNodeRef)t, b.doc);
