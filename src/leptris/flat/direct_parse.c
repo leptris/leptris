@@ -1005,7 +1005,6 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
      * serialize_text_internal then emitted text VERBATIM (raw < in
      * the output, invalid XML). */
     tn->base.raw = 0;
-    tn->base.binding_wrapper = NULL;
     tn->base.line = 0;     /* caller stamps the offset */
     /* #1285 slice 4: the run is NUL-terminated in place BEFORE this
      * carve (dispatch-entry dp_nul / walker '&' NUL / EOF sentinel)

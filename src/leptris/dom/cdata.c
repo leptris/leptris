@@ -23,8 +23,7 @@ LeptrisCDATANode* leptris_cdata_create(const char* content,
     node->base.type = LEPTRIS_NODE_TYPE_CDATA;
     node->base.frozen = 0;
     node->base.version = 0;
-      node->base.binding_wrapper = NULL;
-    node->parent_off = 0;
+      node->parent_off = 0;
     node->next_sibling_off = 0;
 
     if (content && content_len > 0) {

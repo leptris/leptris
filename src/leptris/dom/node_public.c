@@ -688,12 +688,71 @@ LEPTRIS_API void leptris_node_source_position(LeptrisNodeRef node,
     }
 }
 
+/* #1285 slice 3b: binding_wrapper storage moved out of LeptrisNode
+ * (both bindings have zero callers — they cache wrappers on their
+ * own side — and the in-node field carried the #421 stale-pointer
+ * bug class on recycled arena pages). Open-addressed map keyed by
+ * node pointer, lazily allocated per document, freed with it: map
+ * entries can never outlive their nodes, and documents that never
+ * wrap (all of them today) pay nothing. NULL before any set — the
+ * parse-NULL contract holds by construction. */
+struct leptris_wrapper_entry {
+    LeptrisNodeRef node;   /* 0 = empty slot */
+    void* wrapper;
+};
+
+static size_t wrapper_hash(LeptrisNodeRef n, size_t cap) {
+    uintptr_t k = (uintptr_t)n;
+    return ((size_t)((k * 0x9E3779B97F4A7C15ULL) >> 32)) & (cap - 1);
+}
+
+static int wrapper_grow(struct leptris_document* doc) {
+    size_t ncap = doc->wrapper_cap ? doc->wrapper_cap * 2 : 16;
+    struct leptris_wrapper_entry* nt = (struct leptris_wrapper_entry*)
+        calloc(ncap, sizeof(*nt));
+    if (!nt) return -1;
+    for (size_t i = 0; i < doc->wrapper_cap; i++) {
+        struct leptris_wrapper_entry* e = &doc->wrapper_map[i];
+        if (e->node) {
+            size_t j = wrapper_hash(e->node, ncap);
+            while (nt[j].node) j = (j + 1) & (ncap - 1);
+            nt[j] = *e;
+        }
+    }
+    free(doc->wrapper_map);
+    doc->wrapper_map = nt;
+    doc->wrapper_cap = ncap;
+    return 0;
+}
+
 LEPTRIS_API void* leptris_node_get_binding_wrapper(LeptrisNodeRef node) {
-    return node ? node->binding_wrapper : NULL;
+    if (!node) return NULL;
+    struct leptris_document* doc = node_public_document(node);
+    if (!doc || !doc->wrapper_map) return NULL;
+    size_t i = wrapper_hash(node, doc->wrapper_cap);
+    while (doc->wrapper_map[i].node) {
+        if (doc->wrapper_map[i].node == node)
+            return doc->wrapper_map[i].wrapper;
+        i = (i + 1) & (doc->wrapper_cap - 1);
+    }
+    return NULL;
 }
 
 LEPTRIS_API void leptris_node_set_binding_wrapper(LeptrisNodeRef node, void* wrapper) {
-    if (node) node->binding_wrapper = wrapper;
+    if (!node) return;
+    struct leptris_document* doc = node_public_document(node);
+    if (!doc) return;   /* detached, unregistered node: no carrier */
+    if (doc->wrapper_count * 2 + 2 >= doc->wrapper_cap) {
+        if (wrapper_grow(doc) != 0) return;
+    }
+    size_t i = wrapper_hash(node, doc->wrapper_cap);
+    while (doc->wrapper_map[i].node && doc->wrapper_map[i].node != node)
+        i = (i + 1) & (doc->wrapper_cap - 1);
+    if (!doc->wrapper_map[i].node) {
+        doc->wrapper_map[i].node = node;
+        doc->wrapper_count++;
+    }
+    doc->wrapper_map[i].wrapper = wrapper;
 }
 
 LEPTRIS_API int leptris_node_compare(LeptrisNodeRef a, LeptrisNodeRef b) {

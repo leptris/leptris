@@ -683,17 +683,16 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
  * pinned structs hold only pointers and int-sized scalars, so i686
  * and armv7 produce identical layouts. */
 #if SIZE_MAX == UINT64_MAX
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 64,
-    "#1285 slice 3a: ns_cache_off + offsets side table -> 64 bytes");
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 48,
+    "#1285 slice 3b: binding_wrapper out of the base -> 48 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
     "round 19 attr layout: 16+16+4+2+2 = 40");
 #else
-/* ILP32: LeptrisNode 24->16 (binding_wrapper), element name +
- * ns_cache pointers 8->4 each -> 56; attribute name_view 16->8
- * (value union stays 16 via inline_value[16]) -> 32. */
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 48,
-    "#1285 slice 3a ILP32: 48 bytes");
+/* ILP32: LeptrisNode 16->12 (#1285 slice 3b); attribute
+ * name_view 16->8 (value union stays 16 via inline_value[16]). */
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 44,
+    "#1285 slice 3b ILP32: base 12 + 8 + 6*4 + ptr 4 = 44 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 32,
     "leptris_attribute ILP32 layout: 8+16+4+2+2 = 32");
