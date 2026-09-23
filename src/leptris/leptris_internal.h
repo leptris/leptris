@@ -226,6 +226,15 @@ struct leptris_document {
      * xml_buffer) and resolves queries via binary search, caching
      * the result in the node with the high bit set. NULL = not yet
      * built. Freed with the document. */
+    /* #1285 slice 3b: binding_wrapper left the node base (#262's
+     * FFI cache was never adopted — zero callers in leptris-ruby/py
+     * — and its stale-pointer bug class, #421, is structural). The
+     * public get/set API now serves from this lazily-allocated
+     * open-addressed map, keyed by node pointer; it dies with the
+     * document so entries can never outlive their nodes. NULL until
+     * the first set — documents that never wrap pay nothing. */
+    struct leptris_wrapper_entry* wrapper_map;
+    size_t wrapper_count, wrapper_cap;
     int html_mode;   /* #1309: HTML-parsed / create_html documents
                           serialize with the §16.2 HTML method by
                           default (libxml2/Nokogiri behavior). */

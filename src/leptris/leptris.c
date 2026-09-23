@@ -967,6 +967,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     free(doc->elem_pos);
     doc->elem_pos = NULL;
     doc->elem_pos_count = doc->elem_pos_cap = 0;
+    /* #1285 slice 3b: binding-wrapper map — entries die with the
+     * document, so they can never outlive their nodes. */
+    free(doc->wrapper_map);
+    doc->wrapper_map = NULL;
+    doc->wrapper_count = doc->wrapper_cap = 0;
     if (doc->xml_buffer && doc->xml_buffer_needs_free) {
         /* Release through the retained-buffer free list (see
          * memory/arena.c): large inputs would otherwise be munmapped

@@ -24,7 +24,6 @@ LeptrisEntityRefNode* leptris_entity_ref_create(const char* name,
     node->base.type = LEPTRIS_NODE_TYPE_ENTITY_REF;
     node->base.frozen = 0;
     node->base.version = 0;
-    node->base.binding_wrapper = NULL;
     node->parent_off = 0;
     node->next_sibling_off = 0;
     node->owner_doc = NULL;

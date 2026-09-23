@@ -57,10 +57,13 @@ TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
      * parse-time bulk strides (dp text block, il lane table) hardcode
      * this layout economics — a silent field growth would erode the
      * #1222 parse win this slice exists for. */
-    /* C++11: no constexpr lambda — inline the round-up expression. */
-    constexpr size_t kRaw = sizeof(LeptrisNode) + sizeof(void*) +
-                            3 * sizeof(int32_t);
+    /* C++11: no constexpr lambda — inline the round-ups. The
+     * content pointer needs pointer alignment INSIDE the struct:
+     * base rounds up to the pointer's alignment first. */
     constexpr size_t kA = alignof(void*);
+    constexpr size_t kBaseA =
+        (sizeof(LeptrisNode) + kA - 1) / kA * kA;
+    constexpr size_t kRaw = kBaseA + sizeof(void*) + 3 * sizeof(int32_t);
     constexpr size_t kAligned = (kRaw + kA - 1) / kA * kA;
     static_assert(sizeof(LeptrisTextNode) == kAligned,
                   "LeptrisTextNode must be base + one content pointer + "
@@ -68,9 +71,9 @@ TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
                   "no pool/borrowed fields (#1285 slice 4)");
     EXPECT_EQ(sizeof(LeptrisTextNode), kAligned);
 #if defined(__LP64__) || defined(_WIN64)
-    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)48);
+    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)40);
 #else
-    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)32);
+    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)28);
 #endif
 }
 

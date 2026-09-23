@@ -57,11 +57,9 @@ typedef struct leptris_node {
                                         * parse-time bulk strides hold. */
     unsigned int version : 30;         /* COW 2.2: Node version for tracking modifications */
     uint32_t line;                     /* Source line (1-based, 0 = unknown). Issue #223 */
-    void* binding_wrapper;             /* FFI wrapper cache (#262). NULL when no binding
-                                        * is attached. Set by the language binding on
-                                        * first node wrap; subsequent traversals find
-                                        * the cached wrapper without FFI call overhead. */
-    /* NOTE: Parent/sibling pointers stored in compressed form in specific node types */
+    /* NOTE: Parent/sibling pointers stored in compressed form in specific node types.
+     * #1285 slice 3b: binding_wrapper (#262) moved to the document-
+     * owned wrapper map — see leptris_internal.h; base is 12 bytes. */
 } LeptrisNode;
 
 /* ============================================================================
