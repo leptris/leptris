@@ -184,6 +184,9 @@ leptris_add_test(test_stress_high_doc_count perf/test_stress_high_doc_count.cpp)
 find_package(Threads REQUIRED)
 leptris_add_test(test_concurrency concurrency/test_concurrency.cpp)
 target_link_libraries(test_concurrency PRIVATE Threads::Threads)
+# leptris-ruby#321: cross-thread document death vs the root-doc map.
+leptris_add_test(test_root_doc_cross_thread concurrency/test_root_doc_cross_thread.cpp)
+target_link_libraries(test_root_doc_cross_thread PRIVATE Threads::Threads)
 
 
 # FlatDoc + lazy-promote tests removed — direct_parse is the sole
