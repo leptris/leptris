@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.231] - 2026-09-23
+
+### Fixed
+
+- root-doc map is process-global — cross-thread document death poisoned owner-thread state (dom)
+
+
+
 ## [1.9.230] - 2026-09-23
 
 ### Added
