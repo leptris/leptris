@@ -98,7 +98,11 @@ typedef struct {
 } leptris_attr_plan;
 
 typedef struct {
-    const char* wire_name; /* XML element name as it appears on the wire */
+    const char* wire_name; /* XML element name as it appears on the wire:
+                            * the prefixed form ("w:b") binds that literal
+                            * prefix+local pair; the bare local form ("b")
+                            * binds by local name and lets ns_form do the
+                            * namespace work */
     uint8_t kind;          /* LeptrisPlanKind */
     uint8_t type_tag;      /* host-defined; echoed back verbatim */
     int32_t child_plan_index; /* NESTED: index into leptris_plan_spec.plans;

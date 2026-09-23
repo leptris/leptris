@@ -386,6 +386,74 @@ TEST(PlanWalk, NamespaceFormsAndLeniency) {
     leptris_document_free(doc);
 }
 
+/* XSD-002 fallout class: child rows whose wire_name is the PREFIXED
+ * form ("w:b") — exactly what the ABI doc promises ("XML element
+ * name as it appears on the wire") — must bind namespaced elements.
+ * The matcher historically compared the LOCAL name only, so every
+ * prefixed row silently matched nothing: hosts hydrated empty
+ * subtrees (attributes read NULL, elements fell back to defaults)
+ * and re-serialized without them. Local-name rows keep binding. */
+TEST(PlanWalk, PrefixedWireNamesBindNamespacedElements) {
+    LeptrisDocument doc = parse(
+        "<w:document xmlns:w=\"urn:w\">"
+        "<w:r><w:b w:val=\"false\"/></w:r>"
+        "</w:document>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_attr_plan b_attrs[] = {
+        {"w:val", LEPTRIS_PLAN_KIND_SCALAR, 7, 0, 0, nullptr},
+    };
+    leptris_child_plan b_row = {};
+    b_row.wire_name = "w:b";
+    b_row.kind = LEPTRIS_PLAN_KIND_NESTED;
+    b_row.child_plan_index = 2;
+    b_row.ns_form = LEPTRIS_PLAN_NS_ANY;
+    leptris_child_plan r_row = {};
+    r_row.wire_name = "w:r";
+    r_row.kind = LEPTRIS_PLAN_KIND_NESTED;
+    r_row.child_plan_index = 1;
+    r_row.ns_form = LEPTRIS_PLAN_NS_ANY;
+    leptris_element_plan plans[3] = {};
+    plans[0].element_name = "document";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 1;
+    plans[0].child_plans = &r_row;
+    plans[1].element_name = "r";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[1].child_count = 1;
+    plans[1].child_plans = &b_row;
+    plans[2].element_name = "b";
+    plans[2].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[2].attribute_count = 1;
+    plans[2].attribute_plans = b_attrs;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 3;
+    spec.plans = plans;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    LeptrisPlanResult rcoll = leptris_plan_value_at(r, 0);
+    ASSERT_NE(rcoll, nullptr);
+    /* the nested w:r row binds its element value */
+    ASSERT_EQ(leptris_plan_value_kind(rcoll), LEPTRIS_PLAN_VALUE_ELEMENT);
+    ASSERT_EQ(leptris_plan_value_count(rcoll), 1u);
+    LeptrisPlanResult bval = leptris_plan_value_at(rcoll, 0);
+    ASSERT_NE(bval, nullptr);
+    ASSERT_EQ(leptris_plan_value_kind(bval), LEPTRIS_PLAN_VALUE_ELEMENT);
+    const char* val = leptris_plan_value_attribute(bval, "w:val");
+    ASSERT_NE(val, nullptr);
+    EXPECT_STREQ(val, "false");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 TEST(PlanBuild, CopiesTheSpecStrings) {
     LeptrisDocument doc = parse("<doc><t>v</t></doc>");
     ASSERT_NE(doc, nullptr);
