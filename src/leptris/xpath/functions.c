@@ -1067,9 +1067,30 @@ static struct leptris_xpath_result* xpath_func_substring_before(XPathContext* co
     XPathASTNode** args,
     size_t arg_count
 ) {
+    /* 3-arg (collation) overload: only the codepoint-collation URI
+     * (and its UTF-8 sibling) is supported — under it the collation
+     * is exactly the default byte comparison, so args[2] is
+     * validated and dropped (QT3 fn-substring-before/-after). */
+    if (arg_count == 3) {
+        struct leptris_xpath_result* coll = xpath_evaluate(context, args[2]);
+        if (!coll) return NULL;
+        char* uri = coll->type == XPATH_RESULT_STRING
+                        ? coll->value.string_value : NULL;
+        static const char* kCP =
+            "http://www.w3.org/2005/xpath-functions/collation/"
+            "codepoint";
+        int ok = uri && (strcmp(uri, kCP) == 0 || strcmp(uri, "") == 0);
+        leptris_xpath_result_free(coll);
+        if (!ok) {
+            snprintf(context->error_msg, sizeof(context->error_msg),
+                     "substring-before(): unsupported collation");
+            return NULL;
+        }
+        arg_count = 2;
+    }
     if (arg_count != 2) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "substring-before() requires exactly 2 arguments");
+                "substring-before() requires exactly 2 or 3 arguments");
         return NULL;
     }
 
@@ -1134,9 +1155,30 @@ static struct leptris_xpath_result* xpath_func_substring_after(XPathContext* con
     XPathASTNode** args,
     size_t arg_count
 ) {
+    /* 3-arg (collation) overload: only the codepoint-collation URI
+     * (and its UTF-8 sibling) is supported — under it the collation
+     * is exactly the default byte comparison, so args[2] is
+     * validated and dropped (QT3 fn-substring-before/-after). */
+    if (arg_count == 3) {
+        struct leptris_xpath_result* coll = xpath_evaluate(context, args[2]);
+        if (!coll) return NULL;
+        char* uri = coll->type == XPATH_RESULT_STRING
+                        ? coll->value.string_value : NULL;
+        static const char* kCP =
+            "http://www.w3.org/2005/xpath-functions/collation/"
+            "codepoint";
+        int ok = uri && (strcmp(uri, kCP) == 0 || strcmp(uri, "") == 0);
+        leptris_xpath_result_free(coll);
+        if (!ok) {
+            snprintf(context->error_msg, sizeof(context->error_msg),
+                     "substring-after(): unsupported collation");
+            return NULL;
+        }
+        arg_count = 2;
+    }
     if (arg_count != 2) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "substring-after() requires exactly 2 arguments");
+                "substring-after() requires exactly 2 or 3 arguments");
         return NULL;
     }
 
@@ -1226,7 +1268,26 @@ static struct leptris_xpath_result* xpath_func_string_length(XPathContext* conte
         xpath_result_free(str_result);
     }
 
-    size_t len = str ? strlen(str) : 0;
+    /* Codepoint count, not byte count (QT3 fn-string-length-20:
+     * an astral char is one character, not four bytes). Lead-byte
+     * length table: 2/3/4 for multi-byte sequences. */
+    size_t len = 0;
+    if (str) {
+        static const unsigned char sl_u8len[256] = {
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+            1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+            2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+            3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0
+        };
+        for (const unsigned char* p = (const unsigned char*)str; *p; p++) {
+            len++;
+            p += sl_u8len[*p];
+        }
+    }
     LEPTRIS_FREE(str);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
@@ -1358,43 +1419,167 @@ static struct leptris_xpath_result* xpath_func_translate(XPathContext* context,
         return NULL;
     }
 
-    /* Build translation table for first 256 characters */
-    unsigned char map[256];
-    for (int i = 0; i < 256; i++) {
-        map[i] = (unsigned char)i;  /* Default: keep character */
-    }
-
+    /* Codepoint-correct translate (QT3 fn-translate): UTF-8 strings
+     * are decoded into codepoints — a byte-level table mangles any
+     * multi-byte character (each of its bytes matched separately,
+     * and a 256-entry map cannot hold astral or most Latin-1+ chars
+     * at all). Map entries store the REPLACEMENT BYTES so a
+     * codepoint can translate to a different-width codepoint. */
     size_t from_len = strlen(from);
     size_t to_len = strlen(to);
 
-    /* For each character in 'from', map to corresponding in 'to' */
-    for (size_t i = 0; i < from_len; i++) {
-        unsigned char c = (unsigned char)from[i];
-        if (i < to_len) {
-            map[c] = (unsigned char)to[i];
-        } else {
-            map[c] = 0;  /* Remove character if no corresponding replacement */
-        }
+    /* UTF-8 lead-byte -> sequence length (0 = continuation/invalid). */
+    static const unsigned char u8len[256] = {
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+        3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0
+    };
+
+    typedef struct { unsigned long cp; const char* repl; size_t repl_len; } tr_map_ent;
+    tr_map_ent* map = (tr_map_ent*)malloc((from_len ? from_len : 1) * sizeof(*map));
+    if (!map) {
+        LEPTRIS_FREE(str);
+        LEPTRIS_FREE(from);
+        LEPTRIS_FREE(to);
+        return NULL;
+    }
+    size_t map_n = 0;
+
+    /* Decode 'to' into its codepoint byte-spans (pointers INTO to). */
+    const char** to_cp = (const char**)malloc((to_len + 1) * sizeof(*to_cp));
+    size_t* to_cpl = (size_t*)malloc((to_len + 1) * sizeof(*to_cpl));
+    size_t to_n = 0;
+    if (!to_cp || !to_cpl) {
+        LEPTRIS_FREE(map);
+        LEPTRIS_FREE(to_cp);
+        LEPTRIS_FREE(to_cpl);
+        LEPTRIS_FREE(str);
+        LEPTRIS_FREE(from);
+        LEPTRIS_FREE(to);
+        return NULL;
+    }
+    for (size_t i = 0; i < to_len; ) {
+        unsigned char l = u8len[(unsigned char)to[i]];
+        if (!l) l = 1;
+        to_cp[to_n] = to + i;
+        to_cpl[to_n] = l;
+        to_n++;
+        i += l;
     }
 
-    /* Translate the string */
-    for (char* p = str; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (map[c] == 0) {
-            /* Remove character by shifting */
-            char* q = p;
-            while (*q) {
-                *q = *(q + 1);
-                q++;
+    /* First occurrence in 'from' governs (F&O: duplicates later in
+     * the map string are ignored). */
+    size_t from_cp_idx = 0;   /* codepoint ordinal of from[i] */
+    for (size_t i = 0; i < from_len; ) {
+        unsigned char l = u8len[(unsigned char)from[i]];
+        if (!l) l = 1;
+        unsigned long cp = 0;
+        const unsigned char* fp = (const unsigned char*)from + i;
+        switch (l) {
+            case 1: cp = fp[0]; break;
+            case 2: cp = ((fp[0] & 0x1Fu) << 6) | (fp[1] & 0x3Fu); break;
+            case 3: cp = ((fp[0] & 0x0Fu) << 12) | ((fp[1] & 0x3Fu) << 6)
+                        | (fp[2] & 0x3Fu); break;
+            default: cp = ((fp[0] & 0x07u) << 18) | ((fp[1] & 0x3Fu) << 12)
+                        | ((fp[2] & 0x3Fu) << 6) | (fp[3] & 0x3Fu); break;
+        }
+        int seen = 0;
+        for (size_t k = 0; k < map_n; k++) {
+            if (map[k].cp == cp) { seen = 1; break; }
+        }
+        if (!seen) {
+            size_t idx = from_cp_idx;
+            if (idx < to_n) {
+                map[map_n].cp = cp;
+                map[map_n].repl = to_cp[idx];
+                map[map_n].repl_len = to_cpl[idx];
+            } else {
+                map[map_n].cp = cp;
+                map[map_n].repl = NULL;   /* delete */
+                map[map_n].repl_len = 0;
             }
-            p--;  /* Re-check this position */
-        } else if (map[c] != c) {
-            *p = (char)map[c];
+            map_n++;
         }
+        from_cp_idx++;
+        i += l;
     }
 
+    /* Translate: walk str by codepoint, emit into a fresh buffer
+     * (replacements can change byte width, so in-place shifting is
+     * not possible). Worst case: every codepoint maps to a 4-byte
+     * replacement. */
+    size_t str_len = strlen(str);
+    size_t cap = str_len * 4 + 4;
+    char* out = (char*)malloc(cap);
+    if (!out) {
+        LEPTRIS_FREE(map);
+        LEPTRIS_FREE(to_cp);
+        LEPTRIS_FREE(to_cpl);
+        LEPTRIS_FREE(str);
+        LEPTRIS_FREE(from);
+        LEPTRIS_FREE(to);
+        return NULL;
+    }
+    size_t w = 0;
+    for (size_t i = 0; i < str_len; ) {
+        unsigned char l = u8len[(unsigned char)str[i]];
+        if (!l) l = 1;
+        const unsigned char* sp = (const unsigned char*)str + i;
+        unsigned long cp = 0;
+        switch (l) {
+            case 1: cp = sp[0]; break;
+            case 2: cp = ((sp[0] & 0x1Fu) << 6) | (sp[1] & 0x3Fu); break;
+            case 3: cp = ((sp[0] & 0x0Fu) << 12) | ((sp[1] & 0x3Fu) << 6)
+                        | (sp[2] & 0x3Fu); break;
+            default: cp = ((sp[0] & 0x07u) << 18) | ((sp[1] & 0x3Fu) << 12)
+                        | ((sp[2] & 0x3Fu) << 6) | (sp[3] & 0x3Fu); break;
+        }
+        int found = 0;
+        const char* repl = NULL;
+        size_t repl_len = 0;
+        for (size_t k = 0; k < map_n; k++) {
+            if (map[k].cp == cp) {
+                found = 1;
+                repl = map[k].repl;
+                repl_len = map[k].repl_len;
+                break;
+            }
+        }
+        if (found && !repl) {
+            i += l;
+            continue;   /* mapped to nothing: delete */
+        }
+        const char* emit = found ? repl : str + i;
+        size_t emit_len = found ? repl_len : l;
+        if (w + emit_len + 1 > cap) {
+            cap = (w + emit_len + 1) * 2;
+            char* grown = (char*)realloc(out, cap);
+            if (!grown) { free(out); out = NULL; break; }
+            out = grown;
+        }
+        memcpy(out + w, emit, emit_len);
+        w += emit_len;
+        i += l;
+    }
+
+    LEPTRIS_FREE(map);
+    LEPTRIS_FREE(to_cp);
+    LEPTRIS_FREE(to_cpl);
     LEPTRIS_FREE(from);
     LEPTRIS_FREE(to);
+
+    if (!out) {
+        LEPTRIS_FREE(str);
+        return NULL;
+    }
+    out[w] = '\0';
+    LEPTRIS_FREE(str);
+    str = out;
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_STRING);
     if (!result) {
@@ -2522,8 +2707,8 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 2);
     xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 3);
     xpath_function_registry_register(registry, "substring", xpath_func_substring, 2, 3);
-    xpath_function_registry_register(registry, "substring-before", xpath_func_substring_before, 2, 2);
-    xpath_function_registry_register(registry, "substring-after", xpath_func_substring_after, 2, 2);
+    xpath_function_registry_register(registry, "substring-before", xpath_func_substring_before, 2, 3);
+    xpath_function_registry_register(registry, "substring-after", xpath_func_substring_after, 2, 3);
     xpath_function_registry_register(registry, "string-length", xpath_func_string_length, 0, 1);
     xpath_function_registry_register(registry, "normalize-space", xpath_func_normalize_space, 0, 1);
     xpath_function_registry_register(registry, "translate", xpath_func_translate, 3, 3);

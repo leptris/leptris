@@ -585,6 +585,44 @@ TEST(Qt3Subset, FnConcat) {
                  {"xs:double(", "xs:float("});
 }
 
+
+/* Stage-2 corpus slice (lever 6): core 1.0 string/number/boolean
+ * families vendored from w3c/qt3tests. */
+TEST(Qt3Subset, FnTranslate) {
+    run_test_set("fn/translate.xml", {}, 35);
+}
+
+TEST(Qt3Subset, FnNormalizeSpace) {
+    run_test_set("fn/normalize-space.xml", {}, 21);
+}
+
+TEST(Qt3Subset, FnSubstringBefore) {
+    run_test_set("fn/substring-before.xml", {}, 12);
+}
+
+TEST(Qt3Subset, FnSubstringAfter) {
+    run_test_set("fn/substring-after.xml", {}, 16);
+}
+
+TEST(Qt3Subset, FnBoolean) {
+    /* xs:untypedAtomic-cast cases (3) skip: the 1.0-mode engine
+     * does not model xdt:untypedAtomic. Error-assertion cases
+     * skip via the driver. */
+    run_test_set("fn/boolean.xml", {}, 116,
+                 {"boolean(xs:untypedAtomic(",
+                  "not(boolean(xs:untypedAtomic(",
+                  "true() eq boolean(remove(("});
+}
+
+/* fn:number NOT adopted: its assert-string-values want the
+ * canonical E-notation double form, which the number formatter
+ * deliberately does not print (libxml2 xmlXPathFormatNumber
+ * parity is load-bearing for the libxslt suite — same reason as
+ * concat's skipped xs:double cases). */
+TEST(Qt3Subset, FnStringLength) {
+    run_test_set("fn/string-length.xml", {}, 28);
+}
+
 /* The regex trio (matches/replace/tokenize/analyze-string) compiles
  * only where <regex.h> exists; on _WIN32 the engine stubs these
  * functions, so the regex-shaped sets cannot run there. */
