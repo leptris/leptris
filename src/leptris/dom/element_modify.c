@@ -677,7 +677,8 @@ LeptrisStatus leptris_element_set_text(LeptrisElement elem, const char* text) {
     if (text) {
         /* Create new text node (even if empty to match pugixml behavior) */
         LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
-        LeptrisTextNode* text_node = leptris_text_create(text, strlen(text), pool);
+        LeptrisTextNode* text_node = leptris_text_create(text, strlen(text), pool,
+            leptris_element_get_document(elem));
         if (!text_node) {
             return LEPTRIS_ERROR_MEMORY;
         }
@@ -1341,9 +1342,10 @@ LeptrisElement leptris_element_append_copy(LeptrisElement parent, LeptrisElement
             LeptrisTextNode* text = (LeptrisTextNode*)child;
             /* SAFETY: Verify text pointer is valid before accessing content */
             if ((uintptr_t)text > 0x1000) {
-                LeptrisTextNode* text_copy = leptris_text_create(text->content,
+                LeptrisTextNode* text_copy = leptris_text_create(leptris_textnode_content(text),
                     text->content_len,
-                    leptris_element_get_pool(copy));
+                    leptris_element_get_pool(copy),
+                    leptris_element_get_document(copy));
                 if (text_copy) {
                     leptris_element_append_child_internal(copy, (LeptrisNode*)text_copy);
                 }
@@ -1507,9 +1509,10 @@ LeptrisElement leptris_element_prepend_copy(LeptrisElement parent, LeptrisElemen
             leptris_element_append_copy(copy, child);
         } else if (child_node->type == LEPTRIS_NODE_TYPE_TEXT) {
             LeptrisTextNode* text = (LeptrisTextNode*)child;
-            LeptrisTextNode* text_copy = leptris_text_create(text->content,
+            LeptrisTextNode* text_copy = leptris_text_create(leptris_textnode_content(text),
                 text->content_len,
-                leptris_element_get_pool(copy));
+                leptris_element_get_pool(copy),
+                leptris_element_get_document(copy));
             if (text_copy) {
                 leptris_element_append_child_internal(copy, (LeptrisNode*)text_copy);
             }
@@ -1622,9 +1625,10 @@ LeptrisElement leptris_element_insert_copy_after(LeptrisElement sibling, Leptris
             leptris_element_append_copy(copy, child);
         } else if (child_node->type == LEPTRIS_NODE_TYPE_TEXT) {
             LeptrisTextNode* text = (LeptrisTextNode*)child;
-            LeptrisTextNode* text_copy = leptris_text_create(text->content,
+            LeptrisTextNode* text_copy = leptris_text_create(leptris_textnode_content(text),
                 text->content_len,
-                leptris_element_get_pool(copy));
+                leptris_element_get_pool(copy),
+                leptris_element_get_document(copy));
             if (text_copy) {
                 leptris_element_append_child_internal(copy, (LeptrisNode*)text_copy);
             }
@@ -1737,9 +1741,10 @@ LeptrisElement leptris_element_insert_copy_before(LeptrisElement sibling, Leptri
             leptris_element_append_copy(copy, child);
         } else if (child_node->type == LEPTRIS_NODE_TYPE_TEXT) {
             LeptrisTextNode* text = (LeptrisTextNode*)child;
-            LeptrisTextNode* text_copy = leptris_text_create(text->content,
+            LeptrisTextNode* text_copy = leptris_text_create(leptris_textnode_content(text),
                 text->content_len,
-                leptris_element_get_pool(copy));
+                leptris_element_get_pool(copy),
+                leptris_element_get_document(copy));
             if (text_copy) {
                 leptris_element_append_child_internal(copy, (LeptrisNode*)text_copy);
             }
@@ -1925,9 +1930,10 @@ static LeptrisElement leptris_element_copy_subtree_bulk_internal(
         } else if (child_node->type == LEPTRIS_NODE_TYPE_TEXT) {
             /* Copy text node (not bulk-allocated) */
             LeptrisTextNode* text = (LeptrisTextNode*)child;
-            LeptrisTextNode* text_copy = leptris_text_create(text->content,
+            LeptrisTextNode* text_copy = leptris_text_create(leptris_textnode_content(text),
                 text->content_len,
-                leptris_element_get_pool(copy));
+                leptris_element_get_pool(copy),
+                leptris_element_get_document(copy));
             if (text_copy) {
                 /* Link as child using internal function */
                 leptris_element_append_child_internal(copy, (LeptrisNode*)text_copy);
@@ -2066,8 +2072,8 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
                                                        copy, pool, doc);
         } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
             LeptrisTextNode* t = (LeptrisTextNode*)c;
-            cc = (LeptrisNodeRef)leptris_text_create(t->content,
-                                                     t->content_len, pool);
+            cc = (LeptrisNodeRef)leptris_text_create(leptris_textnode_content(t),
+                                                     t->content_len, pool, doc);
             if (cc) leptris_textnode_set_parent((LeptrisTextNode*)cc, copy);
         } else if (ty == LEPTRIS_NODE_TYPE_CDATA) {
             LeptrisCDATANode* cd = (LeptrisCDATANode*)c;

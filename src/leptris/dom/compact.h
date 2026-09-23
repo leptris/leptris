@@ -127,6 +127,15 @@ int32_t leptris_compact_int32_encode_doc(void* base, void* target,
  * value is INT32_MIN). */
 #define LEPTRIS_INT32_OVERFLOW_SENTINEL_H ((int32_t)(-2147483647 - 1))
 
+/* int32 sentinel for a non-NULL static "" pointer (#1285 slice 4b).
+ * Text content can be set to the empty string from far-away
+ * read-only storage (xsl:strip-space field writes); encoding that
+ * address would register one overflow-table entry per stripped
+ * node. Decoding returns a shared "" instead. Collision-free: the
+ * encode fast path below spills exact-INT32_MAX deltas to the
+ * overflow table, so no raw offset ever equals this value. */
+#define LEPTRIS_COMPACT_INT32_EMPTY ((int32_t)2147483647)
+
 /* Inline fast paths (lane 18): the shared encode/decode live in
  * compact.c, so every tree-edge store or sibling/parent read paid an
  * out-of-line call — two per node in the parse loop and one per edge
@@ -140,7 +149,10 @@ static inline int32_t leptris_compact_int32_encode_inline(
     void* base, void* target, const int32_t* field_addr) {
     if (!target) return 0;
     ptrdiff_t d = (char*)target - (char*)base;
-    if (d < INT32_MIN || d > INT32_MAX)
+    /* INT32_MAX is the EMPTY sentinel — a real delta of exactly
+     * that size spills to the overflow table (correct, just not
+     * inline). */
+    if (d < INT32_MIN || d >= INT32_MAX)
         return leptris_compact_int32_encode(base, target, field_addr);
     return (int32_t)d;
 }

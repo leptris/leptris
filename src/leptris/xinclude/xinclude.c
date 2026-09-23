@@ -121,10 +121,12 @@ static char* load_file_content(const char* path, size_t* out_len) {
  * Returns NULL on allocation failure (partial copies are abandoned
  * along with the pool, which is freed document-scoped). */
 static LeptrisNode* deep_copy_node(const LeptrisNode* src,
-                                   LeptrisMemoryPool* target_pool);
+                                   LeptrisMemoryPool* target_pool,
+                                   struct leptris_document* target_doc);
 
 static LeptrisElement deep_copy_element(const LeptrisElement src,
-                                        LeptrisMemoryPool* target_pool) {
+                                        LeptrisMemoryPool* target_pool,
+                                        struct leptris_document* target_doc) {
     const char* name = leptris_element_get_name(src);
     LeptrisElement dst = leptris_element_create_pooled(name, target_pool);
     if (!dst) return NULL;
@@ -144,7 +146,7 @@ static LeptrisElement deep_copy_element(const LeptrisElement src,
          child;
          child = leptris_node_get_next_sibling(child)) {
 
-        LeptrisNode* child_copy = deep_copy_node(child, target_pool);
+        LeptrisNode* child_copy = deep_copy_node(child, target_pool, target_doc);
         if (!child_copy) return NULL;
 
         if (prev_copy) {
@@ -161,18 +163,21 @@ static LeptrisElement deep_copy_element(const LeptrisElement src,
 }
 
 static LeptrisNode* deep_copy_node(const LeptrisNode* src,
-                                   LeptrisMemoryPool* target_pool) {
+                                   LeptrisMemoryPool* target_pool,
+                                   struct leptris_document* target_doc) {
     if (!src) return NULL;
 
     switch (src->type) {
         case LEPTRIS_NODE_TYPE_ELEMENT:
-            return (LeptrisNode*)deep_copy_element((LeptrisElement)src, target_pool);
+            return (LeptrisNode*)deep_copy_element((LeptrisElement)src, target_pool, target_doc);
 
         case LEPTRIS_NODE_TYPE_TEXT: {
             const LeptrisTextNode* t = (const LeptrisTextNode*)src;
-            /* Source text may be borrowed (non-NUL-terminated) — content_len
-             * is authoritative. TODO 115 Phase B. */
-            return (LeptrisNode*)leptris_text_create(t->content, t->content_len, target_pool);
+            /* #1285 slice 4: runs are always NUL-terminated;
+             * content_len is authoritative. TODO 115 Phase B. */
+            return (LeptrisNode*)leptris_text_create(leptris_textnode_content(t),
+                                                     t->content_len, target_pool,
+                                                     target_doc);
         }
 
         case LEPTRIS_NODE_TYPE_CDATA: {
@@ -725,7 +730,7 @@ static int process_element_xinclude(LeptrisElement elem,
                 content_len = conv_len;
 #endif
             }
-            substitute = (LeptrisNode*)leptris_text_create(content, content_len, doc->pool);
+            substitute = (LeptrisNode*)leptris_text_create(content, content_len, doc->pool, doc);
             /* parse="text" doesn't recurse into another file's body
              * (no risk of A -> B -> A via text), so no push/pop here. */
         }
@@ -744,7 +749,7 @@ fallback:
         if (fb) {
             char* fb_text = leptris_element_get_text_content(fb);
             if (fb_text) {
-                substitute = (LeptrisNode*)leptris_text_create(fb_text, strlen(fb_text), doc->pool);
+                substitute = (LeptrisNode*)leptris_text_create(fb_text, strlen(fb_text), doc->pool, doc);
                 leptris_free(fb_text);
             }
         }

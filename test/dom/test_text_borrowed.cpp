@@ -36,45 +36,47 @@ TEST(TextBorrowed, ParsedTextNodeIsTerminatedInPlace) {
     LeptrisTextNode* text = (LeptrisTextNode*)child;
     EXPECT_EQ(text->content_len, std::strlen("hello world"));
     /* #1285 slice 4: the run is NUL-terminated IN PLACE in the
-     * doc-owned input copy — no pool copy, no serve mode. */
-    ASSERT_NE(text->content, nullptr);
-    EXPECT_EQ(text->content[text->content_len], '\0')
+     * doc-owned input copy — no pool copy, no serve mode. #1285
+     * slice 4b: content is an int32 self-relative offset; decode
+     * twice — the pointer must be stable across calls. */
+    const char* c1 = leptris_textnode_content(text);
+    const char* c2 = leptris_textnode_content(text);
+    ASSERT_NE(c1, nullptr);
+    EXPECT_EQ(c1, c2) << "decode is deterministic";
+    EXPECT_EQ(c1[text->content_len], '\0')
         << "run must be terminated at [content_len]";
-    /* get_content is a plain field read: same pointer, stable. */
-    EXPECT_EQ(leptris_text_get_content(text), text->content);
+    EXPECT_EQ(leptris_text_get_content(text), c1);
     EXPECT_STREQ(leptris_text_get_content(text), "hello world");
 
     leptris_document_free(doc);
 }
 
-TEST(TextBorrowed, NodeStructIsBasePointerAndThreeInt32) {
-    /* #1285 slice 4: pool + borrowed removed, content_len is uint32.
-     * The width-independent invariant: base + ONE content pointer +
-     * FOUR int32s (len, next, parent, owner doc — #1320), rounded to
-     * pointer alignment — nothing else. 40 on LP64 (the owner field
-     * lands in padding; sizeof unchanged); 32 on ILP32. Going lower
-     * needs content as an int32 pool offset (slice 4b). The
-     * parse-time bulk strides (dp text block, il lane table) hardcode
-     * this layout economics — a silent field growth would erode the
-     * #1222 parse win this slice exists for. */
-    /* C++11: no constexpr lambda — inline the round-ups. The
-     * content pointer needs pointer alignment INSIDE the struct:
-     * base rounds up to the pointer's alignment first. */
-    constexpr size_t kA = alignof(void*);
-    constexpr size_t kBaseA =
-        (sizeof(LeptrisNode) + kA - 1) / kA * kA;
-    constexpr size_t kRaw = kBaseA + sizeof(void*) + 4 * sizeof(int32_t);
+TEST(TextBorrowed, NodeStructIsBaseAndFiveInt32) {
+    /* #1285 slice 4b + #1320: the content pointer became an int32
+     * self-relative byte offset, and the detached-owner backref
+     * (#1320) joined it as a fifth int32. Width-independent
+     * invariant: base + FIVE int32s (content off, uint32 len,
+     * int32 next, int32 parent, int32 owner doc), int32-aligned —
+     * nothing else. 40 -> 32 on LP64; 32 on ILP32. Encoding:
+     * content_off 0 = NULL, LEPTRIS_COMPACT_INT32_EMPTY = static ""
+     * (ws-strip sentinel, no overflow-table entry per stripped
+     * node), any other value = self-relative offset with the
+     * overflow-table fallback (same machinery as the tree edges);
+     * owner_doc_off 0 = unstamped (parse-carved nodes attach). The
+     * parse-time bulk strides (dp text block, il lane table)
+     * hardcode this layout economics — a silent field growth would
+     * erode the #1222 parse win. */
+    /* C++11: no constexpr lambda — inline the round-ups. */
+    constexpr size_t kA = alignof(int32_t);
+    constexpr size_t kRaw = sizeof(LeptrisNode) + 5 * sizeof(int32_t);
     constexpr size_t kAligned = (kRaw + kA - 1) / kA * kA;
     static_assert(sizeof(LeptrisTextNode) == kAligned,
-                  "LeptrisTextNode must be base + one content pointer + "
+                  "LeptrisTextNode must be base + int32 content off + "
                   "uint32 len + int32 next + int32 parent + int32 owner "
-                  "(aligned) — no pool/borrowed fields (#1285 slice 4, #1320)");
+                  "(int32-aligned) — no content pointer "
+                  "(#1285 slice 4b, #1320)");
     EXPECT_EQ(sizeof(LeptrisTextNode), kAligned);
-#if defined(__LP64__) || defined(_WIN64)
-    EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)40);
-#else
     EXPECT_EQ(sizeof(LeptrisTextNode), (size_t)32);
-#endif
 }
 
 TEST(TextBorrowed, PublicAccessorsReturnCorrectContent) {
@@ -143,8 +145,9 @@ TEST(TextBorrowed, MaterializationIsStableAcrossCalls) {
 
     LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
     LeptrisTextNode* text = (LeptrisTextNode*)child;
-    EXPECT_EQ(leptris_text_get_content(text), text->content)
-        << "get_content is a plain field read (#1285 slice 4)";
+    EXPECT_EQ(leptris_text_get_content(text),
+              leptris_textnode_content(text))
+        << "get_content decodes the same offset (#1285 slice 4b)";
 
     const char* second = leptris_element_text(root);
     EXPECT_EQ(second, first) << "repeated calls return the same pointer";
@@ -183,14 +186,12 @@ TEST(TextBorrowed, ServeContractHoldsInBothParseLanes) {
         LeptrisTextNode* text = (LeptrisTextNode*)child;
         EXPECT_EQ(text->content_len, std::strlen("hello world"));
         /* terminated in place in BOTH lanes (#1285 slice 4) */
-        ASSERT_NE(text->content, nullptr);
-        EXPECT_EQ(text->content[text->content_len], '\0');
-
         const char* a = leptris_text_get_content(text);
         ASSERT_NE(a, nullptr);
+        EXPECT_EQ(a[text->content_len], '\0');
         EXPECT_STREQ(a, "hello world");
-        EXPECT_EQ(a, text->content)
-            << "get_content returns the in-place pointer in both lanes";
+        EXPECT_EQ(a, leptris_textnode_content(text))
+            << "get_content returns the in-place view in both lanes";
         EXPECT_STREQ(leptris_element_text(root), "hello world");
 
         leptris_document_free(doc);
