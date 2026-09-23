@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.227] - 2026-09-23
+
+### Fixed
+
+- zero the fake nodes in the header-hygiene edge specs (test)
+
+### Performance
+
+- binding_wrapper out of the node base — element 48B, text 40B (#1285 slice 3b) (dom)
+- interleaved lane size floor — small docs defer to classic (#1258) (parse)
+
+
+
 ## [1.9.226] - 2026-09-22
 
 ### Performance
