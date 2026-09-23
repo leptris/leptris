@@ -766,3 +766,30 @@ TEST(XQueryCore, XsIntegerLexicalFidelity) {
     leptris_document_free(doc);
 }
 
+
+TEST(XQueryCore, StringLiteralCharacterReferences) {
+    /* XQuery 3.1 §3.1.1: character references inside a string
+     * literal expand to the referenced codepoint — they are
+     * EXEMPT from line-end normalization (QT3
+     * K-CodepointToStringFunc-13). Raw CR in a literal stays
+     * verbatim (this slice expands refs only). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "codepoints-to-string(13) eq \"&#xD;\""),
+              "true");
+    EXPECT_EQ(seq_string(doc, "string-length(\"&#xD;\")"), "1");
+    EXPECT_EQ(seq_string(doc,
+              "codepoints-to-string(65) eq \"&#x41;\""), "true");
+    EXPECT_EQ(seq_string(doc, "string-length(\"&#x1F600;\")"), "1");
+    EXPECT_EQ(seq_string(doc,
+              "string-to-codepoints(\"&#x1F600;\")"), "128512");
+    /* &quot;/&apos;/&amp; predefined entity refs in literals. */
+    EXPECT_EQ(seq_string(doc, "string-length(\"&quot;\")"), "1");
+    EXPECT_EQ(seq_string(doc, "codepoints-to-string(34) eq \"&quot;\""),
+              "true");
+    EXPECT_EQ(seq_string(doc, "codepoints-to-string(38) eq \"&amp;\""),
+              "true");
+    /* A lone '&' that is not a reference stays literal. */
+    EXPECT_EQ(seq_string(doc, "string(\"a&b\")"), "a&b");
+    leptris_document_free(doc);
+}

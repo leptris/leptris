@@ -998,8 +998,5 @@ TEST(Qt3Subset, FnDeepEqual) {
 }
 
 TEST(Qt3Subset, FnCodepointsToString) {
-    /* K-13: &#xD; character reference must survive as CR — the
-     * parser normalizes it to LF (XML 1.0 §3.3.3 exception). */
-    run_test_set("fn/codepoints-to-string.xml", {}, 43, {},
-                 {"K-CodepointToStringFunc-13"});
+    run_test_set("fn/codepoints-to-string.xml", {}, 44);
 }
