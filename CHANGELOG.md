@@ -4,7 +4,22 @@
 
 ### Performance
 
-- text content as int32 self-relative offset — 32B nodes, doc-tagged overflow stamps (#1285 slice 4b) (dom)
+- **dom: text node 40 → 32 bytes — content pointer became an int32
+  self-relative offset, with doc-tagged overflow stamps (#1285
+  slice 4b).** The struct is base + five int32s on both LP64 and
+  ILP32 (content off, uint32 len, int32 next, int32 parent, int32
+  owner doc). Encoding: 0 = NULL, a shared sentinel = the static
+  empty string (xsl:strip-space writes land there instead of one
+  overflow-table entry per stripped node), any other value a byte
+  offset from the node. **Thread safety:** the rare >2 GB delta
+  spills to the overflow table tagged with the EXPLICIT owning
+  document — the direct-parse lane is overflow-table-free by design
+  (it never sets the TLS current-doc), so a TLS-tagged spill leaked
+  the entry past document teardown, which Linux CI ASAN/LSan
+  surfaced as aborting the two concurrency tests. Every content
+  stamp now carries its document; the untagged setter is deleted
+  from the codebase. Local gates: 1683/1683 both parse lanes; the
+  CI ASAN leg that caught the leak is green.
 
 
 
