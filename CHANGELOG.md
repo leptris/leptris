@@ -4,7 +4,25 @@
 
 ### Fixed
 
-- detached text nodes resolve their owner document — set_content works before attach (#1320) (dom)
+- **dom: `leptris_text_node_set_content` works again on
+  created-but-unattached text nodes (#1320).** The 1.9.223–1.9.226
+  window returned `LEPTRIS_ERROR_INVALID_ARG` for exactly the
+  create → fill → attach builder sequence bindings use (moxml's
+  `Text#content=` failed 5 shared examples). Root cause: issue #519
+  gave detached PI/comment/CDATA nodes an `owner_doc` field but
+  skipped text — at the time text nodes carried their own pool
+  backref, which #1285 slice 4 then deleted, leaving detached text
+  with no document to allocate from. Text now gets the same #519
+  treatment: an owner backref stamped by the public creator only,
+  stored as a compact int32 offset (the LP64 struct keeps its 40
+  bytes — the field lands in existing padding; ILP32 32), with
+  overflow-table fallback tagged with the EXPLICIT document (the
+  parse-context TLS slot holds the wrong doc or NULL outside parse).
+  Every parse-carve path zero-initializes the field; the
+  attached/parsed parent-walk fast path is untouched. TDD'd
+  red-first against the reported minimal repro;
+  `DetachedNodes.TextSetContentWorksBeforeAttach` pins the
+  unattached, attach-then-set, and parsed paths.
 
 
 
