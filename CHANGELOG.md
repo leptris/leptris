@@ -4,11 +4,40 @@
 
 ### Added
 
-- QT3 stage-2 corpus slice — translate/normalize-space/substring-before/after/boolean/string-length; codepoint-correct translate + string-length; collation overloads (xquery)
+- **xquery: QT3 stage-2 corpus slice — 228 newly gated conformance
+  cases across six core families** (translate, normalize-space,
+  substring-before, substring-after, boolean, string-length),
+  vendored from the W3C qt3tests suite with the driver's exact
+  `agree == run == pinned` gate. fn:number is deliberately not
+  adopted: its string assertions want canonical E-notation doubles,
+  which the number formatter deliberately does not print
+  (libxml2 xmlXPathFormatNumber parity is load-bearing for the
+  libxslt suite).
 
 ### Fixed
 
-- string-length walks continuation-count table (no past-NUL over-advance); pin qt3 corpus to LF checkouts (xpath)
+- **xpath: `fn:translate` is now codepoint-correct.** The old
+  implementation built a 256-entry byte-level table, so every
+  multi-byte UTF-8 character matched byte-by-byte and astral
+  codepoints could not be addressed at all. The rewrite decodes
+  `from`/`to` into codepoints (first occurrence governs, per
+  F&O), supports cross-width replacements, and emits into a
+  growable buffer.
+- **xpath: `fn:string-length` counts codepoints, not bytes** —
+  `string-length("𐀂")` returned 4; the walk now steps by
+  lead-byte length.
+- **xpath: `substring-before`/`substring-after` accept the 3-arg
+  collation overload.** The codepoint-collation URI (under which
+  the collation is the default byte comparison) and the empty URI
+  are accepted; any other URI raises the unsupported-collation
+  error.
+- **bench: the CI benchmark legs' fixture/result paths unified
+  under one convention** (harnesses read `fixtures/` and write
+  `results/` relative to their working directory; CI stages both
+  once). SAX and XPath benchmark results that were silently
+  skipped or failing to write now produce real data, and 21 stale
+  committed result files (including a nine-month-old comparison
+  report) are gone from the tree.
 
 
 
