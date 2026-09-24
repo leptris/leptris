@@ -35,7 +35,14 @@ typedef struct {
     LeptrisDocument doc;
 } doc_ctx_t;
 
-/* Recursive tree traversal helper */
+/* Recursive tree traversal helper.
+ *
+ * Walks the same shape as the libxml2 bench (hop EVERY child via the
+ * sibling link, recurse into elements): first_child_any +
+ * next_sibling_any is the documented O(1)-per-step iteration. The
+ * previous shape — child_count() + child(elem, i) — re-seeked the
+ * child list from its head per access, O(N²/2) hops per parent, which
+ * measured the indexed-lookup algorithm, not per-hop engine cost. */
 static void traverse_tree(LeptrisElement elem) {
     if (!elem) return;
 
@@ -43,11 +50,12 @@ static void traverse_tree(LeptrisElement elem) {
     const char* name = leptris_element_name(elem);
     (void)name;
 
-    /* Traverse children */
-    size_t child_count = leptris_element_child_count(elem);
-    for (size_t i = 0; i < child_count; i++) {
-        LeptrisElement child = leptris_element_child(elem, i);
-        traverse_tree(child);
+    /* Traverse children (hop every child; recurse into elements) */
+    for (LeptrisElement child = leptris_element_first_child_any(elem);
+         child; child = leptris_element_next_sibling_any(child)) {
+        if (leptris_node_get_type((LeptrisNodeRef)child) ==
+            LEPTRIS_NODE_TYPE_ELEMENT)
+            traverse_tree(child);
     }
 }
 
