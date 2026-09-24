@@ -821,3 +821,84 @@ TEST(XQueryLeaks, RepeatedFunctionDeclarationEvalsDoNotLeak) {
     }
     leptris_document_free(doc);
 }
+
+/* Computed PI and comment constructors (QT3 cbcl-deep-equal-002..004
+ * class): the string-level ctor model serializes them to their XML
+ * markup, so deep-equal compares target+data / comment text. */
+TEST(XQueryCtors, PIConstructor) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"processing-instruction target { \"data\" }", "<?target data?>"},
+        {"processing-instruction target { \"\" }", "<?target?>"},
+        {"processing-instruction target { () }", "<?target?>"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCtors, CommentConstructor) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* cq = "comment { \"hello\" }";
+    LeptrisXQuery xq = leptris_xquery_parse(cq, strlen(cq));
+    ASSERT_NE(xq, nullptr);
+    LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+    ASSERT_NE(r, nullptr);
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "<!--hello-->");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+    leptris_xquery_free(xq);
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCtors, PICtorDeepEqualByTargetAndData) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        bool want;
+    } cases[] = {
+        {"deep-equal(processing-instruction cheese { \"brie\" }, "
+         "processing-instruction cheese { \"brie\" })",
+         true},
+        {"deep-equal(processing-instruction cheese { \"brie\" }, "
+         "processing-instruction cheese { \"stilton\" })",
+         false},
+        {"deep-equal(processing-instruction foo { \"bar\" }, "
+         "processing-instruction bar { \"foo\" })",
+         false},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want ? "true" : "false") << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}

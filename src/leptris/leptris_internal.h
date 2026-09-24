@@ -825,6 +825,11 @@ typedef enum {
      * joined by '\x01' ("*" catches all), children[0] = try body,
      * children[1..] = catch bodies in order. */
     XPATH_OP_DOCUMENT_CTOR,
+    /* processing-instruction NAME { content } and
+     * comment { content } — the string-level ctor model serializes
+     * to the XML markup form (QT3 cbcl-deep-equal-002..004). */
+    XPATH_OP_PI_CTOR,
+    XPATH_OP_COMMENT_CTOR,
     XPATH_OP_TRY,
     /* XQuery 3.0 typeswitch: value = case SequenceTypes joined
      * by '\x01' (a trailing empty entry = the default arm),
