@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.235] - 2026-09-24
+
+### Added
+
+- typed atoms for QT3 equality — atomic_type channel, float precision, NaN semantics (xpath)
+
+
+
 ## [1.9.234] - 2026-09-24
 
 ### Fixed
