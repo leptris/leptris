@@ -92,6 +92,7 @@ target_compile_definitions(test_sch_corpus PRIVATE
 leptris_add_test(test_parser     parser/test_parser.cpp)
 leptris_add_test(test_large_docs parser/test_large_documents.cpp)
 leptris_add_test(test_encoding   parser/test_encoding.cpp)
+leptris_add_test(test_eol_normalization parser/test_eol_normalization.cpp)
 leptris_add_test(test_dom        dom/test_dom.cpp)
 leptris_add_test(test_map_lifecycle dom/test_map_lifecycle.cpp)
 leptris_add_test(test_simd_count parser/test_simd_count.cpp)

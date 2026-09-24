@@ -353,15 +353,24 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      * whitespace, exactly as the spec requires. Clean values keep
      * the zero-copy view; only affected values pay the pool copy. */
     if (has_ws) {
+        /* §3.3.3 order matters for CRLF (leptris-ruby#326): CR+LF
+         * normalizes to ONE LF, then to ONE space — the previous
+         * per-byte map produced two. */
         char* norm = (char*)leptris_pool_alloc(p->pool, val_len + 1);
         if (!norm) return -1;
+        size_t nw = 0;
         for (size_t i = 0; i < val_len; i++) {
             char ch = val[i];
-            norm[i] = (ch == '\t' || ch == '\n' || ch == '\r')
-                          ? ' ' : ch;
+            if (ch == '\r') {
+                norm[nw++] = ' ';
+                if (i + 1 < val_len && val[i + 1] == '\n') i++;
+            } else {
+                norm[nw++] = (ch == '\t' || ch == '\n') ? ' ' : ch;
+            }
         }
-        norm[val_len] = '\0';
+        norm[nw] = '\0';
         val = norm;
+        val_len = nw;
     }
     struct leptris_attribute* attr = p->attr_cursor;
     if (DP_UNLIKELY(attr >= p->attr_end)) {
@@ -1374,6 +1383,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * entity-free docs. The memchr fallback covers the
              * >48-byte tail region only. */
             int has_amp = 0;
+            int has_cr = 0;
             {
                 const char* q = p.pos;
                 const char* probe_end = p.probe_slack
@@ -1383,12 +1393,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     char ch = *q;
                     if (ch == '<') { lt = (char*)q; goto text_done; }
                     has_amp |= (ch == '&');
+                    has_cr |= (ch == '\r');
                     q++;
                 }
                 if (q >= p.end) goto text_done;
                 lt = (char*)memchr(q, '<', p.end - q);
                 if (!lt) lt = p.end;
                 has_amp |= memchr(q, '&', (size_t)((char*)lt - q)) != NULL;
+                has_cr |= memchr(q, '\r', (size_t)((char*)lt - q)) != NULL;
             }
         text_done:
             p.pos = lt ? lt : p.end;
@@ -1403,6 +1415,33 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     if (!IS_WS(*c)) goto fail;
                 }
                 continue;
+            }
+            /* XML 1.0 §2.11 end-of-line handling (leptris-ruby#326):
+             * literal CRLF and lone CR in character data normalize
+             * to LF BEFORE reference expansion — a CR character
+             * reference (&#xD;) therefore survives as CR, while
+             * literal line endings normalize exactly as the spec
+             * requires. has_cr rides the fused scan above (one
+             * predicted compare per byte, a third memchr only on
+             * the >48-byte tail); CR-free runs stay zero-copy. */
+            if (has_cr) {
+                char* norm = (char*)leptris_pool_alloc(pool, tlen + 1);
+                if (!norm) goto fail;
+                char* w = norm;
+                const char* r = text_start;
+                const char* r_end = text_start + tlen;
+                while (r < r_end) {
+                    if (*r == '\r') {
+                        *w++ = '\n';
+                        if (r + 1 < r_end && r[1] == '\n') r++;
+                    } else {
+                        *w++ = *r;
+                    }
+                    r++;
+                }
+                *w = '\0';
+                text_start = norm;
+                tlen = (size_t)(w - norm);
             }
             /* Text node. When a DTD is present (custom entity
              * declarations), eagerly expand entities into a pool-
@@ -2476,12 +2515,20 @@ static struct leptris_document* dp_il_build(
                             pool, a->val_len + 1);
                         if (!norm) { free(smap); free(rdepth);
                                      free(lc); goto oom_pool; }
+                        size_t nw = 0;
                         for (uint32_t w = 0; w < a->val_len; w++) {
                             char ch = scratch[a->val_off + w];
-                            norm[w] = (ch == '\t' || ch == '\n' ||
-                                       ch == '\r') ? ' ' : ch;
+                            if (ch == '\r') {
+                                norm[nw++] = ' ';
+                                if (w + 1 < a->val_len &&
+                                    scratch[a->val_off + w + 1] == '\n')
+                                    w++;
+                            } else {
+                                norm[nw++] = (ch == '\t' || ch == '\n')
+                                                 ? ' ' : ch;
+                            }
                         }
-                        norm[a->val_len] = '\0';
+                        norm[nw] = '\0';
                         leptris_attr_value_set_heap(
                             at, leptris_sv_from_cstr(norm));
                     } else {
