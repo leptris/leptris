@@ -88,6 +88,13 @@ char* xpath_number_to_string(double number) {
  * XsltNumberFormat.MatchesLibxml2 and the libxslt suite), so this
  * spelling is only used where the context sets xquery_spelling. */
 char* xpath_number_to_string_xq(double number) {
+    return xpath_number_to_string_xq_typed(number, 0);
+}
+
+/* float_prec: the value is a float32-widened double — the shortest
+ * round-trip loop reads back at float precision so xs:float spells
+ * "3.4028235E38", not the widened-double digits. */
+char* xpath_number_to_string_xq_typed(double number, int float_prec) {
     if (isnan(number)) return leptris_strdup("NaN");
     if (isinf(number))
         return leptris_strdup(number > 0 ? "INF" : "-INF");
@@ -103,8 +110,31 @@ char* xpath_number_to_string_xq(double number) {
     int size;
     double absolute_value = fabs(number);
     if (absolute_value > 1e18 || absolute_value < 1e-18) {
-        size = (int)snprintf(work, sizeof(work), "%21.14e", number);
-        while (size > 0 && work[size] != 'e') size--;
+        /* Shortest round-trip scientific spelling (Saxon/QT3): the
+         * fewest mantissa digits that read back as the same double,
+         * in canonical form — E separator, exponent sign only for
+         * negatives, no trailing zeros ("1.7976931348623157E308",
+         * "2E6", "4.9E-324"). Returns directly: the shared trim
+         * below must not eat exponent digits. */
+        char mant[64];
+        int prec;
+        for (prec = 1; prec <= 17; prec++) {
+            snprintf(mant, sizeof(mant), "%.*e", prec, number);
+            double back = strtod(mant, NULL);
+            if (float_prec) back = (double)((float)back);
+            if (back == number) break;
+        }
+        char* e = strchr(mant, 'e');
+        if (!e) return leptris_strdup(mant);
+        *e = 0;
+        char* last = mant + strlen(mant);
+        while (last > mant && *(last - 1) == '0') last--;
+        if (last > mant && *(last - 1) == '.') last--;
+        *last = 0;
+        const char* exp = e + 1;
+        if (*exp == '+') exp++;
+        snprintf(work, sizeof(work), "%sE%s", mant, exp);
+        return leptris_strdup(work);
     } else {
         /* Fraction budget: integer digits first, the fraction spends
          * the remaining significant digits (33 places floor for the

@@ -3168,6 +3168,11 @@ static LeptrisXPathResult xq_eval_impl(
         else
             free(s);
     }
+    /* XQuery number spelling rides the result: NUMBER returns render
+     * via the shortest round-trip E form in result_string (the
+     * libxml2-parity XPath printer stays for the XPath surface). */
+    if (result && result->type == XPATH_RESULT_NUMBER && !result->is_int)
+        result->xq_spelling = 1;
     return result;
 }
 
