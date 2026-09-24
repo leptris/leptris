@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.232] - 2026-09-24
+
+### Added
+
+- QT3 corpus slice 4 — sequence-edit + codepoint families, 501 gated cases; seq member fidelity fixes (xquery)
+- entering-only visit mode — leptris_node_visit_entering (#1332) (dom)
+
+### Fixed
+
+- range A to B with an empty operand yields the empty sequence (xpath)
+- expand character and predefined entity references in string literals (xpath)
+- prefixed wire names bind namespaced elements (XSD-002 fallout) (descriptor)
+
+
+
 ## [1.9.231] - 2026-09-23
 
 ### Fixed
