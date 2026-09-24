@@ -4,7 +4,19 @@
 
 ### Added
 
-- shortest round-trip E notation for XQuery number spelling (xquery)
+- xquery: shortest round-trip E notation for the XQuery number
+  spelling. Scientific values print the fewest mantissa digits that
+  read back as the same value — at float precision for xs:float
+  members (`3.4028235E38`, `2E6`, `4.9E-324`,
+  `1.7976931348623157E308`) — in canonical shape: E separator,
+  exponent sign only for negatives, no trailing zeros. The spelling
+  rides NUMBER results that escape an XQuery evaluation; the XPath
+  1.0 surface keeps libxml2 xmlXPathFormatNumber parity.
+
+### Fixed
+
+- QT3 corpus: fn:reverse 57→59, fn:distinct-values 87→89 adopted
+  (the dbl1args/flt1args E-notation pins).
 
 
 
