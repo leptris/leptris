@@ -649,6 +649,11 @@ struct leptris_xpath_result {
      * free-list. */
     int is_int;
     long long int_value;
+    /* Typed-atom tag (QT3 slice): interned type name ("xs:date",
+     * "xs:float", ...) when the atom came from a typed constructor,
+     * NULL for the untyped/string class. NOT owned — static
+     * literals only. Cleared in result_new (free-list recycle). */
+    const char* atomic_type;
 };
 
 /* Namespace mapping for XPath context (v0.8.0) */

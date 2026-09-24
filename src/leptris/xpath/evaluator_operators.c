@@ -332,7 +332,11 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
             const char* mc =
                 (tag == (int)LEPTRIS_NODE_TEXT && n)
                     ? ((XPathTextNode*)n)->content : NULL;
-            int is_num_member = mc && mc[0] == '\x03' && mc[1] == 'N';
+            int is_num_member = mc && mc[0] == '\x03' &&
+                                (mc[1] == 'N' ||
+                                 (mc[1] == 'F' &&
+                                  !((mc[2] == 'N' && mc[3] == '\x02') ||
+                                    mc[2] == 'R')));
             if (strcmp(base, "item()") == 0) {
                 /* every member is an item */
             } else if (strcmp(base, "node()") == 0) {
@@ -2131,7 +2135,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         (tag == (int)LEPTRIS_NODE_TEXT && n)
                             ? ((XPathTextNode*)n)->content : NULL;
                     int is_num_member = mc && mc[0] == '\x03' &&
-                                        mc[1] == 'N';
+                                        (mc[1] == 'N' ||
+                                         (mc[1] == 'F' &&
+                                          !((mc[2] == 'N' &&
+                                             mc[3] == '\x02') ||
+                                            mc[2] == 'R')));
                     if (strcmp(base, "item()") == 0) {
                         /* every member is an item */
                     } else if (strcmp(base, "node()") == 0) {
@@ -2281,11 +2289,17 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 if (item->type == XPATH_RESULT_NUMBER) {
                     /* "\x03N" marks numeric members for per-member
                      * type checks (instance of); get_node_text
-                     * strips it for string consumers. */
+                     * strips it for string consumers. "F" carries
+                     * xs:float members (float32-exact values) so
+                     * eq-based functions apply float promotion. */
                     size_t pl = piece ? strlen(piece) : 0;
                     char* marked = (char*)malloc(pl + 3);
                     if (marked) {
-                        marked[0] = '\x03'; marked[1] = 'N';
+                        marked[0] = '\x03';
+                        marked[1] = (item->atomic_type &&
+                                     strcmp(item->atomic_type,
+                                            "xs:float") == 0)
+                                        ? 'F' : 'N';
                         if (pl) memcpy(marked + 2, piece, pl);
                         marked[2 + pl] = 0;
                         XPathTextNode* tn = synth_text(marked, pl + 2);

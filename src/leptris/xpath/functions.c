@@ -732,14 +732,35 @@ static int de_node_equal(LeptrisNodeRef a, LeptrisNodeRef b) {
         default:
             return 0;
     }
-    /* Element children: pairwise, in order. */
+    /* Element children: pairwise, in order. F&O 3.0: comment and
+     * processing-instruction children are not significant to
+     * deep-equality (cbcl-deep-equal-001: PI vs comment under the
+     * same element compares equal). */
     LeptrisNodeRef ca = leptris_node_first_child(a);
     LeptrisNodeRef cb = leptris_node_first_child(b);
     while (ca && cb) {
+        int tca = leptris_node_get_type(ca);
+        int tcb = leptris_node_get_type(cb);
+        if (tca == LEPTRIS_NODE_TYPE_COMMENT ||
+            tca == LEPTRIS_NODE_TYPE_PI) {
+            ca = leptris_node_next_sibling(ca);
+            continue;
+        }
+        if (tcb == LEPTRIS_NODE_TYPE_COMMENT ||
+            tcb == LEPTRIS_NODE_TYPE_PI) {
+            cb = leptris_node_next_sibling(cb);
+            continue;
+        }
         if (!de_node_equal(ca, cb)) return 0;
         ca = leptris_node_next_sibling(ca);
         cb = leptris_node_next_sibling(cb);
     }
+    while (ca && (leptris_node_get_type(ca) == LEPTRIS_NODE_TYPE_COMMENT ||
+                  leptris_node_get_type(ca) == LEPTRIS_NODE_TYPE_PI))
+        ca = leptris_node_next_sibling(ca);
+    while (cb && (leptris_node_get_type(cb) == LEPTRIS_NODE_TYPE_COMMENT ||
+                  leptris_node_get_type(cb) == LEPTRIS_NODE_TYPE_PI))
+        cb = leptris_node_next_sibling(cb);
     return ca == NULL && cb == NULL;
 }
 
@@ -752,7 +773,28 @@ typedef struct {
     char* str;            /* owned for synthetic items */
     const char* borrow;   /* document-lifetime text */
     LeptrisNodeRef node;
+    /* Typed-atom tag from the result (interned literal, not owned);
+     * NULL for the untyped/string class. */
+    const char* type;
 } DeItem;
+
+/* Numeric promotion rank: xs:decimal(1) < xs:float(2) <= the
+ * double carrier (untyped numerics, xs:double, integers — integers
+ * are int64-exact in the double carrier for eq purposes). */
+static int de_num_rank(const char* t) {
+    if (!t) return 3;
+    if (strcmp(t, "xs:float") == 0) return 2;
+    if (strcmp(t, "xs:decimal") == 0) return 1;
+    return 3;
+}
+
+/* The untyped/string equivalence class: plain ctor/lexical strings,
+ * xs:string, xs:anyURI, xs:untypedAtomic all compare by codepoint. */
+static int de_str_class(const char* t) {
+    return !t || strcmp(t, "xs:string") == 0 ||
+           strcmp(t, "xs:anyURI") == 0 ||
+           strcmp(t, "xs:untypedAtomic") == 0;
+}
 
 static void de_item_clear(DeItem* it) {
     if (it->str) LEPTRIS_FREE(it->str);
@@ -767,12 +809,28 @@ static int de_item_equal(DeItem* a, DeItem* b) {
             /* deep-equal is atomic-eq based: NaN compares equal to
              * NaN (F&O 17.4.1 — unlike the eq operator). */
             if (isnan(a->num) && isnan(b->num)) return 1;
-            return a->num == b->num;
+            /* Numeric promotion by rank: the lower side converts to
+             * the higher (decimal->float rounds; float->double is
+             * exact). xs:float rounds at construction, so the plain
+             * compare against a double is the exact widening
+             * (float(1.01) ne double(1.01)) while decimal vs float
+             * rounds the decimal (mix-args-017 true). */
+            int ra = de_num_rank(a->type);
+            int rb = de_num_rank(b->type);
+            double xa = a->num, xb = b->num;
+            if (rb == 2 && ra < 2) xa = (double)(float)xa;
+            else if (ra == 2 && rb < 2) xb = (double)(float)xb;
+            return xa == xb;
         }
         case 2: {
             const char* as = a->str ? a->str : (a->borrow ? a->borrow : "");
             const char* bs = b->str ? b->str : (b->borrow ? b->borrow : "");
-            return strcmp(as, bs) == 0;
+            if (de_str_class(a->type) && de_str_class(b->type))
+                return strcmp(as, bs) == 0;
+            if (!de_str_class(a->type) && !de_str_class(b->type) &&
+                strcmp(a->type, b->type) == 0)
+                return strcmp(as, bs) == 0;
+            return 0;   /* typed (xs:date...) vs anything else */
         }
         default: return a->num == b->num;   /* booleans as 0/1 */
     }
@@ -788,6 +846,7 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
             out[i].str = NULL;
             out[i].borrow = NULL;
             out[i].node = NULL;
+            out[i].type = NULL;
             int ty = XPATH_NODE_TYPE(ns->nodes[i]);
             if (ty == LEPTRIS_NODE_TEXT) {
                 /* Synthetic sequence member (tag 8): content rides
@@ -795,8 +854,13 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                  * the "\x03N" marker. */
                 const char* c = ((XPathTextNode*)ns->nodes[i])->content;
                 c = c ? c : "";
-                if (c[0] == '\x03' && c[1] == 'N') {
+                if (c[0] == '\x03' &&
+                    (c[1] == 'N' ||
+                     (c[1] == 'F' &&
+                      !((c[2] == 'N' && c[3] == '\x02') ||
+                        c[2] == 'R')))) {
                     out[i].kind = 1;
+                    out[i].type = c[1] == 'F' ? "xs:float" : NULL;
                     out[i].num = strtod(c + 2, NULL);
                 } else {
                     out[i].kind = 2;
@@ -816,6 +880,7 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
     out[0].str = NULL;
     out[0].borrow = NULL;
     out[0].node = NULL;
+    out[0].type = r->atomic_type;
     if (r->type == XPATH_RESULT_NUMBER) {
         out[0].kind = 1;
         out[0].num = r->value.number_value;
@@ -834,10 +899,20 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 2) {
+    if (arg_count < 2 || arg_count > 3) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "deep-equal() requires exactly 2 arguments, got %zu", arg_count);
+                "deep-equal() requires 2 or 3 arguments, got %zu", arg_count);
         return NULL;
+    }
+    if (arg_count == 3) {
+        /* Collation argument: the default and codepoint URIs (and,
+         * per the QT3 corpus, any URI here) fold to the codepoint
+         * comparison this engine implements; evaluation errors
+         * propagate. */
+        struct leptris_xpath_result* c =
+            xpath_evaluate(context, args[2]);
+        if (!c) return NULL;
+        leptris_xpath_result_free(c);
     }
 
     struct leptris_xpath_result* a = xpath_evaluate(context, args[0]);
@@ -2729,7 +2804,7 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "concat", xpath_func_concat, 2, -1);
     xpath_function_registry_register(registry, "starts-with", xpath_func_starts_with, 2, 3);
     xpath_function_registry_register(registry, "ends-with", xpath_func_ends_with, 2, 3);
-    xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 2);
+    xpath_function_registry_register(registry, "deep-equal", xpath_func_deep_equal, 2, 3);
     xpath_function_registry_register(registry, "contains", xpath_func_contains, 2, 3);
     xpath_function_registry_register(registry, "substring", xpath_func_substring, 2, 3);
     xpath_function_registry_register(registry, "substring-before", xpath_func_substring_before, 2, 3);
