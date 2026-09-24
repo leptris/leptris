@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.236] - 2026-09-24
+
+### Added
+
+- F&O subsequence window, boolean/decimal member markers (xpath)
+
+
+
 ## [1.9.235] - 2026-09-24
 
 ### Added
