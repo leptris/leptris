@@ -133,6 +133,87 @@ static void free_items(char** items, size_t n) {
     free(items);
 }
 
+/* Marker-preserving collect: synthetic members keep their raw
+ * content so the "N" numeric marker survives the round-trip
+ * (get_node_text strips it). deep-equal's kind split then agrees
+ * on both sides of reverse()/etc., and eq-based functions can
+ * apply numeric semantics (NaN never matches, 2.0 == 2). */
+static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
+                                size_t n, size_t i, size_t* out_n) {
+    *out_n = 0;
+    struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
+    if (!r) return NULL;
+    char** items = NULL;
+    size_t cnt = 0;
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        XPathNodeSet* ns = r->value.nodeset_value;
+        items = (char**)malloc((ns->count ? ns->count : 1) * sizeof(char*));
+        if (!items) { xpath_result_free(r); return NULL; }
+        for (size_t k = 0; k < ns->count; k++) {
+            void* nd = ns->nodes[k];
+            if (XPATH_NODE_TYPE(nd) == LEPTRIS_NODE_TEXT) {
+                const char* c = ((XPathTextNode*)nd)->content;
+                items[cnt++] = leptris_strdup(c ? c : "");
+            } else {
+                char* t = get_node_text(nd);
+                items[cnt++] = t ? t : leptris_strdup("");
+            }
+        }
+    } else if (r->type == XPATH_RESULT_NUMBER) {
+        char* s = scalar_str(r);
+        size_t sl = s ? strlen(s) : 0;
+        items = (char**)malloc(sizeof(char*));
+        if (!items) { free(s); xpath_result_free(r); return NULL; }
+        char* m = (char*)malloc(sl + 3);
+        if (m) {
+            m[0] = '\x03';
+            m[1] = (r->atomic_type &&
+                    strcmp(r->atomic_type, "xs:float") == 0)
+                       ? 'F' : 'N';
+            if (sl) memcpy(m + 2, s, sl);
+            m[2 + sl] = 0;
+        }
+        items[cnt++] = m ? m : leptris_strdup("");
+        free(s);
+    } else {
+        items = (char**)malloc(sizeof(char*));
+        if (!items) { xpath_result_free(r); return NULL; }
+        items[cnt++] = scalar_str(r);
+    }
+    xpath_result_free(r);
+    *out_n = cnt;
+    (void)n;
+    return items;
+}
+
+/* eq-based atomic comparison over raw item strings: both-marked
+ * compares numerically; both-plain compares by codepoint; number
+ * vs string is false. nan_equal: distinct-values dedups NaN with
+ * itself (F&O 3.1), fn:index-of's eq never matches it. 'F' markers
+ * carry xs:float members (float32-exact values); an F vs plain-N
+ * pair promotes the plain side DOWN to float (decimal-vs-float
+ * promotes decimal to float per F&O numeric promotion). */
+static int atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
+    int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
+             : (a[0] == '\x03' && a[1] == 'F') ? 'F' : 0;
+    int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
+             : (b[0] == '\x03' && b[1] == 'F') ? 'F' : 0;
+    if (!ka != !kb) return 0;
+    if (!ka) return strcmp(a, b) == 0;
+    double da = strtod(a + 2, NULL);
+    double db = strtod(b + 2, NULL);
+    int na = isnan(da), nb = isnan(db);
+    /* NaN eq nothing (distinct-values dedups NaN with itself) */
+    if (na || nb) return na && nb ? nan_equal : 0;
+    if (ka == 'F' && kb != 'F') db = (double)(float)db;
+    else if (kb == 'F' && ka != 'F') da = (double)(float)da;
+    return da == db;
+}
+
+static int atom_seq_eq(const char* a, const char* b) {
+    return atom_seq_eq_n(a, b, 0);
+}
+
 /* Positional helpers (1-based; start may be <= 0, len NaN = to end). */
 static void seq_from_items(struct leptris_xpath_result* seq, char** items,
                            size_t n, long start, long len) {
@@ -192,7 +273,7 @@ static struct leptris_xpath_result* fn_tail(XPathContext* ctx,
 static struct leptris_xpath_result* fn_reverse(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out)
@@ -301,14 +382,40 @@ static struct leptris_xpath_result* fn_insert_before(XPathContext* ctx,
 static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
+    /* Collation argument (3-arg form): accepted, folds to the
+     * codepoint comparison; evaluation errors propagate. */
+    if (n > 2) {
+        struct leptris_xpath_result* c = xpath_evaluate(ctx, args[2]);
+        if (!c) { free_items(items, cnt); return NULL; }
+        leptris_xpath_result_free(c);
+    }
     struct leptris_xpath_result* v = xpath_evaluate(ctx, args[1]);
-    char* needle = v ? scalar_str(v) : NULL;
+    char* needle = NULL;
+    if (v && v->type == XPATH_RESULT_NUMBER) {
+        char* s = scalar_str(v);
+        size_t sl = s ? strlen(s) : 0;
+        needle = (char*)malloc(sl + 3);
+        if (needle) {
+            needle[0] = '\x03';
+            needle[1] = (v->atomic_type &&
+                         strcmp(v->atomic_type, "xs:float") == 0)
+                            ? 'F' : 'N';
+            if (sl) memcpy(needle + 2, s, sl);
+            needle[2 + sl] = 0;
+        } else {
+            needle = leptris_strdup("");
+        }
+        free(s);
+    } else {
+        needle = v ? scalar_str(v) : NULL;
+    }
     struct leptris_xpath_result* out = seq_new();
     if (out && needle)
         for (size_t k = 0; k < cnt; k++)
-            if (strcmp(items[k], needle) == 0) seq_push_num(out, (double)(k + 1));
+            if (atom_seq_eq(items[k], needle))
+                seq_push_num(out, (double)(k + 1));
     free(needle);
     if (v) leptris_xpath_result_free(v);
     free_items(items, cnt);
@@ -318,14 +425,23 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
 static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
+    /* 2-arg form: collation accepted (folds to codepoint); errors
+     * propagate. */
+    if (n > 1) {
+        struct leptris_xpath_result* c = xpath_evaluate(ctx, args[1]);
+        if (!c) { free_items(items, cnt); return NULL; }
+        leptris_xpath_result_free(c);
+    }
     struct leptris_xpath_result* out = seq_new();
     if (out)
         for (size_t k = 0; k < cnt; k++) {
             int dup = 0;
             for (size_t j = 0; j < k && !dup; j++)
-                if (strcmp(items[k], items[j]) == 0) dup = 1;
+                if (atom_seq_eq_n(items[k], items[j], 1)) dup = 1;
+            /* first occurrence keeps its original spelling
+             * (distinct-values((1, 2.0, 3, 2)) = 1, 2.0, 3) */
             if (!dup) seq_push_str(out, items[k]);
         }
     free_items(items, cnt);
@@ -2761,7 +2877,36 @@ static struct leptris_xpath_result* fn_xs_integer(XPathContext* ctx,
 }
 static struct leptris_xpath_result* fn_xs_double(XPathContext* ctx,
         XPathASTNode** a, size_t n) {
-    return fn_xs_number_ctor(ctx, a, n, 0);
+    struct leptris_xpath_result* r = fn_xs_number_ctor(ctx, a, n, 0);
+    if (r) r->atomic_type = "xs:double";
+    return r;
+}
+
+static struct leptris_xpath_result* fn_xs_float(XPathContext* ctx,
+        XPathASTNode** a, size_t n) {
+    struct leptris_xpath_result* r = fn_xs_number_ctor(ctx, a, n, 0);
+    if (r) {
+        /* xs:float keeps float32 precision: the value is the float
+         * nearest the lexical form, widened for the double carrier
+         * (deep-equal's widening compare is then exact). */
+        r->value.number_value = (double)((float)r->value.number_value);
+        r->atomic_type = "xs:float";
+    }
+    return r;
+}
+
+static struct leptris_xpath_result* fn_xs_date_t(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* out = fn_passthrough_ctor(ctx, args, n);
+    if (out) out->atomic_type = "xs:date";
+    return out;
+}
+
+static struct leptris_xpath_result* fn_xs_datetime_t(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    struct leptris_xpath_result* out = fn_passthrough_ctor(ctx, args, n);
+    if (out) out->atomic_type = "xs:dateTime";
+    return out;
 }
 
 /* ---- integer-subtype constructors (QT3 fn/concat): the same
@@ -2845,7 +2990,7 @@ XS_INT_SUB(fn_xs_nonneg, 0, LLONG_MAX, "xs:nonNegativeInteger")
 
 /* xs:decimal: an all-integer lexical keeps int64 fidelity
  * (QT3 fn/concatdec2args); fractions ride the double ctor. */
-static struct leptris_xpath_result* fn_xs_decimal(XPathContext* ctx,
+static struct leptris_xpath_result* fn_xs_decimal_impl(XPathContext* ctx,
         XPathASTNode** a, size_t n) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, a[0]);
     if (!r) return NULL;
@@ -2866,6 +3011,13 @@ static struct leptris_xpath_result* fn_xs_decimal(XPathContext* ctx,
         leptris_xpath_result_free(r);
     }
     return fn_xs_number_ctor(ctx, a, n, 0);
+}
+
+static struct leptris_xpath_result* fn_xs_decimal(XPathContext* ctx,
+        XPathASTNode** a, size_t n) {
+    struct leptris_xpath_result* r = fn_xs_decimal_impl(ctx, a, n);
+    if (r) r->atomic_type = "xs:decimal";
+    return r;
 }
 
 static struct leptris_xpath_result* fn_xs_boolean(XPathContext* ctx,
@@ -5157,8 +5309,8 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "subsequence", fn_subsequence, 2, 3);
     xpath_function_registry_register(registry, "remove", fn_remove, 2, 2);
     xpath_function_registry_register(registry, "insert-before", fn_insert_before, 3, 3);
-    xpath_function_registry_register(registry, "index-of", fn_index_of, 2, 2);
-    xpath_function_registry_register(registry, "distinct-values", fn_distinct_values, 1, 1);
+    xpath_function_registry_register(registry, "index-of", fn_index_of, 2, 3);
+    xpath_function_registry_register(registry, "distinct-values", fn_distinct_values, 1, 2);
     xpath_function_registry_register(registry, "avg", fn_avg, 1, 1);
     xpath_function_registry_register(registry, "min", fn_min, 1, 1);
     xpath_function_registry_register(registry, "max", fn_max, 1, 1);
@@ -5242,13 +5394,13 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "namespace-uri-from-QName", fn_ns_from_qname, 1, 1);
     xpath_function_registry_register(registry, "node-name", fn_node_name, 1, 1);
     /* Dates & durations (05, first slice) — canonical xs: prefix. */
-    xpath_function_registry_register(registry, "xs:date", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:date", fn_xs_date_t, 1, 1);
     /* Atomic constructors (06) — canonical xs: prefix. */
     xpath_function_registry_register(registry, "xs:string", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:anyURI", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:integer", fn_xs_integer, 1, 1);
     xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);
-    xpath_function_registry_register(registry, "xs:float", fn_xs_double, 1, 1);
+    xpath_function_registry_register(registry, "xs:float", fn_xs_float, 1, 1);
     xpath_function_registry_register(registry, "xs:decimal", fn_xs_decimal, 1, 1);
     xpath_function_registry_register(registry, "xs:int", fn_xs_int, 1, 1);
     xpath_function_registry_register(registry, "xs:long", fn_xs_long, 1, 1);
@@ -5260,12 +5412,23 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:nonPositiveInteger", fn_xs_nonpos, 1, 1);
     xpath_function_registry_register(registry, "xs:nonNegativeInteger", fn_xs_nonneg, 1, 1);
     xpath_function_registry_register(registry, "xs:boolean", fn_xs_boolean, 1, 1);
-    xpath_function_registry_register(registry, "xs:dateTime", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:dateTime", fn_xs_datetime_t, 1, 1);
     xpath_function_registry_register(registry, "xs:time", fn_time_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:QName", fn_passthrough_ctor, 1, 1);
+    /* String-classed and gREG surface (QT3 deep-equal/index-of/
+     * distinct-values families): untypedAtomic is string-equal;
+     * binary/gREG compare by lexical form in this engine. */
+    xpath_function_registry_register(registry, "xs:untypedAtomic", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:hexBinary", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:base64Binary", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gYear", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gYearMonth", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gMonthDay", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gMonth", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gDay", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "implicit-timezone", fn_implicit_tz, 0, 0);
     xpath_function_registry_register(registry, "current-dateTime", fn_current_dt, 0, 0);
     xpath_function_registry_register(registry, "current-date", fn_current_date, 0, 0);

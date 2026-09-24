@@ -397,7 +397,10 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
          * per-member type checks — never show it to public
          * consumers. */
         if (text->content && text->content[0] == '\x03' &&
-            text->content[1] == 'N')
+            (text->content[1] == 'N' ||
+             (text->content[1] == 'F' &&
+              !((text->content[2] == 'N' && text->content[3] == '\x02') ||
+                text->content[2] == 'R'))))
             return text->content + 2;
         return text->content;
     }
