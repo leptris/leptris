@@ -346,6 +346,8 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                                       char* val, size_t val_len,
                                       int has_amp, int has_ws,
                                       const char* name_colon) {
+    /* Live value length — the §2.11 collapse (#326) shrinks it. */
+    size_t vlen = val_len;
     /* Attribute-value normalization (XML 1.0 §3.3.3, issue #576):
      * each literal tab/LF/CR in a CDATA attribute becomes a single
      * space. Character references (&#9;) are ASCII text here —
@@ -355,13 +357,21 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     if (has_ws) {
         char* norm = (char*)leptris_pool_alloc(p->pool, val_len + 1);
         if (!norm) return -1;
+        /* §2.11 (#326): CRLF is ONE line break — it collapses to a
+         * single space (libxml2/pugixml parity) before the §3.3.3
+         * break-to-space mapping; lone CR likewise. */
+        size_t wl = 0;
         for (size_t i = 0; i < val_len; i++) {
             char ch = val[i];
-            norm[i] = (ch == '\t' || ch == '\n' || ch == '\r')
-                          ? ' ' : ch;
+            if (ch == '\r' && i + 1 < val_len && val[i + 1] == '\n') {
+                i++;
+            }
+            norm[wl++] = (ch == '\t' || ch == '\n' || ch == '\r')
+                             ? ' ' : ch;
         }
-        norm[val_len] = '\0';
+        norm[wl] = '\0';
         val = norm;
+        vlen = wl;
     }
     struct leptris_attribute* attr = p->attr_cursor;
     if (DP_UNLIKELY(attr >= p->attr_end)) {
@@ -373,7 +383,7 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     }
 
     attr->name_view = leptris_sv_from_ptr(name, name_len);
-    leptris_attr_value_set_heap(attr, leptris_sv_from_ptr(val, val_len));
+    leptris_attr_value_set_heap(attr, leptris_sv_from_ptr(val, vlen));
     /* #1125: the name NUL (at name_end) and the value NUL (at the
      * closing quote) get restored after parse — both views must
      * materialize. The normalized/entity-expanded replacements below
@@ -387,9 +397,9 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      *   predefined entities lazily on first read.
      * - No '&': nothing to do. */
     unsigned ent = 0;
-    if (val_len > 0 && has_amp) {
+    if (vlen > 0 && has_amp) {
         if (p->dtd) {
-            LeptrisStringView dsv = leptris_sv_from_ptr(val, val_len);
+            LeptrisStringView dsv = leptris_sv_from_ptr(val, vlen);
             char* expanded = leptris_decode_entities_view_with_dtd(
                 &dsv, p->dtd, p->pool);
             if (expanded) {
@@ -1018,6 +1028,46 @@ static inline LeptrisTextNode* dp_text_create(DParser* p,
     return tn;
 }
 
+/* §2.11 End-of-Line Handling (#326): collapse literal CR — CRLF →
+ * LF, lone CR → LF — into a pool-owned NUL-terminated copy. Literal
+ * bytes only: character references (&#xD;) are ASCII text at this
+ * layer and must survive as CR (char refs sit outside §2.11
+ * normalization). out_len receives the collapsed length. NULL on
+ * allocation failure. */
+static char* dp_eol_collapse(LeptrisMemoryPool* pool, const char* s,
+                             size_t len, size_t* out_len) {
+    char* conv = (char*)leptris_pool_alloc(pool, len + 1);
+    if (!conv) return NULL;
+    size_t wl = 0;
+    for (size_t i = 0; i < len; i++) {
+        char ch = s[i];
+        if (ch == '\r') {
+            conv[wl++] = '\n';
+            if (i + 1 < len && s[i + 1] == '\n') i++;
+        } else {
+            conv[wl++] = ch;
+        }
+    }
+    conv[wl] = '\0';
+    *out_len = wl;
+    return conv;
+}
+
+/* §2.11 (#326) text mint for the keep-entity-refs segment paths:
+ * zero-copy when the segment is CR-free, else a pool-owned
+ * collapsed copy (leptris_text_create — ownership differs from the
+ * borrowed carve; callers only stamp line/frozen + wire, both
+ * ownership-agnostic). */
+static inline LeptrisTextNode* dp_text_create_norm(DParser* p,
+                                                   const char* s,
+                                                   size_t len) {
+    if (memchr(s, '\r', len) == NULL) return dp_text_create(p, s, len);
+    size_t wl;
+    char* conv = dp_eol_collapse(p->pool, s, len, &wl);
+    if (!conv) return NULL;
+    return leptris_text_create(conv, wl, p->pool, p->doc);
+}
+
 /* Internal: parse from a writable, NUL-terminated buffer.
  * owns_buffer: 1 = document frees buf on leptris_document_free,
  *              0 = caller owns buf (in-place mode). */
@@ -1329,7 +1379,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                  (p.root_chained &&
                   p.dc_tail == (LeptrisNode*)p.root))) {
                 LeptrisTextNode* wtn =
-                    dp_text_create(&p, ws_start, wl);
+                    dp_text_create_norm(&p, ws_start, wl);
                 if (!wtn) goto fail;
                 wtn->base.frozen = 1;
                 dp_doc_child(&p, (LeptrisNode*)wtn);
@@ -1374,6 +1424,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * entity-free docs. The memchr fallback covers the
              * >48-byte tail region only. */
             int has_amp = 0;
+            /* §2.11 (#326): literal-CR tracking rides the same fused
+             * loop — CR-bearing runs take the pool-copy collapse,
+             * CR-free runs (the norm) keep the zero-copy carve. */
+            int has_cr = 0;
             {
                 const char* q = p.pos;
                 const char* probe_end = p.probe_slack
@@ -1383,12 +1437,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     char ch = *q;
                     if (ch == '<') { lt = (char*)q; goto text_done; }
                     has_amp |= (ch == '&');
+                    has_cr |= (ch == '\r');
                     q++;
                 }
                 if (q >= p.end) goto text_done;
                 lt = (char*)memchr(q, '<', p.end - q);
                 if (!lt) lt = p.end;
                 has_amp |= memchr(q, '&', (size_t)((char*)lt - q)) != NULL;
+                has_cr |= memchr(q, '\r', (size_t)((char*)lt - q)) != NULL;
             }
         text_done:
             p.pos = lt ? lt : p.end;
@@ -1447,7 +1503,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                             }
                         }
                         if (!rt) {
-                            rt = dp_text_create(&p, seg, slen);
+                            rt = dp_text_create_norm(&p, seg, slen);
                             if (!rt) goto fail;
                             /* #1285 slice 4: terminate the segment.
                              * The '&' is dead: the walker has passed
@@ -1486,7 +1542,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         }
                     }
                     if (!rt) {
-                        rt = dp_text_create(&p, seg, slen);
+                        rt = dp_text_create_norm(&p, seg, slen);
                         if (!rt) goto fail;
                     }
                     rt->base.line = text_off;
@@ -1505,17 +1561,34 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * raw terminated run. Entity-free runs pay one memchr
              * and stay zero-copy. */
             LeptrisTextNode* tn;
+            /* §2.11 (#326): collapse literal CR BEFORE entity decode
+             * — &#xD; expands after normalization and survives as
+             * CR, exactly as the spec orders it. Collapsed runs are
+             * pool-owned copies; CR-free runs keep every existing
+             * path (entity-free stays zero-copy, entity-decode
+             * fallback stays borrowed). */
+            char* collapsed = NULL;
+            size_t clen = tlen;
+            if (has_cr) {
+                collapsed = dp_eol_collapse(pool, text_start, tlen, &clen);
+                if (!collapsed) goto fail;
+            }
             if (has_amp) {
-                LeptrisStringView sv = leptris_sv_from_ptr(text_start, tlen);
+                LeptrisStringView sv = leptris_sv_from_ptr(
+                    collapsed ? collapsed : text_start, clen);
                 char* expanded = p.dtd
                     ? leptris_decode_entities_view_with_dtd(
                           &sv, p.dtd, pool)
                     : leptris_decode_entities_view(&sv, pool);
                 if (expanded) {
                     tn = leptris_text_create(expanded, strlen(expanded), pool, p.doc);
+                } else if (collapsed) {
+                    tn = leptris_text_create(collapsed, clen, pool, p.doc);
                 } else {
                     tn = dp_text_create(&p, text_start, tlen);
                 }
+            } else if (collapsed) {
+                tn = leptris_text_create(collapsed, clen, pool, p.doc);
             } else {
                 tn = dp_text_create(&p, text_start, tlen);
             }
@@ -1773,7 +1846,18 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 LeptrisCDATANode* cd = (LeptrisCDATANode*)
                     dp_cpi_carve(&p, LEPTRIS_NODE_TYPE_CDATA);
                 if (cd) {
-                    cd->content = start;  /* zero-copy, buf-lifetime */
+                    /* §2.11 (#326): CDATA content is Char data —
+                     * literal CR collapses to LF; CR-free content
+                     * keeps the zero-copy view. */
+                    if (memchr(start, '\r', (size_t)(p.pos - start))) {
+                        size_t wl;
+                        char* conv = dp_eol_collapse(
+                            pool, start, (size_t)(p.pos - start), &wl);
+                        if (!conv) goto fail;
+                        cd->content = conv;
+                    } else {
+                        cd->content = start;  /* zero-copy, buf-lifetime */
+                    }
                 } else {
                     cd = leptris_cdata_create(start, p.pos - start, pool);
                     if (!cd) goto fail;
