@@ -2635,12 +2635,38 @@ static struct leptris_document* dp_il_build(
         } else {
             LeptrisTextNode* tn = &tblk[ntext++];
             const char* content = scratch + r->off;
+            size_t content_len = r->len;
             scratch[r->off + r->len] = '\0';
+            /* §2.11 (leptris-ruby#326), interleaved lane: same
+             * pre-expansion CRLF/CR -> LF normalization as the
+             * classic lane; CR-free runs stay in scratch. Records
+             * carry kind 0/1 only — this branch is never CDATA. */
+            if (memchr(content, '\r', content_len)) {
+                char* norm =
+                    (char*)leptris_pool_alloc(pool, content_len + 1);
+                if (!norm) { free(smap); free(rdepth);
+                             free(lc); goto oom_pool; }
+                char* w = norm;
+                const char* rr = content;
+                const char* r_end = content + content_len;
+                while (rr < r_end) {
+                    if (*rr == '\r') {
+                        *w++ = '\n';
+                        if (rr + 1 < r_end && rr[1] == '\n') rr++;
+                    } else {
+                        *w++ = *rr;
+                    }
+                    rr++;
+                }
+                *w = '\0';
+                content = norm;
+                content_len = (size_t)(w - norm);
+            }
             tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
             tn->base.frozen = 1;
             tn->base.line = r->line;
             leptris_textnode_set_content_ptr_doc(tn, content, doc);
-            tn->content_len = r->len;
+            tn->content_len = content_len;
             /* (slice 4: pool/borrowed fields gone; the il scratch
              * run is already NUL-terminated at carve) */
             tn->parent_off = 0;
