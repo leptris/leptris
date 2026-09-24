@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.233] - 2026-09-24
+
+### Added
+
+- QT3 corpus slice 3 — empty/exists/head/tail/count, 405 gated cases (xquery)
+
+### Fixed
+
+- initialize registry_borrowed on every context init (xpath)
+
+
+
 ## [1.9.232] - 2026-09-24
 
 ### Added
