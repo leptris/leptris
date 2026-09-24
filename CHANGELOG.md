@@ -4,7 +4,12 @@
 
 ### Added
 
-- computed processing-instruction and comment constructors (xquery)
+- xquery: computed `processing-instruction NAME { content }` and
+  `comment { content }` constructors. In the string-level
+  constructor model they serialize to their XML markup
+  (`<?NAME data?>` — empty content drops the data and the separating
+  space — and `<!--content-->`). The comment guard keys on the
+  brace, so the `comment()` node test stays intact.
 
 
 
