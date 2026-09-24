@@ -854,13 +854,17 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                  * the "\x03N" marker. */
                 const char* c = ((XPathTextNode*)ns->nodes[i])->content;
                 c = c ? c : "";
-                if (c[0] == '\x03' &&
-                    (c[1] == 'N' ||
+                if (c[0] == '\x03' && c[1] == 'B') {
+                    out[i].kind = 3;
+                    out[i].num = c[2] == 't' ? 1 : 0;
+                } else if (c[0] == '\x03' &&
+                    (c[1] == 'N' || c[1] == 'D' ||
                      (c[1] == 'F' &&
                       !((c[2] == 'N' && c[3] == '\x02') ||
                         c[2] == 'R')))) {
                     out[i].kind = 1;
-                    out[i].type = c[1] == 'F' ? "xs:float" : NULL;
+                    out[i].type = c[1] == 'F' ? "xs:float"
+                                : c[1] == 'D' ? "xs:decimal" : NULL;
                     out[i].num = strtod(c + 2, NULL);
                 } else {
                     out[i].kind = 2;

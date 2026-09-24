@@ -2299,10 +2299,30 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         marked[1] = (item->atomic_type &&
                                      strcmp(item->atomic_type,
                                             "xs:float") == 0)
-                                        ? 'F' : 'N';
+                                        ? 'F'
+                                    : (item->atomic_type &&
+                                       strcmp(item->atomic_type,
+                                              "xs:decimal") == 0)
+                                        ? 'D' : 'N';
                         if (pl) memcpy(marked + 2, piece, pl);
                         marked[2 + pl] = 0;
                         XPathTextNode* tn = synth_text(marked, pl + 2);
+                        free(marked);
+                        if (tn) xpath_nodeset_add(out, tn);
+                    }
+                } else if (item->type == XPATH_RESULT_BOOLEAN) {
+                    /* "\x03B" marks boolean members so EBV
+                     * round-trips (a false boolean must stay falsy
+                     * after subsequence/remove round-trips). */
+                    const char* bp =
+                        item->value.boolean_value ? "true" : "false";
+                    char* marked = (char*)malloc(strlen(bp) + 3);
+                    if (marked) {
+                        marked[0] = '\x03';
+                        marked[1] = 'B';
+                        strcpy(marked + 2, bp);
+                        XPathTextNode* tn =
+                            synth_text(marked, strlen(bp) + 2);
                         free(marked);
                         if (tn) xpath_nodeset_add(out, tn);
                     }
