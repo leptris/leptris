@@ -1453,6 +1453,76 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
             tc->value = leptris_strdup(tests);
             return parse_postfix_ops(parser, tc);
         }
+        /* processing-instruction NAME { content } — the computed
+         * PI constructor. The target is the NCNAME/QNAME; the
+         * optional content serializes as the PI data. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 current_token(parser)->value_len == 22 &&
+                 memcmp(current_token(parser)->value,
+                        "processing-instruction", 22) == 0 &&
+                 next && (next->type == TOK_NCNAME ||
+                          next->type == TOK_QNAME) &&
+                 parser->token_pos + 2 < parser->token_count &&
+                 parser->tokens[parser->token_pos + 2].type ==
+                     TOK_LBRACE) {
+            char name[128];
+            size_t nl = next->value_len;
+            if (nl >= sizeof(name)) return NULL;
+            memcpy(name, next->value, nl);
+            name[nl] = 0;
+            advance_token(parser);
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* pc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!pc) return NULL;
+            pc->number_value = (double)XPATH_OP_PI_CTOR;
+            pc->value = leptris_strdup(name);
+            if (current_token_is(parser, TOK_RBRACE)) {
+                XPathASTNode* empty = ast_node_new(XPATH_AST_OPERATOR);
+                if (!empty) { ast_node_free(pc); return NULL; }
+                empty->number_value = (double)XPATH_OP_SEQUENCE;
+                ast_node_add_child(pc, empty);
+            } else {
+                XPathASTNode* item = parse_expr(parser);
+                if (!item) { ast_node_free(pc); return NULL; }
+                ast_node_add_child(pc, item);
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(pc);
+                return NULL;
+            }
+            advance_token(parser);
+            return parse_postfix_ops(parser, pc);
+        }
+        /* comment { content } — the computed comment constructor.
+         * Guarded by the brace so the comment() node test stays
+         * intact. */
+        else if (current_token(parser)->type == TOK_NCNAME &&
+                 next && next->type == TOK_LBRACE &&
+                 current_token(parser)->value_len == 7 &&
+                 memcmp(current_token(parser)->value, "comment", 7) == 0) {
+            advance_token(parser);
+            advance_token(parser);
+            XPathASTNode* cc = ast_node_new(XPATH_AST_OPERATOR);
+            if (!cc) return NULL;
+            cc->number_value = (double)XPATH_OP_COMMENT_CTOR;
+            if (current_token_is(parser, TOK_RBRACE)) {
+                XPathASTNode* empty = ast_node_new(XPATH_AST_OPERATOR);
+                if (!empty) { ast_node_free(cc); return NULL; }
+                empty->number_value = (double)XPATH_OP_SEQUENCE;
+                ast_node_add_child(cc, empty);
+            } else {
+                XPathASTNode* item = parse_expr(parser);
+                if (!item) { ast_node_free(cc); return NULL; }
+                ast_node_add_child(cc, item);
+            }
+            if (!current_token_is(parser, TOK_RBRACE)) {
+                ast_node_free(cc);
+                return NULL;
+            }
+            advance_token(parser);
+            return parse_postfix_ops(parser, cc);
+        }
         else if (current_token(parser)->type == TOK_NCNAME &&
                  next && next->type == TOK_LBRACE &&
                  current_token(parser)->value_len == 4 &&

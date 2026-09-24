@@ -1521,6 +1521,45 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
      * escape &<"', text content escapes &<; raw expression content
      * passes through (a nested constructor's result is already
      * markup; arbitrary-string escaping is a value-model limit). */
+    /* Computed PI/comment constructors (string-level ctor model):
+     * serialize to the XML markup form. PI data is raw (no
+     * entity-escaping in the data position); empty content drops
+     * the data and the separating space. */
+    if (op == XPATH_OP_PI_CTOR || op == XPATH_OP_COMMENT_CTOR) {
+        char* s = NULL;
+        if (ast->child_count >= 1) {
+            struct leptris_xpath_result* v =
+                evaluate_expr(ctx, ast->children[0]);
+            if (v) s = xpath_to_string(v);
+            xpath_result_free(v);
+        }
+        if (!s) s = leptris_strdup("");
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_STRING);
+        if (!out) {
+            free(s);
+            return NULL;
+        }
+        const char* target =
+            op == XPATH_OP_PI_CTOR && ast->value ? ast->value : "";
+        size_t tl = strlen(target);
+        size_t dl = strlen(s);
+        char* buf = (char*)malloc(tl + dl + 8);
+        if (!buf) {
+            free(s);
+            xpath_result_free(out);
+            return NULL;
+        }
+        if (op == XPATH_OP_PI_CTOR)
+            snprintf(buf, tl + dl + 8, "<?%s%s%s?>", target,
+                     dl ? " " : "", s);
+        else
+            snprintf(buf, dl + 8, "<!--%s-->", s);
+        out->value.string_value = buf;
+        free(s);
+        return out;
+    }
+
     if (op == XPATH_OP_TEXT_CTOR || op == XPATH_OP_ATTRIBUTE_CTOR ||
         op == XPATH_OP_ELEMENT_CTOR) {
         if (op != XPATH_OP_ELEMENT_CTOR) {
