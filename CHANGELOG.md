@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.238] - 2026-09-24
+
+### Added
+
+- computed processing-instruction and comment constructors (xquery)
+
+
+
 ## [1.9.237] - 2026-09-24
 
 <!-- Edit this section with the actual release notes. -->
