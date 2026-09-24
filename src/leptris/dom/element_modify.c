@@ -232,6 +232,26 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
     return elem;
 }
 
+/* #1344: fused create + attribute-set — one crossing for the
+ * builder path. Identical per-pair semantics to
+ * leptris_element_set_attribute. */
+LeptrisElement leptris_element_new_with_attributes(
+        LeptrisDocument doc, const char* name, const char** attr_names,
+        const char** attr_values, size_t attr_count) {
+    LeptrisElement elem = leptris_element_create(doc, name);
+    if (!elem) return NULL;
+    if (attr_count && !attr_names) return NULL;
+    for (size_t i = 0; i < attr_count; i++) {
+        if (!attr_names[i]) return NULL;
+        if (leptris_element_set_attribute(
+                elem, attr_names[i],
+                (attr_values && attr_values[i]) ? attr_values[i] : "") !=
+            LEPTRIS_OK)
+            return NULL;
+    }
+    return elem;
+}
+
 /**
  * Append child element (Public API)
  */

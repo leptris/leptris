@@ -2616,3 +2616,83 @@ TEST(AttributePairs, BulkReadReturnsNamesValuesAndHandles) {
               0u);
     leptris_document_free(doc);
 }
+
+/* #1344: single-crossing element construction — the fused
+ * create + N x set_attribute entry for builder paths. */
+TEST(ElementNewWithAttributes, CreatesElementWithAllAttributes) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* names[] = {"id", "class"};
+    const char* values[] = {"7", "c"};
+    LeptrisElement e = leptris_element_new_with_attributes(
+        doc, "book", names, values, 2);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "book");
+    EXPECT_EQ(leptris_element_attribute_count(e), 2u);
+    EXPECT_STREQ(leptris_element_attribute(e, "id"), "7");
+    EXPECT_STREQ(leptris_element_attribute(e, "class"), "c");
+    leptris_document_free(doc);
+}
+
+TEST(ElementNewWithAttributes, ZeroAttributesMakesPlainElement) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_element_new_with_attributes(doc, "leaf",
+                                                           NULL, NULL, 0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "leaf");
+    EXPECT_EQ(leptris_element_attribute_count(e), 0u);
+    leptris_document_free(doc);
+}
+
+TEST(ElementNewWithAttributes, InvalidArgsReturnNull) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* names[] = {"id"};
+    const char* values[] = {"1"};
+    EXPECT_EQ(leptris_element_new_with_attributes(NULL, "a", names,
+                                                  values, 1),
+              nullptr);
+    EXPECT_EQ(leptris_element_new_with_attributes(doc, NULL, names,
+                                                  values, 1),
+              nullptr);
+    EXPECT_EQ(leptris_element_new_with_attributes(doc, "a", NULL, values,
+                                                  1),
+              nullptr);
+    leptris_document_free(doc);
+}
+
+TEST(ElementNewWithAttributes, SerializesLikeSetAttributePath) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* names[] = {"id"};
+    const char* values[] = {"x&y"};
+    LeptrisElement e = leptris_element_new_with_attributes(
+        doc, "n", names, values, 1);
+    ASSERT_NE(e, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    char* xml = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, "<r><n id=\"x&amp;y\"/></r>");
+    leptris_free_string(xml);
+    leptris_document_free(doc);
+}
+
+TEST(ElementNewWithAttributes, DuplicateNamesReplaceLastWins) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* names[] = {"id", "id"};
+    const char* values[] = {"first", "second"};
+    LeptrisElement e = leptris_element_new_with_attributes(
+        doc, "n", names, values, 2);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(leptris_element_attribute_count(e), 1u);
+    EXPECT_STREQ(leptris_element_attribute(e, "id"), "second");
+    leptris_document_free(doc);
+}

@@ -1985,6 +1985,33 @@ LEPTRIS_API size_t leptris_element_hash_value(LeptrisElement elem);
 LEPTRIS_API LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name);
 
 /**
+ * Create a new element with attributes set in one call (#1344)
+ *
+ * The fused twin of create + N x set_attribute: one crossing
+ * builds the element with every attribute attached — the
+ * builder-shape answer for programmatic document construction.
+ * Attribute semantics are identical to leptris_element_set_attribute
+ * per pair (same name handling, same value copy); a duplicate name
+ * replaces, last wins.
+ *
+ * @param doc Document that will own the element
+ * @param name Element name (QName prefixes handled like
+ *             leptris_element_create)
+ * @param attr_names Attribute names; may be NULL when attr_count
+ *                   is 0. A NULL element or NULL name string fails
+ *                   the call.
+ * @param attr_values Attribute values; a NULL entry stores the
+ *                    empty string
+ * @param attr_count Number of name/value pairs
+ * @return New element or NULL on error
+ *
+ * Memory: Element owned by document, freed when document freed
+ */
+LEPTRIS_API LeptrisElement leptris_element_new_with_attributes(
+    LeptrisDocument doc, const char* name, const char** attr_names,
+    const char** attr_values, size_t attr_count);
+
+/**
  * Set element name (rename element tag)
  *
  * @param elem Element to rename
