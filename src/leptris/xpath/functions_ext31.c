@@ -169,7 +169,10 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
             m[0] = '\x03';
             m[1] = (r->atomic_type &&
                     strcmp(r->atomic_type, "xs:float") == 0)
-                       ? 'F' : 'N';
+                       ? 'F'
+                   : (r->atomic_type &&
+                      strcmp(r->atomic_type, "xs:decimal") == 0)
+                       ? 'D' : 'N';
             if (sl) memcpy(m + 2, s, sl);
             m[2 + sl] = 0;
         }
@@ -195,11 +198,20 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
  * promotes decimal to float per F&O numeric promotion). */
 static int atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
     int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
-             : (a[0] == '\x03' && a[1] == 'F') ? 'F' : 0;
+             : (a[0] == '\x03' && a[1] == 'F') ? 'F'
+             : (a[0] == '\x03' && a[1] == 'D') ? 'D'
+             : (a[0] == '\x03' && a[1] == 'B') ? 'B' : 0;
     int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
-             : (b[0] == '\x03' && b[1] == 'F') ? 'F' : 0;
+             : (b[0] == '\x03' && b[1] == 'F') ? 'F'
+             : (b[0] == '\x03' && b[1] == 'D') ? 'D'
+             : (b[0] == '\x03' && b[1] == 'B') ? 'B' : 0;
     if (!ka != !kb) return 0;
+    if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
     if (!ka) return strcmp(a, b) == 0;
+    /* xs:decimal eq is exact — the double carrier cannot hold 30
+     * significant digits, so same-type decimals compare lexically
+     * (equal-value canonical decimals share their spelling). */
+    if (ka == 'D' && kb == 'D') return strcmp(a + 2, b + 2) == 0;
     double da = strtod(a + 2, NULL);
     double db = strtod(b + 2, NULL);
     int na = isnan(da), nb = isnan(db);
@@ -308,7 +320,7 @@ static struct leptris_xpath_result* fn_unordered(XPathContext* ctx,
 static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
     struct leptris_xpath_result* sv = xpath_evaluate(ctx, args[1]);
     double sd = sv ? leptris_xpath_result_number(sv) : 0;
@@ -321,16 +333,40 @@ static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
     if (sv) leptris_xpath_result_free(sv);
     struct leptris_xpath_result* out = seq_new();
     if (out) {
-        /* F&O: a negative $length yields the empty sequence
-         * (K-SeqSubsequenceFunc-5) — len < 0 is NOT the "to end"
-         * sentinel here. */
-        if (n >= 3 && ld < 0) {
-            free_items(items, cnt);
-            return out;
+        /* F&O window in position space: item p (1-based) is in the
+         * result iff round(start) <= p and, 3-arg form, also
+         * p < round(start) + round(len). NaN compares false ->
+         * empty (cbcl-subsequence-002/003/005). Positions are NOT
+         * clamped to 1 — a negative start with a short length
+         * covers no positive position (cbcl-subsequence-009).
+         * start/len round half toward +infinity like fn:round
+         * (K2-SeqSubsequenceFunc-5: 1.8 -> 2). */
+        double start = (sd != sd) ? 1.0 : floor(sd + 0.5);
+        double len = 0;
+        int has_len = 0;
+        if (n >= 3) {
+            /* NaN length or negative length: empty */
+            if (ld != ld || ld < 0) {
+                free_items(items, cnt);
+                return out;
+            }
+            len = floor(ld + 0.5);
+            has_len = 1;
         }
-        long start = (long)sd;
-        long len = (n >= 3) ? (ld != ld ? -1 : (long)ld) : -1;
-        seq_from_items(out, items, cnt, start, len);
+        for (size_t k = 0; k < cnt; k++) {
+            double p = (double)(k + 1);
+            /* The spec's own window: p >= round(start) and, 3-arg
+             * form, p < round(start) + round(len). The sum can be
+             * NaN (-INF + INF) making every comparison false ->
+             * empty (cbcl-subsequence-001), so the membership test
+             * must stay NaN-safe — no early break. The 2-arg form
+             * has no upper bound (cbcl-subsequence-004: start=-INF
+             * selects everything; a sentinel length would collide
+             * with -inf + finite = -inf). */
+            if (!(p >= start)) continue;
+            if (has_len && !(p < start + len)) continue;
+            seq_push_str(out, items[k]);
+        }
     }
     free_items(items, cnt);
     return out;
@@ -339,7 +375,7 @@ static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
 static struct leptris_xpath_result* fn_remove(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
     struct leptris_xpath_result* iv = xpath_evaluate(ctx, args[1]);
     long drop = iv ? (long)leptris_xpath_result_number(iv) : 0;
@@ -393,7 +429,18 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
     }
     struct leptris_xpath_result* v = xpath_evaluate(ctx, args[1]);
     char* needle = NULL;
-    if (v && v->type == XPATH_RESULT_NUMBER) {
+    if (v && v->type == XPATH_RESULT_BOOLEAN) {
+        /* B-marked members must match B-marked needles */
+        const char* bp = v->value.boolean_value ? "true" : "false";
+        needle = (char*)malloc(strlen(bp) + 3);
+        if (needle) {
+            needle[0] = '\x03';
+            needle[1] = 'B';
+            strcpy(needle + 2, bp);
+        } else {
+            needle = leptris_strdup("");
+        }
+    } else if (v && v->type == XPATH_RESULT_NUMBER) {
         char* s = scalar_str(v);
         size_t sl = s ? strlen(s) : 0;
         needle = (char*)malloc(sl + 3);
@@ -401,7 +448,10 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
             needle[0] = '\x03';
             needle[1] = (v->atomic_type &&
                          strcmp(v->atomic_type, "xs:float") == 0)
-                            ? 'F' : 'N';
+                            ? 'F'
+                        : (v->atomic_type &&
+                           strcmp(v->atomic_type, "xs:decimal") == 0)
+                            ? 'D' : 'N';
             if (sl) memcpy(needle + 2, s, sl);
             needle[2 + sl] = 0;
         } else {

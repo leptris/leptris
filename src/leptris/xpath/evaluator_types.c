@@ -232,7 +232,7 @@ char* get_node_text(void* node) {
              * in XML 1.0 text, so it can never collide with real
              * content — strip it for every string consumer. */
             if (c[0] == '\x03' &&
-                (c[1] == 'N' ||
+                (c[1] == 'N' || c[1] == 'B' || c[1] == 'D' ||
                  (c[1] == 'F' &&
                   !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R'))))
                 c += 2;

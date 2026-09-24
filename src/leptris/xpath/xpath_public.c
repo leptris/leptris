@@ -397,7 +397,8 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
          * per-member type checks — never show it to public
          * consumers. */
         if (text->content && text->content[0] == '\x03' &&
-            (text->content[1] == 'N' ||
+            (text->content[1] == 'N' || text->content[1] == 'B' ||
+             text->content[1] == 'D' ||
              (text->content[1] == 'F' &&
               !((text->content[2] == 'N' && text->content[3] == '\x02') ||
                 text->content[2] == 'R'))))
@@ -418,6 +419,17 @@ LEPTRIS_API int leptris_xpath_result_boolean(LeptrisXPathResult result) {
         case XPATH_RESULT_STRING:
             return (result->value.string_value && result->value.string_value[0] != '\0') ? 1 : 0;
         case XPATH_RESULT_NODESET:
+            if (result->value.nodeset_value &&
+                result->value.nodeset_value->count == 1) {
+                void* nd = result->value.nodeset_value->nodes[0];
+                if (nd && (int)XPATH_NODE_TYPE(nd) == (int)LEPTRIS_NODE_TEXT) {
+                    XPathTextNode* tn = (XPathTextNode*)nd;
+                    /* "\x03B" boolean members carry their EBV */
+                    if (tn->content && tn->content[0] == '\x03' &&
+                        tn->content[1] == 'B')
+                        return tn->content[2] == 't';
+                }
+            }
             return (result->value.nodeset_value && result->value.nodeset_value->count > 0) ? 1 : 0;
         default:
             return 0;

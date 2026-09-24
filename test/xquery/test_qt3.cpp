@@ -275,6 +275,22 @@ bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
             got.push_back(result_string(r));
         }
         std::vector<std::string> want = split_perm_items(a.text);
+        /* expected items are XQuery expressions (true(),
+         * xs:float('-INF')) — evaluate each against the case doc */
+        for (auto& w : want) {
+            if (w.find('(') == std::string::npos) continue;
+            LeptrisXQuery xq2 =
+                leptris_xquery_parse(w.c_str(), w.size());
+            if (!xq2) continue;
+            LeptrisXPathResult r2 =
+                leptris_xquery_eval(xq2, doc, NULL);
+            if (r2) {
+                std::string v = result_string(r2);
+                leptris_xpath_result_free(r2);
+                w = v;
+            }
+            leptris_xquery_free(xq2);
+        }
         bool numeric = all_numeric(got) && all_numeric(want);
         if (numeric) {
             std::sort(got.begin(), got.end(),
@@ -877,63 +893,66 @@ TEST(Qt3Subset, FnIndexOf) {
     /* Reds are the typed-atom class: NaN/INF members and
      * xs:date/dateTime compare via the string channel. */
     run_test_set("fn/index-of.xml", {}, 42, {},
-                 {                                      "fn-indexof-mix-args-013",
-                                                                                                                                     "K-SeqIndexOfFunc-17"});
+                 {
+                   "K-SeqIndexOfFunc-17",
+                   "fn-indexof-mix-args-013",
+
+                 });
 }
 
 TEST(Qt3Subset, FnInsertBefore) {
     /* K-16 waits on lazy error() semantics (error in an unevaluated
      * branch must not fire). */
     run_test_set("fn/insert-before.xml", {}, 18, {},
-                 {"K-SeqInsertBeforeFunc-16"});
+                 {
+                   "K-SeqInsertBeforeFunc-16",
+
+                 });
 }
 
 TEST(Qt3Subset, FnRemove) {
     /* Reds: instance-of on typed sequences + the typed-member class. */
-    run_test_set("fn/remove.xml", {}, 21, {},
-                 {"fn-remove-mix-args-017",
-                   "K-SeqRemoveFunc-6",
-                   "K-SeqRemoveFunc-7",
-                   "K-SeqRemoveFunc-8"});
+    run_test_set("fn/remove.xml", {}, 23, {},
+                 {
+                   "K-SeqRemoveFunc-8",
+                   "fn-remove-mix-args-017",
+
+                 });
 }
 
 TEST(Qt3Subset, FnReverse) {
     /* Reds are the typed-atom class (NaN/INF/boolean member compare). */
     run_test_set("fn/reverse.xml", {}, 57, {},
-                 {"fn-reversedbl1args-1",
+                 {
+                   "K2-SeqReverseFunc-1",
+                   "K2-SeqReverseFunc-2",
+                   "fn-reversedbl1args-1",
                    "fn-reversedbl1args-3",
-                                                                                               "K2-SeqReverseFunc-1",
-                   "K2-SeqReverseFunc-2"});
+
+                 });
 }
 
 TEST(Qt3Subset, FnSubsequence) {
     /* Reds: typed members under assert-xml (float/boolean/dateTime
      * spellings) + start/length NaN rules. */
-    run_test_set("fn/subsequence.xml", {}, 51, {},
-                 {"fn-subsequence-mix-args-011",
-                   "fn-subsequence-mix-args-016",
-                   "fn-subsequence-mix-args-018",
-                   "fn-subsequence-mix-args-022",
-                   "fn-subsequence-mix-args-025",
-                   "K-SeqSubsequenceFunc-10",
-                   "K-SeqSubsequenceFunc-33",
+    run_test_set("fn/subsequence.xml", {}, 61, {},
+                 {
                    "K-SeqSubsequenceFunc-34",
-                   "K2-SeqSubsequenceFunc-5",
                    "cbcl-subsequence-001",
-                   "cbcl-subsequence-002",
                    "cbcl-subsequence-003",
                    "cbcl-subsequence-005",
-                   "cbcl-subsequence-007",
-                   "cbcl-subsequence-009",
-                   "cbcl-subsequence-010",
                    "cbcl-subsequence-011",
                    "cbcl-subsequence-012",
                    "cbcl-subsequence-013",
                    "cbcl-subsequence-014",
-                   "cbcl-subsequence-018",
                    "cbcl-subsequence-019",
                    "cbcl-subsequence-025",
-                   "cbcl-subsequence-026"});
+                   "cbcl-subsequence-026",
+                   "fn-subsequence-mix-args-011",
+                   "fn-subsequence-mix-args-016",
+                   "fn-subsequence-mix-args-025",
+
+                 });
 }
 
 TEST(Qt3Subset, FnDistinctValues) {
@@ -942,23 +961,24 @@ TEST(Qt3Subset, FnDistinctValues) {
     /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
      * the LTO'd test binary — identical query passes standalone and
      * via the public API; CI's non-LTO/gcc legs are the arbiter. */
-    run_test_set("fn/distinct-values.xml", {}, 84, {},
-                 {"fn-distinct-values-mixed-args-012","fn-distinct-valuesdbl1args-1",
-                   "fn-distinct-valuesdbl1args-3",
-                   "fn-distinct-values-mixed-args-009",
-                   "fn-distinct-values-mixed-args-010",
-                                                                                               "fn-distinct-values-mixed-args-018",
-                   "fn-distinct-values-mixed-args-031",
-                   "fn-distinct-values-mixed-args-032",
-                                                                                               "fn-distinct-values-1",
-                   "fn-distinct-values-2",
+    run_test_set("fn/distinct-values.xml", {}, 87, {},
+                 {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
                    "cbcl-distinct-values-007",
-                                                         "cbcl-distinct-values-010",
+                   "cbcl-distinct-values-010",
                    "cbcl-distinct-values-011",
-                                      "cbcl-distinct-values-013",
-                                      "cbcl-distinct-values-016"});
+                   "cbcl-distinct-values-013",
+                   "cbcl-distinct-values-016",
+                   "fn-distinct-values-1",
+                   "fn-distinct-values-2",
+                   "fn-distinct-values-mixed-args-010",
+                   "fn-distinct-values-mixed-args-012",
+                   "fn-distinct-values-mixed-args-018",
+                   "fn-distinct-valuesdbl1args-1",
+                   "fn-distinct-valuesdbl1args-3",
+
+                 });
 }
 
 TEST(Qt3Subset, FnDeepEqual) {
@@ -966,24 +986,8 @@ TEST(Qt3Subset, FnDeepEqual) {
      * xs:date ne string, NaN = NaN inside typed wrappers) — needs
      * the typed-atom model. */
     run_test_set("fn/deep-equal.xml", {}, 192, {},
-                 {                                                                            "fn-deep-equal-mix-args-031",
-                   "fn-deep-equal-arrays-1",
-                   "fn-deep-equal-arrays-4",
-                   "fn-deep-equal-arrays-6",
-                   "fn-deep-equal-arrays-9",
-                   "fn-deep-equal-arrays-14",
-                   "fn-deep-equal-arrays-15",
-                   "fn-deep-equal-arrays-16",
-                   "fn-deep-equal-arrays-17",
-                   "fn-deep-equal-arrays-18",
-                   "fn-deep-equal-maps-1",
-                   "fn-deep-equal-maps-2",
-                   "fn-deep-equal-maps-3",
-                   "fn-deep-equal-maps-4",
-                   "fn-deep-equal-maps-11",
-                   "fn-deep-equal-maps-18",
-                   "fn-deep-equal-maps-20",
-                                                                                                                                     "K2-SeqDeepEqualFunc-14",
+                 {
+                   "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
                    "K2-SeqDeepEqualFunc-16",
                    "K2-SeqDeepEqualFunc-17",
@@ -1002,7 +1006,26 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "cbcl-deep-equal-002",
                    "cbcl-deep-equal-003",
                    "cbcl-deep-equal-004",
-                                                         "cbcl-deep-equal-010"});
+                   "cbcl-deep-equal-010",
+                   "fn-deep-equal-arrays-1",
+                   "fn-deep-equal-arrays-14",
+                   "fn-deep-equal-arrays-15",
+                   "fn-deep-equal-arrays-16",
+                   "fn-deep-equal-arrays-17",
+                   "fn-deep-equal-arrays-18",
+                   "fn-deep-equal-arrays-4",
+                   "fn-deep-equal-arrays-6",
+                   "fn-deep-equal-arrays-9",
+                   "fn-deep-equal-maps-1",
+                   "fn-deep-equal-maps-11",
+                   "fn-deep-equal-maps-18",
+                   "fn-deep-equal-maps-2",
+                   "fn-deep-equal-maps-20",
+                   "fn-deep-equal-maps-3",
+                   "fn-deep-equal-maps-4",
+                   "fn-deep-equal-mix-args-031",
+
+                 });
 }
 
 TEST(Qt3Subset, FnCodepointsToString) {
