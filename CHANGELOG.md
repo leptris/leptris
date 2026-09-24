@@ -4,7 +4,14 @@
 
 ### Fixed
 
-- DOM traversal bench walks the documented O(1) iteration shape (benchmarks)
+- benchmarks: the DOM Tree Traversal row now walks the documented
+  O(1) iteration shape (`leptris_element_first_child_any` +
+  `leptris_element_next_sibling_any`). The previous shape used
+  `child_count()` + indexed `child(elem, i)` — O(N^2/2) re-seeking
+  per parent — which measured the indexed-lookup algorithm instead of
+  per-hop engine cost, overstating the libxml2 gap at 1.8-4.2x.
+  Matched-shape gap vs libxml2 is 1.5-1.7x (#1341, closed as the
+  structural cost of the 64-byte compact node design).
 
 
 
