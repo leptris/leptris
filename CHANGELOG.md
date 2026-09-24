@@ -5,9 +5,15 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Added
 
-- (describe changes here)
+- dom: `leptris_element_new_with_attributes` — single-crossing
+  element construction (#1344). One call creates the element in the
+  document arena with every attribute attached — identical per-pair
+  semantics to leptris_element_set_attribute (duplicate names
+  replace, last wins; NULL values store the empty string). Builder
+  paths collapse from 1 + N crossings plus wrapper allocations per
+  node to a single crossing.
 
 
 ## [1.9.236] - 2026-09-24
@@ -682,9 +688,15 @@ W3C QT3 suite as the gate:
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Added
 
-- (describe changes here)
+- dom: `leptris_element_new_with_attributes` — single-crossing
+  element construction (#1344). One call creates the element in the
+  document arena with every attribute attached — identical per-pair
+  semantics to leptris_element_set_attribute (duplicate names
+  replace, last wins; NULL values store the empty string). Builder
+  paths collapse from 1 + N crossings plus wrapper allocations per
+  node to a single crossing.
 
 
 ## [1.9.200] - 2026-09-18
@@ -8384,9 +8396,15 @@ fall back to the legacy parser.
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Added
 
-- (describe changes here)
+- dom: `leptris_element_new_with_attributes` — single-crossing
+  element construction (#1344). One call creates the element in the
+  document arena with every attribute attached — identical per-pair
+  semantics to leptris_element_set_attribute (duplicate names
+  replace, last wins; NULL values store the empty string). Builder
+  paths collapse from 1 + N crossings plus wrapper allocations per
+  node to a single crossing.
 
 
 All notable changes to Leptris will be documented in this file.
