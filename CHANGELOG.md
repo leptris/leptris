@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.234] - 2026-09-24
+
+### Fixed
+
+- DOM traversal bench walks the documented O(1) iteration shape (benchmarks)
+
+
+
 ## [1.9.233] - 2026-09-24
 
 ### Added
