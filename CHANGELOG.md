@@ -4,7 +4,26 @@
 
 ### Added
 
-- F&O subsequence window, boolean/decimal member markers (xpath)
+- xpath: fn:subsequence implements the F&O window in position space —
+  NaN start/length yields empty, the window is NaN-safe including
+  -INF + INF = NaN, positions are never clamped to 1, the 2-arg form
+  is unbounded, and start/length round half-up like fn:round
+  (cbcl-subsequence-001..009, K2-5).
+- xpath: boolean and xs:decimal sequence members carry their type
+  (\x03B/\x03D markers) — a false boolean stays falsy through
+  fn:subsequence/fn:remove round-trips (EBV reads the marker) and
+  xs:decimal equality compares lexically where the double carrier
+  cannot hold 30 significant digits.
+- xpath: fn:subsequence and fn:remove preserve member types, so
+  `instance of`, deep-equal and effective boolean value agree across
+  the round-trip.
+- QT3 runner: assert-permutation evaluates expected items as
+  expressions.
+
+### Fixed
+
+- QT3 corpus: subsequence 51→61, distinct-values 84→87, remove
+  21→23 adopted; typed-atom pins 86→67.
 
 
 
