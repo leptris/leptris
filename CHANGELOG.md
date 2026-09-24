@@ -4,7 +4,26 @@
 
 ### Added
 
-- typed atoms for QT3 equality — atomic_type channel, float precision, NaN semantics (xpath)
+- xpath: typed atoms for QT3 equality — an atomic_type channel on
+  XPath results (typed constructors carry interned type names),
+  float32 precision for xs:float (float(1.01) ne double(1.01) while
+  decimal-vs-float promotes per F&O rank), typed \x03F sequence
+  markers, and the missing constructor surface (xs:untypedAtomic,
+  xs:hexBinary, xs:base64Binary, xs:gYear/gYearMonth/gMonthDay/
+  gMonth/gDay).
+
+### Fixed
+
+- xpath: per-function equality semantics — fn:index-of never matches
+  NaN and does not coerce numbers to strings; fn:distinct-values
+  dedups NaN with itself and keeps the first spelling
+  (distinct((1, 2.0, 3, 2)) = 1, 2.0, 3); fn:reverse, fn:index-of and
+  fn:distinct-values preserve sequence-member types.
+- xpath: fn:deep-equal ignores comment/PI children (F&O 3.0),
+  compares typed string classes (xs:date vs string = false), and
+  accepts the 3-argument collation form.
+- QT3 corpus: deep-equal 180→192, distinct-values 74→84, index-of
+  34→42, reverse 53→57 adopted (125 typed-atom pins → 86).
 
 
 
