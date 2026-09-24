@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.239] - 2026-09-24
+
+### Added
+
+- shortest round-trip E notation for XQuery number spelling (xquery)
+
+
+
 ## [1.9.238] - 2026-09-24
 
 ### Added
