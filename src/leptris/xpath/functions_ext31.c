@@ -160,7 +160,15 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
             }
         }
     } else if (r->type == XPATH_RESULT_NUMBER) {
-        char* s = scalar_str(r);
+        /* XQuery-spelled doubles (shortest round-trip E form) when
+         * the eval is XQuery-flavored — same rule as the sequence
+         * operator's scalar spread. */
+        char* s = (ctx->xquery_spelling && !r->is_int)
+                      ? xpath_number_to_string_xq_typed(
+                            r->value.number_value,
+                            r->atomic_type &&
+                                strcmp(r->atomic_type, "xs:float") == 0)
+                      : scalar_str(r);
         size_t sl = s ? strlen(s) : 0;
         items = (char**)malloc(sizeof(char*));
         if (!items) { free(s); xpath_result_free(r); return NULL; }
@@ -441,7 +449,12 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
             needle = leptris_strdup("");
         }
     } else if (v && v->type == XPATH_RESULT_NUMBER) {
-        char* s = scalar_str(v);
+        char* s = (ctx->xquery_spelling && !v->is_int)
+                      ? xpath_number_to_string_xq_typed(
+                            v->value.number_value,
+                            v->atomic_type &&
+                                strcmp(v->atomic_type, "xs:float") == 0)
+                      : scalar_str(v);
         size_t sl = s ? strlen(s) : 0;
         needle = (char*)malloc(sl + 3);
         if (needle) {

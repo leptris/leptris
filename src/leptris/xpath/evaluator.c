@@ -743,6 +743,7 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
     result->type = type;
     result->is_int = 0;   /* free-list recycling would leak it */
     result->atomic_type = NULL;
+    result->xq_spelling = 0;
 
     /* Initialize union based on type. XPATH_RESULT_CACHED is the
      * free-list sentinel — a fresh result never carries it. */

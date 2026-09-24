@@ -922,12 +922,10 @@ TEST(Qt3Subset, FnRemove) {
 
 TEST(Qt3Subset, FnReverse) {
     /* Reds are the typed-atom class (NaN/INF/boolean member compare). */
-    run_test_set("fn/reverse.xml", {}, 57, {},
+    run_test_set("fn/reverse.xml", {}, 59, {},
                  {
                    "K2-SeqReverseFunc-1",
                    "K2-SeqReverseFunc-2",
-                   "fn-reversedbl1args-1",
-                   "fn-reversedbl1args-3",
 
                  });
 }
@@ -961,7 +959,7 @@ TEST(Qt3Subset, FnDistinctValues) {
     /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
      * the LTO'd test binary — identical query passes standalone and
      * via the public API; CI's non-LTO/gcc legs are the arbiter. */
-    run_test_set("fn/distinct-values.xml", {}, 87, {},
+    run_test_set("fn/distinct-values.xml", {}, 89, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
@@ -975,8 +973,6 @@ TEST(Qt3Subset, FnDistinctValues) {
                    "fn-distinct-values-mixed-args-010",
                    "fn-distinct-values-mixed-args-012",
                    "fn-distinct-values-mixed-args-018",
-                   "fn-distinct-valuesdbl1args-1",
-                   "fn-distinct-valuesdbl1args-3",
 
                  });
 }

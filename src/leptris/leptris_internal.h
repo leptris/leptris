@@ -654,6 +654,11 @@ struct leptris_xpath_result {
      * NULL for the untyped/string class. NOT owned — static
      * literals only. Cleared in result_new (free-list recycle). */
     const char* atomic_type;
+    /* XQuery number spelling: set on NUMBER results that escape an
+     * XQuery evaluation, so result_string renders the shortest
+     * round-trip E form instead of the libxml2-parity XPath
+     * spelling. Cleared in result_new (free-list recycle). */
+    int xq_spelling;
 };
 
 /* Namespace mapping for XPath context (v0.8.0) */
