@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.241] - 2026-09-25
+
+### Fixed
+
+- shortest round-trip plain spelling for XQuery numbers (xquery)
+
+
+
 ## [1.9.240] - 2026-09-25
 
 ### Fixed
