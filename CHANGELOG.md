@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.240] - 2026-09-25
+
+### Fixed
+
+- order-by empty-string keys, duration-typed distinct-values (xquery)
+- qualifier casts in the plan free path (descriptor)
+- §2.11 EOL normalization in the interleaved lane (#326) (dom)
+
+
+
 ## [1.9.239] - 2026-09-24
 
 ### Added
