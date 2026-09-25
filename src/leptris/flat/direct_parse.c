@@ -2560,12 +2560,22 @@ static struct leptris_document* dp_il_build(
                             pool, a->val_len + 1);
                         if (!norm) { free(smap); free(rdepth);
                                      free(lc); goto oom_pool; }
+                        /* §2.11 (#326): CRLF is ONE line break — one
+                         * space, same collapse as the classic lane. */
+                        size_t nw = 0;
                         for (uint32_t w = 0; w < a->val_len; w++) {
                             char ch = scratch[a->val_off + w];
-                            norm[w] = (ch == '\t' || ch == '\n' ||
-                                       ch == '\r') ? ' ' : ch;
+                            if (ch == '\r') {
+                                norm[nw++] = ' ';
+                                if (w + 1 < a->val_len &&
+                                    scratch[a->val_off + w + 1] == '\n')
+                                    w++;
+                            } else {
+                                norm[nw++] = (ch == '\t' || ch == '\n')
+                                                 ? ' ' : ch;
+                            }
                         }
-                        norm[a->val_len] = '\0';
+                        norm[nw] = '\0';
                         leptris_attr_value_set_heap(
                             at, leptris_sv_from_cstr(norm));
                     } else {
@@ -2672,12 +2682,37 @@ static struct leptris_document* dp_il_build(
         } else {
             LeptrisTextNode* tn = &tblk[ntext++];
             const char* content = scratch + r->off;
+            size_t content_len = r->len;
             scratch[r->off + r->len] = '\0';
+            /* §2.11 (#326), interleaved lane: same pre-expansion
+             * CRLF/CR -> LF normalization as the classic lane;
+             * CR-free runs stay in scratch. */
+            if (memchr(content, '\r', content_len)) {
+                char* norm =
+                    (char*)leptris_pool_alloc(pool, content_len + 1);
+                if (!norm) { free(smap); free(rdepth);
+                             free(lc); goto oom_pool; }
+                char* w = norm;
+                const char* rr = content;
+                const char* r_end = content + content_len;
+                while (rr < r_end) {
+                    if (*rr == '\r') {
+                        *w++ = '\n';
+                        if (rr + 1 < r_end && rr[1] == '\n') rr++;
+                    } else {
+                        *w++ = *rr;
+                    }
+                    rr++;
+                }
+                *w = '\0';
+                content = norm;
+                content_len = (size_t)(w - norm);
+            }
             tn->base.type = LEPTRIS_NODE_TYPE_TEXT;
             tn->base.frozen = 1;
             tn->base.line = r->line;
             leptris_textnode_set_content_ptr_doc(tn, content, doc);
-            tn->content_len = r->len;
+            tn->content_len = (uint32_t)content_len;
             /* (slice 4: pool/borrowed fields gone; the il scratch
              * run is already NUL-terminated at carve) */
             tn->parent_off = 0;
