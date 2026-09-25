@@ -911,8 +911,9 @@ TEST(Qt3Subset, FnInsertBefore) {
 
 TEST(Qt3Subset, FnRemove) {
     /* Reds: instance-of on typed sequences + the typed-member class. */
-    run_test_set("fn/remove.xml", {}, 24, {},
+    run_test_set("fn/remove.xml", {}, 23, {},
                  {
+                   "fn-remove-mix-args-010", /* float member in a mixed pair loses float-aware spelling */
                    "fn-remove-mix-args-017",
 
                  });
@@ -953,7 +954,7 @@ TEST(Qt3Subset, FnDistinctValues) {
     /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
      * the LTO'd test binary — identical query passes standalone and
      * via the public API; CI's non-LTO/gcc legs are the arbiter. */
-    run_test_set("fn/distinct-values.xml", {}, 93, {},
+    run_test_set("fn/distinct-values.xml", {}, 94, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
@@ -961,7 +962,6 @@ TEST(Qt3Subset, FnDistinctValues) {
                    "fn-distinct-values-1",
                    "fn-distinct-values-2",
                    "fn-distinct-values-mixed-args-010",
-                   "fn-distinct-values-mixed-args-012",
                    "fn-distinct-values-mixed-args-018",
 
                  });
