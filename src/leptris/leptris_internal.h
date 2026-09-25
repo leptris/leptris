@@ -659,6 +659,12 @@ struct leptris_xpath_result {
      * round-trip E form instead of the libxml2-parity XPath
      * spelling. Cleared in result_new (free-list recycle). */
     int xq_spelling;
+    /* Canonical decimal lexical: set by the xs:decimal ctor — the
+     * double carrier cannot hold 30 significant digits, so
+     * eq-based functions (distinct-values, index-of, deep-equal)
+     * key on the canonical form instead (decimal-lex slice). OWNED
+     * — freed in result_free, cleared in result_new (recycle). */
+    char* decimal_lex;
 };
 
 /* Namespace mapping for XPath context (v0.8.0) */

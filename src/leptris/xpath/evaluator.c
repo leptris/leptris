@@ -744,6 +744,7 @@ struct leptris_xpath_result* xpath_result_new(XPathResultType type) {
     result->is_int = 0;   /* free-list recycling would leak it */
     result->atomic_type = NULL;
     result->xq_spelling = 0;
+    result->decimal_lex = NULL;   /* free-list recycling would leak it */
 
     /* Initialize union based on type. XPATH_RESULT_CACHED is the
      * free-list sentinel — a fresh result never carries it. */
@@ -772,6 +773,11 @@ void xpath_result_free(struct leptris_xpath_result* result) {
     /* Already parked on the free-list: freeing again must be a
      * no-op, never a second payload release. */
     if (result->type == XPATH_RESULT_CACHED) return;
+
+    if (result->decimal_lex) {
+        LEPTRIS_FREE(result->decimal_lex);
+        result->decimal_lex = NULL;
+    }
 
     /* Release the payload through locals: after this block the
      * union slot is dead, and parking the free-list next-pointer

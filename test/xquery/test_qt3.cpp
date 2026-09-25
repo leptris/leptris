@@ -189,10 +189,13 @@ std::string norm_xml(const std::string& s) {
 /* assert-permutation expected side: comma-separated items, quotes
  * group spaces; sort mirrors the engine's value ordering (numeric
  * when every item is numeric, else codepoint). */
-std::vector<std::string> split_perm_items(const std::string& s) {
+std::vector<std::string> split_perm_items(const std::string& s,
+                                          std::vector<std::string>* raw) {
     std::vector<std::string> items;
     std::string cur;
+    std::string cur_raw;
     char in_quote = 0;
+    if (raw) raw->clear();
     for (char c : s) {
         if (in_quote) {
             if (c == in_quote)
@@ -203,16 +206,28 @@ std::vector<std::string> split_perm_items(const std::string& s) {
             in_quote = c;
         } else if (c == ',') {
             items.push_back(cur);
+            if (raw) raw->push_back(cur_raw);
             cur.clear();
+            cur_raw.clear();
+            continue;
         } else {
             cur += c;
         }
+        cur_raw += c;
     }
     items.push_back(cur);
+    if (raw) raw->push_back(cur_raw);
     for (auto& it : items) {
         size_t b = it.find_first_not_of(" \t\r\n");
         size_t e = it.find_last_not_of(" \t\r\n");
         it = b == std::string::npos ? "" : it.substr(b, e - b + 1);
+    }
+    if (raw) {
+        for (auto& it : *raw) {
+            size_t b = it.find_first_not_of(" \t\r\n");
+            size_t e = it.find_last_not_of(" \t\r\n");
+            it = b == std::string::npos ? "" : it.substr(b, e - b + 1);
+        }
     }
     return items;
 }
@@ -274,20 +289,24 @@ bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
         } else {
             got.push_back(result_string(r));
         }
-        std::vector<std::string> want = split_perm_items(a.text);
+        std::vector<std::string> raws;
+        std::vector<std::string> want = split_perm_items(a.text, &raws);
         /* expected items are XQuery expressions (true(),
-         * xs:float('-INF')) — evaluate each against the case doc */
-        for (auto& w : want) {
-            if (w.find('(') == std::string::npos) continue;
+         * xs:float('-INF')) — evaluate the RAW item (quotes intact;
+         * the split strips them for the literal compare) against
+         * the case doc */
+        for (size_t wi = 0; wi < want.size(); wi++) {
+            const std::string& expr = raws[wi];
+            if (expr.find('(') == std::string::npos) continue;
             LeptrisXQuery xq2 =
-                leptris_xquery_parse(w.c_str(), w.size());
+                leptris_xquery_parse(expr.c_str(), expr.size());
             if (!xq2) continue;
             LeptrisXPathResult r2 =
                 leptris_xquery_eval(xq2, doc, NULL);
             if (r2) {
                 std::string v = result_string(r2);
                 leptris_xpath_result_free(r2);
-                w = v;
+                want[wi] = v;
             }
             leptris_xquery_free(xq2);
         }
@@ -894,9 +913,9 @@ TEST(Qt3Subset, FnStringJoin) {
 }
 
 TEST(Qt3Subset, FnIndexOf) {
-    run_test_set("fn/index-of.xml", {}, 43, {},
+    run_test_set("fn/index-of.xml", {}, 44, {},
                  {
-                   "fn-indexof-mix-args-013", /* 27- vs 28-digit xs:decimal dedup */
+                   
 
                  });
 }
@@ -941,16 +960,15 @@ TEST(Qt3Subset, FnDistinctValues) {
      * while the float double-spelled differently from the decimal;
      * float-aware spelling exposed the real gap — cross-type
      * numeric promotion in the dedup key. */
-    run_test_set("fn/distinct-values.xml", {}, 93, {},
+    run_test_set("fn/distinct-values.xml", {}, 95, {},
                  {
+                   "fn-distinct-values-1", /* for-tuples ($a at $p, $b) */
+
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
                    "cbcl-distinct-values-007",
-                   "fn-distinct-values-1",
                    "fn-distinct-values-2",
-                   "fn-distinct-values-mixed-args-010",
                    "fn-distinct-values-mixed-args-012",
-                   "fn-distinct-values-mixed-args-018",
 
                  });
 }
