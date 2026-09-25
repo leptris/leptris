@@ -299,8 +299,30 @@ int xpath_to_boolean(struct leptris_xpath_result* result) {
             return result->value.number_value != 0.0 && !isnan(result->value.number_value);
         case XPATH_RESULT_STRING:
             return result->value.string_value && result->value.string_value[0] != '\0';
-        case XPATH_RESULT_NODESET:
-            return xpath_nodeset_count(result->value.nodeset_value) > 0;
+        case XPATH_RESULT_NODESET: {
+            XPathNodeSet* ns = result->value.nodeset_value;
+            size_t cnt = ns ? xpath_nodeset_count(ns) : 0;
+            /* XQuery sequence EBV: a singleton atomic carries the
+             * item's EBV (fn:remove round-trips a false boolean as
+             * falsy), while XPath node-existence EBV applies to
+             * real nodes and multi-item sequences. */
+            if (!ns || !ns->is_sequence) return cnt > 0;
+            if (cnt != 1) return cnt > 0;
+            void* nd = ns->nodes[0];
+            if (!nd || XPATH_NODE_TYPE(nd) != LEPTRIS_NODE_TEXT)
+                return 1;
+            const char* c = ((XPathTextNode*)nd)->content;
+            if (!c) return 1;
+            if (c[0] == '\x03') {
+                if (c[1] == 'B') return c[2] == 't';
+                if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D') {
+                    double d = strtod(c + 2, NULL);
+                    return d != 0.0 && !isnan(d);
+                }
+                return 1;
+            }
+            return c[0] != '\0';
+        }
         default:
             return 0;
     }

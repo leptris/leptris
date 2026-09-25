@@ -855,6 +855,41 @@ TEST(XQueryCtors, EmptyAggregates) {
     leptris_document_free(doc);
 }
 
+/* XQuery sequence EBV: a singleton synthetic member takes the
+ * ITEM's EBV, not node-existence (QT3 fn-remove-mix-args-017:
+ * fn:remove round-trips a false boolean as falsy under
+ * assert-false; XPath 1.0 nodeset EBV is untouched — no
+ * is_sequence flag on path results). */
+TEST(XQueryCtors, SequenceItemEbv) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        bool want;
+    } cases[] = {
+        {"fn:remove((xs:boolean(\"0\")), 2)", false},
+        {"fn:remove((xs:boolean(\"1\")), 2)", true},
+        {"fn:remove((0), 2)", false},
+        {"fn:remove((1), 2)", true},
+        {"fn:remove((\"\"), 2)", false},
+        {"fn:remove((\"x\"), 2)", true},
+        {"fn:remove((), 2)", false},
+        {"fn:remove((false(), true()), 2)", false},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        EXPECT_EQ(leptris_xpath_result_boolean(r), c.want ? 1 : 0)
+            << c.q;
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
 /* Computed PI and comment constructors (QT3 cbcl-deep-equal-002..004
  * class): the string-level ctor model serializes them to their XML
  * markup, so deep-equal compares target+data / comment text. */
