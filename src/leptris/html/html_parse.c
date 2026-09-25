@@ -5453,8 +5453,17 @@ static LeptrisDocument html_parse_shared(
         if (status) *status = LEPTRIS_ERROR_NULL_ARG;
         return NULL;
     }
+    /* #1218: size the arena span from the input up front — the
+     * HTML tree expands ~8x (nodes + attributes + the owned input
+     * copy), and an undersized span spills later allocations into
+     * extension blocks in a different malloc region, pushing every
+     * borrowed pointer out of the int32 compact range (measured
+     * 776k overflow-table inserts on the 2.6 MB table shape). */
+    extern struct leptris_document* leptris_document_create_with_arena_size(
+        size_t arena_size);
     struct leptris_document* doc =
-        (struct leptris_document*)leptris_document_create();
+        (struct leptris_document*)leptris_document_create_with_arena_size(
+            len * 10 + (1u << 18));
     if (!doc) {
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;

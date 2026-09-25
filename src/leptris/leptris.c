@@ -173,7 +173,17 @@ void leptris_parse_options_init(leptris_parse_options* opts) {
  * pool-allocated (TODO 154) zeroed struct, strict mode inherited
  * from the thread-local setting, standalone unset (-1).
  */
-LEPTRIS_API LeptrisDocument leptris_document_create(void) {
+/* #1218: parse entry points that know their input size reserve the
+ * arena span ONCE at content-derived scale — an undersized span
+ * overflows into tracked extension blocks, which malloc places in a
+ * different region (measured 105 TB away on macOS, ~5.5 GB from the
+ * span). Every borrowed pointer (text runs, element names, attribute
+ * strings) then exceeds the int32 compact range and pays an
+ * overflow-table insert per field plus a hash lookup per decode for
+ * the REST of the parse. Sized spans keep the whole parse in one
+ * contiguous region. */
+struct leptris_document* leptris_document_create_with_arena_size(
+    size_t arena_size) {
     extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
         LeptrisArena*, int);
     extern void* leptris_pool_alloc(LeptrisMemoryPool* pool, size_t size);
@@ -185,7 +195,7 @@ LEPTRIS_API LeptrisDocument leptris_document_create(void) {
      * documents take the same arena-backed pool the parser uses
      * (overflow extends via tracked blocks; the pool's page
      * machinery no longer runs for documents). */
-    LeptrisArena* arena = leptris_arena_create(64 * 1024);
+    LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) return NULL;
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
     if (!pool) {
@@ -208,6 +218,10 @@ LEPTRIS_API LeptrisDocument leptris_document_create(void) {
     doc->ref_count = 1;
     doc->standalone = -1;
     return doc;
+}
+
+LEPTRIS_API LeptrisDocument leptris_document_create(void) {
+    return leptris_document_create_with_arena_size(64 * 1024);
 }
 
 LEPTRIS_API LeptrisDocument leptris_document_create_html(void) {
