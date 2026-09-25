@@ -959,11 +959,12 @@ TEST(Qt3Subset, FnDistinctValues) {
 }
 
 TEST(Qt3Subset, FnDeepEqual) {
-    /* Remaining reds: typed-member equality (K2 typed wrappers,
-     * cbcl 001-004), array:put/array:remove nesting (arrays-18),
-     * xs:time vs string (mix-args-031). The arrays/maps
-     * value-compare class is adopted below. */
-    run_test_set("fn/deep-equal.xml", {}, 207, {},
+    /* Remaining reds: typed-member equality (K2 typed wrappers),
+     * cbcl-001 (PI/comment children need node-materializing
+     * ctors), array:put/array:remove nesting (arrays-18), xs:time
+     * vs string (mix-args-031). The arrays/maps value-compare and
+     * direct PI/comment ctor classes are adopted below. */
+    run_test_set("fn/deep-equal.xml", {}, 210, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
@@ -981,9 +982,6 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "K2-SeqDeepEqualFunc-40",
                    "K2-SeqDeepEqualFunc-43",
                    "cbcl-deep-equal-001",
-                   "cbcl-deep-equal-002",
-                   "cbcl-deep-equal-003",
-                   "cbcl-deep-equal-004",
                    "fn-deep-equal-arrays-18",
                    "fn-deep-equal-maps-11",
                    "fn-deep-equal-mix-args-031",
