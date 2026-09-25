@@ -4,7 +4,14 @@
 
 ### Fixed
 
-- shortest round-trip plain spelling for XQuery numbers (xquery)
+- xquery: shortest round-trip plain spelling for XQuery numbers.
+  The plain branch kept a 15-digit budget, so `1.2000000000000001`
+  and `1.2` collided into one spelling and fn:distinct-values
+  deduped distinct xs:decimals. The branch now discovers the minimal
+  significant digits via the same e-form loop (float-aware) and
+  renders fixed-point with `decimals = prec - exp10` — uncapped, or
+  tiny plain-range values (`1e-18`) truncate to "0".
+- QT3 corpus: distinct-values 93→94 adopted; pins-off reds 67→59.
 
 
 
