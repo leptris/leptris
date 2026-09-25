@@ -822,6 +822,39 @@ TEST(XQueryLeaks, RepeatedFunctionDeclarationEvalsDoNotLeak) {
     leptris_document_free(doc);
 }
 
+/* Empty aggregates (#1345 follow-up): evaluate_operator's arity
+ * guard rejected zero-child ARRAY/MAP ctors, and map entry order
+ * was insertion order — deep-equal must be key-order-insensitive. */
+TEST(XQueryCtors, EmptyAggregates) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        bool want;
+    } cases[] = {
+        {"deep-equal([], [])", true},
+        {"deep-equal(map {}, map {})", true},
+        {"deep-equal([], [1])", false},
+        {"deep-equal(map {1:2}, map {})", false},
+        {"deep-equal(map {1:true(), 2:false()}, "
+         "map {2:false(), 1:true()})", true},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want ? "true" : "false") << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
 /* Computed PI and comment constructors (QT3 cbcl-deep-equal-002..004
  * class): the string-level ctor model serializes them to their XML
  * markup, so deep-equal compares target+data / comment text. */
