@@ -276,11 +276,18 @@ char* get_node_text(void* node) {
              * per-member type checks (instance of). \x03 is invalid
              * in XML 1.0 text, so it can never collide with real
              * content — strip it for every string consumer. */
-            if (c[0] == '\x03' &&
-                (c[1] == 'N' || c[1] == 'B' || c[1] == 'D' ||
-                 (c[1] == 'F' &&
-                  !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R'))))
-                c += 2;
+            if (c[0] == '\x03') {
+                if (c[1] == 'A') {
+                    /* attribute ctor carrier: string value is the
+                     * part after the "\x01" separator */
+                    const char* sep = strchr(c, '\x01');
+                    return leptris_strdup(sep ? sep + 1 : "");
+                }
+                if (c[1] == 'N' || c[1] == 'B' || c[1] == 'D' ||
+                    (c[1] == 'F' &&
+                     !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R')))
+                    c += 2;
+            }
             return leptris_strdup(c);
         }
 

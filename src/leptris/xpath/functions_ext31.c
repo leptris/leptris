@@ -2088,6 +2088,27 @@ static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
     return out;
 }
 
+/* Types derived from xs:string: lexical passthrough ctors that
+ * carry their atomic type (deep-equal's string class and instance
+ * of read it; K2-SeqDeepEqualFunc-35 drives xs:NCName). */
+#define TYPED_STRING_CTOR(FN, TY)                                        \
+    static struct leptris_xpath_result* FN(XPathContext* ctx,            \
+            XPathASTNode** args, size_t n) {                             \
+        struct leptris_xpath_result* out =                               \
+            fn_passthrough_ctor(ctx, args, n);                           \
+        if (out) out->atomic_type = TY;                                  \
+        return out;                                                      \
+    }
+TYPED_STRING_CTOR(fn_ncname_ctor, "xs:NCName")
+TYPED_STRING_CTOR(fn_name_ctor, "xs:Name")
+TYPED_STRING_CTOR(fn_token_ctor, "xs:token")
+TYPED_STRING_CTOR(fn_normalizedstring_ctor, "xs:normalizedString")
+TYPED_STRING_CTOR(fn_language_ctor, "xs:language")
+TYPED_STRING_CTOR(fn_nmtoken_ctor, "xs:NMTOKEN")
+TYPED_STRING_CTOR(fn_id_ctor, "xs:ID")
+TYPED_STRING_CTOR(fn_idref_ctor, "xs:IDREF")
+TYPED_STRING_CTOR(fn_entity_ctor, "xs:ENTITY")
+
 /* Extract an integer field from an ISO date/dateTime/time/duration
  * string. which: 1 year 2 month 3 day 4 hours 5 minutes
  * 6 seconds 7 duration-days 8 duration-hours. */
@@ -5570,6 +5591,15 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:date", fn_xs_date_t, 1, 1);
     /* Atomic constructors (06) — canonical xs: prefix. */
     xpath_function_registry_register(registry, "xs:string", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:NCName", fn_ncname_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:Name", fn_name_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:token", fn_token_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:normalizedString", fn_normalizedstring_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:language", fn_language_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:NMTOKEN", fn_nmtoken_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:ID", fn_id_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:IDREF", fn_idref_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:ENTITY", fn_entity_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:anyURI", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:integer", fn_xs_integer, 1, 1);
     xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);

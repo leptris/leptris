@@ -395,14 +395,21 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
         XPathTextNode* text = (XPathTextNode*)node;
         /* Numeric sequence members carry a "\x03N" marker for
          * per-member type checks — never show it to public
-         * consumers. */
-        if (text->content && text->content[0] == '\x03' &&
-            (text->content[1] == 'N' || text->content[1] == 'B' ||
-             text->content[1] == 'D' ||
-             (text->content[1] == 'F' &&
-              !((text->content[2] == 'N' && text->content[3] == '\x02') ||
-                text->content[2] == 'R'))))
-            return text->content + 2;
+         * consumers. "\x03A" attribute carriers strip to the value
+         * after the "\x01" separator. */
+        if (text->content && text->content[0] == '\x03') {
+            if (text->content[1] == 'A') {
+                const char* sep = strchr(text->content, '\x01');
+                return sep ? sep + 1 : "";
+            }
+            if (text->content[1] == 'N' || text->content[1] == 'B' ||
+                text->content[1] == 'D' ||
+                (text->content[1] == 'F' &&
+                 !((text->content[2] == 'N' &&
+                    text->content[3] == '\x02') ||
+                   text->content[2] == 'R')))
+                return text->content + 2;
+        }
         return text->content;
     }
     return NULL;
