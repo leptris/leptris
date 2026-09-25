@@ -2399,8 +2399,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     (ctx->xquery_spelling &&
                      item->type == XPATH_RESULT_NUMBER &&
                      !item->is_int)
-                        ? xpath_number_to_string_xq(
-                              item->value.number_value)
+                        ? xpath_number_to_string_xq_typed(
+                              item->value.number_value,
+                              item->atomic_type &&
+                                  strcmp(item->atomic_type,
+                                         "xs:float") == 0)
                         : xpath_to_string(item);
                 if (item->type == XPATH_RESULT_NUMBER) {
                     /* "\x03N" marks numeric members for per-member

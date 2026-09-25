@@ -419,18 +419,10 @@ LEPTRIS_API int leptris_xpath_result_boolean(LeptrisXPathResult result) {
         case XPATH_RESULT_STRING:
             return (result->value.string_value && result->value.string_value[0] != '\0') ? 1 : 0;
         case XPATH_RESULT_NODESET:
-            if (result->value.nodeset_value &&
-                result->value.nodeset_value->count == 1) {
-                void* nd = result->value.nodeset_value->nodes[0];
-                if (nd && (int)XPATH_NODE_TYPE(nd) == (int)LEPTRIS_NODE_TEXT) {
-                    XPathTextNode* tn = (XPathTextNode*)nd;
-                    /* "\x03B" boolean members carry their EBV */
-                    if (tn->content && tn->content[0] == '\x03' &&
-                        tn->content[1] == 'B')
-                        return tn->content[2] == 't';
-                }
-            }
-            return (result->value.nodeset_value && result->value.nodeset_value->count > 0) ? 1 : 0;
+            /* SSOT: the internal EBV — XQuery sequence singletons
+             * carry item EBV via the type markers; path results
+             * keep node-existence semantics. */
+            return xpath_to_boolean(result);
         default:
             return 0;
     }

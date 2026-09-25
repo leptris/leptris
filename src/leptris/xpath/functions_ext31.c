@@ -186,6 +186,20 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
         }
         items[cnt++] = m ? m : leptris_strdup("");
         free(s);
+    } else if (r->type == XPATH_RESULT_BOOLEAN) {
+        /* "\x03B" keeps the type through the round-trip so the
+         * sequence EBV sees the item, not node existence (paren
+         * folding hands us the bare scalar here, not a nodeset). */
+        const char* bp = r->value.boolean_value ? "true" : "false";
+        char* m = (char*)malloc(strlen(bp) + 3);
+        if (m) {
+            m[0] = '\x03';
+            m[1] = 'B';
+            strcpy(m + 2, bp);
+        }
+        items = (char**)malloc(sizeof(char*));
+        if (!items) { free(m); xpath_result_free(r); return NULL; }
+        items[cnt++] = m ? m : leptris_strdup("");
     } else {
         items = (char**)malloc(sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }

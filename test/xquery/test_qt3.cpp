@@ -860,10 +860,14 @@ TEST(Qt3Subset, OrderByClause) {
         "($x * -1)",
         "<results> { for $x in (<a>A String</a>",
     };
+    /* K2-OrderbyExprWithout-43: the for-domain's direct ctor
+     * degenerates to one empty synthetic under the value-level
+     * ctor model; the case passed vacuously under the old
+     * existence-EBV (node-materializing ctors is the lever). */
     run_test_set("prod/OrderByClause.xml",
                  {{"orderdata", "prod/OrderByClause/orderData.xml"},
                   {"orderdata2", "prod/OrderByClause/orderData.xml"}},
-                 138, ex);
+                 137, ex, {"K2-OrderbyExprWithout-43"});
 }
 
 TEST(Qt3Subset, TimezoneAndIetf) {
@@ -906,12 +910,7 @@ TEST(Qt3Subset, FnInsertBefore) {
 }
 
 TEST(Qt3Subset, FnRemove) {
-    run_test_set("fn/remove.xml", {}, 23, {},
-                 {
-                   "fn-remove-mix-args-010", /* float member in a mixed pair loses float-aware spelling */
-                   "fn-remove-mix-args-017",
-
-                 });
+    run_test_set("fn/remove.xml", {}, 25);
 }
 
 TEST(Qt3Subset, FnReverse) {
@@ -941,10 +940,11 @@ TEST(Qt3Subset, FnSubsequence) {
 }
 
 TEST(Qt3Subset, FnDistinctValues) {
-    /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
-     * the LTO'd test binary — identical query passes standalone and
-     * via the public API; CI's non-LTO/gcc legs are the arbiter. */
-    run_test_set("fn/distinct-values.xml", {}, 94, {},
+    /* mixed-args-012 (xs:decimal vs xs:float dedup) passed only
+     * while the float double-spelled differently from the decimal;
+     * float-aware spelling exposed the real gap — cross-type
+     * numeric promotion in the dedup key. */
+    run_test_set("fn/distinct-values.xml", {}, 93, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
@@ -952,6 +952,7 @@ TEST(Qt3Subset, FnDistinctValues) {
                    "fn-distinct-values-1",
                    "fn-distinct-values-2",
                    "fn-distinct-values-mixed-args-010",
+                   "fn-distinct-values-mixed-args-012",
                    "fn-distinct-values-mixed-args-018",
 
                  });
