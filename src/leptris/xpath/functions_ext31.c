@@ -357,13 +357,18 @@ static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
     if (out) {
         /* F&O window in position space: item p (1-based) is in the
          * result iff round(start) <= p and, 3-arg form, also
-         * p < round(start) + round(len). NaN compares false ->
-         * empty (cbcl-subsequence-002/003/005). Positions are NOT
-         * clamped to 1 — a negative start with a short length
-         * covers no positive position (cbcl-subsequence-009).
-         * start/len round half toward +infinity like fn:round
-         * (K2-SeqSubsequenceFunc-5: 1.8 -> 2). */
-        double start = (sd != sd) ? 1.0 : floor(sd + 0.5);
+         * p < round(start) + round(len). NaN start is empty per
+         * F&O (cbcl-subsequence-003) — NOT a synonym for 1.
+         * Positions are NOT clamped to 1 — a negative start with a
+         * short length covers no positive position
+         * (cbcl-subsequence-009). start/len round half toward
+         * +infinity like fn:round (K2-SeqSubsequenceFunc-5: 1.8 ->
+         * 2). */
+        if (sd != sd) {
+            free_items(items, cnt);
+            return out;
+        }
+        double start = floor(sd + 0.5);
         double len = 0;
         int has_len = 0;
         if (n >= 3) {
