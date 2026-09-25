@@ -985,8 +985,48 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
             if (!base) return NULL;
             if (base->type != XPATH_RESULT_NODESET ||
                 !base->value.nodeset_value) {
+                /* Non-nodeset base: the atom is a one-item sequence
+                 * — (1)[1] keeps it, (1)[true()] keeps it, (1)[2]
+                 * empties (the old code returned empty
+                 * unconditionally). The predicate sees position 1
+                 * of 1; the context node stays the outer one. */
+                int keep = 1;
+                for (size_t p = 1; p < ast->child_count && keep; p++) {
+                    XPathASTNode* pred = ast->children[p];
+                    if (pred->type == XPATH_AST_NUMBER) {
+                        keep = pred->number_value == 1.0;
+                        continue;
+                    }
+                    LeptrisElement old_node = ctx->context_node;
+                    size_t old_pos = ctx->context_position;
+                    size_t old_size = ctx->context_size;
+                    void* old_pred = ctx->current_predicate_node;
+                    ctx->context_position = 1;
+                    ctx->context_size = 1;
+                    struct leptris_xpath_result* pr =
+                        evaluate_expr(ctx, pred);
+                    ctx->context_node = old_node;
+                    ctx->context_position = old_pos;
+                    ctx->context_size = old_size;
+                    ctx->current_predicate_node = old_pred;
+                    if (!pr) {
+                        keep = 0;
+                        continue;
+                    }
+                    if (pr->type == XPATH_RESULT_NUMBER)
+                        keep =
+                            (size_t)pr->value.number_value == 1;
+                    else
+                        keep = xpath_to_boolean(pr) ? 1 : 0;
+                    xpath_result_free(pr);
+                }
+                if (keep) return base;
                 xpath_result_free(base);
-                return xpath_result_new(XPATH_RESULT_NODESET);
+                struct leptris_xpath_result* empty =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (empty && empty->value.nodeset_value)
+                    empty->value.nodeset_value->is_sequence = 1;
+                return empty;
             }
             if (ast->child_count > 1) {
                 apply_predicates(ctx, base->value.nodeset_value,
