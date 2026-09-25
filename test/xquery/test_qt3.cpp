@@ -914,10 +914,9 @@ TEST(Qt3Subset, FnRemove) {
 }
 
 TEST(Qt3Subset, FnReverse) {
-    run_test_set("fn/reverse.xml", {}, 59, {},
+    run_test_set("fn/reverse.xml", {}, 60, {},
                  {
-                   "K2-SeqReverseFunc-1", /* typed-member compare */
-                   "K2-SeqReverseFunc-2",
+                   "K2-SeqReverseFunc-1", /* assert-xml over direct ctors */
 
                  });
 }
@@ -958,29 +957,26 @@ TEST(Qt3Subset, FnDistinctValues) {
 }
 
 TEST(Qt3Subset, FnDeepEqual) {
-    /* Remaining reds: typed-member equality (K2 typed wrappers),
-     * cbcl-001 (PI/comment children need node-materializing
-     * ctors), array:put/array:remove nesting (arrays-18), xs:time
-     * vs string (mix-args-031). The arrays/maps value-compare and
-     * direct PI/comment ctor classes are adopted below. */
-    run_test_set("fn/deep-equal.xml", {}, 211, {},
+    /* The markup-tree fallback (differing ctor strings parse and
+     * de_node_equal) adopted the attr-order and PI/comment-child
+     * classes (K2-21/23, cbcl-001, maps-11). Remaining reds: the
+     * document{}-ctor and attribute{}-ctor cases (K2-14..43) need
+     * the node-materializing ctor model, plus arrays-18 (nested
+     * array:put/remove) and mix-args-031 (xs:time vs string). */
+    run_test_set("fn/deep-equal.xml", {}, 215, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
                    "K2-SeqDeepEqualFunc-16",
                    "K2-SeqDeepEqualFunc-17",
-                   "K2-SeqDeepEqualFunc-21",
-                   "K2-SeqDeepEqualFunc-23",
                    "K2-SeqDeepEqualFunc-25",
                    "K2-SeqDeepEqualFunc-31",
                    "K2-SeqDeepEqualFunc-32",
-                   "K2-SeqDeepEqualFunc-33",
                    "K2-SeqDeepEqualFunc-35",
                    "K2-SeqDeepEqualFunc-36",
                    "K2-SeqDeepEqualFunc-37",
                    "K2-SeqDeepEqualFunc-40",
                    "K2-SeqDeepEqualFunc-43",
-                   "cbcl-deep-equal-001",
                    "fn-deep-equal-arrays-18",
                    "fn-deep-equal-mix-args-031",
 
