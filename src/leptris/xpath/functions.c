@@ -854,11 +854,18 @@ static int de_num_rank(const char* t) {
 }
 
 /* The untyped/string equivalence class: plain ctor/lexical strings,
- * xs:string, xs:anyURI, xs:untypedAtomic all compare by codepoint. */
+ * xs:string, xs:anyURI, xs:untypedAtomic — and the types DERIVED
+ * from xs:string, which all compare by codepoint
+ * (K2-SeqDeepEqualFunc-35: "a" = xs:NCName("a")). */
 static int de_str_class(const char* t) {
-    return !t || strcmp(t, "xs:string") == 0 ||
-           strcmp(t, "xs:anyURI") == 0 ||
-           strcmp(t, "xs:untypedAtomic") == 0;
+    if (!t) return 1;
+    static const char* const k_derived[] = {
+        "xs:string", "xs:anyURI", "xs:untypedAtomic", "xs:NCName",
+        "xs:Name", "xs:token", "xs:normalizedString", "xs:language",
+        "xs:NMTOKEN", "xs:ID", "xs:IDREF", "xs:ENTITY"};
+    for (size_t i = 0; i < sizeof(k_derived) / sizeof(*k_derived); i++)
+        if (strcmp(t, k_derived[i]) == 0) return 1;
+    return 0;
 }
 
 static void de_item_clear(DeItem* it) {
@@ -903,6 +910,23 @@ static int de_item_equal(DeItem* a, DeItem* b) {
                 return strcmp(as, bs) == 0;
             return 0;   /* typed (xs:date...) vs anything else */
         }
+        case 4: {
+            /* Attribute ctor carriers: name segment (after "\x03A",
+             * before "\x01") and value segment must both match. */
+            const char* as = a->str ? a->str : (a->borrow ? a->borrow : "");
+            const char* bs = b->str ? b->str : (b->borrow ? b->borrow : "");
+            const char* ase = strchr(as, '\x01');
+            const char* bse = strchr(bs, '\x01');
+            if (!ase || !bse) return 0;
+            if ((size_t)(ase - as) != (size_t)(bse - bs) ||
+                memcmp(as, bs, (size_t)(ase - as)) != 0)
+                return 0;
+            ase++;
+            bse++;
+            if (strcmp(ase, bse) == 0) return 1;
+            return ase[0] == '<' && bse[0] == '<' &&
+                   de_markup_equal_n(ase, strlen(ase), bse, strlen(bse));
+        }
         default: return a->num == b->num;   /* booleans as 0/1 */
     }
 }
@@ -928,6 +952,11 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                 if (c[0] == '\x03' && c[1] == 'B') {
                     out[i].kind = 3;
                     out[i].num = c[2] == 't' ? 1 : 0;
+                } else if (c[0] == '\x03' && c[1] == 'A') {
+                    /* attribute ctor carrier: kind 4 compares
+                     * name + value (K2-SeqDeepEqualFunc-25/31/32) */
+                    out[i].kind = 4;
+                    out[i].borrow = c;
                 } else if (c[0] == '\x03' &&
                     (c[1] == 'N' || c[1] == 'D' ||
                      (c[1] == 'F' &&

@@ -1599,6 +1599,38 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 if (v) xpath_result_free(v);
             }
             if (!s) s = leptris_strdup("");
+            if (op == XPATH_OP_ATTRIBUTE_CTOR) {
+                /* Top-level attribute ctor keeps its name: one
+                 * synthetic member carrying "\x03A" name "\x01"
+                 * value — deep-equal compares name+value
+                 * (K2-SeqDeepEqualFunc-25/31/32), string consumers
+                 * strip to the value. \x01 cannot occur in XML
+                 * content. */
+                const char* an = ast->value ? ast->value : "";
+                size_t alen = strlen(an), vlen = strlen(s);
+                size_t clen = alen + vlen + 3;
+                char* carrier = (char*)malloc(clen + 1);
+                if (!carrier) { free(s); return NULL; }
+                carrier[0] = '\x03';
+                carrier[1] = 'A';
+                memcpy(carrier + 2, an, alen);
+                carrier[2 + alen] = '\x01';
+                memcpy(carrier + 3 + alen, s, vlen + 1);
+                free(s);
+                XPathNodeSet* ns = xpath_nodeset_new();
+                if (!ns) { free(carrier); return NULL; }
+                ns->owns_synthetic_text = 1;
+                ns->is_sequence = 1;
+                XPathTextNode* tn = synth_text(carrier, clen);
+                free(carrier);
+                if (!tn) { xpath_nodeset_free(ns); return NULL; }
+                xpath_nodeset_add(ns, tn);
+                struct leptris_xpath_result* out =
+                    xpath_result_new(XPATH_RESULT_NODESET);
+                if (!out) { xpath_nodeset_free(ns); return NULL; }
+                out->value.nodeset_value = ns;
+                return out;
+            }
             struct leptris_xpath_result* out =
                 xpath_result_new(XPATH_RESULT_STRING);
             if (!out) { free(s); return NULL; }

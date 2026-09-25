@@ -963,16 +963,12 @@ TEST(Qt3Subset, FnDeepEqual) {
      * document{}-ctor and attribute{}-ctor cases (K2-14..43) need
      * the node-materializing ctor model, plus arrays-18 (nested
      * array:put/remove) and mix-args-031 (xs:time vs string). */
-    run_test_set("fn/deep-equal.xml", {}, 216, {},
+    run_test_set("fn/deep-equal.xml", {}, 220, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
                    "K2-SeqDeepEqualFunc-16",
                    "K2-SeqDeepEqualFunc-17",
-                   "K2-SeqDeepEqualFunc-25",
-                   "K2-SeqDeepEqualFunc-31",
-                   "K2-SeqDeepEqualFunc-32",
-                   "K2-SeqDeepEqualFunc-35",
                    "K2-SeqDeepEqualFunc-36",
                    "K2-SeqDeepEqualFunc-37",
                    "K2-SeqDeepEqualFunc-40",
