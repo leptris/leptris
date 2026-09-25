@@ -513,12 +513,91 @@ static char* xq_rewrite_str_ctors(const char* a, const char* b) {
     return tb.s;
 }
 
+/* unordered{E} / ordered{E} are order-irrelevant in this engine's
+ * sequence model: strip to (E) (K2-SeqReverseFunc-2). Keywords are
+ * recognized at name boundaries with a brace-enclosed body; nested
+ * modes and ctors inside ride the linear scan with a per-brace
+ * order-mode stack, so map{}/computed-ctor braces copy verbatim.
+ * NULL when the span has no order-mode constructor. */
+static char* xq_strip_order_modes(const char* a, const char* b) {
+    const char* kw = strstr(a, "unordered{");
+    if (!kw || kw >= b) kw = strstr(a, "unordered {");
+    const char* kw2 = strstr(a, "ordered{");
+    if (!kw2 || kw2 >= b) kw2 = strstr(a, "ordered {");
+    if ((!kw || kw >= b) && (!kw2 || kw2 >= b)) return NULL;
+    Buf ob = {0};
+    /* growable flag-per-open-brace stack */
+    size_t stk_cap = 16, stk_len = 0;
+    char* stk = (char*)malloc(stk_cap);
+    if (!stk) return NULL;
+    const char* p = a;
+    while (p < b) {
+        if (*p == '\'' || *p == '"') {
+            const char* q = p + 1;
+            while (q < b && *q != *p) q++;
+            buf_put(&ob, p, (size_t)((q < b ? q + 1 : b) - p));
+            p = (q < b) ? q + 1 : b;
+            continue;
+        }
+        if (*p == '{') {
+            if (stk_len == stk_cap) {
+                stk_cap *= 2;
+                char* grown = (char*)realloc(stk, stk_cap);
+                if (!grown) { free(stk); free(ob.s); return NULL; }
+                stk = grown;
+            }
+            /* order-mode when the word before '{' (skipping ws) is
+             * unordered/ordered at a name boundary */
+            const char* w = p;
+            while (w > a && isspace((unsigned char)w[-1])) w--;
+            size_t wl = 0;
+            const char* r = w;
+            while (r > a && (isalnum((unsigned char)r[-1]) ||
+                             r[-1] == '_'))
+                { r--; wl++; }
+            int om = (wl == 9 && strncmp(r, "unordered", 9) == 0) ||
+                     (wl == 7 && strncmp(r, "ordered", 7) == 0);
+            stk[stk_len++] = (char)om;
+            if (om) {
+                /* drop the keyword + separating ws, '{' -> '(' */
+                ob.len -= (size_t)(p - r);
+                ob.s[ob.len] = 0;
+                buf_put(&ob, "(", 1);
+            } else {
+                buf_put(&ob, "{", 1);
+            }
+            p++;
+            continue;
+        }
+        if (*p == '}' && stk_len) {
+            stk_len--;
+            buf_put(&ob, stk[stk_len] ? ")" : "}", 1);
+            p++;
+            continue;
+        }
+        buf_put(&ob, p, 1);
+        p++;
+    }
+    free(stk);
+    if (!ob.s) {
+        ob.s = (char*)calloc(1, 1);
+        return ob.s;
+    }
+    ob.s[ob.len] = 0;
+    return ob.s;
+}
+
 static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     if (a >= b) return NULL;
     char* rewritten = xq_rewrite_str_ctors(a, b);
     if (rewritten) {
         a = rewritten;
         b = rewritten + strlen(rewritten);
+    }
+    char* stripped = xq_strip_order_modes(a, b);
+    if (stripped) {
+        a = stripped;
+        b = stripped + strlen(stripped);
     }
     int has_ctor = 0;
     for (const char* q = a; q + 1 < b && !has_ctor; q++)
@@ -530,15 +609,21 @@ static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     char* translated = NULL;
     if (has_ctor) {
         translated = xq_splice_ctors(a, b);
-        if (!translated) { free(rewritten); return NULL; }
+        if (!translated) { free(stripped); free(rewritten); return NULL; }
         a = translated;
         b = translated + strlen(translated);
     }
     XPathParser* parser = xpath_parser_new(a, (size_t)(b - a));
-    if (!parser) { free(translated); free(rewritten); return NULL; }
+    if (!parser) {
+        free(translated);
+        free(stripped);
+        free(rewritten);
+        return NULL;
+    }
     XPathASTNode* ast = xpath_parse(parser);
     xpath_parser_free(parser);
     free(translated);
+    free(stripped);
     free(rewritten);
     return ast;
 }

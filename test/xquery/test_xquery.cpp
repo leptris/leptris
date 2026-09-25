@@ -890,6 +890,49 @@ TEST(XQueryCtors, SequenceItemEbv) {
     leptris_document_free(doc);
 }
 
+/* unordered{E} / ordered{E} order-mode constructors: order is
+ * irrelevant to this engine's sequence model, so the splice strips
+ * them to (E) (QT3 K2-SeqReverseFunc-2 nests three deep). */
+TEST(XQueryCtors, OrderModeStrip) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"unordered{\"x\", \"y\"}", "x y"},
+        {"ordered { \"x\", \"y\" }", "x y"},
+        {"unordered{ordered{unordered{\"x\"}}}", "x"},
+        {"declare variable $m := "
+         "unordered{ordered{fn:reverse((\"x\",\"y\"))}}; $m",
+         "y x"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        std::string got;
+        if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
+            size_t n = leptris_xpath_result_count(r);
+            for (size_t i = 0; i < n; i++) {
+                const char* v = leptris_xpath_result_node_value(r, i);
+                if (i) got += ' ';
+                got += v ? v : "";
+            }
+        } else {
+            char* s = leptris_xpath_result_string(r);
+            got = s ? s : "";
+            leptris_free_string(s);
+        }
+        EXPECT_EQ(got, c.want) << c.q;
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
 /* Computed PI and comment constructors (QT3 cbcl-deep-equal-002..004
  * class): the string-level ctor model serializes them to their XML
  * markup, so deep-equal compares target+data / comment text. */
