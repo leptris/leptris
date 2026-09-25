@@ -890,27 +890,22 @@ TEST(Qt3Subset, FnStringJoin) {
 }
 
 TEST(Qt3Subset, FnIndexOf) {
-    /* Reds are the typed-atom class: NaN/INF members and
-     * xs:date/dateTime compare via the string channel. */
     run_test_set("fn/index-of.xml", {}, 43, {},
                  {
-                   "fn-indexof-mix-args-013",
+                   "fn-indexof-mix-args-013", /* 27- vs 28-digit xs:decimal dedup */
 
                  });
 }
 
 TEST(Qt3Subset, FnInsertBefore) {
-    /* K-16 waits on lazy error() semantics (error in an unevaluated
-     * branch must not fire). */
     run_test_set("fn/insert-before.xml", {}, 18, {},
                  {
-                   "K-SeqInsertBeforeFunc-16",
+                   "K-SeqInsertBeforeFunc-16", /* lazy error() semantics */
 
                  });
 }
 
 TEST(Qt3Subset, FnRemove) {
-    /* Reds: instance-of on typed sequences + the typed-member class. */
     run_test_set("fn/remove.xml", {}, 23, {},
                  {
                    "fn-remove-mix-args-010", /* float member in a mixed pair loses float-aware spelling */
@@ -920,18 +915,15 @@ TEST(Qt3Subset, FnRemove) {
 }
 
 TEST(Qt3Subset, FnReverse) {
-    /* Reds are the typed-atom class (NaN/INF/boolean member compare). */
     run_test_set("fn/reverse.xml", {}, 59, {},
                  {
-                   "K2-SeqReverseFunc-1",
+                   "K2-SeqReverseFunc-1", /* typed-member compare */
                    "K2-SeqReverseFunc-2",
 
                  });
 }
 
 TEST(Qt3Subset, FnSubsequence) {
-    /* Reds: typed members under assert-xml (float/boolean/dateTime
-     * spellings) + start/length NaN rules. */
     run_test_set("fn/subsequence.xml", {}, 65, {},
                  {
                    "K-SeqSubsequenceFunc-34",
@@ -949,8 +941,6 @@ TEST(Qt3Subset, FnSubsequence) {
 }
 
 TEST(Qt3Subset, FnDistinctValues) {
-    /* Reds: double spelling (E-notation, shortest roundtrip) and
-     * xs:decimal precision — the number-formatter lever. */
     /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
      * the LTO'd test binary — identical query passes standalone and
      * via the public API; CI's non-LTO/gcc legs are the arbiter. */
@@ -968,10 +958,11 @@ TEST(Qt3Subset, FnDistinctValues) {
 }
 
 TEST(Qt3Subset, FnDeepEqual) {
-    /* Reds: type-aware atomic equality (xs:float ne xs:double,
-     * xs:date ne string, NaN = NaN inside typed wrappers) — needs
-     * the typed-atom model. */
-    run_test_set("fn/deep-equal.xml", {}, 193, {},
+    /* Remaining reds: typed-member equality (K2 typed wrappers,
+     * cbcl 001-004), array:put/array:remove nesting (arrays-18),
+     * xs:time vs string (mix-args-031). The arrays/maps
+     * value-compare class is adopted below. */
+    run_test_set("fn/deep-equal.xml", {}, 207, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
@@ -992,22 +983,8 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "cbcl-deep-equal-002",
                    "cbcl-deep-equal-003",
                    "cbcl-deep-equal-004",
-                   "fn-deep-equal-arrays-1",
-                   "fn-deep-equal-arrays-14",
-                   "fn-deep-equal-arrays-15",
-                   "fn-deep-equal-arrays-16",
-                   "fn-deep-equal-arrays-17",
                    "fn-deep-equal-arrays-18",
-                   "fn-deep-equal-arrays-4",
-                   "fn-deep-equal-arrays-6",
-                   "fn-deep-equal-arrays-9",
-                   "fn-deep-equal-maps-1",
                    "fn-deep-equal-maps-11",
-                   "fn-deep-equal-maps-18",
-                   "fn-deep-equal-maps-2",
-                   "fn-deep-equal-maps-20",
-                   "fn-deep-equal-maps-3",
-                   "fn-deep-equal-maps-4",
                    "fn-deep-equal-mix-args-031",
 
                  });

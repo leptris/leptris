@@ -418,7 +418,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         op0 != XPATH_OP_ELEMENT_CTOR &&
         op0 != XPATH_OP_ATTRIBUTE_CTOR &&
         op0 != XPATH_OP_TEXT_CTOR &&
-        op0 != XPATH_OP_DOCUMENT_CTOR)
+        op0 != XPATH_OP_DOCUMENT_CTOR &&
+        op0 != XPATH_OP_ARRAY_CONSTRUCTOR &&
+        op0 != XPATH_OP_MAP_CONSTRUCTOR)
         return NULL;
 
     XPathOperatorType op = (XPathOperatorType)ast->number_value;
@@ -1903,6 +1905,81 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             free(v);
         }
         buf[len] = '\0';
+        /* Canonical entry order: sort by key so deep-equal and the
+         * serialized carrier are key-order-insensitive (maps-4:
+         * {1:a, 2:b} = {2:b, 1:a}); map iteration order is
+         * implementation-defined in XQuery. */
+        {
+            size_t body_len = len - 4;   /* past "\x03MAP" */
+            char* body = buf + 4;
+            size_t count = 0;
+            for (size_t i = 0; i < body_len; i++)
+                if (body[i] == '\x02') count++;
+            if (count > 1) {
+                char** keys = (char**)malloc(count * sizeof(char*));
+                size_t* klens = (size_t*)malloc(count * sizeof(size_t));
+                char** vals = (char**)malloc(count * sizeof(char*));
+                size_t* vlens = (size_t*)malloc(count * sizeof(size_t));
+                if (keys && klens && vals && vlens) {
+                    size_t n = 0, p = 0;
+                    while (p < body_len) {
+                        if (body[p] != '\x02') { p++; continue; }
+                        p++;
+                        size_t ks = p;
+                        while (p < body_len && body[p] != '\x01') p++;
+                        keys[n] = body + ks;
+                        klens[n] = p - ks;
+                        p++;
+                        size_t vs = p;
+                        while (p < body_len && body[p] != '\x02') p++;
+                        vals[n] = body + vs;
+                        vlens[n] = p - vs;
+                        n++;
+                    }
+                    for (size_t a = 1; a < n; a++) {
+                        char* ek = keys[a]; size_t ekl = klens[a];
+                        char* ev = vals[a]; size_t evl = vlens[a];
+                        size_t b2 = a;
+                        while (b2 > 0) {
+                            int c = strncmp(keys[b2 - 1], ek,
+                                            klens[b2 - 1] < ekl
+                                                ? klens[b2 - 1] : ekl);
+                            if (c == 0)
+                                c = klens[b2 - 1] < ekl ? -1
+                                    : klens[b2 - 1] > ekl ? 1 : 0;
+                            if (c <= 0) break;
+                            keys[b2] = keys[b2 - 1];
+                            klens[b2] = klens[b2 - 1];
+                            vals[b2] = vals[b2 - 1];
+                            vlens[b2] = vlens[b2 - 1];
+                            b2--;
+                        }
+                        keys[b2] = ek; klens[b2] = ekl;
+                        vals[b2] = ev; vlens[b2] = evl;
+                    }
+                    /* Sort-order permutes segments in place: write
+                     * through a scratch (a forward write clobbers a
+                     * not-yet-copied source segment). */
+                    char* scratch = (char*)malloc(body_len + 1);
+                    if (scratch) {
+                        size_t w2 = 0;
+                        for (size_t e = 0; e < n; e++) {
+                            scratch[w2++] = '\x02';
+                            memcpy(scratch + w2, keys[e], klens[e]);
+                            w2 += klens[e];
+                            scratch[w2++] = '\x01';
+                            memcpy(scratch + w2, vals[e], vlens[e]);
+                            w2 += vlens[e];
+                        }
+                        memcpy(body, scratch, w2);
+                        len = 4 + w2;
+                        buf[len] = '\0';
+                        free(scratch);
+                    }
+                }
+                free(keys); free(klens); free(vals); free(vlens);
+            }
+        }
         XPathNodeSet* out = xpath_nodeset_new();
         if (!out) { free(buf); return NULL; }
         out->owns_synthetic_text = 1;
