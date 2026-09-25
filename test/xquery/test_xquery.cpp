@@ -893,6 +893,51 @@ TEST(XQueryCtors, SequenceItemEbv) {
 /* unordered{E} / ordered{E} order-mode constructors: order is
  * irrelevant to this engine's sequence model, so the splice strips
  * them to (E) (QT3 K2-SeqReverseFunc-2 nests three deep). */
+/* Filter on a non-nodeset base: the atom is a one-item sequence —
+ * (1)[1] keeps it, (1)[2] empties, boolean predicates see position
+ * 1 of 1 (QT3 K-SeqSubsequenceFunc-34 chains (1)[deep-equal(...)]).
+ * The old code returned an empty nodeset unconditionally. */
+TEST(XPathFilter, ScalarBase) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"(1)[1]", "1"},
+        {"(1)[true()]", "1"},
+        {"(2)[1]", "2"},
+        {"(1)[2]", ""},
+        {"(1)[false()]", ""},
+        {"(1)[deep-equal(1, 1)] eq 1", "true"},
+        {"(1)[1] + 1", "2"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        std::string got;
+        if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
+            size_t n = leptris_xpath_result_count(r);
+            for (size_t i = 0; i < n; i++) {
+                const char* v = leptris_xpath_result_node_value(r, i);
+                if (i) got += ' ';
+                got += v ? v : "";
+            }
+        } else {
+            char* s2 = leptris_xpath_result_string(r);
+            got = s2 ? s2 : "";
+            leptris_free_string(s2);
+        }
+        EXPECT_EQ(got, c.want) << c.q;
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCtors, OrderModeStrip) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
