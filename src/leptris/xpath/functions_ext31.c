@@ -485,6 +485,79 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
     return out;
 }
 
+/* ISO-8601 duration value space: (months, seconds). Returns 1 when
+ * s is a duration lexical form. */
+static int dur_ms_parse(const char* s, double* out_m, double* out_s) {
+    const char* p = s;
+    int neg = (*p == '-');
+    if (neg) p++;
+    if (*p != 'P') return 0;
+    p++;
+    double m = 0, sec = 0;
+    int in_time = 0, any = 0;
+    while (*p) {
+        if (*p == 'T') {
+            in_time = 1;
+            p++;
+            any = 0;
+            continue;
+        }
+        if (!isdigit((unsigned char)*p) && *p != '.') return 0;
+        double v = strtod(p, (char**)&p);
+        char d = *p;
+        if (!d) return 0;
+        p++;
+        double sign = neg ? -1.0 : 1.0;
+        if (!in_time) {
+            if (d == 'Y') { m += sign * v * 12; any = 1; }
+            else if (d == 'M') { m += sign * v; any = 1; }
+            else if (d == 'D') { sec += sign * v * 86400; any = 1; }
+            else return 0;
+        } else {
+            if (d == 'H') { sec += sign * v * 3600; any = 1; }
+            else if (d == 'M') { sec += sign * v * 60; any = 1; }
+            else if (d == 'S') { sec += sign * v; any = 1; }
+            else return 0;
+        }
+    }
+    if (!any) return 0;
+    *out_m = m;
+    *out_s = sec;
+    return 1;
+}
+
+/* XSD canonical duration spelling: whole-value sign, no zero
+ * components, all-zero -> "PT0S". */
+static char* dur_canonical(const char* s) {
+    double m, sec;
+    if (!dur_ms_parse(s, &m, &sec)) return NULL;
+    int neg = (m < 0 || sec < 0);
+    double am = fabs(m), as = fabs(sec);
+    long long years = (long long)(am / 12);
+    long long months = (long long)am - years * 12;
+    long long days = (long long)(as / 86400);
+    double rem = as - days * 86400;
+    long long hours = (long long)(rem / 3600);
+    rem -= hours * 3600;
+    long long mins = (long long)(rem / 60);
+    double secs = rem - mins * 60;
+    if (secs > 0 && secs == (double)(long long)secs)
+        secs = (double)(long long)secs;
+    char buf[96];
+    int w = snprintf(buf, sizeof(buf), "%sP", neg ? "-" : "");
+    if (years) w += snprintf(buf + w, sizeof(buf) - w, "%lldY", years);
+    if (months) w += snprintf(buf + w, sizeof(buf) - w, "%lldM", months);
+    if (days) w += snprintf(buf + w, sizeof(buf) - w, "%lldD", days);
+    if (hours || mins || secs || (!years && !months && !days)) {
+        w += snprintf(buf + w, sizeof(buf) - w, "T");
+        if (hours) w += snprintf(buf + w, sizeof(buf) - w, "%lldH", hours);
+        if (mins) w += snprintf(buf + w, sizeof(buf) - w, "%lldM", mins);
+        if (secs || (!hours && !mins))
+            w += snprintf(buf + w, sizeof(buf) - w, "%.12gS", secs);
+    }
+    return leptris_strdup(buf);
+}
+
 static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
@@ -501,11 +574,28 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
     if (out)
         for (size_t k = 0; k < cnt; k++) {
             int dup = 0;
-            for (size_t j = 0; j < k && !dup; j++)
-                if (atom_seq_eq_n(items[k], items[j], 1)) dup = 1;
-            /* first occurrence keeps its original spelling
-             * (distinct-values((1, 2.0, 3, 2)) = 1, 2.0, 3) */
-            if (!dup) seq_push_str(out, items[k]);
+            double mk = 0, sk = 0;
+            int dk = dur_ms_parse(items[k], &mk, &sk);
+            for (size_t j = 0; j < k && !dup; j++) {
+                if (dk) {
+                    /* xs:duration eq compares the value space
+                     * (months, seconds) across the duration
+                     * subtypes (cbcl-distinct-values-013) */
+                    double mj = 0, sj = 0;
+                    if (dur_ms_parse(items[j], &mj, &sj) &&
+                        mj == mk && sj == sk)
+                        dup = 1;
+                } else if (atom_seq_eq_n(items[k], items[j], 1)) {
+                    dup = 1;
+                }
+            }
+            if (!dup) {
+                /* duration survivors spell canonically
+                 * (dayTimeDuration P0D -> "PT0S") */
+                char* push = dk ? dur_canonical(items[k]) : NULL;
+                seq_push_str(out, push ? push : items[k]);
+                free(push);
+            }
         }
     free_items(items, cnt);
     return out;
