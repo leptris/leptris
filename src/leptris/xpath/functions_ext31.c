@@ -162,13 +162,18 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
     } else if (r->type == XPATH_RESULT_NUMBER) {
         /* XQuery-spelled doubles (shortest round-trip E form) when
          * the eval is XQuery-flavored — same rule as the sequence
-         * operator's scalar spread. */
-        char* s = (ctx->xquery_spelling && !r->is_int)
-                      ? xpath_number_to_string_xq_typed(
-                            r->value.number_value,
-                            r->atomic_type &&
-                                strcmp(r->atomic_type, "xs:float") == 0)
-                      : scalar_str(r);
+         * operator's scalar spread. Decimals carry their canonical
+         * lexical instead: the double lost the exact value
+         * (distinct-values dedups on it). */
+        char* s = r->decimal_lex
+                      ? leptris_strdup(r->decimal_lex)
+                      : (ctx->xquery_spelling && !r->is_int)
+                            ? xpath_number_to_string_xq_typed(
+                                  r->value.number_value,
+                                  r->atomic_type &&
+                                      strcmp(r->atomic_type,
+                                             "xs:float") == 0)
+                            : scalar_str(r);
         size_t sl = s ? strlen(s) : 0;
         items = (char**)malloc(sizeof(char*));
         if (!items) { free(s); xpath_result_free(r); return NULL; }
@@ -468,12 +473,15 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
             needle = leptris_strdup("");
         }
     } else if (v && v->type == XPATH_RESULT_NUMBER) {
-        char* s = (ctx->xquery_spelling && !v->is_int)
-                      ? xpath_number_to_string_xq_typed(
-                            v->value.number_value,
-                            v->atomic_type &&
-                                strcmp(v->atomic_type, "xs:float") == 0)
-                      : scalar_str(v);
+        char* s = v->decimal_lex
+                      ? leptris_strdup(v->decimal_lex)
+                      : (ctx->xquery_spelling && !v->is_int)
+                            ? xpath_number_to_string_xq_typed(
+                                  v->value.number_value,
+                                  v->atomic_type &&
+                                      strcmp(v->atomic_type,
+                                             "xs:float") == 0)
+                            : scalar_str(v);
         size_t sl = s ? strlen(s) : 0;
         needle = (char*)malloc(sl + 3);
         if (needle) {
@@ -3184,10 +3192,61 @@ XS_INT_SUB(fn_xs_nonneg, 0, LLONG_MAX, "xs:nonNegativeInteger")
 
 /* xs:decimal: an all-integer lexical keeps int64 fidelity
  * (QT3 fn/concatdec2args); fractions ride the double ctor. */
+/* Canonical xs:decimal lexical (XSD canonical mapping): sign only
+ * when negative-nonzero, no leading int zeros, no trailing
+ * fraction zeros, integral values carry no point ("5.0" -> "5",
+ * "-0.0" -> "0", ".5" -> "0.5"). NULL when s is not an xs:decimal
+ * lexical (no exponent allowed). The double carrier cannot hold 30
+ * significant digits, so eq-based functions key on this form. */
+static char* decimal_canonical(const char* s, size_t len) {
+    if (!len || len > 120) return NULL;
+    size_t i = 0;
+    int neg = 0;
+    if (s[0] == '+' || s[0] == '-') {
+        neg = s[0] == '-';
+        i = 1;
+    }
+    size_t int_start = i, int_end = i;
+    while (int_end < len && isdigit((unsigned char)s[int_end]))
+        int_end++;
+    size_t frac_start = int_end, frac_end = int_end;
+    if (int_end < len && s[int_end] == '.') {
+        frac_start = int_end + 1;
+        frac_end = frac_start;
+        while (frac_end < len && isdigit((unsigned char)s[frac_end]))
+            frac_end++;
+    }
+    if (frac_end != len) return NULL;
+    if (int_end == int_start && frac_end == frac_start) return NULL;
+    while (int_start < int_end && s[int_start] == '0') int_start++;
+    while (frac_end > frac_start && s[frac_end - 1] == '0') frac_end--;
+    int nonzero = int_start < int_end;
+    for (size_t k = frac_start; !nonzero && k < frac_end; k++)
+        if (s[k] != '0') nonzero = 1;
+    char* out = (char*)malloc(len + 4);
+    if (!out) return NULL;
+    size_t w = 0;
+    if (neg && nonzero) out[w++] = '-';
+    if (int_start == int_end && frac_end > frac_start) out[w++] = '0';
+    if (int_start < int_end) {
+        memcpy(out + w, s + int_start, int_end - int_start);
+        w += int_end - int_start;
+    }
+    if (frac_end > frac_start) {
+        out[w++] = '.';
+        memcpy(out + w, s + frac_start, frac_end - frac_start);
+        w += frac_end - frac_start;
+    }
+    if (!w) out[w++] = '0';
+    out[w] = 0;
+    return out;
+}
+
 static struct leptris_xpath_result* fn_xs_decimal_impl(XPathContext* ctx,
         XPathASTNode** a, size_t n) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, a[0]);
     if (!r) return NULL;
+    char* lex = NULL;
     if (r->type == XPATH_RESULT_STRING) {
         const char* s = r->value.string_value ? r->value.string_value
                                               : "";
@@ -3197,14 +3256,23 @@ static struct leptris_xpath_result* fn_xs_decimal_impl(XPathContext* ctx,
         const char* p = (s < e && (*s == '+' || *s == '-')) ? s + 1 : s;
         int all_digits = e > p &&
                          strspn(p, "0123456789") == (size_t)(e - p);
+        lex = decimal_canonical(s, (size_t)(e - s));
         leptris_xpath_result_free(r);
-        if (all_digits)
+        if (all_digits) {
+            free(lex);
             return xs_int_bound(ctx, a, n, LLONG_MIN, LLONG_MAX,
                                 "xs:decimal");
+        }
     } else {
         leptris_xpath_result_free(r);
     }
-    return fn_xs_number_ctor(ctx, a, n, 0);
+    struct leptris_xpath_result* out = fn_xs_number_ctor(ctx, a, n, 0);
+    if (out && lex) {
+        out->decimal_lex = lex;
+    } else {
+        free(lex);
+    }
+    return out;
 }
 
 static struct leptris_xpath_result* fn_xs_decimal(XPathContext* ctx,

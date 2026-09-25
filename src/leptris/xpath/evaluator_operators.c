@@ -2428,15 +2428,17 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 is->owns_synthetic_text = 0;
             } else {
                 char* piece =
-                    (ctx->xquery_spelling &&
-                     item->type == XPATH_RESULT_NUMBER &&
-                     !item->is_int)
-                        ? xpath_number_to_string_xq_typed(
-                              item->value.number_value,
-                              item->atomic_type &&
-                                  strcmp(item->atomic_type,
-                                         "xs:float") == 0)
-                        : xpath_to_string(item);
+                    item->decimal_lex
+                        ? leptris_strdup(item->decimal_lex)
+                        : (ctx->xquery_spelling &&
+                           item->type == XPATH_RESULT_NUMBER &&
+                           !item->is_int)
+                              ? xpath_number_to_string_xq_typed(
+                                    item->value.number_value,
+                                    item->atomic_type &&
+                                        strcmp(item->atomic_type,
+                                               "xs:float") == 0)
+                              : xpath_to_string(item);
                 if (item->type == XPATH_RESULT_NUMBER) {
                     /* "\x03N" marks numeric members for per-member
                      * type checks (instance of); get_node_text
