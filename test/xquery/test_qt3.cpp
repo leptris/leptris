@@ -922,17 +922,16 @@ TEST(Qt3Subset, FnReverse) {
 }
 
 TEST(Qt3Subset, FnSubsequence) {
-    run_test_set("fn/subsequence.xml", {}, 66, {},
+    run_test_set("fn/subsequence.xml", {}, 67, {},
                  {
-                   "K-SeqSubsequenceFunc-34",
-                   "cbcl-subsequence-005",
                    "cbcl-subsequence-011",
                    "cbcl-subsequence-012",
                    "cbcl-subsequence-013",
                    "cbcl-subsequence-014",
-                   "cbcl-subsequence-019",
                    "cbcl-subsequence-025",
-                   "fn-subsequence-mix-args-025",
+                   "cbcl-subsequence-019", /* document{} + `!` map chain */
+                   "K-SeqSubsequenceFunc-34", /* mixed-type seq item eq */
+                   "fn-subsequence-mix-args-025", /* `!` + @id pair */
 
                  });
 }
@@ -963,7 +962,7 @@ TEST(Qt3Subset, FnDeepEqual) {
      * document{}-ctor and attribute{}-ctor cases (K2-14..43) need
      * the node-materializing ctor model, plus arrays-18 (nested
      * array:put/remove) and mix-args-031 (xs:time vs string). */
-    run_test_set("fn/deep-equal.xml", {}, 220, {},
+    run_test_set("fn/deep-equal.xml", {}, 221, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
@@ -973,7 +972,6 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "K2-SeqDeepEqualFunc-37",
                    "K2-SeqDeepEqualFunc-40",
                    "K2-SeqDeepEqualFunc-43",
-                   "fn-deep-equal-arrays-18",
 
                  });
 }
