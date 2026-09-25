@@ -970,3 +970,39 @@ TEST(XQueryCtors, PICtorDeepEqualByTargetAndData) {
     }
     leptris_document_free(doc);
 }
+
+/* Direct PI/comment constructors (QT3 cbcl-deep-equal-002..004):
+ * `<?t c?>` and `<!--c-->` translate to the computed forms at the
+ * splice, so top-level and element-content occurrences ride the
+ * same carrier + target/data deep-equal path. */
+TEST(XQueryCtors, DirectPICommentCtors) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"deep-equal(<?cheese brie?>, <?cheese stilton?>)", "false"},
+        {"deep-equal(<?foo test?>, <?bar test?>)", "false"},
+        {"deep-equal(<?foo bar?>, <?foo bar?>)", "true"},
+        {"deep-equal(<?foo?>, <?foo ?>)", "true"},
+        {"deep-equal(<!--x-->, <!--x-->)", "true"},
+        {"deep-equal(<!--x-->, <!--y-->)", "false"},
+        {"<doc><?pi content?></doc>",
+         "<doc><?pi content?></doc>"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}

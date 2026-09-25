@@ -224,6 +224,66 @@ static const char* xq_translate_element(const char* p, const char* e,
                                         Buf* out);
 static void xq_translate_content(const char* s, const char* e, Buf* out);
 static int xq_is_name_start(char c);
+static int xq_is_name_char(char c);
+static void buf_lit(Buf* b, const char* s, size_t n);
+
+/* Direct comment/PI constructors: open token at p -> position past
+ * "-->" / "?>", or NULL (not one / unterminated). */
+static const char* xq_pi_comment_end(const char* p, const char* e) {
+    if (p + 3 < e && p[0] == '<' && p[1] == '!' && p[2] == '-' &&
+        p[3] == '-') {
+        const char* close = p + 4;
+        while (close + 2 < e && !(close[0] == '-' && close[1] == '-' &&
+                                  close[2] == '>'))
+            close++;
+        return (close + 2 < e) ? close + 3 : NULL;
+    }
+    if (p + 2 < e && p[0] == '<' && p[1] == '?') {
+        const char* n = p + 2;
+        if (!xq_is_name_start(*n)) return NULL;
+        n++;
+        while (n < e && xq_is_name_char(*n)) n++;
+        while (n < e && isspace((unsigned char)*n)) n++;
+        const char* close = n;
+        while (close + 1 < e && !(close[0] == '?' && close[1] == '>'))
+            close++;
+        return (close + 1 < e) ? close + 2 : NULL;
+    }
+    return NULL;
+}
+
+/* Rewrite the direct form to its computed form: <!--c--> ->
+ * comment {"c"}; <?t c?> -> processing-instruction t {"c"}. Only
+ * call after xq_pi_comment_end accepted the span. */
+static void xq_translate_pi_comment(const char* p, const char* e,
+                                    Buf* out) {
+    if (p[1] == '!') {
+        const char* c = p + 4;
+        const char* close = c;
+        while (close + 2 < e && !(close[0] == '-' && close[1] == '-' &&
+                                  close[2] == '>'))
+            close++;
+        buf_str(out, "comment { ");
+        buf_lit(out, c, (size_t)(close - c));
+        buf_str(out, " }");
+        return;
+    }
+    const char* n = p + 2;
+    while (n < e && xq_is_name_char(*n)) n++;
+    const char* nend = n;
+    while (n < e && isspace((unsigned char)*n)) n++;
+    const char* close = n;
+    while (close + 1 < e && !(close[0] == '?' && close[1] == '>'))
+        close++;
+    buf_str(out, "processing-instruction ");
+    buf_put(out, p + 2, (size_t)(nend - (p + 2)));
+    buf_str(out, " { ");
+    if (close > n)
+        buf_lit(out, n, (size_t)(close - n));
+    else
+        buf_str(out, "\"\"");
+    buf_str(out, " }");
+}
 
 /* Splice rewriter (#684): an expression span keeps its text
  * verbatim; every DIRECT element constructor inside it is replaced
@@ -242,6 +302,17 @@ static char* xq_splice_ctors(const char* a, const char* b) {
             buf_put(&tb, p, (size_t)((q < b ? q + 1 : b) - p));
             p = (q < b) ? q + 1 : b;
             prev_ctor = 0;
+            continue;
+        }
+        if (*p == '<' && p + 1 < b &&
+            (p[1] == '!' || p[1] == '?') &&
+            xq_pi_comment_end(p, b)) {
+            if (prev_ctor && tb.len) buf_str(&tb, ", ");
+            buf_str(&tb, "(");
+            xq_translate_pi_comment(p, b, &tb);
+            buf_str(&tb, ")");
+            p = xq_pi_comment_end(p, b);
+            prev_ctor = 1;
             continue;
         }
         if (*p == '<' && p + 1 < b && xq_is_name_start(p[1])) {
@@ -451,7 +522,11 @@ static XPathASTNode* parse_expr_span(const char* a, const char* b) {
     }
     int has_ctor = 0;
     for (const char* q = a; q + 1 < b && !has_ctor; q++)
-        if (*q == '<' && xq_is_name_start(q[1])) has_ctor = 1;
+        if (*q == '<' &&
+            (xq_is_name_start(q[1]) ||
+             ((q[1] == '!' || q[1] == '?') &&
+              q + 3 < b && xq_pi_comment_end(q, b))))
+            has_ctor = 1;
     char* translated = NULL;
     if (has_ctor) {
         translated = xq_splice_ctors(a, b);
@@ -3447,6 +3522,19 @@ static void xq_translate_content(const char* s, const char* e, Buf* out) {
             }
             buf_put(out, ")", 1);
             p = j + 1;
+            ts = p;
+        } else if (*p == '<' && p + 1 < e &&
+                   (p[1] == '!' || p[1] == '?') &&
+                   xq_pi_comment_end(p, e)) {
+            if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
+                if (out->len) buf_str(out, ", ");
+                buf_str(out, "text { ");
+                buf_lit(out, ts, (size_t)(p - ts));
+                buf_str(out, " }");
+            }
+            if (out->len) buf_str(out, ", ");
+            xq_translate_pi_comment(p, e, out);
+            p = xq_pi_comment_end(p, e);
             ts = p;
         } else if (*p == '<' && p + 1 < e && xq_is_name_start(p[1])) {
             if (p > ts && !xq_ws_only(ts, (size_t)(p - ts))) {
