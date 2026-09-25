@@ -136,17 +136,32 @@ char* xpath_number_to_string_xq_typed(double number, int float_prec) {
         snprintf(work, sizeof(work), "%sE%s", mant, exp);
         return leptris_strdup(work);
     } else {
-        /* Fraction budget: integer digits first, the fraction spends
-         * the remaining significant digits (33 places floor for the
-         * 1e-18 tail). */
-        int integer_place = (int)floor(log10(absolute_value));
-        int fraction_place = integer_place > 0
-                                 ? 15 - integer_place - 1
-                                 : 15 - integer_place;
-        if (fraction_place > 33) fraction_place = 33;
-        if (fraction_place < 0) fraction_place = 0;
-        size = (int)snprintf(work, sizeof(work), "%0.*f",
-                             fraction_place, number);
+        /* Shortest round-trip PLAIN spelling: discover the minimal
+         * significant-digit count via the e-form (float-aware like
+         * the scientific branch), then render fixed-point. The old
+         * 15-digit budget truncated the 17th digit, colliding
+         * distinct xs:decimals ("1.2" vs "1.2000000000000002")
+         * into one spelling. */
+        char mant[64];
+        int prec;
+        for (prec = 1; prec <= 17; prec++) {
+            snprintf(mant, sizeof(mant), "%.*e", prec, number);
+            double back = strtod(mant, NULL);
+            if (float_prec) back = (double)((float)back);
+            if (back == number) break;
+        }
+        int exp10 = 0;
+        char* e = strchr(mant, 'e');
+        if (e) exp10 = atoi(e + 1);
+        /* %.*e prints `prec` digits AFTER the mantissa point, so
+         * fixed-point decimals = prec - exp10 ("2.5e+00" -> 1). */
+        int decimals = prec - exp10;
+        if (decimals < 0) decimals = 0;
+        /* tiny plain-range values (1e-18) need exp10 digits of
+         * fraction — no 17 cap here or they truncate to "0" */
+        if (decimals > 40) decimals = 40;
+        size = (int)snprintf(work, sizeof(work), "%.*f",
+                             decimals, number);
     }
 
     char* start = work;
