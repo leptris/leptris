@@ -892,9 +892,8 @@ TEST(Qt3Subset, FnStringJoin) {
 TEST(Qt3Subset, FnIndexOf) {
     /* Reds are the typed-atom class: NaN/INF members and
      * xs:date/dateTime compare via the string channel. */
-    run_test_set("fn/index-of.xml", {}, 42, {},
+    run_test_set("fn/index-of.xml", {}, 43, {},
                  {
-                   "K-SeqIndexOfFunc-17",
                    "fn-indexof-mix-args-013",
 
                  });
@@ -912,9 +911,8 @@ TEST(Qt3Subset, FnInsertBefore) {
 
 TEST(Qt3Subset, FnRemove) {
     /* Reds: instance-of on typed sequences + the typed-member class. */
-    run_test_set("fn/remove.xml", {}, 23, {},
+    run_test_set("fn/remove.xml", {}, 24, {},
                  {
-                   "K-SeqRemoveFunc-8",
                    "fn-remove-mix-args-017",
 
                  });
@@ -933,10 +931,9 @@ TEST(Qt3Subset, FnReverse) {
 TEST(Qt3Subset, FnSubsequence) {
     /* Reds: typed members under assert-xml (float/boolean/dateTime
      * spellings) + start/length NaN rules. */
-    run_test_set("fn/subsequence.xml", {}, 61, {},
+    run_test_set("fn/subsequence.xml", {}, 65, {},
                  {
                    "K-SeqSubsequenceFunc-34",
-                   "cbcl-subsequence-001",
                    "cbcl-subsequence-003",
                    "cbcl-subsequence-005",
                    "cbcl-subsequence-011",
@@ -945,9 +942,6 @@ TEST(Qt3Subset, FnSubsequence) {
                    "cbcl-subsequence-014",
                    "cbcl-subsequence-019",
                    "cbcl-subsequence-025",
-                   "cbcl-subsequence-026",
-                   "fn-subsequence-mix-args-011",
-                   "fn-subsequence-mix-args-016",
                    "fn-subsequence-mix-args-025",
 
                  });
@@ -959,15 +953,11 @@ TEST(Qt3Subset, FnDistinctValues) {
     /* mixed-args-012 (decimal-vs-float dedup) diverges ONLY inside
      * the LTO'd test binary — identical query passes standalone and
      * via the public API; CI's non-LTO/gcc legs are the arbiter. */
-    run_test_set("fn/distinct-values.xml", {}, 89, {},
+    run_test_set("fn/distinct-values.xml", {}, 93, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
                    "cbcl-distinct-values-007",
-                   "cbcl-distinct-values-010",
-                   "cbcl-distinct-values-011",
-                   "cbcl-distinct-values-013",
-                   "cbcl-distinct-values-016",
                    "fn-distinct-values-1",
                    "fn-distinct-values-2",
                    "fn-distinct-values-mixed-args-010",
@@ -981,7 +971,7 @@ TEST(Qt3Subset, FnDeepEqual) {
     /* Reds: type-aware atomic equality (xs:float ne xs:double,
      * xs:date ne string, NaN = NaN inside typed wrappers) — needs
      * the typed-atom model. */
-    run_test_set("fn/deep-equal.xml", {}, 192, {},
+    run_test_set("fn/deep-equal.xml", {}, 193, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
@@ -1002,7 +992,6 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "cbcl-deep-equal-002",
                    "cbcl-deep-equal-003",
                    "cbcl-deep-equal-004",
-                   "cbcl-deep-equal-010",
                    "fn-deep-equal-arrays-1",
                    "fn-deep-equal-arrays-14",
                    "fn-deep-equal-arrays-15",

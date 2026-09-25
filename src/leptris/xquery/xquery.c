@@ -2898,13 +2898,26 @@ static LeptrisXPathResult xq_eval_impl(
                         for (size_t k = 0; k < q->nkeys; k++) {
                             struct leptris_xpath_result* r =
                                 evaluate_expr(ctx, q->keys[k].key);
-                            char* ks = r ? xpath_to_string(r) : NULL;
+                            /* Only a genuinely EMPTY SEQUENCE key
+                             * takes the empty-mode; an empty STRING
+                             * key is a real key and sorts by value
+                             * ("" < "a" — cbcl-distinct-values-010).
+                             * NULL slot = empty sequence. */
+                            int empty_seq =
+                                !r || (r->type == XPATH_RESULT_NODESET &&
+                                       (!r->value.nodeset_value ||
+                                        r->value.nodeset_value->count ==
+                                            0));
+                            char* ks =
+                                empty_seq ? NULL
+                                          : (r ? xpath_to_string(r)
+                                               : NULL);
                             if (ti == 0)
                                 q->keys[k].strmode =
                                     (r &&
                                      r->type == XPATH_RESULT_STRING);
                             xpath_result_free(r);
-                            tuples[ti].keys[k] = ks ? ks : strdup("");
+                            tuples[ti].keys[k] = ks;
                         }
                     }
                 }
@@ -2936,8 +2949,8 @@ static LeptrisXPathResult xq_eval_impl(
                             const char* ka = tuples[j - 1].keys[k];
                             const char* kb = tmp.keys[k];
                             int c;
-                            int ea = !ka || !ka[0];
-                            int eb = !kb || !kb[0];
+                            int ea = !ka;
+                            int eb = !kb;
                             if (ea || eb) {
                                 /* empty-sequence keys order by the
                                  * key's empty mode (greatest default) */
