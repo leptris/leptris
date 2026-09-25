@@ -2290,6 +2290,23 @@ int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
             j = (size_t)(vend - s) + 1;
             IlAttr a = { (uint32_t)a0, (uint32_t)al,
                          (uint32_t)v0, (uint32_t)vl, aws };
+            /* XML 1.0 §3.1: duplicate attributes are a fatal error —
+             * the classic lane reports "Attribute %s redefined" and
+             * the SAX callback path records an ERROR event, but the
+             * record table has no error channel. A dup-containing
+             * document is therefore outside the scannable subset:
+             * bail so callers fall back to the callback path (#281,
+             * leptris-ruby#331 adoption). Same-element prior attrs
+             * are the contiguous range [r.first_attr, nattr). */
+            if (acount > 0) {
+                for (uint32_t k = r.first_attr; k < (uint32_t)c->nattr;
+                     k++) {
+                    const IlAttr* p = &c->attrs[k];
+                    if (p->name_len == (uint32_t)al &&
+                        memcmp(s + p->name_off, s + a0, al) == 0)
+                        return 0;
+                }
+            }
             if (!il_push_attr(c, &a)) return 0;
             if (acount == 0) r.first_attr = (uint32_t)(c->nattr - 1);
             acount++;
