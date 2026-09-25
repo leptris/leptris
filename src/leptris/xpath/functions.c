@@ -764,6 +764,71 @@ static int de_node_equal(LeptrisNodeRef a, LeptrisNodeRef b) {
     return ca == NULL && cb == NULL;
 }
 
+/* Direct-ctor strings compare as trees when the lexical forms
+ * differ: attribute order is insignificant to deep-equality
+ * (fn-deep-equal-maps-11), and the tree path also inherits the
+ * comment/PI-insignificance rule. Unparseable markup compares
+ * lexically (both sides then fail identically -> false). */
+static int de_markup_equal_n(const char* a, size_t al,
+                             const char* b, size_t bl) {
+    char* xa = (char*)malloc(al + 1);
+    char* xb = (char*)malloc(bl + 1);
+    int eq = 0;
+    if (xa && xb) {
+        memcpy(xa, a, al); xa[al] = 0;
+        memcpy(xb, b, bl); xb[bl] = 0;
+        LeptrisStatus sa = LEPTRIS_OK, sb = LEPTRIS_OK;
+        LeptrisDocument da = leptris_parse_string(xa, al, &sa);
+        LeptrisDocument db = leptris_parse_string(xb, bl, &sb);
+        if (da && db) {
+            LeptrisElement ra = leptris_document_root(da);
+            LeptrisElement rb = leptris_document_root(db);
+            eq = ra && rb &&
+                 de_node_equal((LeptrisNodeRef)ra, (LeptrisNodeRef)rb);
+        }
+        if (da) leptris_document_free(da);
+        if (db) leptris_document_free(db);
+    }
+    free(xa);
+    free(xb);
+    return eq;
+}
+
+/* Map carriers ("\x03MAP" + ("\x02" key "\x01" value)*; entries are
+ * canonically key-sorted at construction) compare entry-wise:
+ * keys lexically, values with the markup fallback. Segment bytes
+ * (\x02/\x01) cannot occur in XML content, so end-scan is safe. */
+static int de_map_equal(const char* a, const char* b) {
+    a += 4;
+    b += 4;
+    while (*a && *b) {
+        if (*a != '\x02' || *b != '\x02') return 0;
+        a++;
+        b++;
+        const char* ka = a;
+        while (*a && *a != '\x01') a++;
+        const char* kb = b;
+        while (*b && *b != '\x01') b++;
+        if (*a != '\x01' || *b != '\x01') return 0;
+        if (a - ka != b - kb || memcmp(ka, kb, (size_t)(a - ka)) != 0)
+            return 0;
+        a++;
+        b++;
+        const char* va = a;
+        while (*a && *a != '\x02') a++;
+        const char* vb = b;
+        while (*b && *b != '\x02') b++;
+        if (a - va != b - vb ||
+            memcmp(va, vb, (size_t)(a - va)) != 0) {
+            if (va[0] != '<' || vb[0] != '<') return 0;
+            if (!de_markup_equal_n(va, (size_t)(a - va),
+                                   vb, (size_t)(b - vb)))
+                return 0;
+        }
+    }
+    return *a == 0 && *b == 0;
+}
+
 /* One comparable item: kind 0 = node, 1 = number, 2 = string,
  * 3 = boolean. Synthetic sequence members carry the "\x03N" numeric
  * marker (stripped here); other synthetic text is a string. */
@@ -825,8 +890,14 @@ static int de_item_equal(DeItem* a, DeItem* b) {
         case 2: {
             const char* as = a->str ? a->str : (a->borrow ? a->borrow : "");
             const char* bs = b->str ? b->str : (b->borrow ? b->borrow : "");
-            if (de_str_class(a->type) && de_str_class(b->type))
-                return strcmp(as, bs) == 0;
+            if (de_str_class(a->type) && de_str_class(b->type)) {
+                if (strncmp(as, "\x03MAP", 4) == 0 &&
+                    strncmp(bs, "\x03MAP", 4) == 0)
+                    return de_map_equal(as, bs);
+                if (strcmp(as, bs) == 0) return 1;
+                return as[0] == '<' && bs[0] == '<' &&
+                       de_markup_equal_n(as, strlen(as), bs, strlen(bs));
+            }
             if (!de_str_class(a->type) && !de_str_class(b->type) &&
                 strcmp(a->type, b->type) == 0)
                 return strcmp(as, bs) == 0;

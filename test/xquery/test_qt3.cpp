@@ -923,10 +923,9 @@ TEST(Qt3Subset, FnReverse) {
 }
 
 TEST(Qt3Subset, FnSubsequence) {
-    run_test_set("fn/subsequence.xml", {}, 65, {},
+    run_test_set("fn/subsequence.xml", {}, 66, {},
                  {
                    "K-SeqSubsequenceFunc-34",
-                   "cbcl-subsequence-003",
                    "cbcl-subsequence-005",
                    "cbcl-subsequence-011",
                    "cbcl-subsequence-012",
@@ -964,7 +963,7 @@ TEST(Qt3Subset, FnDeepEqual) {
      * ctors), array:put/array:remove nesting (arrays-18), xs:time
      * vs string (mix-args-031). The arrays/maps value-compare and
      * direct PI/comment ctor classes are adopted below. */
-    run_test_set("fn/deep-equal.xml", {}, 210, {},
+    run_test_set("fn/deep-equal.xml", {}, 211, {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
@@ -983,7 +982,6 @@ TEST(Qt3Subset, FnDeepEqual) {
                    "K2-SeqDeepEqualFunc-43",
                    "cbcl-deep-equal-001",
                    "fn-deep-equal-arrays-18",
-                   "fn-deep-equal-maps-11",
                    "fn-deep-equal-mix-args-031",
 
                  });
