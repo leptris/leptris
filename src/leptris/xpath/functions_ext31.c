@@ -3661,6 +3661,36 @@ static struct leptris_xpath_result* fn_array_append(XPathContext* ctx,
     return out;
 }
 
+/* array:remove: drop the idx-th POSITION and renumber 1..n —
+ * unlike map:remove, positional keys shift (arrays-18). */
+static struct leptris_xpath_result* fn_array_remove(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    long idx = 1;
+    struct leptris_xpath_result* ir = xpath_evaluate(ctx, args[1]);
+    if (ir) {
+        idx = (long)leptris_xpath_result_number(ir);
+        leptris_xpath_result_free(ir);
+    }
+    MapEntries e = {0};
+    map_entries_arg(ctx, args, 0, &e);
+    MapEntries out = {0};
+    long pos = 0;
+    for (size_t i = 0; i < e.n; i++) {
+        long k = strtol(e.k[i], NULL, 10);
+        if (k == idx) continue;
+        pos++;
+        char nk[24];
+        snprintf(nk, sizeof(nk), "%ld", pos);
+        map_entries_push(&out, nk, strlen(nk), e.v[i],
+                         strlen(e.v[i]));
+    }
+    struct leptris_xpath_result* r = xpath_map_value(&out);
+    map_entries_free(&out);
+    map_entries_free(&e);
+    (void)n;
+    return r;
+}
+
 static struct leptris_xpath_result* fn_array_put(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     long idx = 1;
@@ -5678,6 +5708,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "array:get", fn_array_get, 2, 2);
     xpath_function_registry_register(registry, "array:append", fn_array_append, 2, 2);
     xpath_function_registry_register(registry, "array:put", fn_array_put, 3, 3);
+    xpath_function_registry_register(registry, "array:remove", fn_array_remove, 2, 2);
     /* JSON (08D). */
     xpath_function_registry_register(registry, "parse-json", fn_parse_json, 1, 1);
     xpath_function_registry_register(registry, "json-to-xml", fn_json_to_xml, 1, 1);
