@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.246] - 2026-09-25
+
+### Added
+
+- exact decimal lexical carrier (xquery)
+
+
+
 ## [1.9.245] - 2026-09-25
 
 ### Added
