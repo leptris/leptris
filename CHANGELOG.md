@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.245] - 2026-09-25
+
+### Added
+
+- array:remove + NaN subsequence 2-arg adoption (xquery)
+- attribute ctor carriers + derived-string deep-equal class (xquery)
+
+
+
 ## [1.9.244] - 2026-09-25
 
 <!-- Edit this section with the actual release notes. -->
