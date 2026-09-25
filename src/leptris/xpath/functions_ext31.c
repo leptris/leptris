@@ -2780,6 +2780,7 @@ static struct leptris_xpath_result* fn_time_ctor(
     struct leptris_xpath_result* out =
         xpath_result_new(XPATH_RESULT_STRING);
     if (!out) { free(in); return NULL; }
+    out->atomic_type = "xs:time";
     if (in && in[0] == '2' && in[1] == '4' && in[2] == ':') {
         char* norm = (char*)malloc(strlen(in) + 3);
         if (norm) {
