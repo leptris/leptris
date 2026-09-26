@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.251] - 2026-09-26
+
+### Added
+
+- document{} materializes a node; simple map preserves items (xquery)
+
+
+
 ## [1.9.250] - 2026-09-26
 
 ### Fixed
