@@ -983,9 +983,12 @@ TEST(Qt3Subset, FnDistinctValues) {
      * fn-distinct-values-1 (Bugzilla 5183: float must promote UP to
      * double, never the reverse) close with F&O promotion in the
      * dedup comparator. */
-    /* fn-distinct-values-2 adopted: the assert-permutation
-     * harness expands "N to M" range tokens (values were already
-     * engine-correct; the blocker was harness-side). */
+    /* cbcl-distinct-values-007: both halves are in (tz-normalized
+     * time equality + typed-scalar predicates) and the query is
+     * correct on macOS, but Linux/ASAN still evaluates
+     * xs:dayTimeDuration("PT0S")[$p] with the at-bound position as
+     * EBV-true (all-Z output) — a narrow platform divergence to
+     * chase separately. */
     run_test_set("fn/distinct-values.xml", {}, 98, {},
                  {
                    "cbcl-distinct-values-002",
