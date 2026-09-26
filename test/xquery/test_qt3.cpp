@@ -956,6 +956,11 @@ TEST(Qt3Subset, FnDistinctValues) {
      * fn-distinct-values-1 (Bugzilla 5183: float must promote UP to
      * double, never the reverse) close with F&O promotion in the
      * dedup comparator. */
+    /* cbcl-distinct-values-007 needs BOTH the time-tz
+     * normalization (shipped) AND the xq-driver variable-predicate
+     * bug fixed: `xs:dayTimeDuration("PT0S")[$p]` is mangled by the
+     * FLWOR scanner — the XPath entry evaluates the same shape
+     * correctly ((10,20,30)[$p] -> 20). Separate lever. */
     run_test_set("fn/distinct-values.xml", {}, 97, {},
                  {
                    "cbcl-distinct-values-002",

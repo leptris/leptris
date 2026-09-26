@@ -1213,3 +1213,45 @@ TEST(XQueryCore, MixedNumericCompare) {
     }
     leptris_document_free(doc);
 }
+
+
+TEST(XQueryCore, TimeTzEq) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        /* F&O: xs:time equality compares timezone-normalized
+         * instants (mod 24h), not lexicals */
+        {"xs:time('01:00:00+12:00') = xs:time('13:00:00Z')", "true"},
+        {"xs:time('02:00:00+13:00') = xs:time('13:00:00Z')", "true"},
+        {"xs:time('01:00:00+12:00') = xs:time('13:30:00Z')", "false"},
+        {/* day wrap: 00:00+14:00 is 10:00Z the previous day */
+         "xs:time('00:00:00+14:00') = xs:time('10:00:00Z')", "true"},
+        {"xs:time('24:00:00') = xs:time('00:00:00')", "true"},
+        {"count(distinct-values((xs:time('12:00:00'),"
+         " xs:time('12:00:00'), xs:time('20:00:00'),"
+         " xs:time('01:00:00+12:00'), xs:time('02:00:00+13:00'))))", "3"},
+        {/* order by uses the LINEAR normalized instant: a tz-bearing
+         * time can land on the previous UTC day (F&O
+         * op:time-less-than; cbcl-distinct-values-007 expectation) */
+         "string-join(for $t in (xs:time('12:00:00'),"
+         " xs:time('01:00:00+12:00'), xs:time('20:00:00'))"
+         " order by $t return string($t), '|')",
+         "01:00:00+12:00|12:00:00|20:00:00"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}

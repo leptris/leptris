@@ -76,6 +76,12 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
 /* Marker-aware atomic eq over raw item strings (evaluator_operators.c). */
 int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal);
 
+/* xs:time lexical -> timezone-normalized seconds (cycle = mod 86400
+ * for equality; linear = unbounded for ordering); either out may be
+ * NULL. Returns 0 when s is not a time lexical. */
+int leptris_time_norm_seconds(const char* s, double* cycle,
+                              double* linear);
+
 /* Direct function-call entry for the VM (TODO 120 Phase F).
  * Identical semantics to invoking evaluate_expr on a FUNCTION_CALL
  * AST, but skips the AST-type switch in evaluate_expr. The handler

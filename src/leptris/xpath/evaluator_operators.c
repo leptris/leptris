@@ -350,6 +350,65 @@ XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src) {
     return dst;
 }
 
+/* Parse an xs:time lexical (hh:mm:ss[.fff][Z|(+|-)hh:mm]) into
+ * timezone-normalized seconds. *cycle is the value mod 86400
+ * (op:time-equal compares the cyclic value space); *linear is the
+ * unbounded normalized value, where a tz-bearing time can land on
+ * the previous UTC day (op:time-less-than, cbcl-distinct-values-007).
+ * A timezone-less time uses UTC. Either out param may be NULL.
+ * Returns 0 when s is not a pure time lexical. */
+int leptris_time_norm_seconds(const char* s, double* cycle,
+                              double* linear) {
+    if (!s || s[0] < '0' || s[0] > '9') return 0;
+    char* end;
+    long hh = strtol(s, &end, 10);
+    if (end == s || *end != ':' || hh < 0 || hh > 24) return 0;
+    const char* p = end + 1;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9' ||
+        p[2] != ':')
+        return 0;
+    long mm = (p[0] - '0') * 10 + (p[1] - '0');
+    if (mm > 59) return 0;
+    p += 3;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9') return 0;
+    long ss = (p[0] - '0') * 10 + (p[1] - '0');
+    if (ss > 60) return 0;
+    p += 2;
+    double secs = (hh % 24) * 3600.0 + mm * 60.0 + ss;
+    if (*p == '.') {
+        char* fend;
+        double frac = strtod(p, &fend);
+        if (fend == p) return 0;
+        secs += frac;
+        p = fend;
+    }
+    double off = 0;
+    if (*p == 'Z') {
+        p++;
+    } else if (*p == '+' || *p == '-') {
+        int sign = (*p == '-') ? -1 : 1;
+        p++;
+        if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9' ||
+            p[2] != ':' || p[3] < '0' || p[3] > '9' || p[4] < '0' ||
+            p[4] > '9')
+            return 0;
+        long oh = (p[0] - '0') * 10 + (p[1] - '0');
+        long om = (p[3] - '0') * 10 + (p[4] - '0');
+        if (oh > 14 || om > 59) return 0;
+        off = sign * (oh * 3600.0 + om * 60.0);
+        p += 5;
+    }
+    if (*p) return 0;
+    double v = secs - off;
+    if (linear) *linear = v;
+    if (cycle) {
+        v = fmod(v, 86400.0);
+        if (v < 0) v += 86400.0;
+        *cycle = v;
+    }
+    return 1;
+}
+
 /* §3.4 relational compare over a double pair. */
 
 /* Exact decimal-string comparison for two xs:decimal operands (F&O
@@ -430,7 +489,15 @@ int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
              : (b[0] == '\x03' && b[1] == 'B') ? 'B' : 0;
     if (!ka != !kb) return 0;
     if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
-    if (!ka) return strcmp(a, b) == 0;
+    if (!ka) {
+        /* both untyped strings: timezone-normalized time values
+         * compare by instant (cbcl-distinct-values-007) */
+        double ta, tb;
+        if (leptris_time_norm_seconds(a, &ta, NULL) &&
+            leptris_time_norm_seconds(b, &tb, NULL))
+            return ta == tb;
+        return strcmp(a, b) == 0;
+    }
     /* xs:decimal eq is exact — the double carrier cannot hold 30
      * significant digits, so same-type decimals compare lexically
      * (equal-value canonical decimals share their spelling). */
@@ -461,6 +528,16 @@ static char* op_node_raw_text(void* node) {
         return leptris_strdup(c ? c : "");
     }
     return get_node_text(node);
+}
+
+/* Order-by key compare: time-shaped keys order by the
+ * timezone-normalized instant (cbcl-distinct-values-007). */
+static int ob_key_cmp(const char* ka, const char* kb) {
+    double ta, tb;
+    if (leptris_time_norm_seconds(ka, NULL, &ta) &&
+        leptris_time_norm_seconds(kb, NULL, &tb))
+        return ta < tb ? -1 : ta > tb ? 1 : 0;
+    return strcmp(ka, kb);
 }
 
 static int op_relational_cmp(XPathOperatorType op, double a, double b) {
@@ -946,7 +1023,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                             else
                                 c = ea ? 1 : -1;
                         } else if ((ob_strmask >> k) & 1) {
-                            c = strcmp(ka, kb);
+                            c = ob_key_cmp(ka, kb);
                         } else {
                             char *ea2 = NULL, *eb2 = NULL;
                             double va = strtod(ka, &ea2);
@@ -966,7 +1043,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                                   : (va > vb) ? 1 : 0;
                                 }
                             } else {
-                                c = strcmp(ka, kb);
+                                c = ob_key_cmp(ka, kb);
                             }
                         }
                         cmp = (flag & 1) ? -c : c;
@@ -3019,6 +3096,30 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                            (strlen(rvs) >= 8 && rvs[4] == '-' &&
                             rvs[7] == '-'));
                 if (lok && rok) {
+                    /* time-shaped pairs compare timezone-normalized
+                     * (mod 24h) — lexical order is wrong across
+                     * zones (01:00:00+12:00 == 13:00:00Z) */
+                    if (strchr(lvs, ':') && strchr(rvs, ':')) {
+                        double lc, ll, rc, rl;
+                        if (leptris_time_norm_seconds(lvs, &lc, &ll) &&
+                            leptris_time_norm_seconds(rvs, &rc, &rl)) {
+                            int eqop = op == XPATH_OP_EQUAL ||
+                                       op == XPATH_OP_NOT_EQUAL;
+                            double lv = eqop ? lc : ll;
+                            double rv = eqop ? rc : rl;
+                            int c = lv < rv ? -1 : lv > rv ? 1 : 0;
+                            result->value.boolean_value =
+                                op == XPATH_OP_EQUAL ? c == 0
+                                : op == XPATH_OP_NOT_EQUAL ? c != 0
+                                : op == XPATH_OP_LESS ? c < 0
+                                : op == XPATH_OP_LESS_EQUAL ? c <= 0
+                                : op == XPATH_OP_GREATER ? c > 0
+                                : c >= 0;
+                            xpath_result_free(left);
+                            xpath_result_free(right);
+                            return result;
+                        }
+                    }
                     /* time lexical 24:00:00 == 00:00:00 — fold the
                      * hour before comparing (xs:time midnight form) */
                     char lfold[48], rfold[48];
