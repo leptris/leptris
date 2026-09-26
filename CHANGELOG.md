@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [1.9.247] - 2026-09-26
+
+### Fixed
+
+- filter on a non-nodeset base treats the atom as a one-item sequence (xpath)
+
 ## [1.9.246] - 2026-09-25
 
 ### Added
