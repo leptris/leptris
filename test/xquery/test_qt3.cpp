@@ -291,6 +291,33 @@ bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
         }
         std::vector<std::string> raws;
         std::vector<std::string> want = split_perm_items(a.text, &raws);
+        /* "N to M" range tokens expand to the enumerated items
+         * (fn-distinct-values-2 expects "1 to 400" — 400 items, not
+         * one literal string). raws expands in lockstep — every
+         * expanded member keeps the range's raw text so the
+         * expression-eval loop below stays index-aligned. */
+        {
+            std::vector<std::string> expanded;
+            std::vector<std::string> expanded_raws;
+            for (size_t wi = 0; wi < want.size(); wi++) {
+                long lo = 0, hi = 0;
+                char tail = 0;
+                if (sscanf(want[wi].c_str(), "%ld to %ld%c", &lo,
+                           &hi, &tail) == 2 &&
+                    hi >= lo && hi - lo < 1000000) {
+                    for (long v = lo; v <= hi; v++) {
+                        expanded.push_back(std::to_string(v));
+                        expanded_raws.push_back(raws[wi]);
+                    }
+                } else {
+                    expanded.push_back(want[wi]);
+                    expanded_raws.push_back(
+                        wi < raws.size() ? raws[wi] : want[wi]);
+                }
+            }
+            want.swap(expanded);
+            raws.swap(expanded_raws);
+        }
         /* expected items are XQuery expressions (true(),
          * xs:float('-INF')) — evaluate the RAW item (quotes intact;
          * the split strips them for the literal compare) against
@@ -956,17 +983,14 @@ TEST(Qt3Subset, FnDistinctValues) {
      * fn-distinct-values-1 (Bugzilla 5183: float must promote UP to
      * double, never the reverse) close with F&O promotion in the
      * dedup comparator. */
-    /* cbcl-distinct-values-007 needs BOTH the time-tz
-     * normalization (shipped) AND the xq-driver variable-predicate
-     * bug fixed: `xs:dayTimeDuration("PT0S")[$p]` is mangled by the
-     * FLWOR scanner — the XPath entry evaluates the same shape
-     * correctly ((10,20,30)[$p] -> 20). Separate lever. */
-    run_test_set("fn/distinct-values.xml", {}, 97, {},
+    /* fn-distinct-values-2 adopted: the assert-permutation
+     * harness expands "N to M" range tokens (values were already
+     * engine-correct; the blocker was harness-side). */
+    run_test_set("fn/distinct-values.xml", {}, 98, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
                    "cbcl-distinct-values-007",
-                   "fn-distinct-values-2",
 
                  });
 }
