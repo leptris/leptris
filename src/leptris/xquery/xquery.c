@@ -2366,6 +2366,12 @@ static int key_cmp(const char* a, const char* b) {
         }
         return (va < vb) ? -1 : (va > vb) ? 1 : 0;
     }
+    /* time-shaped keys order by the timezone-normalized instant
+     * (cbcl-distinct-values-007) */
+    double ta, tb;
+    if (leptris_time_norm_seconds(a, NULL, &ta) &&
+        leptris_time_norm_seconds(b, NULL, &tb))
+        return (ta < tb) ? -1 : (ta > tb) ? 1 : 0;
     return strcmp(a, b);
 }
 
@@ -3121,7 +3127,15 @@ static LeptrisXPathResult xq_eval_impl(
                                 else
                                     c = ea ? 1 : -1;
                             } else if (q->keys[k].strmode) {
-                                c = strcmp(ka, kb);
+                                /* time-shaped keys order by the
+                                 * timezone-normalized instant
+                                 * (cbcl-distinct-values-007) */
+                                double ta, tb;
+                                if (leptris_time_norm_seconds(ka, NULL, &ta) &&
+                                    leptris_time_norm_seconds(kb, NULL, &tb))
+                                    c = ta < tb ? -1 : ta > tb ? 1 : 0;
+                                else
+                                    c = strcmp(ka, kb);
                             } else {
                                 c = key_cmp(ka, kb);
                             }
