@@ -199,13 +199,18 @@ TEST(XQueryCore, PositionalFor) {
 }
 
 TEST(XQueryCore, DocumentConstructor) {
-    /* Saxon t9: <n>1</n><n>2</n> — document serializes its content. */
+    /* Saxon t9: document{} materializes a NODE per iteration —
+     * navigation steps into it (string-value of each <n> is the
+     * loop variable; value-of joins the text values). */
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);
     ASSERT_NE(doc, nullptr);
     EXPECT_EQ(seq_string(doc,
-        "for $v in (1,2) return document { element n { $v } }"),
-        "<n>1</n> <n>2</n>");
+        "for $v in (1,2) return string(document { element n { $v } }/n)"),
+        "1 2");
+    EXPECT_EQ(seq_string(doc,
+        "count(for $v in (1,2) return document { element n { $v } })"),
+        "2");
     leptris_document_free(doc);
 }
 
@@ -536,15 +541,16 @@ TEST(XQueryCore, DocumentConstructorWithDirectContent) {
     /* Direct constructors inside computed-content braces — the
      * textual translation must recurse into ctor keyword braces,
      * not treat them as literal text. */
-    EXPECT_EQ(seq_string(doc, "document { <a><b>1</b></a> }"),
-              "<a><b>1</b></a>");
+    /* The document ctor materializes a node: navigate into it. */
+    EXPECT_EQ(seq_string(doc, "string(document { <a><b>1</b></a> }/a/b)"),
+              "1");
+    EXPECT_EQ(seq_string(doc, "name(document { <a><b>1</b></a> }/a)"),
+              "a");
     /* Constructors in nested expression positions (function args,
-     * FLWOR bodies) keep their value form; NAVIGATION into a
-     * constructed tree is the value-level contract's documented
-     * boundary (tree-level construction = lane-12 tail). */
+     * FLWOR bodies) keep their value form. */
     EXPECT_EQ(seq_string(doc,
-        "string-join((document { <a/> }, <b>2</b>), '|')"),
-              "<a/>|<b>2</b>");
+        "string-join((string(document { <a/> }), <b>2</b>), '|')"),
+              "|<b>2</b>");
     leptris_document_free(doc);
 }
 

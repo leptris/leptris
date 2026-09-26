@@ -941,7 +941,7 @@ TEST(Qt3Subset, FnReverse) {
 }
 
 TEST(Qt3Subset, FnSubsequence) {
-    run_test_set("fn/subsequence.xml", {}, 68, {},
+    run_test_set("fn/subsequence.xml", {}, 69, {},
                  {
                    "cbcl-subsequence-011",
                    "cbcl-subsequence-012",
@@ -949,7 +949,6 @@ TEST(Qt3Subset, FnSubsequence) {
                    "cbcl-subsequence-014",
                    "cbcl-subsequence-025",
                    "cbcl-subsequence-019", /* document{} + `!` map chain */
-                   "fn-subsequence-mix-args-025", /* `!` + @id pair */
 
                  });
 }
