@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.257] - 2026-09-26
+
+### Performance
+
+- resolve namebp documents before the locked root-map lookup (dom)
+
+
+
 ## [1.9.256] - 2026-09-26
 
 ### Fixed
