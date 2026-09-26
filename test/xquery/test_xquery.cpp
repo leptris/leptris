@@ -1167,3 +1167,49 @@ TEST(XQueryCore, MultiBindingFlwor) {
     }
     leptris_document_free(doc);
 }
+
+/* Cross-type numeric eq is EXACT when either operand carries the
+ * decimal lexical (XQuery 3.0: no double rounding of the decimal
+ * operand) — the double widening used to make decimal(
+ * 2.0000000000100000000001) eq double(2.00000000001) true.
+ * fn-distinct-values-1's pair assertion hangs on this. */
+TEST(XQueryCore, MixedNumericCompare) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        /* both operands decimal: exact value comparison */
+        {"xs:decimal('2.0000000000100000000001') = "
+         "xs:decimal('2.00000000001')", "false"},
+        /* decimal vs double: F&O promotion converts both to double
+         * (the decimal rounds onto the same double) */
+        {"xs:decimal('2.0000000000100000000001') = "
+         "xs:double('2.00000000001')", "true"},
+        {"xs:decimal('0.5') = xs:double('0.5')", "true"},
+        {"xs:decimal('2.0000000000100000000001') = "
+         "xs:double('2.00000000002')", "false"},
+        /* decimal vs float: promotion converts the decimal to float
+         * (1.00000000001f rounds to 1.0f) */
+        {"xs:decimal('1.0000000000100000000001') = "
+         "xs:float('1.0')", "true"},
+        /* float vs double: BOTH promote up to double — the float is
+         * never demoted (Bugzilla 5183 / fn-distinct-values-1) */
+        {"xs:float('1.0') = xs:double('1.00000000001')", "false"},
+        {"xs:float('1.0') = xs:double('1.0')", "true"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}

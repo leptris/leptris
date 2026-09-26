@@ -216,43 +216,6 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
     return items;
 }
 
-/* eq-based atomic comparison over raw item strings: both-marked
- * compares numerically; both-plain compares by codepoint; number
- * vs string is false. nan_equal: distinct-values dedups NaN with
- * itself (F&O 3.1), fn:index-of's eq never matches it. 'F' markers
- * carry xs:float members (float32-exact values); an F vs plain-N
- * pair promotes the plain side DOWN to float (decimal-vs-float
- * promotes decimal to float per F&O numeric promotion). */
-static int atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
-    int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
-             : (a[0] == '\x03' && a[1] == 'F') ? 'F'
-             : (a[0] == '\x03' && a[1] == 'D') ? 'D'
-             : (a[0] == '\x03' && a[1] == 'B') ? 'B' : 0;
-    int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
-             : (b[0] == '\x03' && b[1] == 'F') ? 'F'
-             : (b[0] == '\x03' && b[1] == 'D') ? 'D'
-             : (b[0] == '\x03' && b[1] == 'B') ? 'B' : 0;
-    if (!ka != !kb) return 0;
-    if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
-    if (!ka) return strcmp(a, b) == 0;
-    /* xs:decimal eq is exact — the double carrier cannot hold 30
-     * significant digits, so same-type decimals compare lexically
-     * (equal-value canonical decimals share their spelling). */
-    if (ka == 'D' && kb == 'D') return strcmp(a + 2, b + 2) == 0;
-    double da = strtod(a + 2, NULL);
-    double db = strtod(b + 2, NULL);
-    int na = isnan(da), nb = isnan(db);
-    /* NaN eq nothing (distinct-values dedups NaN with itself) */
-    if (na || nb) return na && nb ? nan_equal : 0;
-    if (ka == 'F' && kb != 'F') db = (double)(float)db;
-    else if (kb == 'F' && ka != 'F') da = (double)(float)da;
-    return da == db;
-}
-
-static int atom_seq_eq(const char* a, const char* b) {
-    return atom_seq_eq_n(a, b, 0);
-}
-
 /* Positional helpers (1-based; start may be <= 0, len NaN = to end). */
 static void seq_from_items(struct leptris_xpath_result* seq, char** items,
                            size_t n, long start, long len) {
@@ -504,7 +467,7 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
     struct leptris_xpath_result* out = seq_new();
     if (out && needle)
         for (size_t k = 0; k < cnt; k++)
-            if (atom_seq_eq(items[k], needle))
+            if (leptris_atom_seq_eq_n(items[k], needle, 0))
                 seq_push_num(out, (double)(k + 1));
     free(needle);
     if (v) leptris_xpath_result_free(v);
@@ -598,12 +561,20 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
         leptris_xpath_result_free(c);
     }
     struct leptris_xpath_result* out = seq_new();
+    /* Dedup compares against KEPT items only: promotion eq is
+     * non-transitive (float~decimal~double while float!~double), so
+     * comparing against all earlier items over-collapses and breaks
+     * fn-distinct-values-1's pairwise assertion (Bugzilla 5183). */
+    size_t* kept = cnt ? (size_t*)malloc(cnt * sizeof(size_t)) : NULL;
+    size_t n_kept = 0;
+    if (out && cnt && !kept) { xpath_result_free(out); out = NULL; }
     if (out)
         for (size_t k = 0; k < cnt; k++) {
             int dup = 0;
             double mk = 0, sk = 0;
             int dk = dur_ms_parse(items[k], &mk, &sk);
-            for (size_t j = 0; j < k && !dup; j++) {
+            for (size_t j2 = 0; j2 < n_kept && !dup; j2++) {
+                size_t j = kept[j2];
                 if (dk) {
                     /* xs:duration eq compares the value space
                      * (months, seconds) across the duration
@@ -612,7 +583,7 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
                     if (dur_ms_parse(items[j], &mj, &sj) &&
                         mj == mk && sj == sk)
                         dup = 1;
-                } else if (atom_seq_eq_n(items[k], items[j], 1)) {
+                } else if (leptris_atom_seq_eq_n(items[k], items[j], 1)) {
                     dup = 1;
                 }
             }
@@ -620,10 +591,12 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
                 /* duration survivors spell canonically
                  * (dayTimeDuration P0D -> "PT0S") */
                 char* push = dk ? dur_canonical(items[k]) : NULL;
+                kept[n_kept++] = k;
                 seq_push_str(out, push ? push : items[k]);
                 free(push);
             }
         }
+    free(kept);
     free_items(items, cnt);
     return out;
 }
