@@ -160,7 +160,13 @@ TEST(DomBasics, DocumentSetRootRejectsParentedElement) {
 TEST(DomBasics, RootDocMemoClearedWhenRootUnregisters) {
     LeptrisDocument doc = leptris_document_create();
     ASSERT_NE(doc, nullptr);
-    LeptrisElement e = leptris_element_create(doc, "r");
+    /* A >254-char name forces the pool-fallback create: no namebp
+     * backpointer, so the element is MAP-resolved. Lane 18 P2 made
+     * namebp-carrying elements resolve statelessly before the map
+     * (no memo to prime, nothing to invalidate); the unregistration
+     * contract below is about the map-primed memo. */
+    std::string long_name(300, 'x');
+    LeptrisElement e = leptris_element_create(doc, long_name.c_str());
     ASSERT_NE(e, nullptr);
     leptris_root_doc_register(e, doc);
     /* Prime the memo through a resolution. */
