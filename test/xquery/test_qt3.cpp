@@ -960,7 +960,10 @@ TEST(Qt3Subset, FnDistinctValues) {
      * numeric promotion in the dedup key. */
     run_test_set("fn/distinct-values.xml", {}, 95, {},
                  {
-                   "fn-distinct-values-1", /* for-tuples ($a at $p, $b) */
+                    /* parses now (for-tuples); blocked on
+                     * decimal-vs-double EXACT eq (decimal_lex in
+                     * the comparison operator — next lever) */
+                    "fn-distinct-values-1",
 
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",

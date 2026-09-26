@@ -1878,7 +1878,26 @@ static XPathASTNode* parse_if_expr(XPathParser* parser) {
 /* XPath 2.0+ `for $v1 in E1, $v2 in E2 ... return R` (XSLT 3.0).
  * Single-variable form first; the operator node carries [0]=the
  * binding (an XPATH_AST_ARGUMENT-shaped pair), [1]=return expr. */
+
+/* Free collected extra for-binding triples (parse_for_expr). */
+static void xq_free_extra_bindings(char** names, char** poss,
+                                   XPathASTNode** domains, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        free(names[i]);
+        free(poss[i]);
+        ast_node_free(domains[i]);
+    }
+    free(names);
+    free(poss);
+    free(domains);
+}
+
 static XPathASTNode* parse_for_expr(XPathParser* parser) {
+    /* Extra bindings (multi-binding clause); declared up front so
+     * every error path below can free them uniformly. */
+    char** x_names = NULL; char** x_poss = NULL;
+    XPathASTNode** x_domains = NULL;
+    size_t n_x = 0, cap_x = 0;
     advance_token(parser);   /* consume `for` */
 
     XPathToken* d = current_token(parser);
@@ -1934,12 +1953,133 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
                  "Expected 'in' in for expression");
         free(var_name);
         free(pos_name);
+        xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
         return NULL;
     }
     advance_token(parser);
 
     XPathASTNode* domain = parse_expr(parser);
     if (!domain) { free(var_name); free(pos_name); return NULL; }
+
+    /* XQuery multi-binding: `for $a in A, $b in B` — the binding
+     * comma belongs to the clause (each domain is an ExprSingle,
+     * so the parse above stops at the comma naturally). Extras
+     * collect here and fold as nested FORs at the tail:
+     * for $a in A, $b in B return R = for $a in A return
+     * for $b in B return R. */
+    while (current_token_is(parser, TOK_COMMA)) {
+        advance_token(parser);
+        XPathToken* xd = current_token(parser);
+        if (!xd || xd->type != TOK_DOLLAR) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected '$' variable after ',' in for");
+            free(var_name);
+            free(pos_name);
+            ast_node_free(domain);
+            return NULL;
+        }
+        advance_token(parser);
+        XPathToken* xvt = current_token(parser);
+        if (!xvt || (xvt->type != TOK_NCNAME && xvt->type != TOK_QNAME)) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected variable name in for");
+            free(var_name);
+            free(pos_name);
+            ast_node_free(domain);
+            return NULL;
+        }
+        char* xn = token_to_string(xvt);
+        if (!xn) {
+            free(var_name);
+            free(pos_name);
+            ast_node_free(domain);
+            return NULL;
+        }
+        advance_token(parser);
+        char* xp = NULL;
+        {
+            XPathToken* at = current_token(parser);
+            if (at && at->type == TOK_NCNAME && at->value_len == 2 &&
+                memcmp(at->value, "at", 2) == 0) {
+                advance_token(parser);
+                XPathToken* pd = current_token(parser);
+                if (!pd || pd->type != TOK_DOLLAR) {
+                    snprintf(parser->error_msg,
+                             sizeof(parser->error_msg),
+                             "Expected '$' position variable after at");
+                    free(xn);
+                    free(var_name);
+                    free(pos_name);
+                    ast_node_free(domain);
+                    return NULL;
+                }
+                advance_token(parser);
+                XPathToken* pt = current_token(parser);
+                if (!pt || (pt->type != TOK_NCNAME &&
+                            pt->type != TOK_QNAME)) {
+                    snprintf(parser->error_msg,
+                             sizeof(parser->error_msg),
+                             "Expected position variable name");
+                    free(xn);
+                    free(var_name);
+                    free(pos_name);
+                    ast_node_free(domain);
+                    return NULL;
+                }
+                xp = token_to_string(pt);
+                if (!xp) {
+                    free(xn);
+                    free(var_name);
+                    free(pos_name);
+                    ast_node_free(domain);
+                    return NULL;
+                }
+                advance_token(parser);
+            }
+        }
+        XPathToken* xit = current_token(parser);
+        if (!xit || xit->type != TOK_NCNAME || xit->value_len != 2 ||
+            memcmp(xit->value, "in", 2) != 0) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "Expected 'in' in for expression");
+            free(xp);
+            free(xn);
+            free(var_name);
+            free(pos_name);
+            ast_node_free(domain);
+            return NULL;
+        }
+        advance_token(parser);
+        XPathASTNode* xdom = parse_expr(parser);
+        if (!xdom) {
+            free(xp);
+            free(xn);
+            free(var_name);
+            free(pos_name);
+            ast_node_free(domain);
+            return NULL;
+        }
+        if (n_x == cap_x) {
+            size_t ncap = cap_x ? cap_x * 2 : 4;
+            char** nn = (char**)realloc(x_names, ncap * sizeof(char*));
+            char** np = (char**)realloc(x_poss, ncap * sizeof(char*));
+            XPathASTNode** nd = (XPathASTNode**)realloc(
+                x_domains, ncap * sizeof(XPathASTNode*));
+            if (!nn || !np || !nd) {
+                free(nn); free(np); free(nd);
+                free(xp);
+                free(xn);
+                free(var_name);
+                free(pos_name);
+                ast_node_free(domain);
+                xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
+                return NULL;
+            }
+            x_names = nn; x_poss = np; x_domains = nd; cap_x = ncap;
+        }
+        x_names[n_x] = xn; x_poss[n_x] = xp;
+        x_domains[n_x] = xdom; n_x++;
+    }
 
     /* XQuery `where` — desugars to if (W, R, ()). */
     XPathASTNode* where_ast = NULL;
@@ -1953,6 +2093,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
                 ast_node_free(domain);
                 free(var_name);
                 free(pos_name);
+                xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
                 return NULL;
             }
         }
@@ -1994,6 +2135,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
                 free(pos_name);
                 free(ob_keys);
                 free(ob_flags);
+                xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
                 return NULL;
             }
             advance_token(parser);
@@ -2008,6 +2150,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
                         ast_node_free(ob_keys[i]);
                     free(ob_keys);
                     free(ob_flags);
+                    xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
                     return NULL;
                 }
                 int desc = 0, eleast = 0;
@@ -2061,6 +2204,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
                         ast_node_free(ob_keys[i]);
                     free(gk ? gk : ob_keys);
                     free(gf ? gf : ob_flags);
+                    xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
                     return NULL;
                 }
                 ob_keys = gk;
@@ -2090,6 +2234,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         for (size_t i = 0; i < n_ob; i++) ast_node_free(ob_keys[i]);
         free(ob_keys);
         free(ob_flags);
+        xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
         return NULL;
     }
     advance_token(parser);
@@ -2103,6 +2248,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         for (size_t i = 0; i < n_ob; i++) ast_node_free(ob_keys[i]);
         free(ob_keys);
         free(ob_flags);
+        xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
         return NULL;
     }
 
@@ -2119,6 +2265,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
             ast_node_free(ret);
             free(var_name);
             free(pos_name);
+            xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
             return NULL;
         }
         guard->number_value = (double)XPATH_OP_IF;
@@ -2135,6 +2282,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
         ast_node_free(ret);
         free(var_name);
         free(pos_name);
+        xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
         return NULL;
     }
     node->number_value = (double)XPATH_OP_FOR;
@@ -2146,6 +2294,7 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
             ast_node_free(ret);
             free(var_name);
             free(pos_name);
+            xq_free_extra_bindings(x_names, x_poss, x_domains, n_x);
             return NULL;
         }
         memcpy(joined, var_name, vl);
@@ -2174,6 +2323,43 @@ static XPathASTNode* parse_for_expr(XPathParser* parser) {
     }
     free(ob_keys);
     free(ob_flags);
+    /* Extra bindings fold innermost-last: for $a in A, $b in B
+     * return R = FOR(a, [A, FOR(b, [B, R])]). */
+    for (size_t i = n_x; i > 0; i--) {
+        XPathASTNode* inner = ast_node_new(XPATH_AST_OPERATOR);
+        if (!inner) {
+            ast_node_free(node);
+            xq_free_extra_bindings(x_names, x_poss, x_domains, i - 1);
+            return NULL;
+        }
+        inner->number_value = (double)XPATH_OP_FOR;
+        if (x_poss[i - 1]) {
+            size_t vl = strlen(x_names[i - 1]);
+            size_t pl = strlen(x_poss[i - 1]);
+            char* joined = (char*)malloc(vl + pl + 2);
+            if (!joined) {
+                ast_node_free(inner);
+                ast_node_free(node);
+                xq_free_extra_bindings(x_names, x_poss, x_domains,
+                                       i - 1);
+                return NULL;
+            }
+            memcpy(joined, x_names[i - 1], vl);
+            joined[vl] = '\x01';
+            memcpy(joined + vl + 1, x_poss[i - 1], pl + 1);
+            inner->value = joined;
+        } else {
+            inner->value = x_names[i - 1];
+        }
+        ast_node_add_child(inner, x_domains[i - 1]);
+        ast_node_add_child(inner, node);
+        node = inner;
+        /* name/pos strings moved into the AST (first-binding
+         * pattern); domains moved too — nothing freed here. */
+    }
+    free(x_names);
+    free(x_poss);
+    free(x_domains);
     return node;
 }
 

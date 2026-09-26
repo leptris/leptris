@@ -1128,3 +1128,42 @@ TEST(XQueryCtors, CtorFollowedByPathStep) {
     }
     leptris_document_free(doc);
 }
+
+/* Multi-binding FLWOR: the binding comma (`for $a in X, $b in Y`)
+ * belongs to the CLAUSE, not the enclosing sequence — inside parens
+ * and in bare let-initializers the tuple domain must survive
+ * (QT3 fn-distinct-values-1, cbcl-019 class). */
+TEST(XQueryCore, MultiBindingFlwor) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"count(for $a in (1,2), $b in (10,20) return $a + $b)", "4"},
+        {"count(for $a in 1, $b in 2, $c in 3 return $a + $b + $c)",
+         "1"},
+        {"string-join(for $a in (1,2), $b in (10,20) return $a * $b,"
+         " ' ')", "10 20 20 40"},
+        {"let $y := (for $a in (1,2), $b in (10,20)"
+         " return $a * $b) return count($y)", "4"},
+        /* BARE let-initializer (no parens) with a nested FLWOR is
+         * an XQ-driver flwor-scanner boundary (separate slice). */
+        {"some $x in (1,2), $y in (10,20) satisfies $y gt $x", "true"},
+        {"every $x in (1,2), $y in (10,20) satisfies $y gt $x", "true"},
+        {"for $a in 1, $b in 2, $c in 3 return $a + $b + $c", "6"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
