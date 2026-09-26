@@ -7,6 +7,7 @@
 #include "evaluator_internal.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../dom/document_node.h"  /* document-node handle + ->doc */
 #include <math.h>
 #include <ctype.h>
 #include <string.h>
@@ -210,6 +211,60 @@ XPathNodeSet* xpath_map_fn_over(XPathContext* ctx, XPathNodeSet* ns,
             synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
         free(piece);
         if (tn) xpath_nodeset_add(out, tn);
+    }
+    ctx->context_node = saved_node;
+    ctx->context_position = saved_pos;
+    ctx->context_size = saved_size;
+    return out;
+}
+
+XPathNodeSet* xpath_map_items_over(XPathContext* ctx, XPathNodeSet* ns,
+                                   XPathASTNode* expr) {
+    XPathNodeSet* out = xpath_nodeset_new();
+    if (!out) return NULL;
+    out->owns_synthetic_text = 1;
+    size_t n = ns ? ns->count : 0;
+    struct leptris_element* saved_node = ctx->context_node;
+    size_t saved_pos = ctx->context_position;
+    size_t saved_size = ctx->context_size;
+    for (size_t i = 0; i < n; i++) {
+        ctx->context_node = (struct leptris_element*)ns->nodes[i];
+        ctx->context_position = i + 1;
+        ctx->context_size = n;
+        struct leptris_xpath_result* item =
+            evaluate_expr(ctx, expr);
+        if (!item) {
+            ctx->context_node = saved_node;
+            ctx->context_position = saved_pos;
+            ctx->context_size = saved_size;
+            xpath_nodeset_free(out);
+            return NULL;
+        }
+        if (item->type == XPATH_RESULT_NODESET &&
+            item->value.nodeset_value) {
+            /* Nodes stay nodes: the mapped sequence appends ALL
+             * members in order (simple-map semantics — the fn-step
+             * string map keeps its own mapper). */
+            XPathNodeSet* is = item->value.nodeset_value;
+            for (size_t m = 0; m < is->count; m++)
+                xpath_nodeset_add(out, is->nodes[m]);
+            /* Members the item result OWNS transfer to `out`:
+             * freeing the item disposes owned members, which
+             * would leave `out` referencing freed nodes. */
+            if (is->owns_synthetic_text) out->owns_synthetic_text = 1;
+            if (is->owns_attributes) out->owns_attributes = 1;
+            if (is->owns_namespaces) out->owns_namespaces = 1;
+            is->owns_synthetic_text = 0;
+            is->owns_attributes = 0;
+            is->owns_namespaces = 0;
+        } else {
+            char* piece = xpath_to_string(item);
+            XPathTextNode* tn =
+                synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
+            free(piece);
+            if (tn) xpath_nodeset_add(out, tn);
+        }
+        xpath_result_free(item);
     }
     ctx->context_node = saved_node;
     ctx->context_position = saved_pos;
@@ -1511,6 +1566,65 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             }
             xpath_result_free(v);
         }
+        /* Node materialization: single-root markup parses into a
+         * real document and the ctor yields its document NODE, so
+         * path steps resolve over the ctor result
+         * (fn-subsequence-mix-args-025). The document is ANCHORED
+         * in the context (the fn:doc pattern — owned_docs, freed
+         * at eval end); results borrow the node handle, so no
+         * ownership rides the nodesets. Multi-root / non-markup
+         * content keeps the string spelling — hoisting multiple
+         * roots needs document-child surgery (deferred). */
+        {
+            size_t blen = strlen(buf);
+            LeptrisStatus pst = LEPTRIS_OK;
+            LeptrisDocument pdoc =
+                blen ? leptris_parse_string(buf, blen, &pst) : NULL;
+            if (pdoc && leptris_document_root(pdoc)) {
+                extern LeptrisNode* leptris_document_get_node(
+                    struct leptris_document* doc);
+                LeptrisNode* dn = leptris_document_get_node(pdoc);
+                if (dn) {
+                    /* get_node's lazy creation registers the node
+                     * into the doc child chain, shadowing the
+                     * parsed root. Drop the self-link: the axis
+                     * falls back to the root element. */
+                    LeptrisDocumentNode* dnode =
+                        (LeptrisDocumentNode*)dn;
+                    if (dnode->doc->doc_children_head == (void*)dn)
+                        dnode->doc->doc_children_head = NULL;
+                    if (ctx->n_owned_docs == ctx->cap_owned_docs) {
+                        size_t ncap = ctx->cap_owned_docs
+                                          ? ctx->cap_owned_docs * 2 : 4;
+                        struct leptris_document** nd =
+                            (struct leptris_document**)realloc(
+                                ctx->owned_docs,
+                                ncap * sizeof(struct leptris_document*));
+                        if (!nd) {
+                            leptris_document_free(pdoc);
+                            free(buf);
+                            return NULL;
+                        }
+                        ctx->owned_docs = nd;
+                        ctx->cap_owned_docs = ncap;
+                    }
+                    ctx->owned_docs[ctx->n_owned_docs++] = pdoc;
+                    XPathNodeSet* ns = xpath_nodeset_new();
+                    struct leptris_xpath_result* docres =
+                        ns ? xpath_result_new(XPATH_RESULT_NODESET)
+                           : NULL;
+                    if (docres) {
+                        docres->value.nodeset_value = ns;
+                        xpath_nodeset_add(ns, dn);
+                        free(buf);
+                        return docres;
+                    }
+                    if (ns) xpath_nodeset_free(ns);
+                    return NULL;
+                }
+                leptris_document_free(pdoc);
+            }
+        }
         struct leptris_xpath_result* out =
             xpath_result_new(XPATH_RESULT_STRING);
         if (!out) { free(buf); return NULL; }
@@ -2047,8 +2161,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 xpath_nodeset_add(one, ctx->context_node);
             xpath_result_free(left);
             if (!one) return NULL;
-            XPathNodeSet* out = xpath_map_fn_over(ctx, one,
-                                                  ast->children[1]);
+            XPathNodeSet* out = xpath_map_items_over(ctx, one,
+                                                     ast->children[1]);
             xpath_nodeset_free(one);
             if (!out) return NULL;
             struct leptris_xpath_result* result =
@@ -2072,8 +2186,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 return NULL;
             }
             /* map FIRST — `left` owns the synthetic members */
-            XPathNodeSet* out = xpath_map_fn_over(ctx, owned,
-                                                  ast->children[1]);
+            XPathNodeSet* out = xpath_map_items_over(ctx, owned,
+                                                     ast->children[1]);
             xpath_nodeset_free(owned);
             xpath_result_free(left);
             if (!out) return NULL;

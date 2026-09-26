@@ -30,6 +30,11 @@ XPathTextNode* xpath_synth_text(const char* content, size_t len);
 XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
 XPathNodeSet* xpath_map_fn_over(XPathContext* ctx, XPathNodeSet* ns,
                                 XPathASTNode* fc);
+/* Item-preserving simple map (`!`): the RHS evaluates per member
+ * with the focus bound and ALL result members append in order —
+ * nodes stay nodes (unlike the fn-step string map). */
+XPathNodeSet* xpath_map_items_over(XPathContext* ctx, XPathNodeSet* ns,
+                                   XPathASTNode* expr);
 
 /* Fast inline nodeset_add (TODO 135). Internal-only; callers must
  * guarantee well-formed nodeset. See evaluator.c for the contract. */
