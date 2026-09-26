@@ -76,6 +76,11 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
 /* Marker-aware atomic eq over raw item strings (evaluator_operators.c). */
 int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal);
 
+/* Typed-scalar carrier conversion for predicates (evaluator_path.c):
+ * takes ownership; single numeric-marker carriers become NUMBER. */
+struct leptris_xpath_result* leptris_pred_scalar_convert(
+    struct leptris_xpath_result* r);
+
 /* xs:time lexical -> timezone-normalized seconds (cycle = mod 86400
  * for equality; linear = unbounded for ordering); either out may be
  * NULL. Returns 0 when s is not a time lexical. */

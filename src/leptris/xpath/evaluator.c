@@ -1004,7 +1004,8 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
                     ctx->context_position = 1;
                     ctx->context_size = 1;
                     struct leptris_xpath_result* pr =
-                        evaluate_expr(ctx, pred);
+                        leptris_pred_scalar_convert(
+                            evaluate_expr(ctx, pred));
                     ctx->context_node = old_node;
                     ctx->context_position = old_pos;
                     ctx->context_size = old_size;
