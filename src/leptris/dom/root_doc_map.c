@@ -414,6 +414,14 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
         if (!parent) break;
         cur = parent;
     }
+    /* Lane 18 P2: resolve the namebp backpointer BEFORE the locked
+     * map. Fast-path-created roots (mut_elem_carve) carry the doc
+     * statelessly in the name slot and never register, so the map
+     * below always misses for them — the append/builder loop paid
+     * the mutex on every call to reach the same answer. The namebp
+     * value is stamped at create and cannot go stale. */
+    if (cur->name && leptris_elem_has_namebp(cur))
+        return leptris_elem_namebp_doc(cur);
     /* Locked bucket walk with an UNDER-THE-LOCK generation
      * snapshot: a death that acquires the lock after we release
      * bumps the global generation past our snapshot, so the primed
