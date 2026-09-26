@@ -211,6 +211,21 @@ endif()
 leptris_add_benchmark(bench_serialize        serialization/bench_leptris_serialize.c)
 leptris_add_benchmark(bench_modify_leptris    modification/bench_leptris_modify.c)
 
+# Lane 18 (#1179): append + attr-parse vs pugixml (the lane bar is
+# <=1x on both shapes). Needs C++ (pugixml.hpp) and the pugixml
+# target; skipped when the dependency is absent.
+if(PUGIXML_AVAILABLE)
+    add_executable(bench_append_attr_pugixml
+                   modification/bench_append_attr_pugixml.cpp)
+    target_link_libraries(bench_append_attr_pugixml PRIVATE leptris::leptris)
+    if(PUGIXML_TARGET)
+        target_link_libraries(bench_append_attr_pugixml PRIVATE ${PUGIXML_TARGET})
+    else()
+        target_include_directories(bench_append_attr_pugixml PRIVATE ${PUGIXML_INCLUDE_DIR})
+        target_link_libraries(bench_append_attr_pugixml PRIVATE ${PUGIXML_LIBRARY})
+    endif()
+endif()
+
 # XSLT release scorecard (TODO.xslt-full/13, #682): the transform
 # fixtures the perf lane gates on — best-of protocol, never mean.
 leptris_add_benchmark(bench_xslt_dispatch     xslt/bench_dispatch.c utils.c)
