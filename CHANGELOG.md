@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.249] - 2026-09-26
+
+### Performance
+
+- classify implied-end pairs on tag ids (#1218) (html)
+
+
+
 ## [1.9.248] - 2026-09-26
 
 <!-- Edit this section with the actual release notes. -->
