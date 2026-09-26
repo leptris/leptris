@@ -1215,6 +1215,43 @@ TEST(XQueryCore, MixedNumericCompare) {
 }
 
 
+TEST(XQueryCore, VarPredicatePositional) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        /* a numeric variable is a POSITIONAL predicate: position()
+         * = $p — not EBV. The xq driver binds vars as sequence
+         * carriers, so the bare-var predicate took the EBV-true
+         * path and kept the whole sequence. */
+        {"let $p := 2 return count((10,20,30)[$p])", "1"},
+        {"let $p := 2 return (10,20,30)[$p]", "20"},
+        {"string-join(for $p in (2,3) return"
+         " string((10,20,30)[$p]), '|')", "20|30"},
+        {"let $p := 2.0 return count((10,20,30)[$p])", "1"},
+        {/* cbcl-distinct-values-007's shape: positional predicate
+         * on a singleton sequence */
+         "let $p := 1 return"
+         " count(xs:dayTimeDuration('PT0S')[$p])", "1"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
+
 TEST(XQueryCore, TimeTzEq) {
     LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
     ASSERT_NE(doc, nullptr);
