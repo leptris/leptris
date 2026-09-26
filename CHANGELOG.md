@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.254] - 2026-09-26
+
+### Added
+
+- timezone-normalized xs:time comparison and ordering (xquery)
+
+
+
 ## [1.9.253] - 2026-09-26
 
 ### Fixed
