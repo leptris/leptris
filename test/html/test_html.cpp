@@ -745,6 +745,22 @@ TEST(HtmlTwoModes, AdoptionAgencyCloneKeepsAttributes) {
               R"(<a href="h">1<i>2</i></a><i>3</i>)");
 }
 
+/* The adoption-agency stack splice (remove fe, insert the clone
+ * above the furthest block) keeps the open-stack's PARALLEL id
+ * array in sync: the implied-end and button-scope fence walks read
+ * it directly. A stale entry made a later <p> pop the button
+ * fence (its slot still reported the pre-splice p's id). */
+TEST(HtmlParse, AdoptionAgencyKeepsOpenIdsInSync) {
+    EXPECT_EQ(Html("<b><li><p><button></b></b><p>a"),
+              "<b/><li><b/><p><b/><button><b/><p>a</p></button></p>"
+              "</li>");
+    /* Single splice: the p id must not land on the button's slot
+     * (a stale id pops the button fence — p must nest INSIDE). */
+    EXPECT_EQ(Html("<b><li><p><button></b><p>a"),
+              "<b/><li><b/><p><b/><button><b/><p>a</p></button></p>"
+              "</li>");
+}
+
 /* #659: the HTML modes record the DOCTYPE (name + legacy PUBLIC/
  * SYSTEM ids) on the document like the XML path — the corpus
  * comparator reads it via leptris_document_internal_subset. */

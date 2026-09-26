@@ -2134,49 +2134,6 @@ static int h_is_heading(const char* n) {
     return n[0] == 'h' && n[1] >= '1' && n[1] <= '6' && n[2] == 0;
 }
 
-/* #659 WHATWG-only implied ends (12.2.6.4 "in body"): ruby
- * annotations (rb closes rb; rt/rp close rt/rb/rp — annotations
- * become siblings) plus rb/rt/rp/listing/plaintext closing an
- * open p. libxml2 keeps nesting; the html4 entry stays bare. */
-static int h_closes_ww(const char* open, const char* start) {
-    /* Heading starts pop a current heading (13.2.6.4.7 "in
-     * body": <h1>x<h2> -> siblings). */
-    if (h_is_heading(open) && h_is_heading(start)) return 1;
-    /* tests6:42: a <table> start inside a table closes the open
-     * table - the new table is a following SIBLING, not a child
-     * (<table><table> -> body > [table, table]). */
-    if (strcmp(open, "table") == 0 && strcmp(start, "table") == 0)
-        return 1;
-    /* webkit02:28-35: in select, an <hr> closes the open
-     * optgroup layers - hr is a select child, not optgroup
-     * content. */
-    if (strcmp(open, "optgroup") == 0 &&
-        (strcmp(start, "hr") == 0 || strcmp(start, "select") == 0))
-        return 1;
-    /* 13.2.6.4.12 "in ruby" / .6.4.7: every ruby-child start
-     * (rb/rt/rp/rtc) closes a CURRENT rb/rt/rp/rtc — annotation
-     * boxes are siblings (ruby.dat:3-18: <ruby>a<rb>b<rtc> ->
-     * ruby > [a, rb, rtc]). */
-    int is_ruby_start = strcmp(start, "rb") == 0 ||
-                        strcmp(start, "rt") == 0 ||
-                        strcmp(start, "rp") == 0 ||
-                        strcmp(start, "rtc") == 0;
-    if (is_ruby_start || strcmp(start, "listing") == 0 ||
-        strcmp(start, "plaintext") == 0) {
-        if (strcmp(open, "p") == 0) return 1;
-        if (!is_ruby_start) return 0;
-        if (strcmp(open, "rb") == 0 || strcmp(open, "rt") == 0 ||
-            strcmp(open, "rp") == 0)
-            return 1;
-        /* "in rtc" (13.2.6.4.13): rt/rp nest INSIDE an open rtc;
-         * rb/rtc close it (ruby.dat:12/14 vs :11/13). */
-        if (strcmp(open, "rtc") == 0)
-            return strcmp(start, "rb") == 0 ||
-                   strcmp(start, "rtc") == 0;
-    }
-    return 0;
-}
-
 /* WHATWG: starts that close an open p in button scope
  * (13.2.6.4.7 "in body" block set + h/pre/form/li/dd/dt/plaintext/
  * hr/xmp). */
@@ -2185,66 +2142,32 @@ typedef struct {
     uint8_t len;
     uint8_t special;   /* WHATWG 13.2.4 special set */
     uint8_t no_fmt;    /* never reconstructed (formatting) */
-    uint8_t closes;    /* bit0: h_p_closes implied-end set; bit1:
-                        * k_p_closers — replaced the per-close-tag
-                        * strcmp scans (#1218 profile). */
+    uint8_t closes;    /* bit0: button-scope p-fence set (the
+                        * h_p_closes walk gate); bit1: k_p_closers —
+                        * replaced the per-close-tag strcmp scans
+                        * (#1218 profile). */
     uint8_t fo_void;   /* bit0: void element; bit1: start tag
                         * clears frameset-ok (13.2.5.4.4) —
                         * replaced the k_void/k_fo_clear strcmp
                         * scans (#1218 profile). */
+    uint8_t open_grp;  /* implied-end group when OPEN: bit0 p,
+                        * bit1 li, bit2 dd|dt, bit3 td|th, bit4 tr,
+                        * bit5 thead|tbody|tfoot, bit6 option,
+                        * bit7 optgroup — h_closes_ids reads it
+                        * straight off the open-stack ids. */
+    uint8_t closes_grp;/* groups this START tag closes in the
+                        * generic implied-end walk; bit0 is the
+                        * k_p_closers set (== closes bit1), bit5
+                        * excludes thead (a <thead> start does not
+                        * close an open section). */
 } HTagInfo;
 
 static const HTagInfo* h_tag_lookup(const char* n);
 
-static const HTagInfo* h_tag_lookup(const char* n);
-
-static int h_p_closes(const char* start) {
-    /* Classifier hit (round: #1218 profile — the 40-name strcmp
-     * scan was the top WHATWG self-time on table-heavy pages).
-     * Sets preserved bit-for-bit from the old k[] list. */
-    const HTagInfo* t = h_tag_lookup(start);
-    return t && (t->closes & 1);
-}
-
 /* Implied-end sets: a start tag in `closes` closes any open
- * element named `name` (HTML4 §7.5.4 / table model). */
-/* Does starting `start` close an open element named `open`? */
-static int h_closes(const char* open, const char* start) {
-    if (strcmp(open, "p") == 0) {
-        const HTagInfo* t = h_tag_lookup(start);
-        if (t && (t->closes & 2)) return 1;
-    }
-    if (strcmp(open, "li") == 0 && strcmp(start, "li") == 0)
-        return 1;
-    if ((strcmp(open, "dt") == 0 || strcmp(open, "dd") == 0) &&
-        (strcmp(start, "dt") == 0 || strcmp(start, "dd") == 0))
-        return 1;
-    if ((strcmp(open, "td") == 0 || strcmp(open, "th") == 0) &&
-        (strcmp(start, "td") == 0 || strcmp(start, "th") == 0 ||
-         strcmp(start, "tr") == 0 || strcmp(start, "tbody") == 0 ||
-         strcmp(start, "thead") == 0 || strcmp(start, "tfoot") == 0 ||
-         strcmp(start, "table") == 0))
-        return 1;
-    if (strcmp(open, "tr") == 0 &&
-        (strcmp(start, "tr") == 0 || strcmp(start, "tbody") == 0 ||
-         strcmp(start, "thead") == 0 || strcmp(start, "tfoot") == 0 ||
-         strcmp(start, "table") == 0))
-        return 1;
-    if ((strcmp(open, "thead") == 0 || strcmp(open, "tbody") == 0 ||
-         strcmp(open, "tfoot") == 0) &&
-        (strcmp(start, "tbody") == 0 || strcmp(start, "tfoot") == 0 ||
-         strcmp(start, "table") == 0))
-        return 1;
-    if (strcmp(open, "option") == 0 &&
-        (strcmp(start, "option") == 0 || strcmp(start, "optgroup") == 0 ||
-         strcmp(start, "select") == 0 || strcmp(start, "hr") == 0))
-        return 1;
-    if (strcmp(open, "optgroup") == 0 && strcmp(start, "optgroup") == 0)
-        return 1;
-    /* Same-name non-container nesting is never implied except the
-     * cases above — a <div><div> nests. */
-    return 0;
-}
+ * element named `name` (HTML4 §7.5.4 / table model). The pair
+ * sets live in h_tag_infos' open_grp/closes_grp columns now —
+ * h_closes_ids evaluates them from the open-stack ids. */
 
 /* ---- HTML entity decode: named table + numeric, lenient ---- */
 /* #848: the old lookup was a linear scan with a strlen per entry
@@ -3084,97 +3007,103 @@ static int h_is_formatting(const char* n) {
  * no-formatting sets. */
 
 static const HTagInfo h_tag_infos[] = {
-    {"address", 7, 1, 1, 3, 0},
-    {"applet", 6, 1, 0, 0, 2},
-    {"area", 4, 1, 0, 0, 3},
-    {"article", 7, 1, 1, 3, 0},
-    {"aside", 5, 1, 1, 3, 0},
-    {"base", 4, 1, 1, 0, 1},
-    {"basefont", 8, 1, 1, 0, 1},
-    {"bgsound", 7, 1, 1, 0, 1},
-    {"blockquote", 10, 1, 1, 3, 0},
-    {"body", 4, 1, 1, 0, 0},
-    {"br", 2, 1, 0, 0, 3},
-    {"button", 6, 1, 0, 0, 2},
-    {"caption", 7, 1, 1, 0, 0},
-    {"center", 6, 1, 1, 1, 0},
-    {"col", 3, 1, 1, 0, 1},
-    {"colgroup", 8, 1, 1, 0, 0},
-    {"dd", 2, 1, 1, 1, 2},
-    {"details", 7, 1, 1, 3, 0},
-    {"dialog", 6, 1, 1, 3, 0},
-    {"dir", 3, 1, 1, 3, 0},
-    {"div", 3, 1, 1, 3, 0},
-    {"dl", 2, 1, 1, 3, 0},
-    {"dt", 2, 1, 1, 1, 2},
-    {"embed", 5, 1, 0, 0, 3},
-    {"fieldset", 8, 1, 1, 3, 0},
-    {"figcaption", 10, 1, 1, 3, 0},
-    {"figure", 6, 1, 1, 3, 0},
-    {"footer", 6, 1, 1, 3, 0},
-    {"form", 4, 1, 1, 3, 0},
-    {"frame", 5, 1, 1, 0, 1},
-    {"frameset", 8, 1, 1, 0, 0},
-    {"h1", 2, 1, 1, 3, 0},
-    {"h2", 2, 1, 1, 3, 0},
-    {"h3", 2, 1, 1, 3, 0},
-    {"h4", 2, 1, 1, 3, 0},
-    {"h5", 2, 1, 1, 3, 0},
-    {"h6", 2, 1, 1, 3, 0},
-    {"head", 4, 1, 1, 0, 0},
-    {"header", 6, 1, 1, 3, 0},
-    {"hgroup", 6, 1, 1, 3, 0},
-    {"hr", 2, 1, 1, 3, 3},
-    {"html", 4, 1, 1, 0, 0},
-    {"iframe", 6, 1, 0, 0, 2},
-    {"img", 3, 1, 0, 0, 3},
-    {"input", 5, 1, 0, 0, 3},
-    {"keygen", 6, 1, 0, 0, 3},
-    {"li", 2, 1, 1, 3, 2},
-    {"link", 4, 1, 1, 0, 1},
-    {"listing", 7, 1, 1, 1, 2},
-    {"main", 4, 1, 1, 3, 0},
-    {"marquee", 7, 1, 0, 0, 2},
-    {"menu", 4, 1, 1, 3, 0},
-    {"meta", 4, 1, 1, 0, 1},
-    {"nav", 3, 1, 1, 3, 0},
-    {"noembed", 7, 1, 0, 0, 2},
-    {"noframes", 8, 1, 1, 0, 2},
-    {"noscript", 8, 1, 0, 0, 0},
-    {"object", 6, 1, 0, 0, 2},
-    {"ol", 2, 1, 1, 3, 0},
-    {"p", 1, 1, 1, 3, 0},
-    {"param", 5, 1, 0, 0, 1},
-    {"plaintext", 9, 1, 1, 1, 2},
-    {"pre", 3, 1, 1, 3, 2},
-    {"script", 6, 1, 1, 0, 0},
-    {"search", 6, 1, 1, 1, 0},
-    {"section", 7, 1, 1, 3, 0},
-    {"select", 6, 1, 0, 0, 2},
-    {"source", 6, 1, 0, 0, 1},
-    {"style", 5, 1, 1, 0, 0},
-    {"summary", 7, 1, 1, 1, 0},
-    {"table", 5, 1, 1, 2, 2},
-    {"tbody", 5, 1, 1, 0, 0},
-    {"td", 2, 1, 1, 0, 0},
-    {"template", 8, 1, 1, 0, 0},
-    {"textarea", 8, 1, 1, 0, 2},
-    {"tfoot", 5, 1, 1, 0, 0},
-    {"th", 2, 1, 1, 0, 0},
-    {"thead", 5, 1, 1, 0, 0},
-    {"title", 5, 1, 1, 0, 0},
-    {"tr", 2, 1, 1, 0, 0},
-    {"track", 5, 1, 0, 0, 1},
-    {"ul", 2, 1, 1, 3, 0},
-    {"wbr", 3, 1, 0, 0, 3},
-    {"xmp", 3, 1, 0, 1, 2},
+    {"address", 7, 1, 1, 3, 0, 0, 0x01},
+    {"applet", 6, 1, 0, 0, 2, 0, 0},
+    {"area", 4, 1, 0, 0, 3, 0, 0},
+    {"article", 7, 1, 1, 3, 0, 0, 0x01},
+    {"aside", 5, 1, 1, 3, 0, 0, 0x01},
+    {"base", 4, 1, 1, 0, 1, 0, 0},
+    {"basefont", 8, 1, 1, 0, 1, 0, 0},
+    {"bgsound", 7, 1, 1, 0, 1, 0, 0},
+    {"blockquote", 10, 1, 1, 3, 0, 0, 0x01},
+    {"body", 4, 1, 1, 0, 0, 0, 0},
+    {"br", 2, 1, 0, 0, 3, 0, 0},
+    {"button", 6, 1, 0, 0, 2, 0, 0},
+    {"caption", 7, 1, 1, 0, 0, 0, 0},
+    {"center", 6, 1, 1, 1, 0, 0, 0x01},
+    {"col", 3, 1, 1, 0, 1, 0, 0},
+    {"colgroup", 8, 1, 1, 0, 0, 0, 0},
+    {"dd", 2, 1, 1, 1, 2, 0x04, 0x05},
+    {"details", 7, 1, 1, 3, 0, 0, 0x01},
+    {"dialog", 6, 1, 1, 3, 0, 0, 0x01},
+    {"dir", 3, 1, 1, 3, 0, 0, 0x01},
+    {"div", 3, 1, 1, 3, 0, 0, 0x01},
+    {"dl", 2, 1, 1, 3, 0, 0, 0x01},
+    {"dt", 2, 1, 1, 1, 2, 0x04, 0x05},
+    {"embed", 5, 1, 0, 0, 3, 0, 0},
+    {"fieldset", 8, 1, 1, 3, 0, 0, 0x01},
+    {"figcaption", 10, 1, 1, 3, 0, 0, 0x01},
+    {"figure", 6, 1, 1, 3, 0, 0, 0x01},
+    {"footer", 6, 1, 1, 3, 0, 0, 0x01},
+    {"form", 4, 1, 1, 3, 0, 0, 0x01},
+    {"frame", 5, 1, 1, 0, 1, 0, 0},
+    {"frameset", 8, 1, 1, 0, 0, 0, 0},
+    {"h1", 2, 1, 1, 3, 0, 0, 0x01},
+    {"h2", 2, 1, 1, 3, 0, 0, 0x01},
+    {"h3", 2, 1, 1, 3, 0, 0, 0x01},
+    {"h4", 2, 1, 1, 3, 0, 0, 0x01},
+    {"h5", 2, 1, 1, 3, 0, 0, 0x01},
+    {"h6", 2, 1, 1, 3, 0, 0, 0x01},
+    {"head", 4, 1, 1, 0, 0, 0, 0},
+    {"header", 6, 1, 1, 3, 0, 0, 0x01},
+    {"hgroup", 6, 1, 1, 3, 0, 0, 0x01},
+    {"hr", 2, 1, 1, 3, 3, 0, 0x41},
+    {"html", 4, 1, 1, 0, 0, 0, 0},
+    {"iframe", 6, 1, 0, 0, 2, 0, 0},
+    {"img", 3, 1, 0, 0, 3, 0, 0},
+    {"input", 5, 1, 0, 0, 3, 0, 0},
+    {"keygen", 6, 1, 0, 0, 3, 0, 0},
+    {"li", 2, 1, 1, 3, 2, 0x02, 0x03},
+    {"link", 4, 1, 1, 0, 1, 0, 0},
+    {"listing", 7, 1, 1, 1, 2, 0, 0x01},
+    {"main", 4, 1, 1, 3, 0, 0, 0x01},
+    {"marquee", 7, 1, 0, 0, 2, 0, 0},
+    {"menu", 4, 1, 1, 3, 0, 0, 0x01},
+    {"meta", 4, 1, 1, 0, 1, 0, 0},
+    {"nav", 3, 1, 1, 3, 0, 0, 0x01},
+    {"noembed", 7, 1, 0, 0, 2, 0, 0},
+    {"noframes", 8, 1, 1, 0, 2, 0, 0},
+    {"noscript", 8, 1, 0, 0, 0, 0, 0},
+    {"object", 6, 1, 0, 0, 2, 0, 0},
+    {"ol", 2, 1, 1, 3, 0, 0, 0x01},
+    {"option", 6, 0, 0, 0, 0, 0x40, 0x40},
+    {"optgroup", 8, 0, 0, 0, 0, 0x80, 0xC0},
+    {"p", 1, 1, 1, 3, 0, 0x01, 0x01},
+    {"param", 5, 1, 0, 0, 1, 0, 0},
+    {"plaintext", 9, 1, 1, 1, 2, 0, 0x01},
+    {"pre", 3, 1, 1, 3, 2, 0, 0x01},
+    {"rb", 2, 0, 0, 0, 0, 0, 0},
+    {"rp", 2, 0, 0, 0, 0, 0, 0},
+    {"rt", 2, 0, 0, 0, 0, 0, 0},
+    {"rtc", 3, 0, 0, 0, 0, 0, 0},
+    {"script", 6, 1, 1, 0, 0, 0, 0},
+    {"search", 6, 1, 1, 1, 0, 0, 0x01},
+    {"section", 7, 1, 1, 3, 0, 0, 0x01},
+    {"select", 6, 1, 0, 0, 2, 0, 0x40},
+    {"source", 6, 1, 0, 0, 1, 0, 0},
+    {"style", 5, 1, 1, 0, 0, 0, 0},
+    {"summary", 7, 1, 1, 1, 0, 0, 0x01},
+    {"table", 5, 1, 1, 2, 2, 0, 0x39},
+    {"tbody", 5, 1, 1, 0, 0, 0x20, 0x38},
+    {"td", 2, 1, 1, 0, 0, 0x08, 0x08},
+    {"template", 8, 1, 1, 0, 0, 0, 0},
+    {"textarea", 8, 1, 1, 0, 2, 0, 0},
+    {"tfoot", 5, 1, 1, 0, 0, 0x20, 0x38},
+    {"th", 2, 1, 1, 0, 0, 0x08, 0x08},
+    {"thead", 5, 1, 1, 0, 0, 0x20, 0x18},
+    {"title", 5, 1, 1, 0, 0, 0, 0},
+    {"tr", 2, 1, 1, 0, 0, 0x10, 0x18},
+    {"track", 5, 1, 0, 0, 1, 0, 0},
+    {"ul", 2, 1, 1, 3, 0, 0, 0x01},
+    {"wbr", 3, 1, 0, 0, 3, 0, 0},
+    {"xmp", 3, 1, 0, 1, 2, 0, 0},
 };
 
 /* bucket[first_char] = start index; bucket[first_char+1] = end */
 static const uint8_t h_tag_bucket[27] = {
     0, 5, 12, 16, 23, 24, 31, 31, 42,
-    45, 45, 46, 49, 53, 57, 59, 63, 63,
-    63, 70, 81, 82, 82, 83, 84, 84, 84,
+    45, 45, 46, 49, 53, 57, 61, 65, 65,
+    69, 76, 87, 88, 88, 89, 90, 90, 90,
 };
 
 /* Resolve a (lowercased) tag name's flags; NULL when unknown.
@@ -3212,6 +3141,19 @@ static uint8_t h_tag_id(const char* n) {
 static uint8_t h_id_select, h_id_template, h_id_table, h_id_tbody,
     h_id_thead, h_id_tfoot, h_id_tr;
 
+/* Per-id sets for the implied-end / fence walks (#1218 round 2:
+ * the walks used to fetch + strcmp the open element's name per
+ * stack slot). UNKNOWN ids never match — an unknown tag neither
+ * participates in implied ends nor fences a scope walk, matching
+ * the string walks they replaced. */
+static uint8_t h_id_p, h_id_li, h_id_dd, h_id_dt, h_id_ol, h_id_ul,
+    h_id_option, h_id_optgroup, h_id_hr, h_id_td, h_id_th,
+    h_id_frameset, h_id_button, h_id_applet, h_id_caption,
+    h_id_colgroup, h_id_marquee, h_id_object, h_id_html, h_id_rb,
+    h_id_rt, h_id_rp, h_id_rtc, h_id_listing, h_id_plaintext;
+static uint8_t h_heading_lut[256], h_ruby_lut[256], h_p_fence_lut[256],
+    h_li_fence_lut[256], h_dd_fence_lut[256];
+
 static void h_id_luts_init(void) {
     static int done;
     if (done) return;
@@ -3223,6 +3165,106 @@ static void h_id_luts_init(void) {
     h_id_thead = h_tag_id("thead");
     h_id_tfoot = h_tag_id("tfoot");
     h_id_tr = h_tag_id("tr");
+    h_id_p = h_tag_id("p");
+    h_id_li = h_tag_id("li");
+    h_id_dd = h_tag_id("dd");
+    h_id_dt = h_tag_id("dt");
+    h_id_ol = h_tag_id("ol");
+    h_id_ul = h_tag_id("ul");
+    h_id_option = h_tag_id("option");
+    h_id_optgroup = h_tag_id("optgroup");
+    h_id_hr = h_tag_id("hr");
+    h_id_td = h_tag_id("td");
+    h_id_th = h_tag_id("th");
+    h_id_frameset = h_tag_id("frameset");
+    h_id_button = h_tag_id("button");
+    h_id_applet = h_tag_id("applet");
+    h_id_caption = h_tag_id("caption");
+    h_id_colgroup = h_tag_id("colgroup");
+    h_id_marquee = h_tag_id("marquee");
+    h_id_object = h_tag_id("object");
+    h_id_html = h_tag_id("html");
+    h_id_rb = h_tag_id("rb");
+    h_id_rt = h_tag_id("rt");
+    h_id_rp = h_tag_id("rp");
+    h_id_rtc = h_tag_id("rtc");
+    h_id_listing = h_tag_id("listing");
+    h_id_plaintext = h_tag_id("plaintext");
+    for (int i = 0; i < (int)(sizeof(h_tag_infos) /
+                              sizeof(h_tag_infos[0])); i++) {
+        uint8_t id = (uint8_t)i;
+        const char* n = h_tag_infos[i].name;
+        if (n[0] == 'h' && n[1] >= '1' && n[1] <= '6' && n[2] == 0)
+            h_heading_lut[id] = 1;
+        if (id == h_id_rb || id == h_id_rt || id == h_id_rp ||
+            id == h_id_rtc)
+            h_ruby_lut[id] = 1;
+    }
+    h_p_fence_lut[h_id_button] = 1;
+    h_p_fence_lut[h_id_applet] = 1;
+    h_p_fence_lut[h_id_caption] = 1;
+    h_p_fence_lut[h_id_table] = 1;
+    h_p_fence_lut[h_id_td] = 1;
+    h_p_fence_lut[h_id_th] = 1;
+    h_p_fence_lut[h_id_marquee] = 1;
+    h_p_fence_lut[h_id_object] = 1;
+    h_p_fence_lut[h_id_select] = 1;
+    h_p_fence_lut[h_id_template] = 1;
+    h_li_fence_lut[h_id_applet] = 1;
+    h_li_fence_lut[h_id_caption] = 1;
+    h_li_fence_lut[h_id_table] = 1;
+    h_li_fence_lut[h_id_td] = 1;
+    h_li_fence_lut[h_id_th] = 1;
+    h_li_fence_lut[h_id_marquee] = 1;
+    h_li_fence_lut[h_id_object] = 1;
+    h_li_fence_lut[h_id_template] = 1;
+    h_li_fence_lut[h_id_html] = 1;
+    h_dd_fence_lut[h_id_applet] = 1;
+    h_dd_fence_lut[h_id_caption] = 1;
+    h_dd_fence_lut[h_id_table] = 1;
+    h_dd_fence_lut[h_id_td] = 1;
+    h_dd_fence_lut[h_id_th] = 1;
+    h_dd_fence_lut[h_id_marquee] = 1;
+    h_dd_fence_lut[h_id_object] = 1;
+    h_dd_fence_lut[h_id_template] = 1;
+    h_dd_fence_lut[h_id_button] = 1;
+    h_dd_fence_lut[h_id_select] = 1;
+    h_dd_fence_lut[h_id_html] = 1;
+}
+
+/* Implied-end decision on ids: does starting `start_id` close an
+ * open element with id `open_id`? Bit-for-bit replacement of the
+ * h_closes strcmp chains — the open_grp/closes_grp columns of
+ * h_tag_infos encode the same pair sets. */
+static int h_closes_ids(uint8_t open_id, uint8_t start_id) {
+    if (open_id == H_ID_UNKNOWN || start_id == H_ID_UNKNOWN)
+        return 0;
+    uint8_t g = h_tag_infos[open_id].open_grp;
+    return g && (h_tag_infos[start_id].closes_grp & g);
+}
+
+/* h_closes_ww on ids (same pair sets as the string version:
+ * headings, table/table, optgroup hr|select, ruby family). */
+static int h_closes_ww_ids(uint8_t open_id, uint8_t start_id) {
+    if (open_id == H_ID_UNKNOWN || start_id == H_ID_UNKNOWN)
+        return 0;
+    if (h_heading_lut[open_id] && h_heading_lut[start_id]) return 1;
+    if (open_id == h_id_table && start_id == h_id_table) return 1;
+    if (open_id == h_id_optgroup &&
+        (start_id == h_id_hr || start_id == h_id_select))
+        return 1;
+    int is_ruby_start = h_ruby_lut[start_id];
+    if (is_ruby_start || start_id == h_id_listing ||
+        start_id == h_id_plaintext) {
+        if (open_id == h_id_p) return 1;
+        if (!is_ruby_start) return 0;
+        if (open_id == h_id_rb || open_id == h_id_rt ||
+            open_id == h_id_rp)
+            return 1;
+        if (open_id == h_id_rtc)
+            return start_id == h_id_rb || start_id == h_id_rtc;
+    }
+    return 0;
 }
 
 static int h_is_void(const char* name) {
@@ -3826,8 +3868,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
      * noframes content is raw text, never reaching here. */
     if (b->whatwg && b->depth > 0 &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
-        h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
-                  "frameset")) {
+        b->open_id[b->depth - 1] == h_id_frameset) {
         const char* t = leptris_text_node_get_content(n);
         int ws = 1;
         if (t)
@@ -4163,48 +4204,6 @@ static LeptrisElement h_open_foreign(HBuilder* b, const char* name,
         b->open_tail[b->depth] = NULL;
         b->open_ns[b->depth] = (uint8_t)ns;
         b->open_id[b->depth] = h_tag_id(store);
-        b->depth++;
-    }
-    return e;
-}
-
-/* Hot-path variant (#1218): the start-tag section resolves the
- * HTagInfo once per token and passes the id down. */
-static LeptrisElement h_open_element_id(HBuilder* b, const char* name,
-                                        uint8_t tid) {
-    LeptrisStringView nv = leptris_sv_from_cstr(name);
-    LeptrisElement e = leptris_element_create_with_view(nv, b->pool);
-    if (!e) return NULL;
-    /* HTML keeps qualified names literally (tests14:1/3): the DOM
-     * QName split nulled the colon in place (xyz:abc -> prefix xyz
-     * + local abc). Re-point at a fresh full copy; the serializer
-     * then joins nothing (prefix cleared) and element_name reports
-     * the whole token. */
-    if (strchr(name, ':')) {
-        LeptrisStringView fv = leptris_sv_from_cstr(name);
-        char* full = leptris_sv_to_cstr_pooled(&fv, b->pool);
-        if (full) {
-            e->name = full;
-            e->name_len =
-                (fv.length > 254) ? 0xFF : (uint8_t)fv.length;
-            e->name_hash = leptris_name_hash_compute(full);
-            e->header.flags &=
-                (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
-            leptris_elem_set_prefix(e, NULL, b->pool);
-        }
-    }
-    /* Detached pre-registration: children append through the doc-
-     * resolved internal; the root-map entry makes that work before
-     * the element is attached (round-20 create contract). */
-    leptris_root_doc_register(e, b->doc);
-    b->left_initial = 1;
-    h_append(b, (LeptrisNodeRef)e);
-    if (b->depth == 0 && !b->root) b->root = e;
-    if (b->depth < 256) {
-        b->open[b->depth] = e;
-        b->open_tail[b->depth] = NULL;
-        b->open_ns[b->depth] = H_NS_HTML;
-        b->open_id[b->depth] = tid;
         b->depth++;
     }
     return e;
@@ -4691,10 +4690,18 @@ static int h_afe_end(HBuilder* b, const char* subject) {
             b->afe_n++;
         }
         int ri = h_stack_find(b, fe);
+        /* The open stack's PARALLEL arrays must move together: a
+         * memmove that skips open_id desyncs the implied-end /
+         * fence walks (which read ids directly). ne is a clone
+         * of fe: same name, same id. */
+        uint8_t fe_id = H_ID_UNKNOWN;
         if (ri >= 0) {
+            fe_id = b->open_id[ri];
             memmove(&b->open[ri], &b->open[ri + 1],
                     (b->depth - ri - 1) * sizeof(b->open[0]));
             memmove(&b->open_ns[ri], &b->open_ns[ri + 1],
+                    (b->depth - ri - 1));
+            memmove(&b->open_id[ri], &b->open_id[ri + 1],
                     (b->depth - ri - 1));
             b->depth--;
         }
@@ -4707,8 +4714,12 @@ static int h_afe_end(HBuilder* b, const char* subject) {
             memmove(&b->open_ns[fbpos + 2],
                     &b->open_ns[fbpos + 1],
                     (b->depth - fbpos - 1));
+            memmove(&b->open_id[fbpos + 2],
+                    &b->open_id[fbpos + 1],
+                    (b->depth - fbpos - 1));
             b->open[fbpos + 1] = ne;
             b->open_ns[fbpos + 1] = H_NS_HTML;
+            b->open_id[fbpos + 1] = fe_id;
             b->depth++;
         }
     }
@@ -7228,24 +7239,16 @@ static LeptrisDocument html_parse_shared(
              * in default scope — sibling definition items even
              * with content in between (13.2.6.4.7, tests19:30:
              * <dd><optgroup><dd> -> dd>[optgroup] + sibling dd). */
-            if (b.whatwg && (strcmp(name, "dd") == 0 ||
-                             strcmp(name, "dt") == 0)) {
+            if (b.whatwg &&
+                (tid == h_id_dd || tid == h_id_dt)) {
                 for (size_t d = b.depth; d > 0; d--) {
-                    const char* on =
-                        leptris_element_name(b.open[d - 1]);
-                    if (!on) break;
-                    if (strcmp(on, "dd") == 0 || strcmp(on, "dt") == 0) {
+                    uint8_t oid = b.open_id[d - 1];
+                    if (oid == h_id_dd || oid == h_id_dt) {
                         b.depth = d - 1;
                         break;
                     }
-                    if (h_ieq_raw(on, "applet") ||
-                        h_ieq_raw(on, "caption") ||
-                        h_ieq_raw(on, "table") || h_ieq_raw(on, "td") ||
-                        h_ieq_raw(on, "th") || h_ieq_raw(on, "marquee") ||
-                        h_ieq_raw(on, "object") ||
-                        h_ieq_raw(on, "template") ||
-                        h_ieq_raw(on, "button") ||
-                        h_ieq_raw(on, "select") || h_ieq_raw(on, "html"))
+                    if (h_dd_fence_lut[oid] ||
+                        h_is_int_point(&b, d - 1))
                         break;
                 }
             }
@@ -7255,32 +7258,20 @@ static LeptrisDocument html_parse_shared(
              * scope boundaries + ol/ul do), so <li><div><li>
              * restarts the li (tests1:103). */
             if (b.whatwg_adopt &&
-                (strcmp(name, "li") == 0 || strcmp(name, "dd") == 0 ||
-                 strcmp(name, "dt") == 0)) {
+                (tid == h_id_li || tid == h_id_dd ||
+                 tid == h_id_dt)) {
                 for (size_t d = b.depth; d > 0; d--) {
-                    const char* on =
-                        leptris_element_name(b.open[d - 1]);
-                    if (!on) break;
-                    if ((strcmp(name, "li") == 0 &&
-                         strcmp(on, "li") == 0) ||
-                        (strcmp(name, "li") != 0 &&
-                         (strcmp(on, "dd") == 0 ||
-                          strcmp(on, "dt") == 0))) {
+                    uint8_t oid = b.open_id[d - 1];
+                    if ((tid == h_id_li && oid == h_id_li) ||
+                        (tid != h_id_li &&
+                         (oid == h_id_dd || oid == h_id_dt))) {
                         b.depth = d - 1;
                         break;
                     }
-                    if (strcmp(name, "li") == 0 &&
-                        (strcmp(on, "ol") == 0 || strcmp(on, "ul") == 0))
+                    if (tid == h_id_li &&
+                        (oid == h_id_ol || oid == h_id_ul))
                         break;
-                    if (h_ieq_raw(on, "applet") ||
-                        h_ieq_raw(on, "caption") ||
-                        h_ieq_raw(on, "table") ||
-                        h_ieq_raw(on, "td") ||
-                        h_ieq_raw(on, "th") ||
-                        h_ieq_raw(on, "marquee") ||
-                        h_ieq_raw(on, "object") ||
-                        h_ieq_raw(on, "template") ||
-                        h_ieq_raw(on, "html") ||
+                    if (h_li_fence_lut[oid] ||
                         h_is_int_point(&b, d - 1))
                         break;
                 }
@@ -7289,54 +7280,43 @@ static LeptrisDocument html_parse_shared(
              * SCOPE — formatting elements do not fence the scan,
              * they stay dangling in the active formatting list
              * and reconstruct inside the new block. */
-            if (b.whatwg_adopt && h_p_closes(name)) {
+            if (b.whatwg_adopt && tid != H_ID_UNKNOWN &&
+                (h_tag_infos[tid].closes & 1)) {
                 for (size_t d = b.depth; d > 0; d--) {
-                    const char* on =
-                        leptris_element_name(b.open[d - 1]);
-                    if (!on) break;
-                    if (strcmp(on, "p") == 0) {
+                    uint8_t oid = b.open_id[d - 1];
+                    if (oid == h_id_p) {
                         b.depth = d - 1;
                         break;
                     }
-                    if (h_ieq_raw(on, "button") ||
-                        h_ieq_raw(on, "applet") ||
-                        h_ieq_raw(on, "caption") ||
-                        h_ieq_raw(on, "table") ||
-                        h_ieq_raw(on, "td") ||
-                        h_ieq_raw(on, "th") ||
-                        h_ieq_raw(on, "marquee") ||
-                        h_ieq_raw(on, "object") ||
-                        h_ieq_raw(on, "select") ||
-                        h_ieq_raw(on, "template") ||
+                    if (h_p_fence_lut[oid] ||
                         h_is_int_point(&b, d - 1))
                         break;
                 }
             }
-            const char* tmpl_last_popped = NULL;
+            uint8_t tmpl_last_popped = H_ID_UNKNOWN;
             while (b.depth > 0) {
-                const char* on = leptris_element_name(b.open[b.depth - 1]);
-                if (on &&
-                    ((h_closes(on, name) &&
-                      !(b.whatwg &&
-                        strcmp(on, "option") == 0 &&
-                        strcmp(name, "select") == 0)) ||
-                     (b.whatwg && h_closes_ww(on, name) &&
-                      /* The optgroup hr/select closes are "in
-                       * select" rules only - without an open
-                       * select the select NESTS in the optgroup
-                       * (tests1:35). */
-                      !(!h_in_select(&b) &&
-                        h_ieq_raw(on, "optgroup") &&
-                        (strcmp(name, "hr") == 0 ||
-                         strcmp(name, "select") == 0))))) {
+                uint8_t oid = b.open_id[b.depth - 1];
+                if ((h_closes_ids(oid, tid) &&
+                     !(b.whatwg &&
+                       oid == h_id_option &&
+                       tid == h_id_select)) ||
+                    (b.whatwg && h_closes_ww_ids(oid, tid) &&
+                     /* The optgroup hr/select closes are "in
+                      * select" rules only - without an open
+                      * select the select NESTS in the optgroup
+                      * (tests1:35). */
+                     !(!h_in_select(&b) &&
+                       oid == h_id_optgroup &&
+                       (tid == h_id_hr ||
+                        tid == h_id_select)))) {
                     /* The vendored reference keeps <table> INSIDE
                      * an open p in the bare shape (tests3:24,
                      * tests20:42) but closes it under an explicit
                      * <body> (tests3:23) - gate on the structural
                      * body tag. */
                     if (b.whatwg && !b.body_tag_seen &&
-                        h_ieq_raw(on, "p") &&
-                        strcmp(name, "table") == 0)
+                        oid == h_id_p &&
+                        tid == h_id_table)
                         break;
                     /* 13.2.6.4.11 "in cell": a nested <table> is
                      * CELL content - the cell fences the
@@ -7344,18 +7324,18 @@ static LeptrisDocument html_parse_shared(
                      * nests inside the td (tests7:6; bare
                      * <table><table> still siblings, tests6:42). */
                     if (b.whatwg &&
-                        strcmp(name, "table") == 0 &&
-                        (h_ieq_raw(on, "td") || h_ieq_raw(on, "th")))
+                        tid == h_id_table &&
+                        (oid == h_id_td || oid == h_id_th))
                         break;
                     /* #659 "in template" start-tag fence (13.2.4.2):
                      * an open template is a scope boundary — a start
                      * tag never pops it; table-context starts become
                      * template content instead (html5lib
                      * template.dat:28/32/36). */
-                    if (b.whatwg && h_ieq_raw(on, "template"))
+                    if (b.whatwg && oid == h_id_template)
                         break;
-                    tmpl_last_popped = on;
-                    if (b.whatwg && h_ieq_raw(on, "table")) {
+                    tmpl_last_popped = oid;
+                    if (b.whatwg && oid == h_id_table) {
                         /* The popped table's marker no longer
                          * fences the list: drop the topmost table
                          * marker so later character tokens can
@@ -7369,7 +7349,7 @@ static LeptrisDocument html_parse_shared(
                             }
                     }
                     b.depth--;
-                } else if (b.whatwg && strcmp(name, "table") == 0) {
+                } else if (b.whatwg && tid == h_id_table) {
                     /* 13.2.6.4.7 "in body" table start: TABLE SCOPE
                      * - formatting/row/section elements do not fence
                      * it. Burst down to the open HTML table (crossing
@@ -7379,19 +7359,17 @@ static LeptrisDocument html_parse_shared(
                      * still stop it. */
                     int d5 = (int)b.depth, found = -1;
                     while (d5 > 0) {
-                        const char* n5 =
-                            leptris_element_name(b.open[d5 - 1]);
+                        uint8_t o5 = b.open_id[d5 - 1];
                         if (b.open_ns[d5 - 1] != H_NS_HTML) {
                             d5--;
                             continue;
                         }
-                        if (h_ieq_raw(n5, "td") ||
-                            h_ieq_raw(n5, "th") ||
-                            h_ieq_raw(n5, "template"))
+                        if (o5 == h_id_td || o5 == h_id_th ||
+                            o5 == h_id_template)
                             break;
-                        if (h_ieq_raw(n5, "p") && !b.body_tag_seen)
+                        if (o5 == h_id_p && !b.body_tag_seen)
                             break;
-                        if (h_ieq_raw(n5, "table")) {
+                        if (o5 == h_id_table) {
                             found = d5;
                             break;
                         }
@@ -7408,17 +7386,15 @@ static LeptrisDocument html_parse_shared(
              * the new section/group token arrives in in-table mode
              * (gumbo in-table-body 3775: pop the open section,
              * switch to in-table, reprocess) — not a stray drop. */
-            if (b.whatwg && tmpl_last_popped && b.depth > 0) {
-                const char* tp =
-                    leptris_element_name(b.open[b.depth - 1]);
-                if (tp && h_ieq_raw(tp, "template") &&
-                    (h_ieq_raw(tmpl_last_popped, "tbody") ||
-                     h_ieq_raw(tmpl_last_popped, "thead") ||
-                     h_ieq_raw(tmpl_last_popped, "tfoot") ||
-                     h_ieq_raw(tmpl_last_popped, "caption") ||
-                     h_ieq_raw(tmpl_last_popped, "colgroup")))
-                    b.tmpl_mode[b.depth - 1] = H_TPLM_IN_TABLE;
-            }
+            if (b.whatwg && tmpl_last_popped != H_ID_UNKNOWN &&
+                b.depth > 0 &&
+                b.open_id[b.depth - 1] == h_id_template &&
+                (tmpl_last_popped == h_id_tbody ||
+                 tmpl_last_popped == h_id_thead ||
+                 tmpl_last_popped == h_id_tfoot ||
+                 tmpl_last_popped == h_id_caption ||
+                 tmpl_last_popped == h_id_colgroup))
+                b.tmpl_mode[b.depth - 1] = H_TPLM_IN_TABLE;
         }
 
         /* #659 template content-level table tokens: the per-
