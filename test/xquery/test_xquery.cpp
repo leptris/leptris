@@ -1232,9 +1232,18 @@ TEST(XQueryCore, VarPredicatePositional) {
          " string((10,20,30)[$p]), '|')", "20|30"},
         {"let $p := 2.0 return count((10,20,30)[$p])", "1"},
         {/* cbcl-distinct-values-007's shape: positional predicate
-         * on a singleton sequence */
+         * on a singleton sequence (function-call base) */
          "let $p := 1 return"
          " count(xs:dayTimeDuration('PT0S')[$p])", "1"},
+        {/* single-item base path: the XQUERY entry must convert the
+         * carrier in the AST_PREDICATE handler too */
+         "let $p := 2 return"
+         " string(adjust-time-to-timezone(xs:time('12:00:00'),"
+         " (xs:dayTimeDuration('PT0S')[$p])))", "12:00:00"},
+        {"count(distinct-values((xs:time('12:00:00'),"
+         " xs:time('12:00:00'), xs:time('20:00:00'),"
+         " xs:time('01:00:00+12:00'), xs:time('02:00:00+13:00'))))",
+         "3"},
     };
     for (auto& c : cases) {
         LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));

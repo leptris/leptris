@@ -281,6 +281,34 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
 /* Helper: Evaluate a single predicate for a node in-place
  * Returns 1 if node matches predicate, 0 otherwise
  */
+/* Typed-scalar carrier conversion for predicates: the xq driver
+ * binds every variable as a sequence carrier, so a numeric atomic
+ * rides one marked text node. A bare variable predicate must then be
+ * POSITIONAL (number -> position compare), not EBV-of-a-one-item
+ * sequence (cbcl-distinct-values-007). Takes ownership of r; when
+ * converted, the carrier copy is freed through the result and a
+ * fresh NUMBER result returns. NULL propagates. */
+struct leptris_xpath_result* leptris_pred_scalar_convert(
+    struct leptris_xpath_result* r) {
+    if (!r || r->type != XPATH_RESULT_NODESET || !r->value.nodeset_value ||
+        r->value.nodeset_value->count != 1 ||
+        !r->value.nodeset_value->nodes[0] ||
+        XPATH_NODE_TYPE(r->value.nodeset_value->nodes[0]) !=
+            LEPTRIS_NODE_TEXT)
+        return r;
+    const char* c =
+        ((XPathTextNode*)r->value.nodeset_value->nodes[0])->content;
+    if (!c || c[0] != '\x03' ||
+        (c[1] != 'N' && c[1] != 'F' && c[1] != 'D'))
+        return r;
+    double v = strtod(c + 2, NULL);
+    xpath_result_free(r);
+    struct leptris_xpath_result* out =
+        xpath_result_new(XPATH_RESULT_NUMBER);
+    if (out) out->value.number_value = v;
+    return out;
+}
+
 static int evaluate_predicate_for_node(XPathContext* ctx,
                                        void* node,
                                        XPathASTNode* predicate,
@@ -328,33 +356,8 @@ static int evaluate_predicate_for_node(XPathContext* ctx,
     struct leptris_xpath_result* pred_result = evaluate_expr(ctx, predicate);
     int matches = 0;
 
-    /* Typed-scalar binding: the xq driver binds every variable as a
-     * sequence carrier, so a numeric atomic rides one marked text
-     * node. A bare variable predicate must then be POSITIONAL
-     * (number -> position compare), not EBV-of-a-one-item-sequence
-     * (cbcl-distinct-values-007). */
-    if (pred_result && pred_result->type == XPATH_RESULT_NODESET &&
-        pred_result->value.nodeset_value &&
-        pred_result->value.nodeset_value->count == 1 &&
-        pred_result->value.nodeset_value->nodes[0] &&
-        XPATH_NODE_TYPE(pred_result->value.nodeset_value->nodes[0]) ==
-            LEPTRIS_NODE_TEXT) {
-        const char* c = ((XPathTextNode*)pred_result->value.nodeset_value
-                             ->nodes[0])
-                            ->content;
-        if (c && c[0] == '\x03' &&
-            (c[1] == 'N' || c[1] == 'F' || c[1] == 'D')) {
-            double v = strtod(c + 2, NULL);
-            /* the carrier nodeset copy is result-owned — free it
-             * through the result (synthetic members included) and
-             * hand back a fresh NUMBER; overwriting the union in
-             * place would leak the array */
-            xpath_result_free(pred_result);
-            pred_result = xpath_result_new(XPATH_RESULT_NUMBER);
-            if (!pred_result) return 0;
-            pred_result->value.number_value = v;
-        }
-    }
+    pred_result = leptris_pred_scalar_convert(pred_result);
+    if (!pred_result) return 0;
 
     if (pred_result) {
         /* Numeric predicate: matches position */
