@@ -32,6 +32,8 @@ static XPathASTNode* parse_arrow_expr(XPathParser* parser);
 
 /* Path parsers */
 static XPathASTNode* parse_path_expr(XPathParser* parser);
+static XPathASTNode* parse_path_continuation(XPathParser* parser,
+                                             XPathASTNode* expr);
 static XPathASTNode* parse_filter_expr(XPathParser* parser);
 static XPathASTNode* parse_primary_expr(XPathParser* parser);
 static XPathASTNode* parse_postfix_ops(XPathParser* parser,
@@ -1216,7 +1218,8 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                 return NULL;
             }
             advance_token(parser);
-            return parse_postfix_ops(parser, mc);
+            return parse_path_continuation(
+                parser, parse_postfix_ops(parser, mc));
         }
         /* XQuery 1.0 computed constructors (TODO.xslt-full/11):
          * element NAME { content }, attribute NAME { value },
@@ -1252,7 +1255,8 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                 return NULL;
             }
             advance_token(parser);
-            return parse_postfix_ops(parser, dc);
+            return parse_path_continuation(
+                parser, parse_postfix_ops(parser, dc));
         }
         /* XQuery 3.0 typeswitch (#692/12): typeswitch (E)
          * case T1 return R1 case T2 return R2 ... default return
@@ -1611,6 +1615,16 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
 
     /* Try filter expression */
     XPathASTNode* expr = parse_filter_expr(parser);
+    return parse_path_continuation(parser, expr);
+}
+
+/* Path continuation after a complete expression start: `/` or
+ * `//` builds a PATH_EXPR over it. Shared by the filter
+ * fall-through AND the keyword-ctor legs (map{ / document{ return
+ * from the path dispatch before the filter level —
+ * `document{...}/M` must still step). */
+static XPathASTNode* parse_path_continuation(XPathParser* parser,
+                                             XPathASTNode* expr) {
     if (!expr) return NULL;
 
     /* Check for path continuation */
