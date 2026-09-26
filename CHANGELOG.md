@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.252] - 2026-09-26
+
+### Added
+
+- multi-binding for/quantifier clauses (xquery)
+
+
+
 ## [1.9.251] - 2026-09-26
 
 ### Added
