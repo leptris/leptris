@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.250] - 2026-09-26
+
+### Fixed
+
+- keyword ctors run the path continuation (document{...}/M) (xquery)
+
+
+
 ## [1.9.249] - 2026-09-26
 
 ### Performance
