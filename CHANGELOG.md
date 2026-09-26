@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.253] - 2026-09-26
+
+### Fixed
+
+- F&O numeric promotion in value comparison and distinct-values (xquery)
+
+
+
 ## [1.9.252] - 2026-09-26
 
 ### Added
