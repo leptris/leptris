@@ -915,8 +915,6 @@ TEST(Qt3Subset, FnStringJoin) {
 TEST(Qt3Subset, FnIndexOf) {
     run_test_set("fn/index-of.xml", {}, 44, {},
                  {
-                   
-
                  });
 }
 
@@ -954,22 +952,16 @@ TEST(Qt3Subset, FnSubsequence) {
 }
 
 TEST(Qt3Subset, FnDistinctValues) {
-    /* mixed-args-012 (xs:decimal vs xs:float dedup) passed only
-     * while the float double-spelled differently from the decimal;
-     * float-aware spelling exposed the real gap — cross-type
-     * numeric promotion in the dedup key. */
-    run_test_set("fn/distinct-values.xml", {}, 95, {},
+    /* mixed-args-012 (xs:decimal vs xs:float dedup) and
+     * fn-distinct-values-1 (Bugzilla 5183: float must promote UP to
+     * double, never the reverse) close with F&O promotion in the
+     * dedup comparator. */
+    run_test_set("fn/distinct-values.xml", {}, 97, {},
                  {
-                    /* parses now (for-tuples); blocked on
-                     * decimal-vs-double EXACT eq (decimal_lex in
-                     * the comparison operator — next lever) */
-                    "fn-distinct-values-1",
-
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
                    "cbcl-distinct-values-007",
                    "fn-distinct-values-2",
-                   "fn-distinct-values-mixed-args-012",
 
                  });
 }

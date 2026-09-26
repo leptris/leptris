@@ -73,6 +73,9 @@ XPathNodeSet* apply_predicates(XPathContext* ctx, XPathNodeSet* nodes,
 /* Main expression evaluator (in evaluator.c) */
 struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast);
 
+/* Marker-aware atomic eq over raw item strings (evaluator_operators.c). */
+int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal);
+
 /* Direct function-call entry for the VM (TODO 120 Phase F).
  * Identical semantics to invoking evaluate_expr on a FUNCTION_CALL
  * AST, but skips the AST-type switch in evaluate_expr. The handler

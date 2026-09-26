@@ -351,6 +351,118 @@ XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src) {
 }
 
 /* §3.4 relational compare over a double pair. */
+
+/* Exact decimal-string comparison for two xs:decimal operands (F&O
+ * 3.0: decimal-vs-decimal compares the exact mathematical values —
+ * the double carrier cannot hold 30 significant digits). Returns
+ * -1/0/1. Falls back to strtod when either string uses exponent
+ * form. */
+static int xq_dec_str_cmp(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    /* exponent form: best-effort double compare */
+    if (strchr(a, 'e') || strchr(a, 'E') ||
+        strchr(b, 'e') || strchr(b, 'E')) {
+        double da = strtod(a, NULL), db = strtod(b, NULL);
+        return da < db ? -1 : da > db ? 1 : 0;
+    }
+    int sa = (a[0] == '-'), sb = (b[0] == '-');
+    const char* pa = a + sa;
+    const char* pb = b + sb;
+    const char* ia = pa;
+    const char* fa = strchr(pa, '.');
+    size_t ila = fa ? (size_t)(fa - pa) : strlen(pa);
+    const char* ib = pb;
+    const char* fb = strchr(pb, '.');
+    size_t ilb = fb ? (size_t)(fb - pb) : strlen(pb);
+    /* strip leading zeros for the integer-length compare */
+    while (*ia == '0' && (size_t)(ia - pa) < ila - 1 && ila > 1) { ia++; ila--; }
+    while (*ib == '0' && (size_t)(ib - pb) < ilb - 1 && ilb > 1) { ib++; ilb--; }
+    while (ila > 1 && ia[0] == '0') { ia++; ila--; }
+    while (ilb > 1 && ib[0] == '0') { ib++; ilb--; }
+    /* zero handling: all-zero magnitudes are equal regardless of sign */
+    int za = 1, zb = 1;
+    for (const char* q = ia; q < pa + ila + (fa ? 0 : 0); q++) {}
+    for (const char* q = ia; *q && (*q != '.' ); q++)
+        if (*q != '0') za = 0;
+    if (fa) for (const char* q = fa + 1; *q; q++) if (*q != '0') za = 0;
+    for (const char* q = ib; *q && (*q != '.'); q++)
+        if (*q != '0') zb = 0;
+    if (fb) for (const char* q = fb + 1; *q; q++) if (*q != '0') zb = 0;
+    if (za && zb) return 0;
+    if (sa != sb) return sa ? -1 : 1;
+    int mag = 0;
+    if (ila != ilb) mag = ila < ilb ? -1 : 1;
+    else {
+        int c = strncmp(ia, ib, ila);
+        if (c) mag = c < 0 ? -1 : 1;
+        else {
+            const char* q1 = fa ? fa + 1 : "";
+            const char* q2 = fb ? fb + 1 : "";
+            while (*q1 || *q2) {
+                char c1 = *q1 ? *q1 : '0';
+                char c2 = *q2 ? *q2 : '0';
+                if (c1 != c2) { mag = c1 < c2 ? -1 : 1; break; }
+                if (*q1) q1++;
+                if (*q2) q2++;
+            }
+        }
+    }
+    return sa ? -mag : mag;
+}
+
+
+/* eq-based atomic comparison over raw item strings: both-marked
+ * compares numerically; both-plain compares by codepoint; number
+ * vs string is false. nan_equal: distinct-values dedups NaN with
+ * itself (F&O 3.1), fn:index-of's eq never matches it. 'F' markers
+ * carry xs:float members (float32-exact values). F&O numeric
+ * promotion: float vs decimal converts the decimal DOWN to float;
+ * float vs double promotes the float UP (the double side is never
+ * demoted — Bugzilla 5183). */
+int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
+    int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
+             : (a[0] == '\x03' && a[1] == 'F') ? 'F'
+             : (a[0] == '\x03' && a[1] == 'D') ? 'D'
+             : (a[0] == '\x03' && a[1] == 'B') ? 'B' : 0;
+    int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
+             : (b[0] == '\x03' && b[1] == 'F') ? 'F'
+             : (b[0] == '\x03' && b[1] == 'D') ? 'D'
+             : (b[0] == '\x03' && b[1] == 'B') ? 'B' : 0;
+    if (!ka != !kb) return 0;
+    if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
+    if (!ka) return strcmp(a, b) == 0;
+    /* xs:decimal eq is exact — the double carrier cannot hold 30
+     * significant digits, so same-type decimals compare lexically
+     * (equal-value canonical decimals share their spelling). */
+    if (ka == 'D' && kb == 'D') return strcmp(a + 2, b + 2) == 0;
+    double da = strtod(a + 2, NULL);
+    double db = strtod(b + 2, NULL);
+    int na = isnan(da), nb = isnan(db);
+    /* NaN eq nothing (distinct-values dedups NaN with itself) */
+    if (na || nb) return na && nb ? nan_equal : 0;
+    /* The F item's lexical is the float32 exact spelling — re-parse
+     * it through float to recover the float's actual value. */
+    if (ka == 'F' || kb == 'F') {
+        if (ka == 'F') da = (double)(float)da;
+        if (kb == 'F') db = (double)(float)db;
+        if (ka == 'D') da = (double)(float)da;
+        if (kb == 'D') db = (double)(float)db;
+    }
+    return da == db;
+}
+
+/* Raw synthetic-text fetch for equality compares: unlike
+ * get_node_text, the \x03 typed-atom marker stays — the marker is
+ * part of the internal value and leptris_atom_seq_eq_n needs the
+ * type to apply F&O promotion. */
+static char* op_node_raw_text(void* node) {
+    if (node && XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
+        const char* c = ((XPathTextNode*)node)->content;
+        return leptris_strdup(c ? c : "");
+    }
+    return get_node_text(node);
+}
+
 static int op_relational_cmp(XPathOperatorType op, double a, double b) {
     switch (op) {
         case XPATH_OP_LESS:          return a <  b;
@@ -2965,14 +3077,22 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     XPathNodeSet* lns = ns_is_left ? ns : on;
                     XPathNodeSet* rns = ns_is_left ? on : ns;
                     for (size_t i = 0; !matches && lns && i < lns->count; i++) {
-                        char* a = get_node_text(lns->nodes[i]);
+                        char* a = is_equality_op
+                            ? op_node_raw_text(lns->nodes[i])
+                            : get_node_text(lns->nodes[i]);
                         if (!a) continue;
                         for (size_t j = 0; !matches && rns && j < rns->count; j++) {
-                            char* b = get_node_text(rns->nodes[j]);
+                            char* b = is_equality_op
+                                ? op_node_raw_text(rns->nodes[j])
+                                : get_node_text(rns->nodes[j]);
                             if (!b) continue;
                             if (is_equality_op) {
-                                matches = negate ? (strcmp(a, b) != 0)
-                                                 : (strcmp(a, b) == 0);
+                                /* marker-aware: typed numeric
+                                 * items (distinct-values output,
+                                 * ctor spreads) compare under F&O
+                                 * promotion, not lexically */
+                                int eq = leptris_atom_seq_eq_n(a, b, 0);
+                                matches = negate ? !eq : eq;
                             } else {
                                 matches = op_relational_cmp(
                                     op, atof(a), atof(b));
@@ -3036,6 +3156,49 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             else {
                 double lval = xpath_to_number(left);
                 double rval = xpath_to_number(right);
+                /* F&O 3.0 numeric type promotion on value
+                 * comparisons: decimal-vs-decimal compares exactly;
+                 * decimal-vs-float converts both to float; every
+                 * pair involving double compares as double (the
+                 * float is promoted UP — Bugzilla 5183). */
+                if (left->type == XPATH_RESULT_NUMBER &&
+                    right->type == XPATH_RESULT_NUMBER &&
+                    lval == lval && rval == rval &&
+                    (left->decimal_lex || right->decimal_lex)) {
+                    int c;
+                    if (left->decimal_lex && right->decimal_lex) {
+                        c = xq_dec_str_cmp(left->decimal_lex,
+                                           right->decimal_lex);
+                    } else {
+                        double a = lval, b = rval;
+                        int lfl = left->atomic_type && strcmp(left->atomic_type, "xs:float") == 0;
+                        int rfl = right->atomic_type && strcmp(right->atomic_type, "xs:float") == 0;
+                        if ((lfl && right->decimal_lex) ||
+                            (rfl && left->decimal_lex)) {
+                            a = (double)(float)a;
+                            b = (double)(float)b;
+                        }
+                        c = a < b ? -1 : a > b ? 1 : 0;
+                    }
+                    switch (op) {
+                        case XPATH_OP_EQUAL:
+                            result->value.boolean_value = (c == 0); break;
+                        case XPATH_OP_NOT_EQUAL:
+                            result->value.boolean_value = (c != 0); break;
+                        case XPATH_OP_LESS:
+                            result->value.boolean_value = (c < 0); break;
+                        case XPATH_OP_LESS_EQUAL:
+                            result->value.boolean_value = (c <= 0); break;
+                        case XPATH_OP_GREATER:
+                            result->value.boolean_value = (c > 0); break;
+                        case XPATH_OP_GREATER_EQUAL:
+                            result->value.boolean_value = (c >= 0); break;
+                        default: break;
+                    }
+                    xpath_result_free(left);
+                    xpath_result_free(right);
+                    return result;
+                }
                 switch (op) {
                     case XPATH_OP_EQUAL: result->value.boolean_value = (lval == rval); break;
                     case XPATH_OP_NOT_EQUAL: result->value.boolean_value = (lval != rval); break;
