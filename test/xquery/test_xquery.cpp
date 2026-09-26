@@ -1094,3 +1094,31 @@ TEST(XQueryCtors, DirectPICommentCtors) {
     }
     leptris_document_free(doc);
 }
+
+/* A keyword computed constructor followed by a PATH STEP PARSES as
+ * a path over the ctor result (`document{...}/M`) — the ctor legs
+ * in parse_path_expr returned early and never ran the SLASH
+ * continuation (fn-subsequence-mix-args-025's parse half). Value
+ * pins land with the node-materializing ctor slice: the ctor
+ * itself still evaluates to serialized markup text. */
+TEST(XQueryCtors, CtorFollowedByPathStep) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* cases[] = {
+        "document{<M id=\"1\"/>}/M",
+        "document{<M id=\"1\"/>}/M/@id",
+        "document{<M id=\"1\"/>}/M/count(subsequence(. ! (., @id), 1, 2))",
+        "document{<a/><b/>}/*[2]",
+        "map{ 'a': 1 }?a",
+    };
+    for (const char* q : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(q, strlen(q));
+        ASSERT_NE(xq, nullptr) << q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << q;
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
