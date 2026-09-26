@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.256] - 2026-09-26
+
+### Fixed
+
+- numeric variable predicates are positional, not EBV (xquery)
+
+
+
 ## [1.9.255] - 2026-09-26
 
 <!-- Edit this section with the actual release notes. -->
