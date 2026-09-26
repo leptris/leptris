@@ -989,11 +989,15 @@ TEST(Qt3Subset, FnDistinctValues) {
      * xs:dayTimeDuration("PT0S")[$p] with the at-bound position as
      * EBV-true (all-Z output) — a narrow platform divergence to
      * chase separately. */
-    run_test_set("fn/distinct-values.xml", {}, 98, {},
+    /* cbcl-distinct-values-007 now passes everywhere: BOTH predicate
+     * paths convert typed-scalar carriers (the nodeset-base path via
+     * evaluate_predicate_for_node AND the single-item base path in
+     * the XPATH_AST_PREDICATE handler — xs:dayTimeDuration("PT0S")[$p]
+     * takes the latter). */
+    run_test_set("fn/distinct-values.xml", {}, 99, {},
                  {
                    "cbcl-distinct-values-002",
                    "cbcl-distinct-values-002b",
-                   "cbcl-distinct-values-007",
 
                  });
 }
