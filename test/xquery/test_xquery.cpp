@@ -66,6 +66,46 @@ TEST(XQueryCore, PrologVariableAndFlwor) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, TypedAtomDistinctFamilies) {
+    /* cbcl-distinct-values-002 semantics (Saxon-verified): typed
+     * atoms dedup only within comparable families. Same-spelling
+     * pairs of DIFFERENT families stay distinct; untyped merges
+     * with the string family; numerics collapse by value. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* gMonth vs untypedAtomic, same spelling: BOTH kept */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:gMonth('--06'), "
+        "'--06' cast as xs:untypedAtomic))"),
+        "--06 --06");
+    /* hexBinary vs untypedAtomic, same spelling: BOTH kept */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:hexBinary('FF00'), "
+        "'FF00' cast as xs:untypedAtomic))"),
+        "FF00 FF00");
+    /* float/double/decimal same value: float kept, double kept,
+     * decimal merges (float32-exact promotion) */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:float(3.141), xs:double(3.141), "
+        "xs:decimal(3.141)))"),
+        "3.141 3.141");
+    /* numeric NaN dedups with numeric NaN; untyped 'NaN' stays */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:float('NaN'), xs:double('NaN'), "
+        "'NaN' cast as xs:untypedAtomic))"),
+        "NaN NaN");
+    /* identical typed atoms dedup within their family */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:gYear('2008'), xs:gYear('2008')))"),
+        "2008");
+    /* same family same spelling via time normalization */
+    EXPECT_EQ(seq_string(doc,
+        "distinct-values((xs:time('12:00:00'), "
+        "xs:time('12:00:00')))"),
+        "12:00:00");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);

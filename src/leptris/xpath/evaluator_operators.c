@@ -478,17 +478,201 @@ static int xq_dec_str_cmp(const char* a, const char* b) {
  * promotion: float vs decimal converts the decimal DOWN to float;
  * float vs double promotes the float UP (the double side is never
  * demoted — Bugzilla 5183). */
+/* ---- XSD lexical validators for castable (cbcl-distinct-values-002:
+ * each cast branch fires only when the lexical is legal for the
+ * target type). ---- */
+static int xq_valid_tz_opt(const char** pp) {
+    const char* p = *pp;
+    if (*p == 'Z') { *pp = p + 1; return 1; }
+    if (*p == '+' || *p == '-') {
+        const char* q = p + 1;
+        if (q[0] < '0' || q[0] > '9' || q[1] < '0' || q[1] > '9' ||
+            q[2] != ':' || q[3] < '0' || q[3] > '9' || q[4] < '0' ||
+            q[4] > '9')
+            return 0;
+        if ((q[0] - '0') * 10 + (q[1] - '0') > 14) return 0;
+        if ((q[3] - '0') * 10 + (q[4] - '0') > 59) return 0;
+        *pp = q + 5;
+        return 1;
+    }
+    return 1;   /* tz absent is fine */
+}
+static int xq_valid_date_part(const char** pp) {
+    /* YYYY-MM-DD (year may carry a leading minus) */
+    const char* p = *pp;
+    if (*p == '-') p++;
+    for (int i = 0; i < 4; i++)
+        if (p[i] < '0' || p[i] > '9') return 0;
+    p += 4;
+    if (*p != '-') return 0;
+    p++;
+    if (p[0] < '0' || p[0] > '1' || p[1] < '0' || p[1] > '9') return 0;
+    int mo = (p[0] - '0') * 10 + (p[1] - '0');
+    if (mo < 1 || mo > 12) return 0;
+    p += 2;
+    if (*p != '-') return 0;
+    p++;
+    if (p[0] < '0' || p[0] > '3' || p[1] < '0' || p[1] > '9') return 0;
+    int dy = (p[0] - '0') * 10 + (p[1] - '0');
+    if (dy < 1 || dy > 31) return 0;
+    *pp = p + 2;
+    return 1;
+}
+static int xq_valid_gyear(const char* s) {
+    const char* p = s;
+    if (*p == '-') p++;
+    int nd = 0;
+    while (p[nd] >= '0' && p[nd] <= '9') nd++;
+    if (nd != 4) return 0;
+    p += nd;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_gyearmonth(const char* s) {
+    const char* p = s;
+    if (*p == '-') p++;
+    for (int i = 0; i < 4; i++)
+        if (p[i] < '0' || p[i] > '9') return 0;
+    p += 4;
+    if (*p != '-') return 0;
+    p++;
+    if (p[0] < '0' || p[0] > '1' || p[1] < '0' || p[1] > '9') return 0;
+    int mo = (p[0] - '0') * 10 + (p[1] - '0');
+    if (mo < 1 || mo > 12) return 0;
+    p += 2;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_gmonthday(const char* s) {
+    const char* p = s;
+    if (p[0] != '-' || p[1] != '-') return 0;
+    p += 2;
+    if (p[0] < '0' || p[0] > '1' || p[1] < '0' || p[1] > '9') return 0;
+    int mo = (p[0] - '0') * 10 + (p[1] - '0');
+    if (mo < 1 || mo > 12) return 0;
+    p += 2;
+    if (*p != '-') return 0;
+    p++;
+    if (p[0] < '0' || p[0] > '3' || p[1] < '0' || p[1] > '9') return 0;
+    int dy = (p[0] - '0') * 10 + (p[1] - '0');
+    if (dy < 1 || dy > 31) return 0;
+    p += 2;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_gday(const char* s) {
+    const char* p = s;
+    if (p[0] != '-' || p[1] != '-' || p[2] != '-') return 0;
+    p += 3;
+    if (p[0] < '0' || p[0] > '3' || p[1] < '0' || p[1] > '9') return 0;
+    int dy = (p[0] - '0') * 10 + (p[1] - '0');
+    if (dy < 1 || dy > 31) return 0;
+    p += 2;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_gmonth(const char* s) {
+    const char* p = s;
+    if (p[0] != '-' || p[1] != '-') return 0;
+    p += 2;
+    if (p[0] < '0' || p[0] > '1' || p[1] < '0' || p[1] > '9') return 0;
+    int mo = (p[0] - '0') * 10 + (p[1] - '0');
+    if (mo < 1 || mo > 12) return 0;
+    p += 2;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_hex(const char* s) {
+    size_t n = strlen(s);
+    if (!n || (n % 2)) return 0;
+    for (size_t i = 0; i < n; i++)
+        if (!isxdigit((unsigned char)s[i])) return 0;
+    return 1;
+}
+static int xq_valid_base64(const char* s) {
+    size_t n = strlen(s);
+    if (!n || (n % 4)) return 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = s[i];
+        int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                 (c >= '0' && c <= '9') || c == '+' || c == '/';
+        if (!ok && c == '=')
+            ok = (i + 1 == n) || (i + 2 == n);
+        if (!ok) return 0;
+    }
+    return 1;
+}
+static int xq_valid_date(const char* s) {
+    const char* p = s;
+    if (!xq_valid_date_part(&p)) return 0;
+    return xq_valid_tz_opt(&p) && *p == '\0';
+}
+static int xq_valid_datetime(const char* s) {
+    const char* p = s;
+    if (!xq_valid_date_part(&p)) return 0;
+    if (*p != 'T') return 0;
+    double c, l;
+    return leptris_time_norm_seconds(p + 1, &c, &l) ? 1 : 0;
+}
+
+/* XSD atomic families that ride typed carriers: the sequence
+ * fold marks members "\x03<mark>" so equality and grouping keep
+ * distinct families apart even at identical spellings
+ * (cbcl-distinct-values-002, Saxon-verified grouping). mark 0
+ * entries carry their type for instance-of only. */
+static const struct { const char* type; char mark; } xq_family_table[] = {
+    { "xs:dateTime", 'T' }, { "xs:date", 'E' }, { "xs:time", 't' },
+    { "xs:gYear", 'Y' }, { "xs:gYearMonth", 'J' }, { "xs:gMonthDay", 'K' },
+    { "xs:gDay", 'Q' }, { "xs:gMonth", 'H' },
+    { "xs:hexBinary", 'X' }, { "xs:base64Binary", 'W' }, { "xs:QName", 'Z' },
+};
+
+static char xq_atomic_family_mark(const char* t) {
+    if (!t) return 0;
+    for (size_t i = 0;
+         i < sizeof xq_family_table / sizeof xq_family_table[0]; i++)
+        if (strcmp(xq_family_table[i].type, t) == 0)
+            return xq_family_table[i].mark;
+    return 0;
+}
+
 int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
     int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
              : (a[0] == '\x03' && a[1] == 'F') ? 'F'
              : (a[0] == '\x03' && a[1] == 'D') ? 'D'
-             : (a[0] == '\x03' && a[1] == 'B') ? 'B' : 0;
+             : (a[0] == '\x03' && a[1] == 'B') ? 'B'
+             : (a[0] == '\x03' && a[1] && a[1] != 'A' && a[1] != 'M')
+                   ? a[1] : 0;
     int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
              : (b[0] == '\x03' && b[1] == 'F') ? 'F'
              : (b[0] == '\x03' && b[1] == 'D') ? 'D'
-             : (b[0] == '\x03' && b[1] == 'B') ? 'B' : 0;
+             : (b[0] == '\x03' && b[1] == 'B') ? 'B'
+             : (b[0] == '\x03' && b[1] && b[1] != 'A' && b[1] != 'M')
+                   ? b[1] : 0;
     if (!ka != !kb) return 0;
     if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
+    /* Typed families (calendar/binary/QName) are comparable only
+     * within the same family — an untypedAtomic spelling never eqs
+     * a calendar item of the same spelling. */
+    if (ka && kb && ka != kb &&
+        (ka == 'N' || ka == 'F' || ka == 'D' ? 0 : 1) &&
+        (kb == 'N' || kb == 'F' || kb == 'D' ? 0 : 1))
+        return 0;
+    if (ka && ka == kb && strchr("ETtYJKQHXWZ", ka)) {
+        if (ka == 'Z') {
+            /* QName eq is namespace+local; the carrier holds the
+             * lexical — compare the local part so the prefixed
+             * spelling merges with the unprefixed twin. */
+            const char* la = strrchr(a + 2, ':');
+            const char* lb = strrchr(b + 2, ':');
+            la = la ? la + 1 : a + 2;
+            lb = lb ? lb + 1 : b + 2;
+            return strcmp(la, lb) == 0;
+        }
+        if (ka == 't') {
+            /* xs:time eq is cyclic across timezones */
+            double ta, tb;
+            if (leptris_time_norm_seconds(a + 2, &ta, NULL) &&
+                leptris_time_norm_seconds(b + 2, &tb, NULL))
+                return ta == tb;
+        }
+        return strcmp(a + 2, b + 2) == 0;
+    }
     if (!ka) {
         /* both untyped strings: timezone-normalized time values
          * compare by instant (cbcl-distinct-values-007) */
@@ -2637,7 +2821,13 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             int numeric = strcmp(base, "xs:integer") == 0 ||
                           strcmp(base, "xs:double") == 0 ||
                           strcmp(base, "xs:decimal") == 0 ||
-                          strcmp(base, "xs:float") == 0;
+                          strcmp(base, "xs:float") == 0 ||
+                          strcmp(base, "xs:long") == 0 ||
+                          strcmp(base, "xs:int") == 0 ||
+                          strcmp(base, "xs:short") == 0 ||
+                          strcmp(base, "xs:byte") == 0 ||
+                          strncmp(base, "xs:unsigned", 11) == 0 ||
+                          strstr(base, "Integer") != NULL;
             if (numeric) {
                 char* s = xpath_to_string(v);
                 ok = 0;
@@ -2653,6 +2843,66 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 ok = s && (strcmp(s, "true") == 0 ||
                            strcmp(s, "false") == 0 ||
                            strcmp(s, "1") == 0 || strcmp(s, "0") == 0);
+                free(s);
+            } else if (strcmp(base, "xs:QName") == 0) {
+                /* XQ10: no cast from a string to xs:QName */
+                ok = 0;
+            } else if (strcmp(base, "xs:gYear") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_gyear(s);
+                free(s);
+            } else if (strcmp(base, "xs:gYearMonth") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_gyearmonth(s);
+                free(s);
+            } else if (strcmp(base, "xs:gMonthDay") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_gmonthday(s);
+                free(s);
+            } else if (strcmp(base, "xs:gDay") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_gday(s);
+                free(s);
+            } else if (strcmp(base, "xs:gMonth") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_gmonth(s);
+                free(s);
+            } else if (strcmp(base, "xs:hexBinary") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_hex(s);
+                free(s);
+            } else if (strcmp(base, "xs:base64Binary") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_base64(s);
+                free(s);
+            } else if (strcmp(base, "xs:dateTime") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_datetime(s);
+                free(s);
+            } else if (strcmp(base, "xs:date") == 0) {
+                char* s = xpath_to_string(v);
+                ok = s && xq_valid_date(s);
+                free(s);
+            } else if (strcmp(base, "xs:time") == 0) {
+                char* s = xpath_to_string(v);
+                double c;
+                ok = s && leptris_time_norm_seconds(s, &c, NULL);
+                free(s);
+            } else if (strcmp(base, "xs:yearMonthDuration") == 0) {
+                char* s = xpath_to_string(v);
+                double m;
+                ok = s && leptris_dur_try_months(s, &m);
+                free(s);
+            } else if (strcmp(base, "xs:dayTimeDuration") == 0) {
+                char* s = xpath_to_string(v);
+                double x;
+                ok = s && leptris_dur_try_seconds(s, &x);
+                free(s);
+            } else if (strcmp(base, "xs:duration") == 0) {
+                char* s = xpath_to_string(v);
+                double m, x;
+                ok = s && (leptris_dur_try_months(s, &m) ||
+                           leptris_dur_try_seconds(s, &x));
                 free(s);
             }
             out->value.boolean_value = ok;
@@ -2670,6 +2920,28 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 strcmp(base, "xs:duration") == 0) {
                 out = xpath_result_new(XPATH_RESULT_STRING);
                 if (out) out->value.string_value = xpath_to_string(v);
+            } else if (strcmp(base, "xs:untypedAtomic") == 0 ||
+                       xq_atomic_family_mark(base) ||
+                       strcmp(base, "xs:normalizedString") == 0 ||
+                       strcmp(base, "xs:token") == 0 ||
+                       strcmp(base, "xs:language") == 0 ||
+                       strcmp(base, "xs:NMTOKEN") == 0 ||
+                       strcmp(base, "xs:Name") == 0 ||
+                       strcmp(base, "xs:NCName") == 0 ||
+                       strcmp(base, "xs:ID") == 0 ||
+                       strcmp(base, "xs:IDREF") == 0 ||
+                       strcmp(base, "xs:ENTITY") == 0 ||
+                       strcmp(base, "xs:yearMonthDuration") == 0 ||
+                       strcmp(base, "xs:dayTimeDuration") == 0) {
+                /* Typed passthrough target: the atomic type rides
+                 * the result so the sequence fold can tag carriers
+                 * with their family (equality/grouping identity). */
+                out = xpath_result_new(XPATH_RESULT_STRING);
+                if (out) {
+                    out->value.string_value = xpath_to_string(v);
+                    if (xq_atomic_family_mark(base))
+                        out->atomic_type = base;
+                }
             } else if (strcmp(base, "xs:boolean") == 0) {
                 out = xpath_result_new(XPATH_RESULT_BOOLEAN);
                 if (out) out->value.boolean_value = xpath_to_boolean(v);
@@ -2783,10 +3055,30 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         if (tn) xpath_nodeset_add(out, tn);
                     }
                 } else {
-                    XPathTextNode* tn =
-                        synth_text(piece ? piece : "",
-                                   piece ? strlen(piece) : 0);
-                    if (tn) xpath_nodeset_add(out, tn);
+                    char fam = (item->type == XPATH_RESULT_STRING &&
+                                item->atomic_type)
+                        ? xq_atomic_family_mark(item->atomic_type) : 0;
+                    if (fam && piece) {
+                        /* "\x03<mark>" family tag keeps typed atoms
+                         * distinct from the same spelling in other
+                         * families (cbcl-distinct-values-002). */
+                        size_t pl = strlen(piece);
+                        char* marked = (char*)malloc(pl + 3);
+                        if (marked) {
+                            marked[0] = '\x03';
+                            marked[1] = fam;
+                            memcpy(marked + 2, piece, pl + 1);
+                            XPathTextNode* tn =
+                                synth_text(marked, pl + 2);
+                            free(marked);
+                            if (tn) xpath_nodeset_add(out, tn);
+                        }
+                    } else {
+                        XPathTextNode* tn =
+                            synth_text(piece ? piece : "",
+                                       piece ? strlen(piece) : 0);
+                        if (tn) xpath_nodeset_add(out, tn);
+                    }
                 }
                 free(piece);
             }
