@@ -119,6 +119,14 @@ struct leptris_mut_attr_block {
 
 struct LeptrisDiag;
 
+/* #1124 source-offset side table entry (open addressing,
+ * Fibonacci hash — elem_pos.c). */
+struct leptris_elem_pos_entry {
+    struct leptris_element* elem;
+    uint32_t start_tag_end;
+    uint32_t element_end;
+};
+
 struct leptris_document {
     struct leptris_element* root;             /* Root element (legacy API) */
     /* Snapshot of this document's last failing parse message
@@ -245,6 +253,8 @@ struct leptris_document {
      * Frees in leptris_document_free. */
     struct leptris_elem_pos_entry* elem_pos;
     size_t elem_pos_count, elem_pos_cap;
+    int elem_pos_heap;   /* 0 = elem_pos points at elem_pos_inline */
+    struct leptris_elem_pos_entry elem_pos_inline[16];
     size_t line_break_count;
     /* Doc-level attribute-name index (mutation path): open-addressed
      * (element, name-hash) -> attr. Built lazily on the first
