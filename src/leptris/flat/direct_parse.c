@@ -223,11 +223,6 @@ static inline void dp_skip_ws(DParser* p) {
 #else
 #  define DP_UNLIKELY(x) (x)
 #endif
-/* Sentinel-terminated + 4x-unrolled byte loads (parse endgame):
- * pugixml's SCANWHILE_UNROLL shape, never tested here — the earlier
- * failed fast path was SWAR (mask setup dominated short names);
- * this one keeps plain byte loads and only amortizes the loop
- * counter and exits via unlikely hints. NUL stops the scan. */
 static LEPTRIS_ALWAYS_INLINE void dp_scan_name_p(char** pos) {
     char* s = *pos;
     for (;;) {
@@ -2862,15 +2857,44 @@ void leptris_il_run_free(IlCtx* c, char* scratch) {
     free(scratch);
 }
 
+/* Env-gate memo: getenv is a LOCKED LINEAR environ scan, and the
+ * gate runs on EVERY parse — ~100-200ns, 5-8% of a small-doc
+ * parse (the old comment assumed ~ms parses). Memoized per
+ * process; the interleaved tests toggle the env per-case and bump
+ * the memo through leptris_dp_env_cache_reset() (the CI forced
+ * gate sets the env before process start). Benign race on the
+ * one-word inited flag: concurrent first parses compute identical
+ * values unless the environment changes mid-parse, which no
+ * supported flow does. */
+static struct {
+    int inited;
+    int interleaved;
+    size_t min_len;
+} dp_env_memo;
+
+void leptris_dp_env_cache_reset(void) { dp_env_memo.inited = 0; }
+
+static void dp_env_memo_init(void) {
+    const char* gate = getenv("LEPTRIS_INTERLEAVED");
+    dp_env_memo.interleaved = gate && *gate;
+    const char* mins = getenv("LEPTRIS_IL_MIN");
+    size_t min_len = 64 * 1024;
+    if (mins && *mins) {
+        long mv = strtol(mins, NULL, 10);
+        if (mv > 0) min_len = (size_t)mv;
+        else min_len = 0;   /* explicit 0 disables */
+    }
+    dp_env_memo.min_len = min_len;
+    dp_env_memo.inited = 1;
+}
+
 static struct leptris_document* dp_il_try(const char* xml, size_t len,
                                           int drop_ws, int keep_ent,
                                           int dtd_attrs) {
-    /* Per-parse getenv (uncached): ~100-200ns against ~ms parses,
-     * and it lets tests toggle the lane per-case in one process. */
     /* Empty string counts as unset: MSVC's _putenv_s(k, "") (the
      * only "unset" the CRT offers) leaves an empty value behind. */
-    const char* gate = getenv("LEPTRIS_INTERLEAVED");
-    if (!gate || !*gate) return NULL;
+    if (!dp_env_memo.inited) dp_env_memo_init();
+    if (!dp_env_memo.interleaved) return NULL;
     if (keep_ent || dtd_attrs) return NULL;
     if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
     /* #1258: small documents do not amortize the record pass.
@@ -2882,16 +2906,7 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
      * overrides (bytes; 0 = no threshold) for hosts and for the
      * parity gates, which force it to 0 so the lane stays covered
      * by the suite at fixture sizes. */
-    {
-        const char* mins = getenv("LEPTRIS_IL_MIN");
-        size_t min_len = 64 * 1024;
-        if (mins && *mins) {
-            long mv = strtol(mins, NULL, 10);
-            if (mv > 0) min_len = (size_t)mv;
-            else min_len = 0;   /* explicit 0 disables */
-        }
-        if (len < min_len) return NULL;
-    }
+    if (len < dp_env_memo.min_len) return NULL;
 
     /* Scratch is built UP FRONT (slice 2): il_scan reads it with
      * the NUL-sentinel discipline, and dp_il_build reuses the same

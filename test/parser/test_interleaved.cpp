@@ -21,11 +21,15 @@
  * value in the environment, so the lane gates in direct_parse.c
  * treat empty-string values as off. */
 #ifdef _WIN32
-static void set_env(const char* k, const char* v) { _putenv_s(k, v); }
-static void unset_env(const char* k) { _putenv_s(k, ""); }
+/* The parser memoizes the lane env gates per process; bump the
+ * memo after every toggle so per-case forcing still applies. */
+extern "C" void leptris_dp_env_cache_reset(void);
+static void set_env(const char* k, const char* v) { _putenv_s(k, v); leptris_dp_env_cache_reset(); }
+static void unset_env(const char* k) { _putenv_s(k, ""); leptris_dp_env_cache_reset(); }
 #else
-static void set_env(const char* k, const char* v) { setenv(k, v, 1); }
-static void unset_env(const char* k) { unsetenv(k); }
+extern "C" void leptris_dp_env_cache_reset(void);
+static void set_env(const char* k, const char* v) { setenv(k, v, 1); leptris_dp_env_cache_reset(); }
+static void unset_env(const char* k) { unsetenv(k); leptris_dp_env_cache_reset(); }
 #endif
 
 namespace {
