@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.260] - 2026-09-27
+
+### Fixed
+
+- bare FLWOR initializer scan terminates at outer clause words (xquery)
+
+
+
 ## [1.9.259] - 2026-09-26
 
 <!-- Edit this section with the actual release notes. -->
