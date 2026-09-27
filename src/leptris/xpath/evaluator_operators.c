@@ -2946,8 +2946,24 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 strcmp(base, "xs:anyURI") == 0) {
                 out = xpath_result_new(XPATH_RESULT_STRING);
                 if (out) out->value.string_value = xpath_to_string(v);
-            } else if (strcmp(base, "xs:untypedAtomic") == 0 ||
-                       xq_atomic_family_mark(base) ||
+            } else if (strcmp(base, "xs:untypedAtomic") == 0) {
+                /* numeric carriers may ride a %.17g binding
+                 * lexical — a numeric string re-spells from its
+                 * value (string(3.141e0 cast as
+                 * xs:untypedAtomic) is '3.141') */
+                char* us = xpath_to_string(v);
+                if (us && xq_numeric_lexical(us)) {
+                    double uv = xpath_to_number(v);
+                    char* us2 = xpath_number_to_string_xq_typed(
+                        uv,
+                        v->atomic_type &&
+                            strcmp(v->atomic_type, "xs:float") == 0);
+                    free(us);
+                    us = us2;
+                }
+                out = xpath_result_new(XPATH_RESULT_STRING);
+                if (out) out->value.string_value = us;
+            } else if (xq_atomic_family_mark(base) ||
                        strcmp(base, "xs:normalizedString") == 0 ||
                        strcmp(base, "xs:token") == 0 ||
                        strcmp(base, "xs:language") == 0 ||
@@ -3003,6 +3019,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     strcmp(base, "xs:byte") == 0 ||
                     strncmp(base, "xs:unsigned", 11) == 0)
                     d = (d < 0) ? ceil(d) : floor(d);
+                if (strcmp(base, "xs:float") == 0)
+                    d = (double)(float)d;   /* store the float value */
                 out = xpath_result_new(XPATH_RESULT_NUMBER);
                 if (out) {
                     out->value.number_value = d;
@@ -3013,13 +3031,12 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         out->atomic_type = "xs:float";
                     else if (strcmp(base, "xs:decimal") == 0) {
                         out->atomic_type = "xs:decimal";
-                        /* a double source spells shortest (Saxon:
-                         * xs:decimal(3.141e0) = 3.141) — the
-                         * %.17g string() form would leak digits */
+                        /* derive from the VALUE, not the operand
+                         * lexical — double carriers may ride a
+                         * %.17g binding spelling (Saxon:
+                         * xs:decimal(3.141e0) = 3.141) */
                         out->decimal_lex =
-                            (v->type == XPATH_RESULT_NUMBER)
-                                ? xpath_number_to_string_xq_typed(d, 0)
-                                : xpath_to_string(v);
+                            xpath_number_to_string_xq_typed(d, 0);
                     }
                 }
             }
