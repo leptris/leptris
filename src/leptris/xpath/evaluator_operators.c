@@ -620,6 +620,8 @@ static const struct { const char* type; char mark; } xq_family_table[] = {
     { "xs:gYear", 'Y' }, { "xs:gYearMonth", 'J' }, { "xs:gMonthDay", 'K' },
     { "xs:gDay", 'Q' }, { "xs:gMonth", 'H' },
     { "xs:hexBinary", 'X' }, { "xs:base64Binary", 'W' }, { "xs:QName", 'Z' },
+    { "xs:duration", 'd' }, { "xs:yearMonthDuration", 'd' },
+    { "xs:dayTimeDuration", 'd' },
 };
 
 static char xq_atomic_family_mark(const char* t) {
@@ -647,13 +649,14 @@ int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
     if (!ka != !kb) return 0;
     if (ka == 'B' && kb == 'B') return strcmp(a + 2, b + 2) == 0;
     /* Typed families (calendar/binary/QName) are comparable only
-     * within the same family — an untypedAtomic spelling never eqs
-     * a calendar item of the same spelling. */
-    if (ka && kb && ka != kb &&
-        (ka == 'N' || ka == 'F' || ka == 'D' ? 0 : 1) &&
-        (kb == 'N' || kb == 'F' || kb == 'D' ? 0 : 1))
-        return 0;
-    if (ka && ka == kb && strchr("ETtYJKQHXWZ", ka)) {
+     * within the same family; mixed marked pairs (family vs
+     * numeric) never eq — both sides strtod to 0.0 otherwise. */
+    if (ka && kb && ka != kb) {
+        int na_num = (ka == 'N' || ka == 'F' || ka == 'D');
+        int nb_num = (kb == 'N' || kb == 'F' || kb == 'D');
+        if (!(na_num && nb_num)) return 0;
+    }
+    if (ka && ka == kb && strchr("ETtYJKQHXWZd", ka)) {
         if (ka == 'Z') {
             /* QName eq is namespace+local; the carrier holds the
              * lexical — compare the local part so the prefixed
@@ -670,6 +673,18 @@ int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
             if (leptris_time_norm_seconds(a + 2, &ta, NULL) &&
                 leptris_time_norm_seconds(b + 2, &tb, NULL))
                 return ta == tb;
+        }
+        if (ka == 'd') {
+            /* duration family (all subtypes) eq by value space;
+             * each side values as months when it is a Y/M form,
+             * else seconds — zero-duration cross-forms merge
+             * (cbcl-distinct-values-013). */
+            double va = 0, vb = 0, t;
+            va = leptris_dur_try_months(a + 2, &t) ? t
+                 : leptris_dur_try_seconds(a + 2, &t) ? t : 0;
+            vb = leptris_dur_try_months(b + 2, &t) ? t
+                 : leptris_dur_try_seconds(b + 2, &t) ? t : 0;
+            return va == vb;
         }
         return strcmp(a + 2, b + 2) == 0;
     }
@@ -2828,6 +2843,14 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                           strcmp(base, "xs:byte") == 0 ||
                           strncmp(base, "xs:unsigned", 11) == 0 ||
                           strstr(base, "Integer") != NULL;
+            /* integer-family castable is source-type dependent:
+             * a STRING source needs an integer lexical ('3.141'
+             * fails), a NUMBER source always truncates in-range
+             * (Saxon: xs:byte(3.333) = 3). */
+            int integral_ty =
+                strcmp(base, "xs:double") != 0 &&
+                strcmp(base, "xs:float") != 0 &&
+                strcmp(base, "xs:decimal") != 0;
             if (numeric) {
                 char* s = xpath_to_string(v);
                 ok = 0;
@@ -2836,6 +2859,12 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     strtod(s, &end);
                     while (end && *end == ' ') end++;
                     ok = end && *end == '\0' && s[0] != '\0';
+                    if (ok && integral_ty && v->type == XPATH_RESULT_STRING) {
+                        const char* q = s + (s[0] == '-');
+                        if (!*q) ok = 0;
+                        for (; *q && ok; q++)
+                            if (*q < '0' || *q > '9') ok = 0;
+                    }
                     free(s);
                 }
             } else if (strcmp(base, "xs:boolean") == 0) {
@@ -2914,10 +2943,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         {
             struct leptris_xpath_result* out = NULL;
             if (strcmp(base, "xs:string") == 0 ||
-                strcmp(base, "xs:anyURI") == 0 ||
-                strncmp(base, "xs:date", 7) == 0 ||
-                strcmp(base, "xs:time") == 0 ||
-                strcmp(base, "xs:duration") == 0) {
+                strcmp(base, "xs:anyURI") == 0) {
                 out = xpath_result_new(XPATH_RESULT_STRING);
                 if (out) out->value.string_value = xpath_to_string(v);
             } else if (strcmp(base, "xs:untypedAtomic") == 0 ||
@@ -2943,8 +2969,16 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         out->atomic_type = base;
                 }
             } else if (strcmp(base, "xs:boolean") == 0) {
+                /* the operand may ride a nodeset carrier — EBV of a
+                 * non-empty nodeset is always true; cast the STRING
+                 * value instead */
+                char* bs = xpath_to_string(v);
                 out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-                if (out) out->value.boolean_value = xpath_to_boolean(v);
+                if (out)
+                    out->value.boolean_value =
+                        bs && (strcmp(bs, "true") == 0 ||
+                               strcmp(bs, "1") == 0);
+                free(bs);
             } else {
                 /* Numeric targets validate string lexicals (#790):
                  * 'nope' cast as xs:integer is a dynamic error
@@ -2963,10 +2997,31 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     return NULL;
                 }
                 d = xpath_to_number(v);
-                if (strcmp(base, "xs:integer") == 0)
+                if (strcmp(base, "xs:integer") == 0 || strstr(base, "Integer") ||
+                    strcmp(base, "xs:long") == 0 || strcmp(base, "xs:int") == 0 ||
+                    strcmp(base, "xs:short") == 0 ||
+                    strcmp(base, "xs:byte") == 0 ||
+                    strncmp(base, "xs:unsigned", 11) == 0)
                     d = (d < 0) ? ceil(d) : floor(d);
                 out = xpath_result_new(XPATH_RESULT_NUMBER);
-                if (out) out->value.number_value = d;
+                if (out) {
+                    out->value.number_value = d;
+                    /* the fold tags float/decimal carriers for the
+                     * F&O promotion comparator; decimals keep their
+                     * exact spelling */
+                    if (strcmp(base, "xs:float") == 0)
+                        out->atomic_type = "xs:float";
+                    else if (strcmp(base, "xs:decimal") == 0) {
+                        out->atomic_type = "xs:decimal";
+                        /* a double source spells shortest (Saxon:
+                         * xs:decimal(3.141e0) = 3.141) — the
+                         * %.17g string() form would leak digits */
+                        out->decimal_lex =
+                            (v->type == XPATH_RESULT_NUMBER)
+                                ? xpath_number_to_string_xq_typed(d, 0)
+                                : xpath_to_string(v);
+                    }
+                }
             }
             xpath_result_free(v);
             return out;
