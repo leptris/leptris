@@ -66,6 +66,27 @@ TEST(XQueryCore, PrologVariableAndFlwor) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, BareFlworInitializer) {
+    /* A binding expression may itself start a FLWOR without
+     * parentheses; the OUTER clause words (let/order by/where/
+     * return) must still terminate the inner scan. Regression
+     * shape from QT3 K2-OrderbyExprWithout. */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "let $x := for $i in (1,2) return $i * 10 return $x"),
+        "10 20");
+    EXPECT_EQ(seq_string(doc,
+        "for $a in (1, 4, 2) let $i := (1, 3, 2) "
+        "order by $a return $i"),
+        "1 3 2 1 3 2 1 3 2");
+    EXPECT_EQ(seq_string(doc,
+        "for $i in (1, 2, 3) let $s := $i * $i "
+        "where $i > 1 return $s"),
+        "4 9");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);
