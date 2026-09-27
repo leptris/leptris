@@ -173,24 +173,39 @@ static int is_clause_word(const char* w, size_t len) {
 /* Advance over one FLWOR expression segment: stops before a clause
  * keyword at nesting depth 0 (a bare word delimited by whitespace
  * or segment end). */
-static void scan_expr_segment(Scan* s, int stop_at_comma) {
+static void scan_expr_segment(Scan* s, int stop_at_comma,
+                              int allow_bare_flwor) {
     int depth = 0;
+    /* A binding expression that STARTS with for/let is a bare
+     * nested FLWOR (let $x := for ... return ...): its clause
+     * keywords are inert and `return` closes the nesting. Segments
+     * that merely CONTAIN a depth-0 for/let after a complete
+     * expression (for $i in (1,2,3) let ...) keep the old boundary.
+     * allow_bare_flwor arms the check for the first word only. */
+    int flwor_nest = 0;
+    int seen_token = 0;   /* any non-space token consumed yet? */
     while (s->p < s->end) {
         char c = *s->p;
         if (c == '\'' || c == '"') {
             scan_string(s);
+            seen_token = 1;
             continue;
         }
         if (c == '`') {
             s->p++;
             while (s->p < s->end && *s->p != '`') s->p++;
             if (s->p < s->end) s->p++;
+            seen_token = 1;
             continue;
         }
-        if (c == '(' || c == '[' || c == '{') depth++;
+        if (c == '(' || c == '[' || c == '{') {
+            depth++;
+            seen_token = 1;
+        }
         else if (c == ')' || c == ']' || c == '}') {
             if (depth == 0) return;   /* segment boundary */
             depth--;
+            seen_token = 1;
         } else if (c == ',' && depth == 0 && stop_at_comma) {
             return;
         } else if (depth == 0 &&
@@ -202,9 +217,25 @@ static void scan_expr_segment(Scan* s, int stop_at_comma) {
                  * by whitespace/segment end. scan_word does not
                  * advance the cursor — look past the word. */
                 const char* after = w + wl;
-                if (after >= s->end || isspace((unsigned char)*after))
-                    return;
+                int at_boundary =
+                    after >= s->end || isspace((unsigned char)*after);
+                if (at_boundary && !seen_token && allow_bare_flwor &&
+                    (word_is(w, wl, "for") || word_is(w, wl, "let"))) {
+                    flwor_nest = 1;
+                    seen_token = 1;
+                    s->p += wl;
+                    continue;
+                }
+                if (at_boundary && flwor_nest > 0) {
+                    if (word_is(w, wl, "return")) flwor_nest--;
+                    seen_token = 1;
+                    s->p += wl;
+                    continue;
+                }
+                seen_token = 1;
+                if (at_boundary) return;
             }
+            seen_token = 1;
             s->p += wl ? wl : 1;
             continue;
         }
@@ -1424,7 +1455,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             }
                             s.p = iw + iwl;
                             Scan e = s;
-                            scan_expr_segment(&e, 0);
+                            scan_expr_segment(&e, 0, 0);
                             wc.win.domain = parse_expr_span(s.p, e.p);
                             if (!wc.win.domain) {
                                 xq_clause_partial_free(&wc);
@@ -1471,7 +1502,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                                 if (wwl2 && word_is(ww, wwl2, "when")) {
                                     s.p = ww + wwl2;
                                     Scan se = s;
-                                    scan_expr_segment(&se, 0);
+                                    scan_expr_segment(&se, 0, 0);
                                     wc.win.s_when =
                                         parse_expr_span(s.p, se.p);
                                     if (!wc.win.s_when) {
@@ -1520,7 +1551,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                                     if (wwl2 && word_is(ww, wwl2, "when")) {
                                         s.p = ww + wwl2;
                                         Scan ee = s;
-                                        scan_expr_segment(&ee, 0);
+                                        scan_expr_segment(&ee, 0, 0);
                                         wc.win.e_when =
                                             parse_expr_span(s.p, ee.p);
                                         if (!wc.win.e_when) {
@@ -1616,7 +1647,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             s.p += 2;
                         }
                         Scan e = s;
-                        scan_expr_segment(&e, 1);
+                        scan_expr_segment(&e, 1, 1);
                         XPathASTNode* expr = parse_expr_span(s.p, e.p);
                         if (!expr) {
                             free(var);
@@ -1649,7 +1680,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                     }
                 } else if (word_is(kw, kwl, "where")) {
                     Scan e = s;
-                    scan_expr_segment(&e, 0);
+                    scan_expr_segment(&e, 0, 0);
                     /* WHERE after GROUP BY filters the GROUPED
                      * tuples (aggregates see the whole group) */
                     XPathASTNode* w_ast = parse_expr_span(s.p, e.p);
@@ -1722,7 +1753,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                             s.p[1] == '=') {
                             s.p += 2;
                             Scan e = s;
-                            scan_expr_segment(&e, 0);
+                            scan_expr_segment(&e, 0, 0);
                             gk = parse_expr_span(s.p, e.p);
                             if (!gk) {
                                 free(gvar);
@@ -1800,7 +1831,7 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                     for (;;) {
                         scan_ws(&s);
                         Scan e = s;
-                        scan_expr_segment(&e, 1);   /* stop at ',' */
+                        scan_expr_segment(&e, 1, 1);   /* stop at ',' */
                         XPathASTNode* key = parse_expr_span(s.p, e.p);
                         if (!key) {
                             xq_free(q);
