@@ -223,6 +223,21 @@ static inline void dp_skip_ws(DParser* p) {
 #else
 #  define DP_UNLIKELY(x) (x)
 #endif
+/* Round 6: value-scan stop tables. One table load + one test per
+ * byte replaces the three-compare chain - pugixml's ct_parse_attr
+ * loop shape. 0 = boring, 1 = this value's quote, 2 = '&', 3 = ws.
+ * Two tables because the closing quote matches the OPENING one;
+ * NUL classifies boring exactly as the compare chain did (the
+ * probe endgame bounds the scan). */
+static const unsigned char dp_val_stop_dq[256] = {
+    ['"'] = 1, ['&'] = 2,
+    ['\t'] = 3, ['\n'] = 3, ['\r'] = 3,
+};
+static const unsigned char dp_val_stop_sq[256] = {
+    ['\''] = 1, ['&'] = 2,
+    ['\t'] = 3, ['\n'] = 3, ['\r'] = 3,
+};
+
 static LEPTRIS_ALWAYS_INLINE void dp_scan_name_p(char** pos) {
     char* s = *pos;
     for (;;) {
@@ -842,12 +857,18 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             const char* probe_end = p->probe_slack
                 ? q + 48
                 : ((p->end - q > 48) ? q + 48 : p->end);
+            const unsigned char* vtab =
+                (quote == '"') ? dp_val_stop_dq : dp_val_stop_sq;
             while (q < probe_end) {
-                char vch = *q;
-                if (vch == quote) { val_end = (char*)q; goto value_done; }
-                if (vch == '&') has_amp = 1;
-                else if (vch == '\t' || vch == '\n' || vch == '\r')
-                    has_ws = 1;
+                if (DP_UNLIKELY(vtab[(unsigned char)*q])) {
+                    char vch = *q;
+                    if (vch == quote) {
+                        val_end = (char*)q;
+                        goto value_done;
+                    }
+                    if (vch == '&') has_amp = 1;
+                    else has_ws = 1;
+                }
                 q++;
             }
             if (q >= p->end) return -1; /* unterminated */
