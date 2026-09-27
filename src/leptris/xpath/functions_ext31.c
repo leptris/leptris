@@ -2059,6 +2059,18 @@ static struct leptris_xpath_result* fn_parse_xml_fragment(
     return xq_anchor_owned_doc(ctx, doc, 1);
 }
 
+static struct leptris_xpath_result* fn_qname_ctor(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    /* fn:QName(uri, lexical): the string value is the LEXICAL
+     * form including prefix; the 1-arg form passes through. */
+    char* in = re_str_arg(ctx, args, n > 1 ? 1 : 0);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (!out) { free(in); return NULL; }
+    out->value.string_value = in ? in : leptris_strdup("");
+    out->atomic_type = "xs:QName";
+    return out;
+}
+
 static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
@@ -2080,6 +2092,16 @@ static struct leptris_xpath_result* fn_passthrough_ctor(XPathContext* ctx,
         if (out) out->atomic_type = TY;                                  \
         return out;                                                      \
     }
+/* Calendar/binary/QName ctors carry their atomic type so the
+ * sequence fold tags carriers with their family (equality and
+ * grouping keep families apart at identical spellings). */
+TYPED_STRING_CTOR(fn_gyear_ctor, "xs:gYear")
+TYPED_STRING_CTOR(fn_gyearmonth_ctor, "xs:gYearMonth")
+TYPED_STRING_CTOR(fn_gmonthday_ctor, "xs:gMonthDay")
+TYPED_STRING_CTOR(fn_gmonth_ctor, "xs:gMonth")
+TYPED_STRING_CTOR(fn_gday_ctor, "xs:gDay")
+TYPED_STRING_CTOR(fn_hexbinary_ctor, "xs:hexBinary")
+TYPED_STRING_CTOR(fn_base64binary_ctor, "xs:base64Binary")
 TYPED_STRING_CTOR(fn_ncname_ctor, "xs:NCName")
 TYPED_STRING_CTOR(fn_name_ctor, "xs:Name")
 TYPED_STRING_CTOR(fn_token_ctor, "xs:token")
@@ -5691,18 +5713,18 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:QName", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:QName", fn_qname_ctor, 1, 2);
     /* String-classed and gREG surface (QT3 deep-equal/index-of/
      * distinct-values families): untypedAtomic is string-equal;
      * binary/gREG compare by lexical form in this engine. */
     xpath_function_registry_register(registry, "xs:untypedAtomic", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:hexBinary", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:base64Binary", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:gYear", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:gYearMonth", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:gMonthDay", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:gMonth", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:gDay", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:hexBinary", fn_hexbinary_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:base64Binary", fn_base64binary_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gYear", fn_gyear_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gYearMonth", fn_gyearmonth_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gMonthDay", fn_gmonthday_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gMonth", fn_gmonth_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:gDay", fn_gday_ctor, 1, 1);
     xpath_function_registry_register(registry, "implicit-timezone", fn_implicit_tz, 0, 0);
     xpath_function_registry_register(registry, "current-dateTime", fn_current_dt, 0, 0);
     xpath_function_registry_register(registry, "current-date", fn_current_date, 0, 0);

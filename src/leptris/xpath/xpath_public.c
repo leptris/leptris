@@ -407,7 +407,9 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
                 (text->content[1] == 'F' &&
                  !((text->content[2] == 'N' &&
                     text->content[3] == '\x02') ||
-                   text->content[2] == 'R')))
+                   text->content[2] == 'R')) ||
+                (text->content[1] &&
+                 strchr("ETtYJKQHXWZ", text->content[1])))
                 return text->content + 2;
         }
         return text->content;
