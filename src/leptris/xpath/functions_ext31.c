@@ -572,15 +572,23 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
         for (size_t k = 0; k < cnt; k++) {
             int dup = 0;
             double mk = 0, sk = 0;
-            int dk = dur_ms_parse(items[k], &mk, &sk);
+            int marked_dur = items[k][0] == '\x03' && items[k][1] == 'd';
+            const char* durs = marked_dur ? items[k] + 2 : items[k];
+            /* only typed duration carriers value-dedup as durations;
+             * an untypedAtomic string that happens to look like one
+             * stays in the string family (cbcl-002 pairs) */
+            int dk = marked_dur ? dur_ms_parse(durs, &mk, &sk) : 0;
             for (size_t j2 = 0; j2 < n_kept && !dup; j2++) {
                 size_t j = kept[j2];
                 if (dk) {
                     /* xs:duration eq compares the value space
                      * (months, seconds) across the duration
                      * subtypes (cbcl-distinct-values-013) */
+                    const char* durj =
+                        (items[j][0] == '\x03' && items[j][1] == 'd')
+                            ? items[j] + 2 : items[j];
                     double mj = 0, sj = 0;
-                    if (dur_ms_parse(items[j], &mj, &sj) &&
+                    if (dur_ms_parse(durj, &mj, &sj) &&
                         mj == mk && sj == sk)
                         dup = 1;
                 } else if (leptris_atom_seq_eq_n(items[k], items[j], 1)) {
@@ -590,7 +598,9 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
             if (!dup) {
                 /* duration survivors spell canonically
                  * (dayTimeDuration P0D -> "PT0S") */
-                char* push = dk ? dur_canonical(items[k]) : NULL;
+                char* push =
+                    dk ? dur_canonical(durs)
+                       : (marked_dur ? leptris_strdup(items[k]) : NULL);
                 kept[n_kept++] = k;
                 seq_push_str(out, push ? push : items[k]);
                 free(push);
@@ -2102,6 +2112,9 @@ TYPED_STRING_CTOR(fn_gmonth_ctor, "xs:gMonth")
 TYPED_STRING_CTOR(fn_gday_ctor, "xs:gDay")
 TYPED_STRING_CTOR(fn_hexbinary_ctor, "xs:hexBinary")
 TYPED_STRING_CTOR(fn_base64binary_ctor, "xs:base64Binary")
+TYPED_STRING_CTOR(fn_duration_ctor, "xs:duration")
+TYPED_STRING_CTOR(fn_daytimeduration_ctor, "xs:dayTimeDuration")
+TYPED_STRING_CTOR(fn_yearmonthduration_ctor, "xs:yearMonthDuration")
 TYPED_STRING_CTOR(fn_ncname_ctor, "xs:NCName")
 TYPED_STRING_CTOR(fn_name_ctor, "xs:Name")
 TYPED_STRING_CTOR(fn_token_ctor, "xs:token")
@@ -5710,9 +5723,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:boolean", fn_xs_boolean, 1, 1);
     xpath_function_registry_register(registry, "xs:dateTime", fn_xs_datetime_t, 1, 1);
     xpath_function_registry_register(registry, "xs:time", fn_time_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:duration", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_passthrough_ctor, 1, 1);
-    xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_passthrough_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:duration", fn_duration_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:dayTimeDuration", fn_daytimeduration_ctor, 1, 1);
+    xpath_function_registry_register(registry, "xs:yearMonthDuration", fn_yearmonthduration_ctor, 1, 1);
     xpath_function_registry_register(registry, "xs:QName", fn_qname_ctor, 1, 2);
     /* String-classed and gREG surface (QT3 deep-equal/index-of/
      * distinct-values families): untypedAtomic is string-equal;
