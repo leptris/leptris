@@ -978,7 +978,7 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     free(doc->line_breaks);
     doc->line_breaks = NULL;
     /* #1285 slice 3a: element source-offset side table. */
-    free(doc->elem_pos);
+    if (doc->elem_pos_heap) free(doc->elem_pos);
     doc->elem_pos = NULL;
     doc->elem_pos_count = doc->elem_pos_cap = 0;
     /* #1285 slice 3b: binding-wrapper map — entries die with the

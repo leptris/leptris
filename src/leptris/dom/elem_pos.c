@@ -12,12 +12,6 @@
 #include <stdint.h>
 #include <string.h>
 
-struct leptris_elem_pos_entry {
-    struct leptris_element* elem;
-    uint32_t start_tag_end;
-    uint32_t element_end;
-};
-
 static size_t elem_pos_hash(const struct leptris_element* e, size_t cap) {
     uintptr_t k = (uintptr_t)e;
     return ((size_t)((k * 0x9E3779B97F4A7C15ULL) >> 32)) & (cap - 1);
@@ -35,7 +29,10 @@ static void elem_pos_insert_raw(struct leptris_elem_pos_entry* tab,
 }
 
 static int elem_pos_grow(struct leptris_document* doc) {
-    size_t ncap = doc->elem_pos_cap ? doc->elem_pos_cap * 2 : 64;
+    /* spill from the inline table -> heap 64; the inline array is
+     * part of the document and is never freed */
+    size_t ncap = (doc->elem_pos_heap || doc->elem_pos_cap > 16)
+                      ? doc->elem_pos_cap * 2 : 64;
     struct leptris_elem_pos_entry* nt =
         (struct leptris_elem_pos_entry*)calloc(ncap, sizeof(*nt));
     if (!nt) return -1;
@@ -45,9 +42,10 @@ static int elem_pos_grow(struct leptris_document* doc) {
             elem_pos_insert_raw(nt, ncap, e->elem, e->start_tag_end,
                                 e->element_end);
     }
-    free(doc->elem_pos);
+    if (doc->elem_pos_heap) free(doc->elem_pos);
     doc->elem_pos = nt;
     doc->elem_pos_cap = ncap;
+    doc->elem_pos_heap = 1;
     return 0;
 }
 
@@ -55,7 +53,11 @@ void leptris_elem_pos_record(struct leptris_document* doc,
                              struct leptris_element* elem,
                              uint32_t start_tag_end, uint32_t element_end) {
     if (!doc || !elem) return;
-    if (doc->elem_pos_count * 2 + 2 >= doc->elem_pos_cap) {
+    /* the inline table spills when FULL; heap tables keep the
+     * load-factor rule */
+    if (doc->elem_pos_cap <= 16
+            ? doc->elem_pos_count + 1 >= doc->elem_pos_cap
+            : doc->elem_pos_count * 2 + 2 >= doc->elem_pos_cap) {
         if (elem_pos_grow(doc) != 0) return;   /* cold data: skip on OOM */
     }
     struct leptris_elem_pos_entry* tab = doc->elem_pos;

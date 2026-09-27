@@ -1204,7 +1204,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     }
     size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
-#define DP_ELEM_CHUNK 64u
+#define DP_ELEM_CHUNK 8u
     size_t elem_bytes = est_elems * sizeof(struct leptris_element);
     /* Chunked zeroing over-allocation: elements are zeroed 64 at a
      * time as the carve cursor advances (see the carve site), so the
@@ -1221,7 +1221,20 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * missing). */
     size_t node_overhead = est_elems * 64;
     size_t text_room = len + node_overhead;
-    size_t slack = len / 2 + 64 * 1024;  /* mutation headroom + floor */
+    /* Mutation headroom + floor. The 64KB floor kept small parsed
+     * documents mutation-ready, but it also pushed EVERY small-doc
+     * span into the allocator's medium bin - the teardown pays
+     * madvise per document, 100ns+ against a ~1-2us parse. Scale
+     * the floor down for small docs (>= 8x content, >= 16KB) so
+     * tiny spans stay in the small bin; large documents keep the
+     * full 64KB. Small-doc mutations that overflow the span extend
+     * via tracked blocks (correct, slower) - the #1218 sizing
+     * lesson applies to PARSE-time allocations, which the
+     * elem/attr/text terms above already bound. */
+    size_t slack = len / 2 +
+        (len * 8 < 16 * 1024 ? 16 * 1024
+         : len * 8 > 64 * 1024 ? 64 * 1024
+         : len * 8);
     size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room + slack;
     LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) {
@@ -1306,6 +1319,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
+    doc->elem_pos = doc->elem_pos_inline;   /* pre-zeroed inline table */
+    doc->elem_pos_cap = 16;
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;
@@ -1316,37 +1331,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     doc->xml_buffer_needs_free = pristine_owned;
     doc->xml_buffer_slack = 0u;
     doc->parse_scratch = buf;   /* string backing; freed at doc free */
-    if (len < 0x7FFFFFFFu) {
-        size_t cap = 256, n_ = 0;
-        uint32_t* brks = (uint32_t*)malloc(cap * sizeof(uint32_t));
-        if (!brks) {
-            leptris_pool_destroy(pool);
-            leptris_arena_buffer_release(buf, len + 1 + 64);
-            if (pristine_owned)
-                leptris_arena_buffer_release(pristine, len + 1);
-            return NULL;
-        }
-        for (size_t i = 0; i < len; i++) {
-            if (buf[i] != '\n') continue;
-            if (n_ == cap) {
-                cap *= 2;
-                uint32_t* grown = (uint32_t*)realloc(
-                    brks, cap * sizeof(uint32_t));
-                if (!grown) {
-                    free(brks);
-                    leptris_pool_destroy(pool);
-                    leptris_arena_buffer_release(buf, len + 1 + 64);
-                    if (pristine_owned)
-                        leptris_arena_buffer_release(pristine, len + 1);
-                    return NULL;
-                }
-                brks = grown;
-            }
-            brks[n_++] = (uint32_t)i;
-        }
-        doc->line_breaks = brks;
-        doc->line_break_count = n_;
-    }
+    /* Line breaks are LAZY (node_public.c doc_line_breaks): the
+     * eager scan here cost a 1KB malloc + a full input pass per
+     * document for a diagnostics-only table most documents never
+     * read. The lazy builder reads xml_buffer, whose '\n' layout
+     * is identical to the scratch copy (NUL substitutions never
+     * replace newlines). */
     /* No leptris_compact_set_current_document — direct_parse is
      * overflow-table-free. All compact pointer edges use direct
      * offset arithmetic, never touching the shared thread-local
@@ -2155,7 +2145,7 @@ fail:
     free(doc->line_breaks);
     /* #1285 slice 3a: the element source-offset side table is
      * malloc'd too — same fail-path rule as line_breaks. */
-    free(doc->elem_pos);
+    if (doc->elem_pos_heap) free(doc->elem_pos);
     doc->elem_pos = NULL;
     leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
