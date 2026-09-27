@@ -16,34 +16,34 @@ net-negative, and REVERTED — the remaining ~25 template reds need
 the real mode stack (14-html-mode.md entry (h) banked,
 entry (i) shipped; the mode-stack requirement lives there).
 
-**STAGE 1 — HTML tail (#659), the only engine lane owned
-end-to-end:**
-1.1 template insertion-mode stack: each open template saves its
-    insertion mode; starts switch it (tr → in_row, td → in_cell,
-    thead/tbody/caption/col → in_table), end tags restore; clears
-    the ~25 template.dat reds (floor → ~1200)
-1.2 the 3-red walker mystery (plain-text-unsafe 12/13,
-    noscript01:1) — engine output is correct, the corpus walker
-    compares the comment as ''
-1.3 remaining corpus families in size order (tests1/16 tails)
-1.4 bindings expose leptris_parse_html_string/html4
-    (leptris-ruby PR: Leptris::HTML.parse WHATWG + parse4
-    Nokogiri-parity) → CLOSE #659
+**STAGE 1 — HTML tail (#659): CLOSED on the C side.** The
+html5lib corpus gate runs 1753 cases with fail=0 (1555 pass,
+198 legitimate skips) and the html/html_builder gates are green
+(verified 2026-09-27 at v1.9.260). Binding legs (parse_html_string
+exposure) live with the dedicated binding agents.
 
 **STAGE 2 — XSLT/XPath/XQuery completion (lanes 05/07/11/12/15):**
-2.1 QT3 growth: UCA collation → error-assertion channel →
-    assert-type/assert-xml/any-of → prod/ + Context* sets → 3.1
-    sets (array/, map/)
-2.2 lane 05 dates tail: current-*, implicit-timezone,
-    adjust-*-to-timezone (fixed-offset model), format-date/
-    time/dateTime picture subset
-2.3 lane 07 fn-items tail: fn:sort key/collation arity,
-    for-each-pair past the zip
-2.4 lane 15: leptris_xpath_eval_versioned (1.0-strict vs 3.x
-    surface gating) + result-type mirrors in both bindings
-    (gate: abi spec + mirror-drift check)
+2.1 QT3 growth: the typed-atom lane carries it — fn/distinct-values
+    is at 99 adopted / 2 pins (cbcl-002/002b, PR #1405 brings the
+    family-identity engine: 73/78 items Saxon-verified, remaining
+    5 = duration-canonical survivor spellings, may be unreachable);
+    OrderByClause, for-tuples, maps/arrays slices shipped v1.9.245+.
+2.2 lane 05 dates tail: SHIPPED — current-date/-dateTime/-time,
+    implicit-timezone, all three adjust-*-to-timezone and
+    format-date/time are registered (functions_ext31.c, verified
+    2026-09-27).
+2.3 lane 07 fn-items tail: SHIPPED — fn:sort, for-each-pair,
+    fold-left/right and the HOF surface are registered (verified
+    2026-09-27).
+2.4 lane 15: leptris_xpath_eval_versioned SHIPPED
+    (xpath_public.c:72); binding-side result-type mirrors remain
+    with the binding agents.
 
-**STAGE 3 — Schematron lane 16: COMPLETE on the C side** (schema
+**STAGE 3 — Schematron lane 16 + Lane 16.6: COMPLETE.** The
+`leptris validate` CLI (cli/commands/validate.c: DTD + RELAX NG +
+Schematron, --phase/--svrl) shipped with issue #1183; the ruby/py
+binding wrappers are in their repos (dedicated agents own the
+merge timing). (schema
 IR + SVRL evaluator + corpus 50/50 + `leptris validate`,
 v1.9.128/129). CLOSES when the user merges leptris-ruby#170 +
 leptris-py#99.
