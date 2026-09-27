@@ -383,13 +383,17 @@ LeptrisElement leptris_root_doc_memo_root_for_tests(void) {
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
     if (!elem) return NULL;
-    /* Lane 18 R3: a namebp-carrying element is UNATTACHED by
-     * definition (#1189) — its document is stateless in the name
-     * slot and must never see the recyclable-address memo. Answer
-     * BEFORE the TLS memo reads: builder loops appending under a
-     * fast-path root paid two tlv_get_addr per append for an
-     * answer sitting in the name slot. */
-    if (elem->name && leptris_elem_has_namebp(elem))
+    /* Lane 18 R3: an UNATTACHED namebp-carrying element roots
+     * itself in the name slot (#1189) — that slot is its
+     * authoritative document and must never see the recyclable-
+     * address memo. Answer BEFORE the TLS memo reads: builder
+     * loops appending under a fast-path root paid two
+     * tlv_get_addr per append for this answer. ATTACHED elements
+     * keep the walk — the namebp stamp is the CREATE-time doc
+     * (dp_il elements are stamped then attached, where the slot
+     * is not the tree's doc). */
+    if (elem->name && leptris_elem_has_namebp(elem) &&
+        !leptris_elem_parent(elem))
         return leptris_elem_namebp_doc(elem);
     LeptrisElement cur = elem;
     /* lane18 S2: hoist the TLS memo read (tlv_get_addr was the
