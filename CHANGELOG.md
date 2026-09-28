@@ -4,7 +4,7 @@
 
 ### Performance
 
-- lazily materialize the child-iteration cache for attr-free parents (dom)
+- dom: the child-iteration cache is now materialized lazily for attribute-free parents. The round-13 resume slot only engaged for elements carrying namespace state, so indexed child access on a plain wide parent (`<catalog>` with a thousand `<product>` children) was still an O(N^2) full re-walk per call — dom_benchmark_v2's Child Access row measured 148 SECONDS on the 96 KB catalog fixture (CI's 1 KB fixture hid it entirely). `child()` now carves the cache from the element's pool on first indexed access; the mutation-invalidation contract is unchanged and pinned by a new spec plus a tightened (18x -> 6x) perf guard watched failing first. Same fixture after: 0.77 s (~190x). CI artifacts now show all three access rows AHEAD of pugixml on ubuntu: Child 2.42x, Attribute 1.45x, Tree Walking 5.81x.
 
 
 
