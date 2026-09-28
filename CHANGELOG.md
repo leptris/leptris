@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.262] - 2026-09-28
+
+### Fixed
+
+- initialize pool pointer in the arena-carve fallback (pool)
+
+### Performance
+
+- arena-carved pool struct + elem_pos journal (parse)
+- O(1) dup probe, fused name scan, per-element ns-cache (parse)
+- carve scratch+pristine copies from the parse arena (parse)
+
+
+
 ## [1.9.261] - 2026-09-28
 
 ### Added
