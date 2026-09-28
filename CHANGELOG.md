@@ -4,7 +4,7 @@
 
 ### Performance
 
-- child-iteration cache for indexed access (ns_cache slot) (dom)
+- dom: child-iteration cache for indexed child access. `leptris_element_child(parent, i)` no longer re-walks from the first child on every call — it resumes from a per-element slot (generation-validated; every child-list mutator invalidates) so sequential indexed access is O(1) per step, and sibling hops skip the generic node type-switch via the shared edge tables. CI dom_benchmark_v2 Child Access: 0.34x -> 2.02x vs pugixml (ubuntu leg); Tree Walking 4.94x.
 
 
 
