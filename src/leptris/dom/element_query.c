@@ -37,6 +37,11 @@ struct leptris_namespace* leptris_namespace_new_pooled(const char* prefix,
  * resolver are defined in the attribute section below. */
 static struct leptris_attribute* find_attr_expanded_len(
     LeptrisElement elem, const char* uri, const char* local, size_t ll);
+static struct leptris_attribute* find_attr_bare(
+    LeptrisElement elem, const char* local, size_t ll);
+static struct leptris_attribute* find_attr_bare_h(LeptrisElement elem,
+                                                  const char* local,
+                                                  size_t ll, uint16_t lh);
 static const char* elem_resolve_attr_prefix(LeptrisElement elem,
                                             const char* prefix);
 #include <math.h>
@@ -172,14 +177,23 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
      * strcmp ran for EVERY bare-name query. */
     const char* colon = NULL;
     size_t name_len = 0;
+    /* The FNV rides this same pass (attr_hash15's byte loop fused
+     * into the len+colon scan — a second pass over the needle cost
+     * ~1ns/query). Discarded when a colon ends the scan: the bare
+     * path that consumes the hash is not taken then. */
+    uint32_t nh = 2166136261u;
     for (; name[name_len]; name_len++) {
-        if (name[name_len] == ':') { colon = &name[name_len]; break; }
+        unsigned char c9 = (unsigned char)name[name_len];
+        if (c9 == ':') { colon = &name[name_len]; break; }
+        nh ^= c9;
+        nh *= 16777619u;
     }
     struct leptris_attribute* attr;
     if (!colon) {
         if (name_len == 5 && name[0] == 'x' &&
             leptris_memeq_short(name, "xmlns", 5)) return NULL;  /* (5) */
-        attr = find_attr_expanded_len(elem, NULL, name, name_len); /* (1) */
+        attr = find_attr_bare_h(elem, name, name_len,
+                                attr_hash15_finish(nh));     /* (1) */
     } else {
         size_t pl = (size_t)(colon - name);
         if (pl == 5 && memcmp(name, "xmlns", 5) == 0) return NULL;  /* (5) */
@@ -329,6 +343,41 @@ static int uri_is_none(const char* uri) {
     return !uri || !uri[0];
 }
 
+/* Bare-name lookup (needle provably colon-free). The TODO 173
+ * invariant: an attribute carries a side ns cache ONLY when its name
+ * contains a colon — all three attr_set_ns_cache sites are
+ * colon-gated — so `ns_cache_off == 0` is an exact colon-free test,
+ * and a prefixed attr can never match a bare needle (#542 rule 1).
+ * That removes the per-attr colon probe entirely: a skipped hop is
+ * one int32 load, and the confirmed hop needs no probe either. */
+/* Always-inline: an out-of-line call per query costs more than the
+ * whole walk body (LTO otherwise emits this as a shared subroutine
+ * for the expanded-name delegation — the call was ~65% of query
+ * time at 2-attr chain lengths). Takes the caller's needle hash:
+ * attribute() computes it inside its len+colon scan, so the needle
+ * is hashed in one pass, not two. */
+LEPTRIS_ALWAYS_INLINE
+static struct leptris_attribute* find_attr_bare_h(LeptrisElement elem,
+                                                  const char* local,
+                                                  size_t ll, uint16_t lh) {
+    struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
+    while (attr) {
+        if (attr->ns_cache_off == 0 &&
+            attr->name_view.length == ll &&
+            attr_name_hash(attr) == lh &&
+            leptris_memeq_short(attr->name_view.data, local, ll))
+            return attr;
+        attr = leptris_attr_next(attr);
+    }
+    return NULL;
+}
+
+static struct leptris_attribute* find_attr_bare(LeptrisElement elem,
+                                                const char* local,
+                                                size_t ll) {
+    return find_attr_bare_h(elem, local, ll, attr_hash15(local, ll));
+}
+
 /* Find an attribute by EXPANDED name. uri NULL/"" matches only
  * no-namespace attributes; otherwise the URI must match what the
  * attribute's prefix resolves to (prefix-agnostic). Local names
@@ -336,34 +385,24 @@ static int uri_is_none(const char* uri) {
 static struct leptris_attribute* find_attr_expanded_len(
         LeptrisElement elem, const char* uri, const char* local,
         size_t ll) {
+    if (uri_is_none(uri)) return find_attr_bare(elem, local, ll);
     struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
-    /* No-namespace search: the 15-bit name-hash prefilter (TODO 172
-     * / S9, as in leptris_dom_attr_find). A hash+length+memcmp hit
-     * against a colon-free needle implies the attr name carries no
-     * colon, so the per-attr memchr is gone from the common path —
-     * value-of @name and attribute axes ride this (#682). */
-    uint16_t lh = uri_is_none(uri) ? attr_hash15(local, ll) : 0;
     while (attr) {
         const char* n = attr->name_view.data;
         size_t nl = attr->name_view.length;
-        if (nl < ll) goto next;
         /* Round 11: inline colon probe for the short names that
-     * dominate attr traffic — memchr's call setup costs more than
-     * the 1-3 iterations (the TODO 174 law). */
-    const char* colon = NULL;
-    if (nl <= 16) {
-        for (const char* c9 = n; c9 < n + nl; c9++) {
-            if (*c9 == ':') { colon = c9; break; }
-        }
-    } else {
-        colon = (const char*)memchr(n, ':', nl);
-    }
-        if (uri_is_none(uri)) {
-            if (colon) goto next;                    /* namespaced */
-            if (attr_name_hash(attr) == lh &&
-                leptris_memeq_short(n, local, ll)) return attr;
+         * dominate attr traffic — memchr's call setup costs more
+         * than the 1-3 iterations (the TODO 174 law). */
+        const char* colon = NULL;
+        if (nl <= 16) {
+            for (const char* c9 = n; c9 < n + nl; c9++) {
+                if (*c9 == ':') { colon = c9; break; }
+            }
         } else {
-            if (!colon) goto next;                   /* no namespace */
+            colon = (const char*)memchr(n, ':', nl);
+        }
+        if (!colon) goto next;                       /* no namespace */
+        {
             size_t pl = (size_t)(colon - n);
             if (nl - pl - 1 != ll || memcmp(colon + 1, local, ll) != 0)
                 goto next;
