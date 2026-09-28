@@ -1085,6 +1085,10 @@ static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
     c->doc_next = NULL;
     c->prefix_heap = 0;
     c->uri_heap = 0;
+    c->child_gen = 0;
+    c->child_cached_gen = 0;
+    c->child_idx = 0;
+    c->child_node = NULL;
     elem_set_ns_cache(elem, c);
     return c;
 }

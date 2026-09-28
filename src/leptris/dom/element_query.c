@@ -24,6 +24,8 @@ struct leptris_namespace* leptris_namespace_new_pooled(const char* prefix,
 #include "cdata.h"
 #include "comment.h"
 #include "pi.h"
+#include "entity_ref.h"
+#include "edges.h"
 #include "../common/string_view.h"
 #include "../common/entities.h"
 #include "../common/port.h"
@@ -621,11 +623,47 @@ LEPTRIS_API LeptrisElement leptris_element_child(LeptrisElement elem, size_t ind
     if (!elem) return NULL;
     if (index >= elem->child_count) return NULL;
 
-    LeptrisElement child = leptris_element_get_first_child(elem);
-    for (size_t i = 0; i < index && child != NULL; i++) {
-        child = leptris_element_get_next_sibling(child);
+    /* Lane-18 round 13: resume from the ns_cache child-iteration
+     * slot when the generations agree — sequential indexed access
+     * (the loop pattern) becomes O(1) per step instead of re-walking
+     * from the first child through every interleaved text node.
+     * leptris_element_invalidate_child_cache bumps the generation on
+     * every child-list mutation. */
+    struct leptris_ns_cache* cc = elem_get_ns_cache(elem);
+    LeptrisNode* cur;
+    size_t i;
+    if (cc && cc->child_cached_gen == cc->child_gen && cc->child_node &&
+        index >= cc->child_idx) {
+        cur = cc->child_node;
+        i = cc->child_idx;
+    } else {
+        cur = (LeptrisNode*)leptris_element_get_first_child(elem);
+        i = 0;
     }
-    return child;
+    while (cur) {
+        if (cur->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            if (i == index) {
+                if (cc) {
+                    cc->child_cached_gen = cc->child_gen;
+                    cc->child_idx = index;
+                    cc->child_node = cur;
+                }
+                return (LeptrisElement)cur;
+            }
+            i++;
+        }
+        /* Type-dispatched raw hop (edges.h tables, #450): text nodes
+         * interleave with elements and carry next_sibling_off at a
+         * different struct offset — a single-offset cast here reads
+         * garbage (the segfault this comment replaced). */
+        size_t ti = leptris_edge_idx((unsigned)cur->type);
+        if (ti >= 6) { cur = NULL; continue; }
+        const int32_t* f =
+            (const int32_t*)((char*)cur + leptris_edge_sib_off[ti]);
+        cur = (LeptrisNode*)leptris_compact_int32_decode_inline(
+            (void*)cur, *f, f);
+    }
+    return NULL;
 }
 
 /**
