@@ -999,8 +999,10 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     }
     /* #1125 scratch: string-view backing — every borrowed parse
      * string dies with it. Released on every path, including
-     * inplace documents (the scratch is always ours). */
-    if (doc->parse_scratch) {
+     * inplace documents (the scratch is always ours) — unless it
+     * was carved from the parse arena (round 8), in which case the
+     * pool destroy at the end of doc_free reclaims the whole span. */
+    if (doc->parse_scratch && !doc->parse_scratch_pool_owned) {
         leptris_arena_buffer_release(
             doc->parse_scratch, doc->xml_buffer_len + 1 + 64);
         doc->parse_scratch = NULL;

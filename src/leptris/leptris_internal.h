@@ -219,10 +219,13 @@ struct leptris_document {
     int xml_buffer_needs_free;   /* 1 if xml_buffer needs free(), 0 if stack/const */
     /* #1125 scratch design: the parser NUL-terminates in place on
      * this copy; every borrowed string view points into it. Always
-     * document-owned (retained-block allocator) and released with
-     * len + 1 + 64 at leptris_document_free. xml_buffer stays
-     * byte-identical to the input by construction. */
+     * document-owned: either released with len + 1 + 64 at
+     * leptris_document_free, or — lane-18 round 8 — carved from the
+     * parse arena (parse_scratch_pool_owned = 1) so pool destroy
+     * reclaims it. xml_buffer stays byte-identical to the input by
+     * construction. */
     char* parse_scratch;
+    int parse_scratch_pool_owned;   /* 1 = arena-carved, no release */
     /* Extra allocation past len+1: the parser's owns-copy over-
      * allocates 64 zeroed bytes for slack-backed probe windows. The
      * release path must hand the retention free-list the TRUE size
