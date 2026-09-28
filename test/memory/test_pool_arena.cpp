@@ -57,8 +57,13 @@ TEST(PoolArenaMode, ExhaustionExtendsBeyondSpan) {
      * like element_create can't start returning NULL). Overflow beyond
      * the sized span is satisfied by a tracked extension block — which
      * must lie OUTSIDE [base, base+size): the span stays contiguous
-     * and exclusively holds parse-time allocations. */
-    LeptrisArena* arena = leptris_arena_create(128);
+     * and exclusively holds parse-time allocations.
+     *
+     * Lane-18 round 10: the owning pool's struct carves the arena
+     * head first (arena_head_reserved in the stats), so the in-span
+     * budget is the arena size minus that carve; a 512-byte arena
+     * leaves room for the 120-byte in-span probe below. */
+    LeptrisArena* arena = leptris_arena_create(512);
     ASSERT_NE(arena, nullptr);
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
     ASSERT_NE(pool, nullptr);
@@ -67,14 +72,14 @@ TEST(PoolArenaMode, ExhaustionExtendsBeyondSpan) {
     char* in_span = (char*)leptris_pool_alloc(pool, 120);
     ASSERT_NE(in_span, nullptr);
     EXPECT_GE(in_span, base);
-    EXPECT_LT(in_span, base + 128);
+    EXPECT_LT(in_span, base + 512);
     /* Overflow succeeds but comes from an extension block. */
-    char* ext = (char*)leptris_pool_alloc(pool, 64);
+    char* ext = (char*)leptris_pool_alloc(pool, 4096);
     ASSERT_NE(ext, nullptr);
-    EXPECT_TRUE(ext < base || ext >= base + 128)
+    EXPECT_TRUE(ext < base || ext >= base + 512)
         << "overflow allocation must not land inside the arena span";
     /* Span accounting unchanged by the extension. */
-    EXPECT_LE(leptris_pool_used_size(pool), 128u);
+    EXPECT_LE(leptris_pool_used_size(pool), 512u);
     leptris_pool_destroy(pool);  /* extension freed with the pool */
 }
 
