@@ -210,8 +210,7 @@ static LEPTRIS_THREAD_LOCAL size_t g_overflow_table_refcount = 0;
  * is untouched. */
 static LeptrisCompactOverflowTable* get_overflow_table(void);
 
-__attribute__((noinline))
-static void* overflow_lookup(const void* field_addr, size_t size) {
+static LEPTRIS_NOINLINE void* overflow_lookup(const void* field_addr, size_t size) {
     LeptrisCompactOverflowTable* table = get_overflow_table();
     if (!table) return NULL;
     return leptris_compact_overflow_get(table, field_addr);
