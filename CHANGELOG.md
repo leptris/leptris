@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+## [1.9.261] - 2026-09-28
+
+### Added
+
+- typed-atom family identity for equality and grouping (xquery)
+
+### Fixed
+
+- float casts store the float32 value (xquery)
+- complete family identity for cast paths, durations, booleans (xquery)
+- namebp document short-circuit only for unattached elements (dom)
+
+### Performance
+
+- table-classified attribute value scan (parse)
+- small-doc fixed-cost round - lazy line breaks, inline pos table, lean element zeroing (parse)
+- memoize the interleaved-lane env gates (parse)
+- answer get_document from the namebp slot before the TLS memo (dom)
+
+
+
 ## [1.9.260] - 2026-09-27
 
 ### Fixed
