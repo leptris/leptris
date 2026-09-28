@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.265] - 2026-09-28
+
+### Fixed
+
+- portable noinline macro for the overflow_lookup helper (compact)
+
+### Performance
+
+- confine overflow-table TLS reads to the cold sentinel path (compact)
+
+
+
 ## [1.9.264] - 2026-09-28
 
 ### Performance
