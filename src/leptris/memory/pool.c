@@ -188,7 +188,11 @@ LeptrisMemoryPool* leptris_pool_create_arena_backed(LeptrisArena* arena,
      * lands after the struct. Shared-arena pools (owns_arena == 0,
      * e.g. iterparse) keep the malloc: their arena is bump-reset
      * under the caller and must not accumulate dead pool structs. */
-    LeptrisMemoryPool* pool;
+    /* MUST start NULL: the owns_arena==0 path skips the carve, and
+     * an uninitialized local made the !pool fallback test read stack
+     * garbage — Linux ASAN caught the wild-pointer write the fresh
+     * macOS stack hid. */
+    LeptrisMemoryPool* pool = NULL;
     int in_arena = 0;
     size_t reserved = 0;
     if (owns_arena) {
