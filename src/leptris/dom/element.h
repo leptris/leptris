@@ -370,6 +370,16 @@ struct leptris_ns_cache {
     struct leptris_ns_cache* doc_next;
     unsigned char prefix_heap;
     unsigned char uri_heap;
+    /* Lane-18 round 13: child-iteration cache. child_gen is bumped by
+     * every child-list mutator (prepend/insert/remove); child() stores
+     * (child_cached_gen, child_idx, child_node) after a walk and
+     * resumes from it while the generations agree — sequential indexed
+     * access becomes O(1) per step. append_child needs no bump: it
+     * preserves existing indices. */
+    uint32_t child_gen;
+    uint32_t child_cached_gen;
+    uint32_t child_idx;
+    LeptrisNode* child_node;
 };
 
 struct leptris_element {
@@ -927,7 +937,15 @@ void leptris_element_set_next_sibling(LeptrisElement elem, LeptrisElement siblin
  * future compact-storage cache (e.g. pugixml-style compact pointer
  * table) can plug in without touching every mutation call site. */
 static inline void leptris_element_invalidate_child_cache(LeptrisElement elem) {
-    (void)elem;
+    /* Lane-18 round 13: the hook now drives the ns_cache child-
+     * iteration cache (child_idx/child_node below). Bumping child_gen
+     * AND nulling child_node means a stale cache can never serve a
+     * node even across a 2^32 generation wrap. */
+    struct leptris_ns_cache* c = elem_get_ns_cache(elem);
+    if (c) {
+        c->child_gen++;
+        c->child_node = NULL;
+    }
 }
 
 /* ============================================================================
