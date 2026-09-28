@@ -55,3 +55,48 @@ TEST(ElementChildCache, RemoveChildInvalidatesIterationSlot) {
     EXPECT_EQ(leptris_element_child(root, 2), nullptr);
     leptris_document_free(doc);
 }
+
+TEST(ElementChildCache, AttrFreeParentLazyCacheStaysMutationSafe) {
+    /* Lane-18 round 15: attribute-free elements carry no ns_cache
+     * from the parser (the cache exists only when the parse stamped
+     * xmlns/prefix state), so the round-13 resume slot never engaged
+     * for them and every indexed read re-walked from the first
+     * child. child() now materializes the cache lazily. The mutation
+     * contract must hold for that lazily-created cache exactly as it
+     * does for parse-created ones. */
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><a/><b/><c/></r>", 19, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(leptris_element_attribute(root, "id"), nullptr);
+
+    /* Warm the iteration slot through the lazy path. */
+    for (int i = 0; i < 3; i++) {
+        LeptrisElement c = leptris_element_child(root, (size_t)i);
+        ASSERT_NE(c, nullptr) << "i=" << i;
+    }
+
+    LeptrisDocument fresh = leptris_document_create();
+    LeptrisElement z = leptris_element_create(fresh, "z");
+    ASSERT_NE(z, nullptr);
+    ASSERT_EQ(leptris_element_prepend_child(root, z), LEPTRIS_OK);
+
+    const char* names[] = {"z", "a", "b", "c"};
+    for (int i = 0; i < 4; i++) {
+        LeptrisElement c = leptris_element_child(root, (size_t)i);
+        ASSERT_NE(c, nullptr) << "i=" << i;
+        EXPECT_EQ(std::string(leptris_element_name(c)), names[i]) << "i=" << i;
+    }
+
+    LeptrisElement b = leptris_element_child(root, 2);
+    ASSERT_NE(b, nullptr);
+    ASSERT_EQ(leptris_element_remove_child(root, b), LEPTRIS_OK);
+    LeptrisElement c = leptris_element_child(root, 2);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(std::string(leptris_element_name(c)), "c");
+    EXPECT_EQ(leptris_element_child(root, 3), nullptr);
+    leptris_document_free(fresh);
+    leptris_document_free(doc);
+}
