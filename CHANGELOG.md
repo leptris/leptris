@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.268] - 2026-09-28
+
+### Performance
+
+- lazily materialize the child-iteration cache for attr-free parents (dom)
+
+
+
 ## [1.9.267] - 2026-09-28
 
 ### Performance
