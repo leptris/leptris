@@ -313,12 +313,16 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
         if (s < small) small = s;
         if (l < large) large = l;
     }
-    /* 3x size: O(N^2) sweep => large/small ~ 9x; an O(N^3)
-     * regression reaches ~27x. Budget 18x separates both with
-     * margin on loaded runners and under ASAN. */
-    EXPECT_LT(large, 18.0 * small)
-        << "Indexed child access complexity regression: 75-child sweep "
-        << large << " us vs 25-child sweep " << small << " us";
+    /* 3x size: a LINEAR sweep (the round-13 resume slot makes a
+     * sequential indexed read O(1) per step; round 15 extends it to
+     * attr-free parents, whose cache child() materializes lazily)
+     * measures large/small ~ 3x. The old quadratic walk measures
+     * ~9x; an O(N^3) regression reaches ~27x. Budget 6x separates
+     * linear from quadratic with margin on loaded runners. */
+    EXPECT_LT(large, 6.0 * small)
+        << "Indexed child access lost the O(1)-per-step resume "
+        << "(quadratic walk back?): 75-child sweep " << large
+        << " us vs 25-child sweep " << small << " us";
 }
 
 /* Template dispatch must scale with the CANDIDATE'S subtree, not

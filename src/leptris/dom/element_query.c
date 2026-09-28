@@ -669,6 +669,31 @@ LEPTRIS_API LeptrisElement leptris_element_child(LeptrisElement elem, size_t ind
      * leptris_element_invalidate_child_cache bumps the generation on
      * every child-list mutation. */
     struct leptris_ns_cache* cc = elem_get_ns_cache(elem);
+    if (!cc && elem->child_count > 1) {
+        /* Lane-18 round 15: attr-free parents carry no parse-time
+         * ns_cache (it exists only where the parse stamped
+         * xmlns/prefix state), so the round-13 resume slot never
+         * engaged for them and every indexed read re-walked from
+         * the first child — O(children) per call (a 96 KB catalog
+         * root measured 148 s per 100k indexed reads). Materialize
+         * the cache from the element's pool on first indexed
+         * access: the string fields stay NULL (nothing heap-owned,
+         * so no doc-chain registration), and the mutation
+         * invalidation hook keys off elem_get_ns_cache, so a cache
+         * created here is invalidated exactly like a parse-time
+         * one. Detached elements have no pool — they keep the
+         * walk. */
+        LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
+        if (pool) {
+            struct leptris_ns_cache* nc = (struct leptris_ns_cache*)
+                leptris_pool_alloc(pool, sizeof(*nc));
+            if (nc) {
+                memset(nc, 0, sizeof(*nc));
+                elem_set_ns_cache((struct leptris_element*)elem, nc);
+                cc = nc;
+            }
+        }
+    }
     LeptrisNode* cur;
     size_t i;
     if (cc && cc->child_cached_gen == cc->child_gen && cc->child_node &&
