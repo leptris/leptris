@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.264] - 2026-09-28
+
+### Performance
+
+- memoize the attr-miss debug gate + de-libc the query path (dom)
+
+
+
 ## [1.9.263] - 2026-09-28
 
 <!-- Edit this section with the actual release notes. -->
