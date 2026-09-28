@@ -33,8 +33,8 @@ struct leptris_namespace* leptris_namespace_new_pooled(const char* prefix,
 #include <ctype.h>
 /* Forward decls (issue #542): the expanded-name matcher and prefix
  * resolver are defined in the attribute section below. */
-static struct leptris_attribute* find_attr_expanded(
-    LeptrisElement elem, const char* uri, const char* local);
+static struct leptris_attribute* find_attr_expanded_len(
+    LeptrisElement elem, const char* uri, const char* local, size_t ll);
 static const char* elem_resolve_attr_prefix(LeptrisElement elem,
                                             const char* prefix);
 #include <math.h>
@@ -162,11 +162,22 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
      *   3. xml is prebound and needs no declaration
      *   4. undeclared prefix -> NULL, never a string fallback
      *   5. xmlns / xmlns:* are declarations — never matched here */
-    const char* colon = strchr(name, ':');
+    /* Lane-18 round 11: one fused scan of the caller's needle yields
+     * its length AND colon — the separate strchr + strlen +
+     * find_attr_expanded's strlen cost three libc calls per query,
+     * and a libc call's SIMD setup dwarfs a 2-4 byte name (the
+     * TODO 174 law). The xmlns test gates on 'x' first: the plain
+     * strcmp ran for EVERY bare-name query. */
+    const char* colon = NULL;
+    size_t name_len = 0;
+    for (; name[name_len]; name_len++) {
+        if (name[name_len] == ':') { colon = &name[name_len]; break; }
+    }
     struct leptris_attribute* attr;
     if (!colon) {
-        if (strcmp(name, "xmlns") == 0) return NULL;      /* (5) */
-        attr = find_attr_expanded(elem, NULL, name);      /* (1) */
+        if (name_len == 5 && name[0] == 'x' &&
+            leptris_memeq_short(name, "xmlns", 5)) return NULL;  /* (5) */
+        attr = find_attr_expanded_len(elem, NULL, name, name_len); /* (1) */
     } else {
         size_t pl = (size_t)(colon - name);
         if (pl == 5 && memcmp(name, "xmlns", 5) == 0) return NULL;  /* (5) */
@@ -176,7 +187,10 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
         pbuf[pl] = '\0';
         const char* uri = elem_resolve_attr_prefix(elem, pbuf);  /* (3)(4) */
         if (!uri) return NULL;                             /* (4) */
-        attr = find_attr_expanded(elem, uri, colon + 1);   /* (2) */
+        /* The fused needle scan stops AT the colon — the local part
+         * behind it is cold and rare; plain strlen is correct. */
+        attr = find_attr_expanded_len(elem, uri, colon + 1,
+                                       strlen(colon + 1)); /* (2) */
     }
     if (!attr) {
         /* #1242 diagnostic: LEPTRIS_DEBUG_ATTR_MISS=1 dumps the
@@ -187,7 +201,15 @@ LEPTRIS_API const char* leptris_element_attribute(LeptrisElement elem, const cha
          * mismatching hash15). Off by default; fprintf only on
          * miss. */
         static int dumped = 0;
-        if (dumped < 5 && getenv("LEPTRIS_DEBUG_ATTR_MISS")) {
+        /* Memoized gate — getenv is a LOCKED LINEAR environ scan
+         * (direct_parse.c's LEPTRIS_DEBUG_PARSE hit the same trap):
+         * called on every miss, it was 84% of attribute-lookup time
+         * under the dom_benchmark_v2 access loop. Read once per
+         * process. */
+        static int dbg_miss = -1;
+        if (dbg_miss < 0)
+            dbg_miss = getenv("LEPTRIS_DEBUG_ATTR_MISS") != NULL;
+        if (dumped < 5 && dbg_miss) {
             dumped++;
             size_t chain = 0;
             for (struct leptris_attribute* a =
@@ -267,7 +289,17 @@ LEPTRIS_API const char* leptris_attribute_prefix(LeptrisAttribute attr) {
     if (!attr) return NULL;
     const char* n = attr->name_view.data;
     size_t nl = attr->name_view.length;
-    const char* colon = nl ? memchr(n, ':', nl) : NULL;
+    /* Round 11: inline colon probe for the short names that
+     * dominate attr traffic — memchr's call setup costs more than
+     * the 1-3 iterations (the TODO 174 law). */
+    const char* colon = NULL;
+    if (nl <= 16) {
+        for (const char* c9 = n; c9 < n + nl; c9++) {
+            if (*c9 == ':') { colon = c9; break; }
+        }
+    } else {
+        colon = (const char*)memchr(n, ':', nl);
+    }
     if (!colon) return NULL;
     struct leptris_attr_ns_cache* c = attr_get_ns_cache(attr);
     if (c && c->prefix) return c->prefix;
@@ -299,9 +331,9 @@ static int uri_is_none(const char* uri) {
  * no-namespace attributes; otherwise the URI must match what the
  * attribute's prefix resolves to (prefix-agnostic). Local names
  * compare exactly. xmlns declarations are skipped defensively. */
-static struct leptris_attribute* find_attr_expanded(
-        LeptrisElement elem, const char* uri, const char* local) {
-    size_t ll = strlen(local);
+static struct leptris_attribute* find_attr_expanded_len(
+        LeptrisElement elem, const char* uri, const char* local,
+        size_t ll) {
     struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
     /* No-namespace search: the 15-bit name-hash prefilter (TODO 172
      * / S9, as in leptris_dom_attr_find). A hash+length+memcmp hit
@@ -313,7 +345,17 @@ static struct leptris_attribute* find_attr_expanded(
         const char* n = attr->name_view.data;
         size_t nl = attr->name_view.length;
         if (nl < ll) goto next;
-        const char* colon = nl ? memchr(n, ':', nl) : NULL;
+        /* Round 11: inline colon probe for the short names that
+     * dominate attr traffic — memchr's call setup costs more than
+     * the 1-3 iterations (the TODO 174 law). */
+    const char* colon = NULL;
+    if (nl <= 16) {
+        for (const char* c9 = n; c9 < n + nl; c9++) {
+            if (*c9 == ':') { colon = c9; break; }
+        }
+    } else {
+        colon = (const char*)memchr(n, ':', nl);
+    }
         if (uri_is_none(uri)) {
             if (colon) goto next;                    /* namespaced */
             if (attr_name_hash(attr) == lh &&
@@ -352,7 +394,8 @@ LEPTRIS_API const char* leptris_element_attribute_ns(LeptrisElement elem,
                                                      const char* local) {
     if (!elem || !local) return NULL;
     if (((LeptrisNode*)elem)->type != LEPTRIS_NODE_TYPE_ELEMENT) return NULL;
-    struct leptris_attribute* attr = find_attr_expanded(elem, uri, local);
+    struct leptris_attribute* attr =
+        find_attr_expanded_len(elem, uri, local, strlen(local));
     if (!attr) return NULL;
     if (attr_has_entities(attr)) {
         LeptrisMemoryPool* pool = leptris_element_get_pool(elem);
@@ -374,7 +417,8 @@ LEPTRIS_API int leptris_element_has_attribute_ns(LeptrisElement elem,
                                                  const char* uri,
                                                  const char* local) {
     if (!elem || !local) return 0;
-    return find_attr_expanded(elem, uri, local) != NULL;
+    return find_attr_expanded_len(elem, uri, local,
+                                  strlen(local)) != NULL;
 }
 
 LEPTRIS_API int leptris_element_has_attribute(LeptrisElement elem, const char* name) {
