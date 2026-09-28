@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.266] - 2026-09-28
+
+### Performance
+
+- child-iteration cache for indexed access (ns_cache slot) (dom)
+
+
+
 ## [1.9.265] - 2026-09-28
 
 ### Fixed
