@@ -1135,13 +1135,12 @@ static inline LeptrisTextNode* dp_text_create_norm(DParser* p,
  *              0 = caller owns buf (in-place mode). */
 /* owns_buffer values:
  *   0 — caller owns the buf (in-place parse). Don't free.
- *   1 — direct_parse_internal owns the buf via separate malloc.
- *       Free on failure; doc->xml_buffer owns it on success.
- *   2 — the input `buf` is const; the parser mallocs its own copy,
- *       FUSED with the count3 sizing pre-scan into one pass
- *       (TODO 188), then behaves as owns_buffer = 1. The copy
- *       lives outside the arena; the document frees it via
- *       doc->xml_buffer_needs_free.
+ *   1 — legacy value; no caller passes it today (wrappers send 0
+ *       or 2).
+ *   2 — the input `buf` is const; the parser carves its scratch and
+ *       pristine copies from the parse arena (lane-18 round 8) and
+ *       never mallocs beside it — pool destroy reclaims them, so
+ *       doc_free skips their release.
  */
 /* §3.3.2 defaults pass: walk the finished tree; for every default-
  * bearing declaration whose element matches, materialize the value
@@ -1172,15 +1171,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * Slack: len covers all text/name/value copies (they're substrings
      * of the document), plus len/2 mutation headroom (post-parse
      * append/set calls allocate from the same arena). */
-    /* TODO 188: fused copy+count. The owns-copy path used to stream
-     * the input TWICE — count3 for arena sizing, then the memcpy
-     * into the pool's buffer copy. Now one kernel copies into a
-     * separately-malloc'd buffer AND produces the three counters
-     * from the same load. The arena no longer carries the copy
-     * (buf_extra = 0 below) and the document owns the malloc via
-     * the owns_buffer = 1 free paths + doc->xml_buffer. In-place
-     * callers (owns_buffer = 0) have no copy to fuse and keep the
-     * plain pre-scan. */
     size_t lt_count, dq_count, sq_count;
     /* #1125 scratch design: the scanner NUL-terminates in place, so
      * it runs on a scratch COPY (+64 zeroed probe slack past the
@@ -1188,41 +1178,22 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * zeros stop them, NUL matching neither quote nor '&'), while
      * doc->xml_buffer keeps a pristine copy, byte-identical to the
      * input by construction. Views point into the scratch and live
-     * for the document's lifetime. Both buffers come from the
-     * retained-block allocator (arena.c) so parse/free cycles don't
-     * re-fault their pages. */
+     * for the document's lifetime.
+     *
+     * Lane-18 round 8 (malloc consolidation): both copies are
+     * carved from the parse arena itself (bump-allocated ahead of
+     * the element block) instead of separate retained-buffer
+     * mallocs — two fewer malloc/free pairs per document, and the
+     * arena already dies with the pool, so there is no release
+     * bookkeeping on any path. The count pass runs plain over the
+     * caller's buffer; the copy then reads it warm from L1. */
     char* pristine;
-    int pristine_owned;
-    if (owns_buffer == 2) {
-        char* scratch = leptris_arena_buffer_alloc(len + 1 + 64);
-        if (!scratch) return NULL;
-        leptris_copy_count3(scratch, buf, len, '<', '"', '\'',
-                           &lt_count, &dq_count, &sq_count);
-        scratch[len] = '\0';
-        memset(scratch + len + 1, 0, 64);
-        pristine = leptris_arena_buffer_alloc(len + 1);
-        if (!pristine) {
-            leptris_arena_buffer_release(scratch, len + 1 + 64);
-            return NULL;
-        }
-        memcpy(pristine, scratch, len);  /* scratch is still pristine here */
-        pristine[len] = '\0';
-        pristine_owned = 1;
-        buf = scratch;
-        owns_buffer = 1;  /* failure paths release the scratch below */
-    } else {
-        leptris_text_count3(buf, len, '<', '"', '\'',
-                           &lt_count, &dq_count, &sq_count);
-        pristine = buf;   /* caller's buffer — never written, never freed */
-        pristine_owned = 0;
-        char* scratch = leptris_arena_buffer_alloc(len + 1 + 64);
-        if (!scratch) return NULL;
-        memcpy(scratch, buf, len);
-        scratch[len] = '\0';
-        memset(scratch + len + 1, 0, 64);
-        buf = scratch;
-        owns_buffer = 1;
-    }
+    int const_input = (owns_buffer == 2);   /* needs a pristine carve */
+    leptris_text_count3(buf, len, '<', '"', '\'',
+                       &lt_count, &dq_count, &sq_count);
+    pristine = buf;   /* owns_buffer == 0: caller's buffer — never
+                       * written, never freed. const_input overwrites
+                       * this below with the arena-carved copy. */
     size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
 #define DP_ELEM_CHUNK 8u
@@ -1256,30 +1227,48 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         (len * 8 < 16 * 1024 ? 16 * 1024
          : len * 8 > 64 * 1024 ? 64 * 1024
          : len * 8);
-    size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room + slack;
+    /* Round 8: the scratch (+ pristine) live INSIDE the arena —
+     * size them in. Only ADD to the estimate (#1218: never
+     * undersize; over-reservation lands in retained slack). */
+    size_t scratch_bytes = (len + 1 + 64 + 15u) & ~(size_t)15u;
+    size_t pristine_bytes =
+        const_input ? ((len + 1 + 15u) & ~(size_t)15u) : 0u;
+    size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room
+        + slack + scratch_bytes + pristine_bytes;
     LeptrisArena* arena = leptris_arena_create(arena_size);
-    if (!arena) {
-        leptris_arena_buffer_release(buf, len + 1 + 64);
-        if (pristine_owned)
-            leptris_arena_buffer_release(pristine, len + 1);
-        return NULL;
-    }
+    if (!arena) return NULL;   /* nothing owned yet */
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
     if (!pool) {
         leptris_arena_destroy(arena);
-        leptris_arena_buffer_release(buf, len + 1 + 64);
-        if (pristine_owned)
-            leptris_arena_buffer_release(pristine, len + 1);
         return NULL;
     }
     if (len >= 256) {
         pool->string_cache = leptris_hash_table_create(pool, 128);
     }
 
-    /* owns_buffer == 2 was resolved above (TODO 188): the input is
-     * already copied — fused with the count3 pre-scan into the
-     * separately-malloc'd buffer `buf` — and owns_buffer is now 1.
-     * There is no second copy here. */
+    /* Round 8 carve: scratch first, then the pristine copy for
+     * const inputs — the first pool bumps, so the scanner's buffers
+     * sit at the front of the document-owned span. doc_free skips
+     * their release (parse_scratch_pool_owned / needs_free = 0):
+     * pool destroy reclaims the whole span. */
+    char* scratch = (char*)leptris_pool_alloc(pool, len + 1 + 64);
+    if (!scratch) {
+        leptris_pool_destroy(pool);
+        return NULL;
+    }
+    memcpy(scratch, buf, len);
+    scratch[len] = '\0';
+    memset(scratch + len + 1, 0, 64);
+    if (const_input) {
+        pristine = (char*)leptris_pool_alloc(pool, len + 1);
+        if (!pristine) {
+            leptris_pool_destroy(pool);
+            return NULL;
+        }
+        memcpy(pristine, buf, len);
+        pristine[len] = '\0';
+    }
+    buf = scratch;
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
      * arena bump. Layout: [ elem_block | attr_block ]
@@ -1303,9 +1292,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         pool, elem_bytes + elem_pad + attr_bytes + text_bytes + cpi_bytes);
     if (!combined) {
         leptris_pool_destroy(pool);
-        leptris_arena_buffer_release(buf, len + 1 + 64);
-        if (pristine_owned)
-            leptris_arena_buffer_release(pristine, len + 1);
         return NULL;
     }
     LeptrisElement elem_block = (LeptrisElement)combined;
@@ -1334,9 +1320,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         leptris_pool_alloc(pool, sizeof(struct leptris_document));
     if (!doc) {
         leptris_pool_destroy(pool);
-        leptris_arena_buffer_release(buf, len + 1 + 64);
-        if (pristine_owned)
-            leptris_arena_buffer_release(pristine, len + 1);
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
@@ -1349,9 +1332,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     doc->ref_count = 1;
     doc->xml_buffer = pristine;
     doc->xml_buffer_len = len;
-    doc->xml_buffer_needs_free = pristine_owned;
+    doc->xml_buffer_needs_free = 0;   /* pristine is caller's or arena-carved */
     doc->xml_buffer_slack = 0u;
-    doc->parse_scratch = buf;   /* string backing; freed at doc free */
+    doc->parse_scratch = buf;   /* string backing; arena-carved */
+    doc->parse_scratch_pool_owned = 1;   /* dies with pool destroy */
     /* Line breaks are LAZY (node_public.c doc_line_breaks): the
      * eager scan here cost a 1KB malloc + a full input pass per
      * document for a diagnostics-only table most documents never
@@ -1398,8 +1382,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.nsc_cursor = NULL;
     p.nsc_end = NULL;
     p.cpi_stride = cpi_stride;
-    /* owns_buffer==2 was converted to 1 above; only the parser's own
-     * copy carries the zeroed slack. */
     p.probe_slack = 1;  /* the scratch always carries zeroed slack */
     p.drop_ws_text = drop_ws_text;
     p.keep_entity_refs = keep_entity_refs;
@@ -2171,9 +2153,8 @@ fail:
     leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
-    leptris_arena_buffer_release(buf, len + 1 + 64);
-    if (pristine_owned)
-        leptris_arena_buffer_release(pristine, len + 1);
+    /* Round 8: scratch/pristine are arena-carved — pool_destroy
+     * above already reclaimed them. */
     return NULL;
 }
 
