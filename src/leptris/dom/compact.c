@@ -198,6 +198,25 @@ void* leptris_compact_overflow_get(LeptrisCompactOverflowTable* table,
 static LEPTRIS_THREAD_LOCAL LeptrisCompactOverflowTable* g_overflow_table = NULL;
 static LEPTRIS_THREAD_LOCAL size_t g_overflow_table_refcount = 0;
 
+/* Lane-18 round 12: sentinel-path lookup, deliberately NOINLINE.
+ * Under LTO the shared decoders inline into the attribute/child walk
+ * and get_overflow_table() inlines with them — the compiler then
+ * hoists its two thread-local loads (g_overflow_table,
+ * g_overflow_table_refcount — a tlv_get_addr pair) onto the HOT walk
+ * path as speculative loads, ~6 ns per query for a table that is
+ * never populated on single-arena documents. A call in the cold
+ * branch cannot be speculated: the TLS reads stay cold, the hot
+ * decode stays inline, and parse (which never takes this branch)
+ * is untouched. */
+static LeptrisCompactOverflowTable* get_overflow_table(void);
+
+__attribute__((noinline))
+static void* overflow_lookup(const void* field_addr, size_t size) {
+    LeptrisCompactOverflowTable* table = get_overflow_table();
+    if (!table) return NULL;
+    return leptris_compact_overflow_get(table, field_addr);
+}
+
 static LeptrisCompactOverflowTable* get_overflow_table(void) {
     if (!g_overflow_table) {
         g_overflow_table = leptris_compact_overflow_table_create(256);
@@ -319,11 +338,8 @@ int32_t leptris_compact_int32_encode_doc(void* base, void* target,
 void* leptris_compact_int32_decode(void* base, int32_t off,
                                    const int32_t* field_addr) {
     if (off == 0) return NULL;
-    if (off == LEPTRIS_INT32_OVERFLOW_SENTINEL) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        if (table) return leptris_compact_overflow_get(table, field_addr);
-        return NULL;
-    }
+    if (off == LEPTRIS_INT32_OVERFLOW_SENTINEL)
+        return overflow_lookup(field_addr, sizeof(int32_t));
     return (char*)base + off;
 }
 
@@ -409,11 +425,8 @@ void* leptris_compact_ptr16_decode(const void* base, int16_t off,
                                    int align_log2,
                                    const int16_t* field_addr) {
     if (off == 0) return NULL;
-    if (off == LEPTRIS_COMPACT_PTR16_OVERFLOW) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        if (table) return leptris_compact_overflow_get(table, field_addr);
-        return NULL;
-    }
+    if (off == LEPTRIS_COMPACT_PTR16_OVERFLOW)
+        return overflow_lookup(field_addr, sizeof(int16_t));
     return (char*)base + ((ptrdiff_t)off << align_log2);
 }
 
