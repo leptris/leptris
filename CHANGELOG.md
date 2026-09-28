@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.267] - 2026-09-28
+
+### Performance
+
+- colon-free attr flag kills the query-path probe + one-pass needle hash (dom)
+
+
+
 ## [1.9.266] - 2026-09-28
 
 ### Performance
