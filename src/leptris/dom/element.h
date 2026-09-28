@@ -219,12 +219,7 @@ static inline void leptris_attr_set_next(struct leptris_attribute* a,
  * low bits sit under the multiply's carry chain; the upper half
  * mixes better). Returns nonzero: 0 maps to 1 so the "uncomputed"
  * sentinel stays unambiguous. */
-static inline uint16_t attr_hash15(const char* s, size_t len) {
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < len; i++) {
-        h ^= (unsigned char)s[i];
-        h *= 16777619u;
-    }
+static inline uint16_t attr_hash15_finish(uint32_t h) {
     /* Finalizer (round 20): raw FNV truncation (h>>16) mapped
      * names differing in their last digit to hashes exactly 256
      * apart — arithmetic progressions that collide onto one open-
@@ -235,6 +230,15 @@ static inline uint16_t attr_hash15(const char* s, size_t len) {
     h ^= h >> 15;
     uint16_t h15 = (uint16_t)(h & 0x7FFFu);
     return h15 ? h15 : 1;
+}
+
+static inline uint16_t attr_hash15(const char* s, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (unsigned char)s[i];
+        h *= 16777619u;
+    }
+    return attr_hash15_finish(h);
 }
 
 /* Entity flag (round 19): name_hash bit 15. */
