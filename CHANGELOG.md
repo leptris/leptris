@@ -4,7 +4,7 @@
 
 ### Performance
 
-- colon-free attr flag kills the query-path probe + one-pass needle hash (dom)
+- dom: bare-name attribute lookup rebuilt on the TODO 173 invariant — an attribute carries a side ns cache only when its name contains a colon, so the query walk skips prefixed attributes with a single int32 load and the per-attribute colon-probe loop is gone entirely. The finder is always-inline and the needle is hashed in the same pass as its length+colon scan (`attr_hash15_finish` split out as the shared finalizer). Attr-only arm64 harness: 14.5 -> 8.8 ns/query vs pugixml 7.4 (1.94x -> 1.15x).
 
 
 
