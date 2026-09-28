@@ -335,13 +335,12 @@ TEST(LeptrisMemoryPool, ParseScratchConsolidatedIntoArena) {
          * direct-parse lane only. */
         GTEST_SKIP() << "interleaved lane forced";
     }
-    /* Lane-18 round 8: the scratch copy (and the pristine copy for
-     * const-string inputs) are carved from the parse arena, not
-     * malloc'd beside it. A full parse+free cycle must therefore
-     * cost exactly three allocator calls (the arena span, the arena
-     * header, the pool struct). A standalone scratch or pristine
-     * buffer reintroduced on this path costs 25 more allocations
-     * each and trips the pin. */
+    /* Lane-18 rounds 8+10: the scratch/pristine copies AND the pool
+     * struct are carved from the parse arena, not malloc'd beside
+     * it. A full parse+free cycle must therefore cost exactly two
+     * allocator calls (the arena span + the arena header). Any
+     * standalone buffer or pool-struct malloc reintroduced on this
+     * path costs 25 more allocations each and trips the pin. */
     leptris_set_memory_management_functions(counting_alloc, counting_free);
     g_alloc_count = g_free_count = 0;
     {
@@ -354,7 +353,7 @@ TEST(LeptrisMemoryPool, ParseScratchConsolidatedIntoArena) {
     }
     leptris_set_memory_management_functions(NULL, NULL);
     EXPECT_EQ(g_alloc_count, g_free_count);
-    EXPECT_EQ(g_alloc_count, 3u * 25);
+    EXPECT_EQ(g_alloc_count, 2u * 25);
 }
 
 }  // namespace

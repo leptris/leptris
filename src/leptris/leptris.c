@@ -195,7 +195,10 @@ struct leptris_document* leptris_document_create_with_arena_size(
      * documents take the same arena-backed pool the parser uses
      * (overflow extends via tracked blocks; the pool's page
      * machinery no longer runs for documents). */
-    LeptrisArena* arena = leptris_arena_create(arena_size);
+    /* Round 10: the owning pool struct carves the arena head — size
+     * it in (callers pass content budgets, not struct budgets). */
+    LeptrisArena* arena = leptris_arena_create(
+        arena_size + ((sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u));
     if (!arena) return NULL;
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
     if (!pool) {
@@ -977,10 +980,8 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
      * inplace documents that don't own the xml_buffer. */
     free(doc->line_breaks);
     doc->line_breaks = NULL;
-    /* #1285 slice 3a: element source-offset side table. */
-    if (doc->elem_pos_heap) free(doc->elem_pos);
-    doc->elem_pos = NULL;
-    doc->elem_pos_count = doc->elem_pos_cap = 0;
+    /* Round 10: the elem_pos journal and its lazy index are
+     * pool-carved — the pool destroy below reclaims them. */
     /* #1285 slice 3b: binding-wrapper map — entries die with the
      * document, so they can never outlive their nodes. */
     free(doc->wrapper_map);

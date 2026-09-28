@@ -65,6 +65,9 @@ typedef struct {
     LeptrisMemoryPool* pool;
     struct leptris_document* doc;
     LeptrisElement open_stack[DP_MAX_DEPTH];
+    /* Round 10: journal slot of each open element's elem_pos entry —
+     * the close path updates by slot (O(1)) instead of hashing. */
+    int pos_slot_stack[DP_MAX_DEPTH];
     /* TODO 155 Phase C: per-depth last-child cache. Replaces the
      * last_child_off field on element. last_child_stack[i] holds
      * the most recently wired child of open_stack[i], or NULL when
@@ -1322,8 +1325,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     size_t scratch_bytes = (len + 1 + 64 + 15u) & ~(size_t)15u;
     size_t pristine_bytes =
         const_input ? ((len + 1 + 15u) & ~(size_t)15u) : 0u;
+    /* Round 10: the owning pool struct carves the arena head. */
+    size_t pool_bytes =
+        (sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u;
     size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room
-        + slack + scratch_bytes + pristine_bytes;
+        + slack + scratch_bytes + pristine_bytes + pool_bytes;
     LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) return NULL;   /* nothing owned yet */
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
@@ -1412,8 +1418,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         return NULL;
     }
     memset(doc, 0, sizeof(*doc));
-    doc->elem_pos = doc->elem_pos_inline;   /* pre-zeroed inline table */
-    doc->elem_pos_cap = 16;
+    /* elem_pos journal: pool-carved lazily on first record
+     * (elem_pos.c) — nothing to initialize here. */
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;
@@ -1795,8 +1801,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (self_closing < 0) goto fail;
             if (p.line_offsets_ok) {
                 uint32_t ste = (uint32_t)(p.pos - p.buf);
-                leptris_elem_pos_record(p.doc, elem, ste,
-                                        self_closing ? ste : 0u);
+                p.pos_slot_stack[p.depth] = leptris_elem_pos_record(
+                    p.doc, elem, ste, self_closing ? ste : 0u);
             }
 
             /* NOW safe to NUL-terminate the name — dp_parse_attrs
@@ -1911,9 +1917,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 goto fail;
             }
             if (p.line_offsets_ok) {
-                uint32_t ste = 0, ee = (uint32_t)(p.pos - p.buf);
-                leptris_elem_pos_lookup(p.doc, open, &ste, NULL);
-                leptris_elem_pos_record(p.doc, open, ste, ee);
+                /* Round 10: fill the open element's journal slot in
+                 * place — no hash probe, and the recorded start offset
+                 * survives verbatim. open_stack[p.depth-1] is `open`;
+                 * its slot sits at the same depth. */
+                leptris_elem_pos_close_at(
+                    p.doc, p.pos_slot_stack[p.depth - 1],
+                    (uint32_t)(p.pos - p.buf));
             }
             p.depth--;
             /* Clear the closed level's tail cache (AFTER the
@@ -2235,10 +2245,8 @@ fail:
      * — the fail path never reaches leptris_document_free. Free it
      * BEFORE pool_destroy reclaims the doc struct. */
     free(doc->line_breaks);
-    /* #1285 slice 3a: the element source-offset side table is
-     * malloc'd too — same fail-path rule as line_breaks. */
-    if (doc->elem_pos_heap) free(doc->elem_pos);
-    doc->elem_pos = NULL;
+    /* Round 10: the elem_pos journal + lazy index are pool-carved —
+     * pool_destroy below reclaims them. */
     leptris_pool_destroy(pool);
     /* elem_block AND doc are pool-allocated — both freed by
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
@@ -2576,6 +2584,7 @@ static struct leptris_document* dp_il_build(
     size_t need = c->nrec * sizeof(struct leptris_element) +
                   c->nrec * sizeof(LeptrisTextNode) +
                   c->nattr * sizeof(struct leptris_attribute) +
+                  ((sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u) +
                   8 * 1024 + 64 * 1024;
     LeptrisArena* arena = leptris_arena_create(need);
     if (!arena) goto oom_early;

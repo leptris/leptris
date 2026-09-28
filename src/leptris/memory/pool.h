@@ -93,6 +93,16 @@ struct leptris_memory_pool {
      * free at the end of destroy reclaims both. Saves one malloc
      * per parse (TODO 154). */
     int first_page_inline;
+    /* Lane-18 round 10: the pool struct itself is carved from the
+     * backing arena (owning pools only — shared-arena pools keep the
+     * malloc so they don't erode the caller's bump region). destroy
+     * must then NOT free it: arena teardown reclaims the span. */
+    int pool_struct_in_arena;
+    /* Round-10 carve bookkeeping: bytes the struct's carve advanced
+     * the arena cursor — subtracted from used_size so "used" keeps
+     * meaning bytes handed to pool allocations. 0 for malloc'd
+     * structs. */
+    size_t arena_head_reserved;
 
     /* Per-pool allocator hooks (TODO 74) — if non-NULL, override the
      * thread-default globals.  When set, every page and oversized

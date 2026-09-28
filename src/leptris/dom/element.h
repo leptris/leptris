@@ -440,11 +440,15 @@ static inline void elem_set_ns_cache(struct leptris_element* e,
         e, ns, &e->ns_cache_off);
 }
 
-/* #1124 source-offset side table (elem_pos.c). Parse lanes record;
- * the position accessor probes. Absent = unknown (0). */
-void leptris_elem_pos_record(struct leptris_document* doc,
-                             struct leptris_element* elem,
-                             uint32_t start_tag_end, uint32_t element_end);
+/* #1124 source-offset journal (elem_pos.c). Parse lanes append at
+ * element open (slot returned for the close-side update) and update
+ * by slot at close; the position accessor probes. Absent = unknown
+ * (0). */
+int leptris_elem_pos_record(struct leptris_document* doc,
+                            struct leptris_element* elem,
+                            uint32_t start_tag_end, uint32_t element_end);
+void leptris_elem_pos_close_at(struct leptris_document* doc, int slot,
+                               uint32_t element_end);
 int leptris_elem_pos_lookup(const struct leptris_document* doc,
                             const struct leptris_element* elem,
                             uint32_t* start_tag_end, uint32_t* element_end);

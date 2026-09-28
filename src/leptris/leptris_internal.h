@@ -256,8 +256,16 @@ struct leptris_document {
      * Frees in leptris_document_free. */
     struct leptris_elem_pos_entry* elem_pos;
     size_t elem_pos_count, elem_pos_cap;
-    int elem_pos_heap;   /* 0 = elem_pos points at elem_pos_inline */
-    struct leptris_elem_pos_entry elem_pos_inline[16];
+    /* Lane-18 round 10: the side table is an append-only JOURNAL
+     * (pool-carved, zeroed never — the 384-byte inline table and its
+     * per-document memset are gone). Parse appends at element open
+     * and updates by slot at close (O(1), no hash, no lookup).
+     * Lookups scan linearly; a pool-carved open-addressed index is
+     * built lazily when a large journal is first probed. Both die
+     * with the pool. */
+    struct leptris_elem_pos_entry* elem_pos_index;
+    size_t elem_pos_index_cap;      /* 0 = index not built */
+    size_t elem_pos_index_count;    /* journal count at build time */
     size_t line_break_count;
     /* Doc-level attribute-name index (mutation path): open-addressed
      * (element, name-hash) -> attr. Built lazily on the first

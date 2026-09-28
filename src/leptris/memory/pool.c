@@ -182,9 +182,34 @@ LeptrisMemoryPool* leptris_pool_create(void) {
 LeptrisMemoryPool* leptris_pool_create_arena_backed(LeptrisArena* arena,
                                                    int owns_arena) {
     if (!arena) return NULL;
-    LeptrisMemoryPool* pool =
-        (LeptrisMemoryPool*)leptris_alloc_hook(sizeof(LeptrisMemoryPool));
-    if (!pool) return NULL;
+    /* Lane-18 round 10: an OWNING pool carves its struct from the
+     * arena head — one fewer malloc/free pair per document. The
+     * carve advances the arena cursor, so every later pool_alloc
+     * lands after the struct. Shared-arena pools (owns_arena == 0,
+     * e.g. iterparse) keep the malloc: their arena is bump-reset
+     * under the caller and must not accumulate dead pool structs. */
+    LeptrisMemoryPool* pool;
+    int in_arena = 0;
+    size_t reserved = 0;
+    if (owns_arena) {
+        size_t before = arena->used;
+        pool = (LeptrisMemoryPool*)leptris_arena_alloc(
+            arena, sizeof(LeptrisMemoryPool));
+        if (pool) {
+            in_arena = 1;
+            reserved = arena->used - before;
+        }
+        /* Sub-struct-size arenas (deliberate tiny-arena tests, shared
+         * scratch arenas) fall back to the malloc — pool creation
+         * never fails for want of carve room. */
+    }
+    if (!pool) {
+        pool = (LeptrisMemoryPool*)leptris_alloc_hook(
+            sizeof(LeptrisMemoryPool));
+        if (!pool) return NULL;
+    }
+    pool->pool_struct_in_arena = in_arena;
+    pool->arena_head_reserved = reserved;
     pool->first_page = NULL;
     pool->current_page = NULL;
     pool->page_count = 0;
@@ -326,10 +351,17 @@ void leptris_pool_destroy(LeptrisMemoryPool* pool) {
             leptris_free_hook(big);
             big = next;
         }
-        if (pool->arena_owned) {
-            leptris_arena_destroy(pool->arena);
+        /* Round 10: snapshot the ownership triples BEFORE the arena
+         * destroy — an arena-carved pool struct dies WITH the span,
+         * so *pool must not be read after leptris_arena_destroy
+         * (exactly the use-after-free the large-doc suites caught). */
+        LeptrisArena* arena_owned_ptr = pool->arena;
+        int owned = pool->arena_owned;
+        int carved = pool->pool_struct_in_arena;
+        if (owned) {
+            leptris_arena_destroy(arena_owned_ptr);
         }
-        leptris_free_hook(pool);
+        if (!carved) leptris_free_hook(pool);
         return;
     }
 
@@ -1033,8 +1065,11 @@ size_t leptris_pool_used_size(LeptrisMemoryPool* pool) {
      * now (busy_size + oversized bytes).  Useful for waste reporting. */
     if (!pool) return 0;
 
-    /* Arena mode: the bump pointer IS the used count. */
-    if (pool->arena) return pool->arena->used;
+    /* Arena mode: the bump pointer IS the used count — minus the
+     * round-10 pool-struct carve, which "used" never counted before
+     * the struct moved into the arena either. */
+    if (pool->arena)
+        return pool->arena->used - pool->arena_head_reserved;
 
     size_t used = 0;
     for (MemoryPage* page = pool->first_page; page; page = page->next) {
