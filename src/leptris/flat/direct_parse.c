@@ -108,13 +108,15 @@ typedef struct {
      * (the element cache line only needs touching twice per tag). */
     struct leptris_attribute* attr_cursor;
     struct leptris_attribute* attr_end;
-    /* #1200 round 2: per-element attr-name hash prefilter — the
-     * dup scan compares uint32 hashes (uint32 loop, no pointer
-     * chasing) and only walks the attr chain with memcmp on a hash
-     * hit. Pool-backed growth; reset per element. */
-    uint32_t* attr_dup_hashes;
-    size_t attr_dup_count;
-    size_t attr_dup_cap;
+    /* #1200 → lane-18 round 9: per-element attr-name hash table —
+     * OPEN ADDRESSED (power-of-two slots, linear probe, 0 = empty),
+     * O(1) expected per attr. The old append+linear-scan array was
+     * O(N) per attr / O(N²) per element (the 100-attr wide case
+     * measured 38 ns/attr). Pool-backed growth; reset per element by
+     * zeroing the live slots. */
+    uint32_t* attr_dup_slots;
+    size_t attr_dup_used;
+    size_t attr_dup_mask;
     /* Bulk text-node block (round 8): leptris_text_create_borrowed
      * is an out-of-line call per text node — pool_alloc alone costs
      * more than the field stores. Same carve pattern as the elem and
@@ -156,6 +158,12 @@ typedef struct {
      * old code walked the ns list to find the tail on every xmlns. */
     struct leptris_attribute* current_elem_last_attr;
     struct leptris_namespace* current_elem_last_ns;
+    /* Lane-18 round 9: the current element's ns_cache, ensured ONCE
+     * per element (was once per attr — 64 dp_ensure_cache calls on a
+     * 4x16 doc, each a non-inlined call + two compact decodes). NULL
+     * until the first cache consumer (raw view, xmlns, prefixed
+     * attr) in this element; reset at dp_parse_attrs entry. */
+    struct leptris_ns_cache* cur_elem_cache;
     int saw_namespace;   /* any xmlns seen → doc->has_namespaces */
     /* Raw-view bulk block (issue #635 perf, pugixml race): raw-attr
      * entries carved from 128-entry pool chunks — one bump per attr,
@@ -351,6 +359,63 @@ static LEPTRIS_ALWAYS_INLINE void dp_doc_child(DParser* p, LeptrisNode* n) {
     p->dc_tail = n;
 }
 
+/* Lane-18 round 9: per-element lazy ns_cache. dp_ensure_cache was
+ * called once per ATTRIBUTE (64 non-inlined calls + double compact
+ * decode on a 4x16 doc) — the cache is now ensured once per element
+ * on first use and parked on the parser. */
+static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
+                                                LeptrisElement elem);
+static LEPTRIS_ALWAYS_INLINE struct leptris_ns_cache* dp_elem_cache(
+    DParser* p, LeptrisElement elem) {
+    struct leptris_ns_cache* c = p->cur_elem_cache;
+    if (DP_UNLIKELY(!c)) {
+        c = dp_ensure_cache(p, elem);
+        p->cur_elem_cache = c;
+    }
+    return c;
+}
+
+/* Lane-18 round 9: O(1) per-attr duplicate probe — open addressing,
+ * linear probe, power-of-two slots, 0 = empty (dh 0 remaps to 1).
+ * Returns 1 when dh is already present; the caller confirms with the
+ * memcmp chain walk (a hash collision is safe, just slower). On OOM
+ * returns 0 (dup detection is best-effort, first-wins unchanged). */
+static int dp_dup_seen_or_add(DParser* p, uint32_t dh) {
+    if (DP_UNLIKELY(!p->attr_dup_slots)) {
+        p->attr_dup_slots = (uint32_t*)leptris_pool_alloc(
+            p->pool, 16 * sizeof(uint32_t));
+        if (!p->attr_dup_slots) return 0;
+        memset(p->attr_dup_slots, 0, 16 * sizeof(uint32_t));
+        p->attr_dup_mask = 15;
+        p->attr_dup_used = 0;
+    } else if ((p->attr_dup_used + 1) * 8 >= (p->attr_dup_mask + 1) * 7) {
+        size_t ncap = (p->attr_dup_mask + 1) * 8;
+        uint32_t* nt = (uint32_t*)leptris_pool_alloc(
+            p->pool, ncap * sizeof(uint32_t));
+        if (!nt) return 0;
+        memset(nt, 0, ncap * sizeof(uint32_t));
+        for (size_t j = 0; j <= p->attr_dup_mask; j++) {
+            uint32_t h = p->attr_dup_slots[j];
+            if (h) {
+                size_t k = h & (ncap - 1);
+                while (nt[k]) k = (k + 1) & (ncap - 1);
+                nt[k] = h;
+            }
+        }
+        p->attr_dup_slots = nt;
+        p->attr_dup_mask = ncap - 1;
+    }
+    if (dh == 0) dh = 1;
+    size_t i = dh & p->attr_dup_mask;
+    while (p->attr_dup_slots[i]) {
+        if (p->attr_dup_slots[i] == dh) return 1;
+        i = (i + 1) & p->attr_dup_mask;
+    }
+    p->attr_dup_slots[i] = dh;
+    p->attr_dup_used++;
+    return 0;
+}
+
 /* Inline attribute allocation. Takes the next slot from the
  * pre-allocated attr_block (bump pointer) when capacity remains,
  * else falls back to a per-attr pool_alloc. Both name and value
@@ -360,9 +425,14 @@ static LEPTRIS_ALWAYS_INLINE void dp_doc_child(DParser* p, LeptrisNode* n) {
  * inputs, so has_entities is always 0. */
 static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                                       char* name, size_t name_len,
+                                      uint32_t name_hash,
                                       char* val, size_t val_len,
                                       int has_amp, int has_ws,
                                       const char* name_colon) {
+    /* Raw-view pointer (pre-normalization) — the #635 surface shows
+     * source views; the normalized/entity-expanded replacements
+     * below rebind val. */
+    const char* raw_val = val;
     /* Live value length — the §2.11 collapse (#326) shrinks it. */
     size_t vlen = val_len;
     /* Attribute-value normalization (XML 1.0 §3.3.3, issue #576):
@@ -472,20 +542,9 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      * becomes official); the duplicate never enters the chain, it
      * costs its already-carved slot. */
     {
-        uint32_t dh = 2166136261u;
-        for (size_t i = 0; i < name_len; i++) {
-            dh ^= (unsigned char)name[i];
-            dh *= 16777619u;
-        }
         int dup = 0;
-        int cand = 0;
-        for (size_t i = 0; i < p->attr_dup_count; i++) {
-            if (p->attr_dup_hashes[i] == dh) {
-                cand = 1;
-                break;
-            }
-        }
-        if (cand && elem->first_attribute_off != 0) {
+        if (dp_dup_seen_or_add(p, name_hash) &&
+            elem->first_attribute_off != 0) {
             /* hash hit: confirm against the real chain (collision
              * or genuine duplicate) */
             for (struct leptris_attribute* a =
@@ -502,24 +561,6 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                     break;
                 }
             }
-        }
-        if (!dup) {
-            if (p->attr_dup_count == p->attr_dup_cap) {
-                size_t nc = p->attr_dup_cap ? p->attr_dup_cap * 2
-                                            : 16;
-                uint32_t* nh = (uint32_t*)leptris_pool_alloc(
-                    p->pool, nc * sizeof(uint32_t));
-                if (nh) {
-                    if (p->attr_dup_count)
-                        memcpy(nh, p->attr_dup_hashes,
-                               p->attr_dup_count *
-                                   sizeof(uint32_t));
-                    p->attr_dup_hashes = nh;
-                    p->attr_dup_cap = nc;
-                }
-            }
-            if (p->attr_dup_count < p->attr_dup_cap)
-                p->attr_dup_hashes[p->attr_dup_count++] = dh;
         }
         if (dup) {
             if (p->doc) {
@@ -564,6 +605,34 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     }
     p->current_elem_last_attr = attr;
     p->cur_attr_count++;
+    /* Lane-18 round 9: raw-view registration fused here (was a
+     * second out-of-line call per attr); the dup path returned 1
+     * above so both surfaces still agree. The ns_cache comes from
+     * the per-element hoist, not a per-attr ensure. */
+    {
+        struct leptris_ns_cache* cache = dp_elem_cache(p, elem);
+        if (cache) {
+            struct leptris_raw_attr* ra;
+            if (p->raw_cursor < p->raw_end) {
+                ra = p->raw_cursor++;
+            } else {
+                ra = (struct leptris_raw_attr*)leptris_pool_alloc(
+                    p->pool, 128 * sizeof(struct leptris_raw_attr));
+                if (!ra) return -1;
+                p->raw_end = ra + 128;
+                p->raw_cursor = ra + 1;
+            }
+            ra->qname = name;
+            ra->value = raw_val;
+            ra->next = NULL;
+            if (p->raw_last) {
+                p->raw_last->next = ra;
+            } else {
+                cache->raw_attrs = ra;
+            }
+            p->raw_last = ra;
+        }
+    }
     return 0;
 }
 
@@ -778,7 +847,15 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     p->current_elem_last_ns = NULL;
     p->raw_last = NULL;
     p->cur_attr_count = 0;
-    p->attr_dup_count = 0;   /* hash array + cap persist across elements */
+    /* Round 9: reset the open-addressed dup table in place — 0 marks
+     * an empty slot. 16 slots = one 64-byte memset on the common
+     * path; a table grown by a wide element costs a proportional
+     * memset, still linear (vs the O(N) scans it replaces). */
+    if (p->attr_dup_slots)
+        memset(p->attr_dup_slots, 0,
+               (p->attr_dup_mask + 1) * sizeof(uint32_t));
+    p->attr_dup_used = 0;
+    p->cur_elem_cache = NULL;
     /* Sentinel-terminated (parse endgame, third application): buf[len]
      * is NUL and NUL fails every classification below — not '>', not
      * '/', not '=' , not a quote, not IS_NAME_START. Each former
@@ -798,29 +875,45 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         }
         if (c == '/') return -1;  /* '/' not followed by '>' */
 
-        /* Attribute name — scan as (pointer, length), no NUL-term. */
+        /* Attribute name — scan as (pointer, length), no NUL-term.
+         * Lane-18 round 9: ONE fused pass yields the name end, the
+         * dup-table hash (FNV-1a), and the ':' position. The old
+         * path made three passes over the name bytes (scan, colon
+         * probe, hash) — for short names the pass overhead, not the
+         * bytes, was the cost. */
         char* name_start = p->pos;
         if (!IS_NAME_START(*p->pos)) return -1;
+        uint32_t dh = 2166136261u ^ (unsigned char)name_start[0];
+        dh *= 16777619u;
+        const char* attr_colon =
+            (name_start[0] == ':') ? name_start : NULL;
         p->pos++;
-        dp_scan_name(p);
+        {
+            char* s = p->pos;
+            for (;;) {
+                char c0 = s[0];
+                if (DP_UNLIKELY(!IS_NAME_CHAR(c0))) break;
+                dh ^= (unsigned char)c0; dh *= 16777619u;
+                if (c0 == ':') attr_colon = s;
+                char c1 = s[1];
+                if (DP_UNLIKELY(!IS_NAME_CHAR(c1))) { s += 1; break; }
+                dh ^= (unsigned char)c1; dh *= 16777619u;
+                if (c1 == ':') attr_colon = s + 1;
+                char c2 = s[2];
+                if (DP_UNLIKELY(!IS_NAME_CHAR(c2))) { s += 2; break; }
+                dh ^= (unsigned char)c2; dh *= 16777619u;
+                if (c2 == ':') attr_colon = s + 2;
+                char c3 = s[3];
+                if (DP_UNLIKELY(!IS_NAME_CHAR(c3))) { s += 3; break; }
+                dh ^= (unsigned char)c3; dh *= 16777619u;
+                if (c3 == ':') attr_colon = s + 3;
+                s += 4;
+            }
+            p->pos = s;
+        }
         char* name_end = p->pos;
         size_t name_len = name_end - name_start;
-        /* Prefixed-name probe (fused here; was the post-loop
-         * dp_stamp_attr_owners pass): a colon needs prefix + ':'
-         * + local = >= 3 bytes, so 1-2 byte names skip entirely.
-         * Short names inline (a memchr call costs more than the
-         * 2-4 iterations); long names keep memchr. */
-        const char* attr_colon = NULL;
-        if (name_len >= 3) {
-            if (name_len <= 16) {
-                for (const char* c9 = name_start; c9 < name_end; c9++) {
-                    if (*c9 == ':') { attr_colon = c9; break; }
-                }
-            } else {
-                attr_colon =
-                    (const char*)memchr(name_start, ':', name_len);
-            }
-        }
+
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
 
@@ -961,13 +1054,9 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         /* Regular attribute — zero-copy name/value, bulk-allocated
          * struct. 1 = duplicate skipped: neither surface sees it. */
         int arc = dp_add_attr_inline(p, elem, name_start, name_len,
-                                     val_start, val_len, has_amp,
+                                     dh, val_start, val_len, has_amp,
                                      has_ws, attr_colon);
         if (arc < 0) return -1;
-        if (arc == 0 &&
-            dp_raw_attr(p, elem, name_start, name_len,
-                        val_start, val_len) != 0)
-            return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag
      * closed, 1 = self-closing, -1 = error) — there is no
@@ -1006,7 +1095,7 @@ static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, size_t qname_len,
                        const char* value, size_t value_len) {
-    struct leptris_ns_cache* cache = dp_ensure_cache(p, elem);
+    struct leptris_ns_cache* cache = dp_elem_cache(p, elem);
     if (!cache) return 0;
     struct leptris_raw_attr* ra;
     if (p->raw_cursor < p->raw_end) {
@@ -1369,9 +1458,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.attr_capacity = attr_capacity;
     p.attr_cursor = attr_block;
     p.attr_end = attr_block + attr_capacity;
-    p.attr_dup_hashes = NULL;
-    p.attr_dup_count = 0;
-    p.attr_dup_cap = 0;
+    p.attr_dup_slots = NULL;
+    p.attr_dup_used = 0;
+    p.attr_dup_mask = 0;
     p.text_cursor = text_block;
     p.text_end = text_block + lt_count;
     p.cpi_cursor = cpi_block;
