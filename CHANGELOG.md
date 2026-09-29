@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.271] - 2026-09-29
+
+### Added
+
+- plan-value children snapshot — one crossing per child list (descriptor)
+
+
+
 ## [1.9.270] - 2026-09-29
 
 ### Fixed
