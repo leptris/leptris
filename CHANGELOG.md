@@ -2,9 +2,22 @@
 
 ## [1.9.272] - 2026-09-29
 
+### Added
+
+- `LEPTRIS_PARSE_SKIP_DUP_DETECTION` (8u) and `LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS` (16u) parse
+  flags for `leptris_parse_string_flags` — leptris#1436 Door A. Opt-out gates for the two remaining
+  fixed per-attribute/per-element bookkeeping costs; defaults unchanged (a zero flag word parses
+  byte-identically to 1.9.271).
+
 ### Performance
 
-- SKIP_ parse flags — opt out of dup detection and source positions (leptris#1436 Door A) (parse)
+- `SKIP_DUP_DETECTION`: the name-hash serial-multiply chain and duplicate probe are skipped
+  (~2.5 ns/attr measured floor). Duplicate attributes are admitted silently — no recover
+  diagnostic; both copies stay visible in the chain and the raw view; queries resolve first-wins.
+  Measured -11-13% opt-in on the 100-attribute wide parse row (1522-1535 -> 1315-1357 ns/doc).
+- `SKIP_SOURCE_POSITIONS`: the element position journal is not built; element columns degrade
+  (col_start falls back to 1, col_end unwritten) while lines continue to resolve via the lazy
+  newline table.
 
 
 
