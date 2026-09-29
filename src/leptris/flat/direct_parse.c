@@ -184,6 +184,7 @@ typedef struct {
      * the first ws-normalized/entity value flips this on and
      * backfills the clean prefix, preserving the source-byte
      * contract exactly where synthesis could not. */
+    unsigned skip_flags;   /* LEPTRIS_PARSE_SKIP_* (round 18, #1436 Door A) */
     struct leptris_ns_cache* nsc_cursor;
     struct leptris_ns_cache* nsc_end;
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
@@ -552,7 +553,7 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      * (libxml2 recover semantics, and the digest's first-wins
      * becomes official); the duplicate never enters the chain, it
      * costs its already-carved slot. */
-    {
+    if (!(p->skip_flags & LEPTRIS_PARSE_SKIP_DUP_DETECTION)) {
         int dup = 0;
         if (dp_dup_seen_or_add(p, name_hash) &&
             elem->first_attribute_off != 0) {
@@ -594,7 +595,8 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
              * the raw-attr registration so BOTH surfaces agree. */
             return 1;
         }
-        if (elem->first_attribute_off != 0) {
+    }
+    if (elem->first_attribute_off != 0) {
         /* Cache should always be valid mid-parse. Fall back to walk
          * only if cache is NULL (defensive — shouldn't happen). */
         struct leptris_attribute* tail = p->current_elem_last_attr;
@@ -612,7 +614,6 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
          * offset is ever needed. */
         elem->first_attribute_off =
             (int32_t)((char*)attr - (char*)elem);
-        }
     }
     p->current_elem_last_attr = attr;
     p->cur_attr_count++;
@@ -902,8 +903,16 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
          * bytes, was the cost. */
         char* name_start = p->pos;
         if (!IS_NAME_START(*p->pos)) return -1;
-        uint32_t dh = 2166136261u ^ (unsigned char)name_start[0];
-        dh *= 16777619u;
+        /* The name hash feeds only the duplicate probe (the dup
+         * confirm is bytewise) — SKIP_DUP_DETECTION callers skip the
+         * whole serial-multiply chain. */
+        const int need_dup_hash =
+            (p->skip_flags & LEPTRIS_PARSE_SKIP_DUP_DETECTION) == 0;
+        uint32_t dh = 0;
+        if (need_dup_hash) {
+            dh = 2166136261u ^ (unsigned char)name_start[0];
+            dh *= 16777619u;
+        }
         const char* attr_colon =
             (name_start[0] == ':') ? name_start : NULL;
         p->pos++;
@@ -912,19 +921,19 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             for (;;) {
                 char c0 = s[0];
                 if (DP_UNLIKELY(!IS_NAME_CHAR(c0))) break;
-                dh ^= (unsigned char)c0; dh *= 16777619u;
+                if (need_dup_hash) { dh ^= (unsigned char)c0; dh *= 16777619u; }
                 if (c0 == ':') attr_colon = s;
                 char c1 = s[1];
                 if (DP_UNLIKELY(!IS_NAME_CHAR(c1))) { s += 1; break; }
-                dh ^= (unsigned char)c1; dh *= 16777619u;
+                if (need_dup_hash) { dh ^= (unsigned char)c1; dh *= 16777619u; }
                 if (c1 == ':') attr_colon = s + 1;
                 char c2 = s[2];
                 if (DP_UNLIKELY(!IS_NAME_CHAR(c2))) { s += 2; break; }
-                dh ^= (unsigned char)c2; dh *= 16777619u;
+                if (need_dup_hash) { dh ^= (unsigned char)c2; dh *= 16777619u; }
                 if (c2 == ':') attr_colon = s + 2;
                 char c3 = s[3];
                 if (DP_UNLIKELY(!IS_NAME_CHAR(c3))) { s += 3; break; }
-                dh ^= (unsigned char)c3; dh *= 16777619u;
+                if (need_dup_hash) { dh ^= (unsigned char)c3; dh *= 16777619u; }
                 if (c3 == ':') attr_colon = s + 3;
                 s += 4;
             }
@@ -1258,6 +1267,7 @@ static inline LeptrisTextNode* dp_text_create_norm(DParser* p,
  * bearing declaration whose element matches, materialize the value
  * when the element does not carry the attribute. */
 static struct leptris_document* direct_parse_internal(char* buf, size_t len,
+                                                      unsigned skip_flags,
                                                      int owns_buffer,
                                                      int drop_ws_text,
                                                      int apply_dtd_attrs,
@@ -1474,6 +1484,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.end = buf + len;
     p.pool = pool;
     p.doc = doc;
+    p.skip_flags = skip_flags;
     p.depth = 0;
     p.root = NULL;
     p.dc_head = NULL;
@@ -1823,7 +1834,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
             if (self_closing < 0) goto fail;
-            if (p.line_offsets_ok) {
+            if (p.line_offsets_ok &&
+                !(p.skip_flags & LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS)) {
                 uint32_t ste = (uint32_t)(p.pos - p.buf);
                 p.pos_slot_stack[p.depth] = leptris_elem_pos_record(
                     p.doc, elem, ste, self_closing ? ste : 0u);
@@ -3080,7 +3092,7 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
         struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
         if (d) return d;
     }
-    return direct_parse_internal((char*)xml, len, 2, 0, 0, 0);
+    return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
@@ -3095,7 +3107,10 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
             (parse_flags & LEPTRIS_PARSE_DTDATTR) ? 1 : 0);
         if (d) return d;
     }
-    return direct_parse_internal((char*)xml, len, 2,
+    return direct_parse_internal((char*)xml, len,
+                                 parse_flags & (LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+                                     LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS),
+                                 2,
                                  (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT)
                                      ? 1 : 0,
                                  (parse_flags & LEPTRIS_PARSE_DTDATTR)
@@ -3108,5 +3123,5 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
 struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
-    return direct_parse_internal(buf, len, 0, 0, 0, 0);
+    return direct_parse_internal(buf, len, 0, 0, 0, 0, 0);
 }

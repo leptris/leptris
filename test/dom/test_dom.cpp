@@ -2393,6 +2393,75 @@ TEST(DomBasics, RawAttributesBackfillWhenXmlnsArrivesLate) {
     leptris_document_free(doc);
 }
 
+/* Lane-18 round 18 (leptris#1436 Door A): the SKIP_ parse flags let
+ * performance-critical callers drop diagnostics features pugixml
+ * does not carry. Defaults keep every feature ON — zero-initialized
+ * flag words parse exactly like today. */
+TEST(DomBasics, ParseSkipDupDetectionAdmitsBothSilently) {
+    /* Default-lane pin: the interleaved lane always tracks (its
+     * builder is a separate construction path). */
+    if (getenv("LEPTRIS_INTERLEAVED")) GTEST_SKIP();
+    const char xml[] = "<r a='1' a='2'/>";
+    LeptrisDocument d0 =
+        leptris_parse_string_flags(xml, std::strlen(xml),
+                                   (LeptrisParseFlags)0, nullptr);
+    ASSERT_NE(d0, nullptr);
+    LeptrisElement r0 = leptris_document_root(d0);
+    EXPECT_EQ(leptris_document_parse_diag_count(d0), 1u);
+    EXPECT_EQ(leptris_element_attributes_raw(r0, nullptr, nullptr, 0), 1u);
+    leptris_document_free(d0);
+
+    LeptrisDocument d1 = leptris_parse_string_flags(
+        xml, std::strlen(xml), LEPTRIS_PARSE_SKIP_DUP_DETECTION,
+        nullptr);
+    ASSERT_NE(d1, nullptr);
+    LeptrisElement r1 = leptris_document_root(d1);
+    EXPECT_EQ(leptris_document_parse_diag_count(d1), 0u);
+    EXPECT_EQ(leptris_element_attributes_raw(r1, nullptr, nullptr, 0), 2u);
+    const char* q[2]; const char* v[2];
+    ASSERT_EQ(leptris_element_attributes_raw(r1, q, v, 2), 2u);
+    EXPECT_STREQ(q[0], "a"); EXPECT_STREQ(v[0], "1");
+    EXPECT_STREQ(q[1], "a"); EXPECT_STREQ(v[1], "2");
+    /* Queries still resolve first-wins by chain order. */
+    EXPECT_STREQ(leptris_element_attribute(r1, "a"), "1");
+    leptris_document_free(d1);
+}
+
+TEST(DomBasics, ParseSkipPositionsDegradesColumnsToZeros) {
+    if (getenv("LEPTRIS_INTERLEAVED")) GTEST_SKIP();
+    const char xml[] = "<r>\n  <e id='7'/>\n</r>";
+    LeptrisDocument d0 =
+        leptris_parse_string_flags(xml, std::strlen(xml),
+                                   (LeptrisParseFlags)0, nullptr);
+    ASSERT_NE(d0, nullptr);
+    LeptrisElement e0 = leptris_element_child(
+        leptris_document_root(d0), 0);
+    LeptrisSourcePosition p0;
+    memset(&p0, 0, sizeof(p0));
+    leptris_node_source_position((LeptrisNodeRef)e0, &p0);
+    EXPECT_GT(p0.line, 0);
+    EXPECT_GT(p0.col_start, 0);
+    leptris_document_free(d0);
+
+    LeptrisDocument d1 = leptris_parse_string_flags(
+        xml, std::strlen(xml), LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS,
+        nullptr);
+    ASSERT_NE(d1, nullptr);
+    LeptrisElement e1 = leptris_element_child(
+        leptris_document_root(d1), 0);
+    LeptrisSourcePosition p1;
+    memset(&p1, 0, sizeof(p1));
+    leptris_node_source_position((LeptrisNodeRef)e1, &p1);
+    /* Line still resolves (base.line + the lazy newline table).
+     * The journaled columns degrade: col_start falls back to the
+     * generic column 1 (start offset 0), col_end is never written
+     * (element_end 0 -> the setter skips it). */
+    EXPECT_GT(p1.line, 0);
+    EXPECT_EQ(p1.col_start, 1);
+    EXPECT_EQ(p1.col_end, 0);
+    leptris_document_free(d1);
+}
+
 /* Issue #635: the raw attribute view carries xmlns declarations
  * interleaved among the attributes in SOURCE order — the mixed
  * qname-ordered list the streaming transports deliver, which the
