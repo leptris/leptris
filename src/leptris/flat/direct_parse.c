@@ -184,7 +184,6 @@ typedef struct {
      * the first ws-normalized/entity value flips this on and
      * backfills the clean prefix, preserving the source-byte
      * contract exactly where synthesis could not. */
-    int raw_journaling;
     struct leptris_ns_cache* nsc_cursor;
     struct leptris_ns_cache* nsc_end;
     /* DTD parsed from the DOCTYPE internal subset. NULL when the
@@ -435,7 +434,6 @@ static int dp_dup_seen_or_add(DParser* p, uint32_t dh) {
  * terminated in-place by the caller). Skips name interning and
  * value pool_strdup entirely — direct_parse path excludes entity
  * inputs, so has_entities is always 0. */
-static int dp_raw_backfill(DParser* p, LeptrisElement elem);
 static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
                                       char* name, size_t name_len,
                                       uint32_t name_hash,
@@ -448,13 +446,6 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     const char* raw_val = val;
     /* Live value length — the §2.11 collapse (#326) shrinks it. */
     size_t vlen = val_len;
-    /* Lane-18 round 17: a dirty value (ws normalization / entities)
-     * forces the raw journal BEFORE this attr joins the chain, so
-     * the backfill covers prior attrs only and this one registers
-     * with its raw source bytes below. */
-    if (DP_UNLIKELY(!p->raw_journaling && (has_ws || has_amp))) {
-        if (dp_raw_backfill(p, elem) != 0) return -1;
-    }
     /* Attribute-value normalization (XML 1.0 §3.3.3, issue #576):
      * each literal tab/LF/CR in a CDATA attribute becomes a single
      * space. Character references (&#9;) are ASCII text here —
@@ -627,8 +618,17 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
     p->cur_attr_count++;
     /* Lane-18 round 9: raw-view registration fused here (was a
      * second out-of-line call per attr); the dup path returned 1
-     * above so both surfaces still agree. */
-    if (p->raw_journaling) {
+     * above so both surfaces still agree.
+     *
+     * LEPTRIS/leptris#1431 REVERT (round 17a's lazy journal): the
+     * raw journal MUST stay eager. The binding GC-frees documents
+     * while Element wrappers survive; on a freed element the
+     * accessor's journal path reads exactly one stale field
+     * (ns_cache_off, stale-zero -> clean early return), while the
+     * chain-synthesis path walked the whole freed chain and
+     * segfaulted six CI platforms. Restores the 1.9.268 contract;
+     * lazy journaling returns only with a real lifetime contract. */
+    {
         struct leptris_ns_cache* cache = dp_elem_cache(p, elem);
         if (cache) {
             struct leptris_raw_attr* ra;
@@ -865,7 +865,6 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
     p->current_elem_last_attr = NULL;
     p->current_elem_last_ns = NULL;
     p->raw_last = NULL;
-    p->raw_journaling = 0;
     p->cur_attr_count = 0;
     /* Round 9: reset the open-addressed dup table in place — 0 marks
      * an empty slot. 16 slots = one 64-byte memset on the common
@@ -1066,9 +1065,6 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             }
             p->current_elem_last_ns = ns;
             p->saw_namespace = 1;
-            if (DP_UNLIKELY(!p->raw_journaling)) {
-                if (dp_raw_backfill(p, elem) != 0) return -1;
-            }
             if (dp_raw_attr(p, elem, name_start, name_len,
                             val_start, val_len) != 0) return -1;
             continue;
@@ -1119,24 +1115,6 @@ static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
  * one bump per attr, O(1) tail via p->raw_last; the old per-attr
  * pool_alloc + tail walk was the largest single cost of attr-heavy
  * parses (39% of attr-heavy-5k). */
-/* Turn the raw journal on mid-element: every attr already in the
- * chain is clean by construction (a dirty one would have flipped
- * raw_journaling itself), so its stored view IS the source bytes —
- * journaling the chain reconstructs the prefix byte-exactly. */
-static int dp_raw_backfill(DParser* p, LeptrisElement elem) {
-    p->raw_journaling = 1;
-    if (elem->first_attribute_off == 0) return 0;
-    for (struct leptris_attribute* a = (struct leptris_attribute*)
-             ((char*)elem + elem->first_attribute_off);
-         a; a = leptris_attr_next(a)) {
-        LeptrisStringView vv = leptris_attr_value_sv(a);
-        if (dp_raw_attr(p, elem, a->name_view.data,
-                        a->name_view.length, vv.data, vv.length) != 0)
-            return -1;
-    }
-    return 0;
-}
-
 static int dp_raw_attr(DParser* p, LeptrisElement elem,
                        const char* qname, size_t qname_len,
                        const char* value, size_t value_len) {
