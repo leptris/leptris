@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.272] - 2026-09-29
+
+### Performance
+
+- SKIP_ parse flags — opt out of dup detection and source positions (leptris#1436 Door A) (parse)
+
+
+
 ## [1.9.271] - 2026-09-29
 
 ### Added
