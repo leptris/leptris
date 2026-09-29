@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.269] - 2026-09-29
+
+### Performance
+
+- lazy #635 raw-attr journal with chain synthesis for plain elements (parse)
+
+
+
 ## [1.9.268] - 2026-09-28
 
 ### Performance
