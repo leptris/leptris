@@ -4,12 +4,12 @@
 
 ### Fixed
 
-- revert the lazy raw-attr journal — restore the 1.9.268 accessor contract (leptris#1431) (dom)
+- dom: revert the lazy #635 raw-attribute journal (#1431, release-blocking). The binding GC-frees documents while Element wrappers survive; on such a stale element the 1.9.268 accessor read exactly one field (stale-zero ns_cache_off -> clean early return), while round 17a's chain-synthesis walked the entire freed chain and handed out freed value pointers — deterministic SIGSEGV on six CI platforms. Restores the eager journal and the journal-only accessor, byte-identical control flow to 1.9.268 on that surface. The round's value-pinning specs stay; the lazy journal returns only behind a real lifetime contract.
 
 ### Performance
 
-- error buffer leaves the construction memset — 255 bytes of dead zeroing gone (doc)
-- carve the header into the span — one system allocation per parse (arena)
+- memory: the arena header is carved into the span itself — a parse+free cycle is exactly ONE system allocation (was two), frozen by an exact-count allocator pin. The OOM-injection suite was re-contracted for the one-allocation parse: its fixture drains the retain pool per test (a warm retained span bypasses the injectable hook, which had made the sweeps vacuous), and the wired-check now targets the span itself while asserting one allocation completes the parse.
+- dom: the 256-byte error buffer leaves the document construction memset. Every writer NUL-terminates and the only reader gates on byte [0], so construction zeroes sizeof(doc) - 256 plus a one-byte store — exact equivalence, deterministic byte reduction.
 
 
 
