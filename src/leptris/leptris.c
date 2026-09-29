@@ -213,7 +213,11 @@ struct leptris_document* leptris_document_create_with_arena_size(
         leptris_pool_destroy(pool);
         return NULL;
     }
-    memset(doc, 0, sizeof(*doc));
+    /* Lane-18 round 17c: the 256-byte error buffer is the struct's
+         * LAST field and is never bulk-zeroed — writers NUL-terminate,
+         * the reader gates on [0]; one byte buys back 255. */
+        memset(doc, 0, sizeof(*doc) - sizeof(doc->last_error_message));
+        doc->last_error_message[0] = '\0';
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;
@@ -256,7 +260,11 @@ struct leptris_document* leptris_document_create_on_arena(
         leptris_pool_destroy(pool);
         return NULL;
     }
-    memset(doc, 0, sizeof(*doc));
+    /* Lane-18 round 17c: the 256-byte error buffer is the struct's
+         * LAST field and is never bulk-zeroed — writers NUL-terminate,
+         * the reader gates on [0]; one byte buys back 255. */
+        memset(doc, 0, sizeof(*doc) - sizeof(doc->last_error_message));
+        doc->last_error_message[0] = '\0';
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;

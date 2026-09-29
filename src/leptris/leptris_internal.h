@@ -129,10 +129,6 @@ struct leptris_elem_pos_entry {
 
 struct leptris_document {
     struct leptris_element* root;             /* Root element (legacy API) */
-    /* Snapshot of this document's last failing parse message
-     * (TODO.concurrency/01; thread-safe alternative to the
-     * thread-local channel). */
-    char last_error_message[256];
 
     /* Recover-class parse diagnostics (#1200): the DOM parse's
      * parity surface with the SAX lane's recover errors. Pool-free
@@ -412,6 +408,15 @@ struct leptris_document {
      * changes; document_free releases it. Evaluation contexts mark
      * it borrowed so their cleanup leaves it alive. */
     void* cached_fn_registry;
+
+    /* Snapshot of this document's last failing parse message
+     * (TODO.concurrency/01; thread-safe alternative to the
+     * thread-local channel). LAST FIELD BY DESIGN (lane-18 round
+     * 17c): construction zeroes sizeof(*doc) - 256 and NULs this
+     * buffer's first byte — every writer NUL-terminates (strncpy
+     * with explicit bound), the only reader gates on [0], so the
+     * 256 bytes of dead zeroing leave the parse hot path. */
+    char last_error_message[256];
 };
 
 /* Open-addressed (element, name-hash) -> attribute index for the

@@ -1459,7 +1459,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         leptris_pool_destroy(pool);
         return NULL;
     }
-    memset(doc, 0, sizeof(*doc));
+    /* Lane-18 round 17c: the 256-byte error buffer is the struct's
+         * LAST field and is never bulk-zeroed — writers NUL-terminate,
+         * the reader gates on [0]; one byte buys back 255. */
+        memset(doc, 0, sizeof(*doc) - sizeof(doc->last_error_message));
+        doc->last_error_message[0] = '\0';
     /* elem_pos journal: pool-carved lazily on first record
      * (elem_pos.c) — nothing to initialize here. */
     doc->doc_pool_allocated = 1;
@@ -2637,7 +2641,11 @@ static struct leptris_document* dp_il_build(
         (struct leptris_document*)leptris_pool_alloc(
             pool, sizeof(struct leptris_document));
     if (!doc) goto oom_pool;
-    memset(doc, 0, sizeof(*doc));
+    /* Lane-18 round 17c: the 256-byte error buffer is the struct's
+         * LAST field and is never bulk-zeroed — writers NUL-terminate,
+         * the reader gates on [0]; one byte buys back 255. */
+        memset(doc, 0, sizeof(*doc) - sizeof(doc->last_error_message));
+        doc->last_error_message[0] = '\0';
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;
