@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.273] - 2026-09-29
+
+### Fixed
+
+- children snapshot returns child handles (descriptor)
+
+
+
 ## [1.9.272] - 2026-09-29
 
 ### Added
