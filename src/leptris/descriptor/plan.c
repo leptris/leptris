@@ -12,6 +12,7 @@
  * recursively by leptris_plan_result_free. */
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -912,14 +913,16 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v, s
 LEPTRIS_API size_t leptris_plan_value_children_snapshot(
     const LeptrisPlanResult v,
     char* names_blob, size_t blob_cap,
-    size_t* name_offsets, uint8_t* type_tags) {
+    size_t* name_offsets, uint8_t* type_tags,
+    LeptrisPlanResult* child_handles) {
     if (!v) return 0;
     size_t need = 0;
     for (size_t i = 0; i < v->kid_count; i++) {
         const char* n = v->kids[i]->name;
         need += (n ? strlen(n) : 0) + 1;
     }
-    if (need > blob_cap || !names_blob || !name_offsets || !type_tags)
+    if (need > blob_cap || !names_blob || !name_offsets || !type_tags ||
+        !child_handles)
         return need;
     size_t off = 0;
     for (size_t i = 0; i < v->kid_count; i++) {
@@ -935,6 +938,7 @@ LEPTRIS_API size_t leptris_plan_value_children_snapshot(
             name_offsets[i] = (size_t)-1;
         }
         type_tags[i] = kid->type_tag;
+        child_handles[i] = kid;
     }
     name_offsets[v->kid_count] = off;
     return 0;
