@@ -211,6 +211,20 @@ LEPTRIS_API size_t leptris_plan_value_count(const LeptrisPlanResult v);
 /* ELEMENT child value / COLLECTION item at i; NULL out of range. */
 LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v,
                                                     size_t i);
+/* ELEMENT: one crossing for the whole child list. Writes each
+ * child's NUL-terminated name into names_blob at the byte offsets
+ * recorded in name_offsets (kid_count+1 entries; the final entry is
+ * the total blob size), and each child's type_tag into type_tags.
+ * A child whose name is NULL (content runs) records SIZE_MAX in its
+ * offsets entry and writes nothing to the blob. Returns 0 on
+ * success; otherwise returns the blob capacity the child names
+ * require and leaves the buffers untouched, so the host retries
+ * with the returned capacity. Child handles are still obtained via
+ * leptris_plan_value_at. */
+LEPTRIS_API size_t leptris_plan_value_children_snapshot(
+    const LeptrisPlanResult v,
+    char* names_blob, size_t blob_cap,
+    size_t* name_offsets, uint8_t* type_tags);
 /* ELEMENT: attribute value by wire_name; NULL when absent. */
 LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                                      const char* wire_name);

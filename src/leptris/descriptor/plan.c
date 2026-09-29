@@ -909,6 +909,37 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_value_at(const LeptrisPlanResult v, s
     return v->kids[i];
 }
 
+LEPTRIS_API size_t leptris_plan_value_children_snapshot(
+    const LeptrisPlanResult v,
+    char* names_blob, size_t blob_cap,
+    size_t* name_offsets, uint8_t* type_tags) {
+    if (!v) return 0;
+    size_t need = 0;
+    for (size_t i = 0; i < v->kid_count; i++) {
+        const char* n = v->kids[i]->name;
+        need += (n ? strlen(n) : 0) + 1;
+    }
+    if (need > blob_cap || !names_blob || !name_offsets || !type_tags)
+        return need;
+    size_t off = 0;
+    for (size_t i = 0; i < v->kid_count; i++) {
+        const LeptrisPlanResult kid = v->kids[i];
+        const char* n = kid->name;
+        if (n) {
+            size_t len = strlen(n);
+            memcpy(names_blob + off, n, len);
+            names_blob[off + len] = '\0';
+            name_offsets[i] = off;
+            off += len + 1;
+        } else {
+            name_offsets[i] = (size_t)-1;
+        }
+        type_tags[i] = kid->type_tag;
+    }
+    name_offsets[v->kid_count] = off;
+    return 0;
+}
+
 LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                          const char* wire_name) {
     if (!v || !wire_name) return NULL;
