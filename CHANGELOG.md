@@ -4,7 +4,7 @@
 
 ### Performance
 
-- lazy #635 raw-attr journal with chain synthesis for plain elements (parse)
+- dom: the #635 raw-attribute view is now built lazily. Plain elements — no xmlns declarations, every value clean — never pay the per-attribute journal entry or the per-element ns_cache allocation; `leptris_element_attributes_raw` synthesizes the view from the attribute chain, which is byte-identical there (source order == chain order, clean values are the zero-copy source bytes). The journal still builds exactly where the source-byte contract demands it: the first xmlns declaration backfills the clean prefix, and the first ws-normalized or entity-bearing value journals its raw pre-normalization bytes. Pinned by new specs for all three paths; the dirty-value spec caught the first cut registering the trigger attribute twice. Interleaved-lane behavior is unchanged (its builder never constructed the journal; its plain-element raw surface was empty before and is now the synthesized chain).
 
 
 
