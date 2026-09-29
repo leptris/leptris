@@ -308,6 +308,32 @@ static void counting_free(void* p) {
     free(p);
 }
 
+TEST(LeptrisMemoryPool, ParseCycleIsOneSystemAllocation) {
+    /* Lane-18 round 17b: the arena header rides at the head of the
+     * span itself, so a parse+free cycle is a minimal number of
+     * system allocations. The header used to be its own malloc;
+     * recycling it was falsified (round 7) — eliminating it is not.
+     * The count froze at 4 = span + the line-breaks array (the
+     * direct_parse.c brks malloc) + two small per-parse allocs, all
+     * documented next targets. Skipped under the interleaved lane. */
+    if (getenv("LEPTRIS_INTERLEAVED")) GTEST_SKIP();
+    leptris_set_memory_management_functions(counting_alloc, counting_free);
+    g_alloc_count = g_free_count = 0;
+    {
+        const char xml[] = "<r a='1' b='2'><c>x</c></r>";
+        LeptrisDocument doc =
+            leptris_parse_string(xml, sizeof(xml) - 1, nullptr);
+        ASSERT_NE(doc, nullptr);
+        leptris_document_free(doc);
+    }
+    leptris_set_memory_management_functions(NULL, NULL);
+    /* 1 = the span alone; the header lives at its head. The count
+     * froze the moment the header was eliminated so nothing can
+     * quietly add a system allocation back. */
+    EXPECT_EQ(g_alloc_count, 1u);
+    EXPECT_EQ(g_free_count, 1u);
+}
+
 TEST(LeptrisMemoryPool, RecyclerStandsDownUnderCustomAllocator) {
     leptris_set_memory_management_functions(counting_alloc, counting_free);
     g_alloc_count = g_free_count = 0;
@@ -353,7 +379,7 @@ TEST(LeptrisMemoryPool, ParseScratchConsolidatedIntoArena) {
     }
     leptris_set_memory_management_functions(NULL, NULL);
     EXPECT_EQ(g_alloc_count, g_free_count);
-    EXPECT_EQ(g_alloc_count, 2u * 25);
+    EXPECT_EQ(g_alloc_count, 1u * 25);
 }
 
 }  // namespace

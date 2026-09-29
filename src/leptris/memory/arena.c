@@ -191,25 +191,31 @@ static void arena_advise_hugepages(const void* base, size_t len) {
 #endif
 
 LeptrisArena* leptris_arena_create(size_t size) {
-    if (size == 0 || size > (size_t)-1 - ARENA_ALIGNMENT) return NULL;
-    LeptrisArena* arena = (LeptrisArena*)leptris_alloc_hook(sizeof(LeptrisArena));
-    if (!arena) return NULL;
-    size_t capacity = size;
-    char* base = retain_take(size, &capacity);
-    if (!base) {
-        base = (char*)leptris_alloc_hook(size);
-        capacity = size;
-        if (!base) {
-            leptris_free_hook(arena);
-            return NULL;
-        }
-        arena_advise_hugepages(base, capacity);
+    /* Lane-18 round 17b: the header is carved from the head of the
+     * span itself — one system allocation per arena instead of two.
+     * The CALLER's budget is preserved exactly: want = size + hdr is
+     * taken from the retain pool / libc, and the bump region still
+     * offers the full requested `size`. */
+    const size_t hdr = (sizeof(LeptrisArena) + ARENA_ALIGNMENT - 1) &
+                       ~(ARENA_ALIGNMENT - 1);
+    if (size == 0 || size > (size_t)-1 - ARENA_ALIGNMENT - hdr)
+        return NULL;
+    size_t want = size + hdr;
+    size_t capacity = want;
+    char* span = retain_take(want, &capacity);
+    if (!span) {
+        span = (char*)leptris_alloc_hook(want);
+        capacity = want;
+        if (!span) return NULL;
+        arena_advise_hugepages(span, capacity);
     }
-    arena->base = base;
-    /* For a reused block this is the BLOCK capacity, so the
-     * fail-fast bound [base, base + size) and remaining() stay
-     * exact; it is >= the requested size, never smaller. */
-    arena->size = capacity;
+    LeptrisArena* arena = (LeptrisArena*)span;
+    arena->span = span;
+    arena->base = span + hdr;
+    /* For a reused block this is the BLOCK capacity minus the
+     * header, so the fail-fast bound [base, base + size) and
+     * remaining() stay exact; it is >= the requested size. */
+    arena->size = capacity - hdr;
     arena->used = 0;
     arena->failed = 0;
     return arena;
@@ -223,8 +229,11 @@ void leptris_arena_reset(LeptrisArena* arena) {
 
 void leptris_arena_destroy(LeptrisArena* arena) {
     if (!arena) return;
-    retain_give(arena->base, arena->size);
-    leptris_free_hook(arena);
+    /* The header lives inside the span — releasing the block
+     * releases everything. */
+    retain_give(arena->span, arena->size +
+                ((sizeof(LeptrisArena) + ARENA_ALIGNMENT - 1) &
+                 ~(ARENA_ALIGNMENT - 1)));
 }
 
 void* leptris_arena_alloc(LeptrisArena* arena, size_t size) {

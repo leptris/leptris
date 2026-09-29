@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "leptris.h"
+#include "arena.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +37,12 @@ void passthrough_free(void* p) { std::free(p); }
 class OomInjection : public ::testing::Test {
 protected:
     void SetUp() override {
+        /* Lane-18 round 17b: the arena span is retained across
+         * parses, and a retained take bypasses the injectable hook —
+         * a warm pool would make every sweep below vacuous (the
+         * failure could never land on the span). Drain so each test
+         * exercises the hooked allocation for real. */
+        leptris_arena_retain_drain();
         leptris_set_memory_management_functions(countdown_alloc,
                                                 passthrough_free);
     }
@@ -156,15 +163,33 @@ TEST_F(OomInjection, FreeNeverCrashesUnderHook) {
 // allocation fails). Guards against the hook silently not applying,
 // which would make every sweep above vacuous.
 TEST_F(OomInjection, HookIsActuallyWired) {
-    g_alloc_countdown = 1;
+    /* Lane-18 round 17b: a parse of this document needs EXACTLY one
+     * system allocation (the arena span — header carved into its
+     * head, everything else bump-carved inside). The countdown
+     * therefore targets the span itself; failing one allocation
+     * later cannot break a one-allocation parse, which is the new
+     * correct behavior, not a vacuous hook. */
+    /* countdown = 0: the very first allocation (the span) fails. */
+    g_alloc_countdown = 0;
     LeptrisStatus st = (LeptrisStatus)0;
     LeptrisDocument doc =
         leptris_parse_string(kDoc, std::strlen(kDoc), &st);
     /* Either it fails cleanly (expected) or allocations bypass the
-     * hook (vacuous suite) — a valid doc here means the latter. */
+     * hook (vacuous suite) — a valid doc here means the latter.
+     * Round 17b: the one hooked allocation IS the span; failing it
+     * must fail the parse, and nothing else in the path allocates. */
     if (doc) {
         leptris_document_free(doc);
         FAIL() << "allocation hook does not cover the parse path — "
                   "the OOM sweeps above are vacuous";
     }
+    /* countdown = 1: the span succeeds and NOTHING else allocates —
+     * the parse must complete on that single allocation. */
+    g_alloc_countdown = 1;
+    st = (LeptrisStatus)0;
+    doc = leptris_parse_string(kDoc, std::strlen(kDoc), &st);
+    ASSERT_NE(doc, nullptr)
+        << "the span allocation failed at countdown=1 — the parse "
+           "path allocates more than the arena span";
+    leptris_document_free(doc);
 }

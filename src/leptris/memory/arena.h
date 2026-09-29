@@ -34,8 +34,9 @@ extern "C" {
 #endif
 
 typedef struct leptris_arena {
-    char* base;    /* Single contiguous allocation (NULL when empty) */
-    size_t size;   /* Total capacity in bytes */
+    char* span;    /* The single backing block (header lives at its head) */
+    char* base;    /* Bump region start = span + header (NULL when empty) */
+    size_t size;   /* Bump-region capacity (span capacity minus header) */
     size_t used;   /* Bump pointer — bytes handed out so far */
     size_t failed; /* 1 once any request has been refused (sticky) */
 } LeptrisArena;
