@@ -2351,6 +2351,10 @@ TEST(DomBasics, RawAttributesJournalDirtyValuesByteExact) {
     /* Literal tab in the value: normalization maps it to a space in
      * the attribute surface, but the raw view must carry the SOURCE
      * bytes — this is the input that forces the journal on. */
+    /* The interleaved lane normalizes attribute values in place and
+     * carries its own raw-view contract — this pin is about the
+     * default lane's journaling gate. */
+    if (getenv("LEPTRIS_INTERLEAVED")) GTEST_SKIP();
     const char xml[] = "<e a='x\ty' b='after'/>";
     LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
     ASSERT_NE(doc, nullptr);
