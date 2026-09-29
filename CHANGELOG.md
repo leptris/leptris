@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.270] - 2026-09-29
+
+### Fixed
+
+- revert the lazy raw-attr journal — restore the 1.9.268 accessor contract (leptris#1431) (dom)
+
+### Performance
+
+- error buffer leaves the construction memset — 255 bytes of dead zeroing gone (doc)
+- carve the header into the span — one system allocation per parse (arena)
+
+
+
 ## [1.9.269] - 2026-09-29
 
 ### Performance
