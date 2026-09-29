@@ -2325,6 +2325,66 @@ TEST(DomBasics, NodeChildrenExCarriesKinds) {
     leptris_document_free(doc);
 }
 
+/* Lane-18 round 17: the raw view is built LAZILY. A plain element
+ * (no xmlns declarations, every value clean) never journals — the
+ * accessor synthesizes from the attribute chain, byte-identical
+ * because source order == chain order and clean values are the
+ * zero-copy source bytes. Any xmlns declaration OR any
+ * ws-normalized/entity value turns the journal on (with backfill of
+ * the clean prefix) so the #635 source-byte contract holds exactly.
+ * These three specs pin every path. */
+TEST(DomBasics, RawAttributesSynthesizedForPlainElements) {
+    const char xml[] = "<e id='7' cat='tech' note='plain values'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_attributes_raw(e, nullptr, nullptr, 0), 3u);
+    const char* q[4]; const char* v[4];
+    ASSERT_EQ(leptris_element_attributes_raw(e, q, v, 4), 3u);
+    EXPECT_STREQ(q[0], "id");   EXPECT_STREQ(v[0], "7");
+    EXPECT_STREQ(q[1], "cat");  EXPECT_STREQ(v[1], "tech");
+    EXPECT_STREQ(q[2], "note"); EXPECT_STREQ(v[2], "plain values");
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, RawAttributesJournalDirtyValuesByteExact) {
+    /* Literal tab in the value: normalization maps it to a space in
+     * the attribute surface, but the raw view must carry the SOURCE
+     * bytes — this is the input that forces the journal on. */
+    const char xml[] = "<e a='x\ty' b='after'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+    const char* q[2]; const char* v[2];
+    ASSERT_EQ(leptris_element_attributes_raw(e, q, v, 2), 2u);
+    EXPECT_STREQ(q[0], "a");
+    ASSERT_EQ(std::strlen(v[0]), (size_t)3);
+    EXPECT_EQ(v[0][0], 'x');
+    EXPECT_EQ(v[0][1], '\t');
+    EXPECT_EQ(v[0][2], 'y');
+    EXPECT_STREQ(q[1], "b");
+    EXPECT_STREQ(v[1], "after");
+    /* The attribute surface carries the normalized single space. */
+    EXPECT_STREQ(leptris_element_attribute(e, "a"), "x y");
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, RawAttributesBackfillWhenXmlnsArrivesLate) {
+    /* attrs BEFORE the first xmlns: the journal turns on mid-element
+     * and the clean prefix is backfilled from the chain. */
+    const char xml[] = "<e a='1' xmlns:x='urn:x' b='2'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement e = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_attributes_raw(e, nullptr, nullptr, 0), 3u);
+    const char* q[3]; const char* v[3];
+    ASSERT_EQ(leptris_element_attributes_raw(e, q, v, 3), 3u);
+    EXPECT_STREQ(q[0], "a");      EXPECT_STREQ(v[0], "1");
+    EXPECT_STREQ(q[1], "xmlns:x"); EXPECT_STREQ(v[1], "urn:x");
+    EXPECT_STREQ(q[2], "b");      EXPECT_STREQ(v[2], "2");
+    leptris_document_free(doc);
+}
+
 /* Issue #635: the raw attribute view carries xmlns declarations
  * interleaved among the attributes in SOURCE order — the mixed
  * qname-ordered list the streaming transports deliver, which the

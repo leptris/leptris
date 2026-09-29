@@ -1661,10 +1661,41 @@ LEPTRIS_API size_t leptris_element_attributes_raw(
     LeptrisElement elem, const char** out_qnames, const char** out_values,
     size_t max_count) {
     if (!elem) return 0;
-    struct leptris_ns_cache* nsc = elem_get_ns_cache(elem);
-    if (!nsc || !nsc->raw_attrs) return 0;
 
-    /* Count-only query. */
+    /* Lane-18 round 17: plain elements never built the journal.
+     * Source order == attribute-chain order and every value is the
+     * zero-copy source bytes (a dirty value would have forced the
+     * journal on), so the chain IS the raw view. */
+    struct leptris_ns_cache* nsc = elem_get_ns_cache(elem);
+    if (!nsc || !nsc->raw_attrs) {
+        if (((LeptrisNode*)elem)->type != LEPTRIS_NODE_TYPE_ELEMENT)
+            return 0;
+        if (elem->first_attribute_off == 0) return 0;
+
+        struct leptris_attribute* first = (struct leptris_attribute*)
+            ((char*)elem + elem->first_attribute_off);
+        if (!out_qnames && !out_values) {
+            size_t n = 0;
+            for (struct leptris_attribute* a = first; a;
+                 a = leptris_attr_next(a))
+                n++;
+            return n;
+        }
+        size_t written = 0;
+        for (struct leptris_attribute* a = first; a;
+             a = leptris_attr_next(a)) {
+            if (written >= max_count) break;
+            if (out_qnames) out_qnames[written] = a->name_view.data;
+            if (out_values) {
+                LeptrisStringView vv = leptris_attr_value_sv(a);
+                out_values[written] = vv.data;
+            }
+            written++;
+        }
+        return written;
+    }
+
+    /* Journaled element (#635 interleave / dirty source bytes). */
     if (!out_qnames && !out_values) {
         size_t n = 0;
         for (struct leptris_raw_attr* r = nsc->raw_attrs; r;
