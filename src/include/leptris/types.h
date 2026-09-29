@@ -226,7 +226,17 @@ typedef enum {
     /* Keep &name; references unexpanded as ENTITY_REF nodes in the
      * tree (#1094): text runs split around them and reads resolve
      * them lazily (libxml2's default, pre-NOENT). */
-    LEPTRIS_PARSE_KEEP_ENTITY_REFS = 4u
+    LEPTRIS_PARSE_KEEP_ENTITY_REFS = 4u,
+    /* Lane-18 round 18 (leptris#1436 Door A): performance opt-outs
+     * for callers that do not consume diagnostics features pugixml
+     * does not carry. Defaults keep every feature ON — these bits
+     * SKIP work:
+     * - SKIP_DUP_DETECTION: duplicate attributes are admitted
+     *   silently (first still wins for queries; no recover diag).
+     * - SKIP_SOURCE_POSITIONS: element source columns degrade to
+     *   zeros (line still resolves from the buffer). */
+    LEPTRIS_PARSE_SKIP_DUP_DETECTION = 8u,
+    LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS = 16u
 } LeptrisParseFlags;
 
 /* ============================================================================
