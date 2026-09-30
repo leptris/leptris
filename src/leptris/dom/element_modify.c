@@ -2119,6 +2119,10 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
                 (int32_t)((char*)attr - (char*)copy);
         }
         last_attr = attr;
+        /* add_attribute's increment — attr_count is what the count
+         * accessor and the O(1) index fast path read (uint8 wrap
+         * at 255 latches the walk, same convention). */
+        copy->attr_count++;
     }
 
     LeptrisNodeRef first = NULL;
