@@ -4,9 +4,19 @@
 
 ### Fixed
 
-- the QT3 runner branches on LEPTRIS_HAS_UTF8PROC — mirror the define on the test target (leptris#1460) (test)
-- guard the case-mapping helpers behind LEPTRIS_HAS_UTF8PROC (leptris#1460) (xpath)
-- true Unicode case mapping for upper-case/lower-case + QT3 string-case family (leptris#1182) (xpath)
+- `fn:upper-case` and `fn:lower-case` now perform real Unicode case mapping (utf8proc's
+  per-codepoint `toupper`/`tolower`) instead of ASCII-only `c ± 32` loops — `upper-case(U+01CB)`
+  correctly yields U+01CA (fn-upper-case-20). `leptris_unicode_to_upper`/`to_lower` were also
+  case folding in disguise (`UTF8PROC_CASEFOLD` produces neither upper nor lower) — rewritten as
+  true case mapping, with `leptris_unicode_casecmp` keeping its genuine fold semantics
+  explicitly. Builds without utf8proc keep the ASCII fallback (leptris#1182, leptris#1460).
+
+### Added
+
+- QT3 string-case corpus family adopted (leptris#1182, corpus growth resumed): fn/upper-case
+  (23/30), fn/lower-case (23/28), fn/codepoint-equal (24/37). The runner's corpus counts now
+  branch on the utf8proc capability — without it the two Unicode-mapping cases are excluded by
+  name rather than counted down.
 
 
 
