@@ -4304,3 +4304,46 @@ TEST(XsltStreamApplyDoc, DocumentFaceMaterializesStreamedOutput) {
     EXPECT_NE(r.find("summary"), std::string::npos);
     EXPECT_NE(r.find("hello"), std::string::npos);
 }
+
+/* #1448 regression pins — the shapes the binding ride caught on
+ * 1.9.274 were all on THIS face (leptris_xslt_apply), which the
+ * engine suite had zero specs for. The streaming engine's result
+ * tree is intentionally empty; every consumer of the document face
+ * depends on the materialization + bail-restart behaving. */
+
+/* Dynamic html method: a fragment-level <html> root trips
+ * stream_bail_html and restarts the transform on the result-tree
+ * path — the doc face must return the RESTARTED tree (root
+ * present, html-method close semantics), not a streamed `<html/>`
+ * and not an empty document. */
+TEST(XsltStreamApplyDoc, HtmlRootBailsToTreePath) {
+    std::string r = run_apply_doc(
+        "<xsl:template match='/'><html><body><p>x</p></body>"
+        "</html></xsl:template>",
+        "<doc/>");
+    EXPECT_EQ(r.find("(no-root)"), std::string::npos)
+        << "bail-restart lost the root: " << r;
+    EXPECT_NE(r.find("html"), std::string::npos) << r;
+    EXPECT_NE(r.find("<p>x</p>"), std::string::npos) << r;
+}
+
+/* Value-of-only sheet: NO element is ever produced, so a rootless
+ * document is the CORRECT shape — and it must be IDENTICAL to the
+ * result-tree path's shape for the same transform (twin: an
+ * xsl:output encoding declaration disqualifies streaming, forcing
+ * the tree path through the #1443 gate). Any divergence between
+ * the two paths for the same sheet is a materialization bug. */
+TEST(XsltStreamApplyDoc, ValueOfOnlySheetMatchesTreePathTwin) {
+    std::string streamed = run_apply_doc(
+        "<xsl:template match='/'><xsl:value-of select='//t'/></xsl:template>",
+        "<doc><t>plain</t></doc>");
+    std::string tree = run_apply_doc(
+        "<xsl:output encoding='iso-8859-1'/>"
+        "<xsl:template match='/'><xsl:value-of select='//t'/></xsl:template>",
+        "<doc><t>plain</t></doc>");
+    EXPECT_NE(streamed.find("(no-root)"), std::string::npos)
+        << "value-of-only sheet grew a synthetic root: " << streamed;
+    EXPECT_EQ(streamed, tree)
+        << "stream and tree paths diverged for the same sheet: "
+        << "streamed=[" << streamed << "] tree=[" << tree << "]";
+}
