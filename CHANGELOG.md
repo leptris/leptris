@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.279] - 2026-09-30
+
+### Fixed
+
+- internal-subset scan is quote- and comment-aware (parse)
+
+
+
 ## [1.9.278] - 2026-09-30
 
 <!-- Edit this section with the actual release notes. -->
