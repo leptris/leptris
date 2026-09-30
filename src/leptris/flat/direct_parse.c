@@ -701,9 +701,38 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
     }
     if (pos < end && *pos == '[') {
         subset_start = ++pos;
-        /* Find matching ']'. Nested brackets aren't legal
-         * in DTD internal subsets, so no depth tracking. */
-        while (pos < end && *pos != ']') pos++;
+        /* Find the subset's closing ']'. ']' is legal inside quoted
+         * strings (entity values like "(?-i)[A-Z]+") and inside
+         * comments, so the scan tracks both — a bare first-']' scan
+         * truncates the subset mid-declaration and the tail parses
+         * as document content (malformed). Nested brackets outside
+         * quotes/comments are not legal in internal subsets, so no
+         * depth tracking. */
+        int in_comment = 0;
+        char quote = 0;
+        while (pos < end) {
+            if (in_comment) {
+                if (end - pos >= 3 && pos[0] == '-' &&
+                    pos[1] == '-' && pos[2] == '>') {
+                    in_comment = 0;
+                    pos += 3;
+                } else {
+                    pos++;
+                }
+            } else if (quote) {
+                if (*pos == quote) quote = 0;
+                pos++;
+            } else if (*pos == '"' || *pos == '\'') {
+                quote = *pos++;
+            } else if (end - pos >= 4 && memcmp(pos, "<!--", 4) == 0) {
+                in_comment = 1;
+                pos += 4;
+            } else if (*pos == ']') {
+                break;
+            } else {
+                pos++;
+            }
+        }
         subset_end = pos;
         if (pos < end) pos++; /* skip ']' */
         /* Skip to '>'. */

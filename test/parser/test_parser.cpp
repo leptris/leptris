@@ -606,3 +606,27 @@ TEST(ParseDiag, CleanDocumentHasNoDiags) {
     EXPECT_EQ(leptris_document_parse_diag_count(NULL), 0u);
     leptris_document_free(doc);
 }
+
+
+/* The internal-subset extraction scan must be quote- and comment-
+ * aware: ']' inside a quoted entity value ("[a-z]") or inside a
+ * comment does NOT close the subset. A bare first-']' scan truncated
+ * the subset mid-declaration and the tail parsed as document content
+ * ("malformed input") - seen on LanguageTool's grammar.xml. */
+TEST(ParseDoctype, SubsetBracketInsideQuotesAndComments) {
+    const char* cases[] = {
+        "<!DOCTYPE r [<!ENTITY x \"[a-z]\">]><r/>",
+        "<!DOCTYPE r [<!ENTITY x \"]\">]><r/>",
+        "<!DOCTYPE r [<!ENTITY x \"worryin[g']\">]><r/>",
+        "<!DOCTYPE r [<!-- comment ] here --><!ENTITY x \"v\">]><r/>",
+        "<!DOCTYPE r [<!ENTITY m \"a<b and ] and <!-- both\">]><r/>",
+    };
+    for (const char* xml : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        ASSERT_NE(d, nullptr) << xml;
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr);
+        leptris_document_free(d);
+    }
+}
