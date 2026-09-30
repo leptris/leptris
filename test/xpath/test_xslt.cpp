@@ -3011,6 +3011,26 @@ TEST(Xslt30, TryCatchErrorVariants) {
         "(compile-failed)");
 }
 
+/* #682 streaming gate: an UNSPECIFIED on-no-match (no xsl:mode
+ * element — every plain 1.0/2.0 sheet) executes the same legacy
+ * text built-ins as the explicit 'text-only-copy' value; both
+ * output shapes must stay byte-identical so the stream gate can
+ * admit the default alongside the explicit value (builtin_no_match:
+ * v==6 falls to the same legacy walk). */
+TEST(Xslt30, UnspecifiedNoMatchMatchesTextOnlyCopy) {
+    const char* body30 =
+        "<xsl:template match='g/@n'><hit/></xsl:template>"
+        "<xsl:template match='/'><out>"
+        "<xsl:apply-templates select='*'/></out></xsl:template>";
+    const char* doc = "<r><g n='1'><i>x</i></g>tail</r>";
+    std::string unspecified = body(
+        run(body30, doc));
+    std::string textonly = body(run(
+        (std::string("<xsl:mode on-no-match='text-only-copy'/>") +
+         body30).c_str(), doc));
+    EXPECT_EQ(unspecified, textonly);
+}
+
 /* xsl:mode on-no-match (3.0 §6.7) — Saxon-HE 12.7 ground truth on
  * <r><g n="1"><i>x</i></g>tail</r> with match="g/@n" -> <hit/>.
  * The 3.0 DEFAULT is shallow-copy (copy the node, process its

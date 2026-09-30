@@ -2406,7 +2406,12 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
         sheet->charmap_count == 0 && sheet->out_standalone < 0 &&
         !sheet->out_doctype_system && !sheet->out_doctype_public &&
         sheet->version_major < 3 &&
-        (sheet->mode_on_no_match == 1 || sheet->mode_on_no_match == 6) &&
+        /* 0 (unspecified — no xsl:mode element) executes the SAME
+         * legacy text built-ins as 6 for 1.0/2.0 sheets (the >=3
+         * remap to shallow-copy is excluded by version_major < 3
+         * above); admitting it is what lets plain sheets stream. */
+        (sheet->mode_on_no_match == 0 || sheet->mode_on_no_match == 1 ||
+         sheet->mode_on_no_match == 6) &&
         stream_instrs_ok(sheet->globals);
     for (size_t i = 0; sheet->can_stream && i < sheet->mode_count; i++) {
         for (size_t t = 0; sheet->can_stream && t < sheet->modes[i].n; t++) {
