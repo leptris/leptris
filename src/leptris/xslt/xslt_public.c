@@ -125,41 +125,62 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     /* #682 stream mode: the result bytes live in the exec buffer,
-     * not the result tree — the document-result face materializes
-     * them by parsing the same assembled bytes
-     * leptris_xslt_apply_string emits (declaration conditions
-     * identical). Empty streamed output keeps the empty result
-     * document; a text-method sheet's output is not XML and cannot
-     * take the document face — NULL, like any transform failure
-     * (the string face or the streaming buffer face carries it). */
-    if (ex->streaming && ex->sbuf && ex->sbuf->size > 0 &&
-        !ex->sheet->out_method_text) {
-        LeptrisElement peek = ex->result
-            ? leptris_document_root(ex->result) : NULL;
-        int html_m = effective_html_method(ex->sheet, peek);
-        const char* decl =
-            (!html_m && !ex->sheet->out_omit_decl)
-                ? "<?xml version=\"1.0\"?>\n" : "";
-        size_t dl = strlen(decl);
-        size_t bl = ex->sbuf->size;
-        char* acc = (char*)malloc(dl + bl + 1);
-        if (!acc) { xslt_exec_free(ex); return NULL; }
-        memcpy(acc, decl, dl);
-        memcpy(acc + dl, ex->sbuf->data, bl);
-        acc[dl + bl] = '\0';
-
+     * not the result tree. The document-result face materializes
+     * them by FRAGMENT-parsing the buffer and lifting the children
+     * to document level — the exact pre-streaming result shape (a
+     * single root for element output; TOP-LEVEL TEXT NODES for
+     * value-of-only sheets, which no whole-document parse can
+     * represent). Empty streamed output keeps the empty result
+     * document; a fragment that fails to parse reports the
+     * transform failure. */
+    if (ex->streaming && ex->sbuf && ex->sbuf->size > 0) {
+        LeptrisDocument parsed = leptris_document_create();
+        if (!parsed) { xslt_exec_free(ex); return NULL; }
         LeptrisStatus st = LEPTRIS_OK;
-        LeptrisDocument parsed =
-            leptris_parse_string(acc, dl + bl, &st);
-        free(acc);
-        xslt_exec_free(ex);
-        /* text-method (or otherwise non-XML) streamed output parses
-         * leniently into a rootless document — that is the
-         * unrepresentable case, reported as a failed transform. */
-        if (!parsed || !leptris_document_root(parsed)) {
-            if (parsed) leptris_document_free(parsed);
+        LeptrisElement synth = leptris_parse_fragment(
+            ex->sbuf->data, ex->sbuf->size, parsed, &st);
+        if (!synth) {
+            leptris_document_free(parsed);
+            xslt_exec_free(ex);
             return NULL;
         }
+        struct leptris_document* pd = (struct leptris_document*)parsed;
+        struct leptris_element* sy = (struct leptris_element*)synth;
+        /* Detach the synthetic's child run in one write, then chain
+         * it into the document children — the tree path's own
+         * wiring shape (xslt_exec's fragment doc does exactly
+         * this). The first ELEMENT child takes the root slots and
+         * the root-doc map registration; bare-text runs keep the
+         * pre-streaming top-level-text shape. */
+        LeptrisNodeRef run =
+            (LeptrisNodeRef)leptris_element_first_child_any(sy);
+        sy->first_child_off = 0;
+        int stamped = 0;
+        for (LeptrisNodeRef n = run; n; ) {
+            LeptrisNodeRef nx = leptris_node_next_sibling(n);
+            leptris_node_set_next_sibling(n, NULL);
+            if (!pd->doc_children_head) {
+                pd->doc_children_head = n;
+                pd->doc_children_tail = n;
+            } else {
+                leptris_node_set_next_sibling(
+                    (LeptrisNodeRef)pd->doc_children_tail, n);
+                pd->doc_children_tail = n;
+            }
+            if (!stamped &&
+                leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT) {
+                pd->root = (LeptrisElement)n;
+                pd->new_dom_root = (LeptrisElement)n;
+                stamped = 1;
+            }
+            n = nx;
+        }
+        if (stamped) {
+            extern void leptris_root_doc_register(
+                LeptrisElement, struct leptris_document*);
+            leptris_root_doc_register(pd->root, pd);
+        }
+        xslt_exec_free(ex);
         return parsed;
     }
     LeptrisDocument out = ex->result;
