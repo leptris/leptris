@@ -87,6 +87,13 @@ leptris_add_test(test_sch_corpus  sch/test_schematron_corpus.cpp)
 leptris_add_test(test_qt3          xquery/test_qt3.cpp)
 target_compile_definitions(test_qt3 PRIVATE
     LEPTRIS_QT3_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xquery/qt3")
+# leptris_static aggregates leptris_objects as SOURCES, so the
+# objects' INTERFACE compile definition does not flow through to
+# test consumers — mirror the capability flag the runner's corpus
+# counts branch on.
+if(LEPTRIS_ENABLE_UTF8PROC)
+    target_compile_definitions(test_qt3 PRIVATE LEPTRIS_HAS_UTF8PROC=1)
+endif()
 target_compile_definitions(test_sch_corpus PRIVATE
     LEPTRIS_SCH_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sch/conformance-cases")
 leptris_add_test(test_parser     parser/test_parser.cpp)
