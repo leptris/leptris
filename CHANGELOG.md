@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.275] - 2026-09-30
+
+### Performance
+
+- element_copy routes the source views' lengths — no strlen on the copy path (leptris#682) (dom)
+
+
+
 ## [1.9.274] - 2026-09-30
 
 ### Fixed
