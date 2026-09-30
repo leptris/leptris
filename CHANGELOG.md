@@ -4,11 +4,28 @@
 
 ### Fixed
 
-- the stream gate also rejects xsl:output encoding — the emitters don't convert (bug-169) (xslt)
+- The XSLT streaming gate now also rejects sheets that declare a non-default `xsl:output`
+  encoding — output-encoding conversion is a serializer feature the stream emitters don't
+  carry, so those sheets stay on the result-tree path in every build configuration
+  (leptris#1443, bug-169).
+- Stream text emission escapes literal CR as `&#13;`, matching the attribute emitter and the
+  result-tree serializer (bug-105).
+- A dynamic HTML output method (result rooted at an unprefixed `<html>`) now bails the
+  streaming path and restarts the transform on the result-tree path instead of emitting
+  XML-method self-closing tags (bug-28-).
 
 ### Performance
 
-- stream plain sheets — the on-no-match gate was keeping the engine dark (#682) (xslt)
+- XSLT streaming output is now active for every plain stylesheet. The eligibility gate
+  required an explicit `xsl:mode on-no-match` value, but sheets without one default to the
+  same legacy text built-ins as the admitted `text-only-copy` — the engine was dark for all
+  plain sheets while the result-tree path paid ~3x (text-node allocation, serialize-back,
+  document teardown). Measured vs in-process libxslt 1.1.43 (best-of-9, arm64):
+  value-of ×50000 17.24 → 1.07 ms (9.8x faster), dispatch 2000 books 2.99 → 1.55 ms
+  (2.7x), dispatch-heavy 120 templates 5.64 → 1.75 ms (2.0x), predicate dispatch
+  4.66 → 2.00 ms (26.7x), transform //book[@price>100] ~157 µs vs 423.6 µs (2.7x),
+  100-book subtree copy 0.099 → 0.060 ms (1.6x). No row remains behind libxslt
+  (leptris#682, leptris#1443).
 
 
 
