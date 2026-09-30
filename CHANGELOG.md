@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.276] - 2026-09-30
+
+### Fixed
+
+- leptris_xslt_apply materializes streamed output into the returned document (xslt)
+
+
+
 ## [1.9.275] - 2026-09-30
 
 ### Performance
