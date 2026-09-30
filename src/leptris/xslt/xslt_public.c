@@ -114,6 +114,9 @@ LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt) {
 }
 
 
+static int effective_html_method(const XsltStylesheet* sheet,
+                                 LeptrisElement peek);
+
 LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                                LeptrisDocument source) {
     if (!xslt || !source) return NULL;
@@ -121,6 +124,44 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                      xslt->sheet_doc, source);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
+    /* #682 stream mode: the result bytes live in the exec buffer,
+     * not the result tree — the document-result face materializes
+     * them by parsing the same assembled bytes
+     * leptris_xslt_apply_string emits (declaration conditions
+     * identical). Empty streamed output keeps the empty result
+     * document; a text-method sheet's output is not XML and cannot
+     * take the document face — NULL, like any transform failure
+     * (the string face or the streaming buffer face carries it). */
+    if (ex->streaming && ex->sbuf && ex->sbuf->size > 0 &&
+        !ex->sheet->out_method_text) {
+        LeptrisElement peek = ex->result
+            ? leptris_document_root(ex->result) : NULL;
+        int html_m = effective_html_method(ex->sheet, peek);
+        const char* decl =
+            (!html_m && !ex->sheet->out_omit_decl)
+                ? "<?xml version=\"1.0\"?>\n" : "";
+        size_t dl = strlen(decl);
+        size_t bl = ex->sbuf->size;
+        char* acc = (char*)malloc(dl + bl + 1);
+        if (!acc) { xslt_exec_free(ex); return NULL; }
+        memcpy(acc, decl, dl);
+        memcpy(acc + dl, ex->sbuf->data, bl);
+        acc[dl + bl] = '\0';
+
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument parsed =
+            leptris_parse_string(acc, dl + bl, &st);
+        free(acc);
+        xslt_exec_free(ex);
+        /* text-method (or otherwise non-XML) streamed output parses
+         * leniently into a rootless document — that is the
+         * unrepresentable case, reported as a failed transform. */
+        if (!parsed || !leptris_document_root(parsed)) {
+            if (parsed) leptris_document_free(parsed);
+            return NULL;
+        }
+        return parsed;
+    }
     LeptrisDocument out = ex->result;
     ex->result = NULL;    /* ownership moved */
     xslt_exec_free(ex);
