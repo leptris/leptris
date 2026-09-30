@@ -4,7 +4,17 @@
 
 ### Fixed
 
-- internal-subset scan is quote- and comment-aware (parse)
+- The DOCTYPE internal-subset extraction scan is quote- and comment-aware: `]` inside a
+  quoted entity value (`"worryin[g]"`, `"(?-i)[A-Z]+\d+"`) or inside a subset comment no
+  longer closes the subset. The previous bare first-`]` scan truncated the internal subset
+  mid-declaration — documents rejected as malformed that libxml2 accepts (LanguageTool
+  grammar.xml: 5,556 rules), and internal-subset entity references left unexpanded in
+  content because their declarations never registered. Expansion itself was already
+  correct: once declarations register, content references, nested references, and
+  attribute-value references all expand in the default mode while
+  `LEPTRIS_PARSE_KEEP_ENTITY_REFS` preserves the reference nodes. The descriptor
+  children-snapshot API additionally returns borrowed child handles so hosts can
+  enumerate without a second crossing per child (leptris#1454).
 
 
 
