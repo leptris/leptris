@@ -2710,9 +2710,14 @@ static struct leptris_xpath_result* xpath_func_upper_case(
     xpath_result_free(arg);
     if (!src) return NULL;
     /* Unicode case mapping (F&O §7.4.7); ASCII fallback when
-     * utf8proc is compiled out. */
+     * utf8proc is compiled out (the cargo legs build without it —
+     * unicode.c is excluded there, so the helper must not be
+     * referenced unguarded). */
     size_t n = strlen(src);
-    char* out = leptris_unicode_to_upper(src, n, &n);
+    char* out = NULL;
+#ifdef LEPTRIS_HAS_UTF8PROC
+    out = leptris_unicode_to_upper(src, n, &n);
+#endif
     if (!out) {
         out = LEPTRIS_ALLOC_N(char, n + 1);
         if (!out) { LEPTRIS_FREE(src); return NULL; }
@@ -2740,7 +2745,10 @@ static struct leptris_xpath_result* xpath_func_lower_case(
     xpath_result_free(arg);
     if (!src) return NULL;
     size_t n = strlen(src);
-    char* out = leptris_unicode_to_lower(src, n, &n);
+    char* out = NULL;
+#ifdef LEPTRIS_HAS_UTF8PROC
+    out = leptris_unicode_to_lower(src, n, &n);
+#endif
     if (!out) {
         out = LEPTRIS_ALLOC_N(char, n + 1);
         if (!out) { LEPTRIS_FREE(src); return NULL; }
