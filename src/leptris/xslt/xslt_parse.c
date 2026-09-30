@@ -2401,7 +2401,11 @@ XsltStylesheet* xslt_stylesheet_parse_root(LeptrisDocument doc,
      * template (and the globals) must be stream-safe; any tree-
      * building or post-hoc op keeps the sheet on the result-tree
      * path. Conservative by construction — unknown kinds reject. */
-    sheet->can_stream = !sheet->out_method_text && !sheet->out_method_html &&
+    /* Output ENCODING conversion (bug-169: xsl:output
+     * encoding='iso-8859-1') is a serializer feature the stream
+     * emitters don't carry — only the default (UTF-8) streams. */
+    sheet->can_stream = !sheet->out_encoding &&
+        !sheet->out_method_text && !sheet->out_method_html &&
         !stream_indent_on(sheet) && sheet->out_cdata_count == 0 &&
         sheet->charmap_count == 0 && sheet->out_standalone < 0 &&
         !sheet->out_doctype_system && !sheet->out_doctype_public &&
