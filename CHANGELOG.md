@@ -4,11 +4,23 @@
 
 ### Fixed
 
-- direct attr placement keeps the attr_count increment (leptris#682) (dom)
+- `element_copy`'s direct attribute placement keeps the `attr_count` increment that
+  `leptris_element_add_attribute` maintained — the count accessor and the O(1) attribute-index
+  fast path read that field, and a 2-attribute copy read as 0 (caught by the ASAN leg's
+  deep-copy suite; leptris#682, leptris#1450).
 
 ### Performance
 
-- direct attr placement in element_copy + zero-arg position()/last() fast path (leptris#682) (dom,xpath)
+- `element_copy` places unprefixed attribute nodes directly instead of routing pooled copies
+  through the mutation API, which re-derived what the source struct already carries (a second
+  string copy, the FNV hash recompute, the entity scan). The source's lazy-hash sentinel and
+  entity flag carry over verbatim. 100-book subtree copy: 0.050 -> 0.033 ms — ~2.7–2.9x faster
+  than lxml's deepcopy of the same fixture (leptris#682).
+- Zero-argument `position()` and `last()` read the evaluation context directly instead of the
+  function-registry round trip (name lookup, argument array, extension fallback chain).
+  Positional predicates re-evaluate these per candidate, so the by-name lookup dominated
+  per-eval cost there. Values mirror the registry handlers exactly; core functions cannot be
+  shadowed; arity errors keep the registry path (leptris#682).
 
 
 
