@@ -157,9 +157,26 @@ static LEPTRIS_THREAD_LOCAL uint64_t g_memo_generation;
 static uint64_t rootmap_generation_load(void) {
     return _InterlockedCompareExchange64(&g_rootmap_generation, 0, 0);
 }
+#if defined(_M_X64) || defined(_M_ARM) || defined(_M_ARM64)
 static uint64_t rootmap_generation_bump(void) {
     return _InterlockedIncrement64(&g_rootmap_generation) - 1;
 }
+#else
+/* _InterlockedIncrement64 has no x86 intrinsic (the symbol does not
+ * resolve under MSVC targeting Win32 — LNK2001); cmpxchg8b covers the
+ * 64-bit add there. GCC/Clang i686 never reaches this branch. */
+static uint64_t rootmap_generation_bump(void) {
+    uint64_t cur = _InterlockedCompareExchange64(&g_rootmap_generation, 0, 0);
+    for (;;) {
+        uint64_t want = cur + 1;
+        uint64_t prev = _InterlockedCompareExchange64(
+            &g_rootmap_generation, want, cur);
+        if (prev == cur)
+            return want;
+        cur = prev;
+    }
+}
+#endif
 #else
 static uint64_t rootmap_generation_load(void) {
     return __atomic_load_n(&g_rootmap_generation, __ATOMIC_ACQUIRE);
