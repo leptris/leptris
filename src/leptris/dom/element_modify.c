@@ -2065,26 +2065,60 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
     if (copy_element_namespaces_pooled(copy, source, pool))
         doc->has_namespaces = 1;
 
+    struct leptris_attribute* last_attr = NULL;
     for (struct leptris_attribute* sa =
              leptris_element_get_first_attribute(source);
          sa; sa = leptris_attr_next(sa)) {
         if (leptris_sv_is_empty(&sa->name_view)) continue;
-        /* Length-based pooled copies — the source views carry their
-         * lengths; pool_strdup would strlen each one again (38% of
-         * the 100-book subtree copy), and add_attribute re-copies
-         * what we pass, so route the lengths through. */
+        /* Prefixed attrs carry the TODO-173 side cache (prefix +
+         * namespace_uri) — rare; keep the full mutation-API path. */
+        if (attr_get_ns_cache(sa)) {
+            char* n = leptris_sv_to_cstr_pooled(&sa->name_view, pool);
+            if (!n) continue;
+            LeptrisStringView sav_ = leptris_attr_value_sv(sa);
+            char* v = leptris_sv_is_empty(&sav_)
+                          ? NULL
+                          : leptris_sv_to_cstr_pooled(&sav_, pool);
+            LeptrisStringView nv = leptris_sv_from_ptr(
+                n, sa->name_view.length);
+            LeptrisStringView vv =
+                v ? leptris_sv_from_ptr(v, sav_.length)
+                  : leptris_sv_from_cstr("");
+            leptris_element_add_attribute(copy, nv, vv, pool);
+            continue;
+        }
+        /* Direct placement: the source attr is already decoded and
+         * hashed — add_attribute's mutation-API work (second string
+         * copy, hash recompute, entity scan) re-derives what the
+         * source struct already carries. Materialize the views into
+         * the destination pool (source views are source-document
+         * lifetime), carry the lazy-hash sentinel and the entity
+         * flag bit verbatim, and wire the chain the way the parser
+         * does. */
         char* n = leptris_sv_to_cstr_pooled(&sa->name_view, pool);
         if (!n) continue;
         LeptrisStringView sav_ = leptris_attr_value_sv(sa);
         char* v = leptris_sv_is_empty(&sav_)
                       ? NULL
                       : leptris_sv_to_cstr_pooled(&sav_, pool);
-        LeptrisStringView nv = leptris_sv_from_ptr(
-            n, sa->name_view.length);
-        LeptrisStringView vv =
-            v ? leptris_sv_from_ptr(v, sav_.length)
-              : leptris_sv_from_cstr("");
-        leptris_element_add_attribute(copy, nv, vv, pool);
+        struct leptris_attribute* attr =
+            (struct leptris_attribute*)leptris_pool_alloc(
+                pool, sizeof(struct leptris_attribute));
+        if (!attr) continue;
+        attr->name_view = leptris_sv_from_ptr(n, sa->name_view.length);
+        leptris_attr_value_set_heap(
+            attr, v ? leptris_sv_from_ptr(v, sav_.length)
+                    : leptris_sv_from_cstr(""));
+        attr->name_hash = sa->name_hash;
+        attr->ns_cache_off = 0;
+        attr->next_cp = 0;
+        if (copy->first_attribute_off != 0) {
+            leptris_attr_set_next(last_attr, attr);
+        } else {
+            copy->first_attribute_off =
+                (int32_t)((char*)attr - (char*)copy);
+        }
+        last_attr = attr;
     }
 
     LeptrisNodeRef first = NULL;
