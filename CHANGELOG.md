@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.281] - 2026-09-30
+
+### Fixed
+
+- the QT3 runner branches on LEPTRIS_HAS_UTF8PROC — mirror the define on the test target (leptris#1460) (test)
+- guard the case-mapping helpers behind LEPTRIS_HAS_UTF8PROC (leptris#1460) (xpath)
+- true Unicode case mapping for upper-case/lower-case + QT3 string-case family (leptris#1182) (xpath)
+
+
+
 ## [1.9.280] - 2026-09-30
 
 ### Fixed
