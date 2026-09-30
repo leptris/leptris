@@ -2058,7 +2058,7 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
     char* name_copy = leptris_sv_to_cstr_pooled(&name_view, pool);
     if (!name_copy) return NULL;
     LeptrisElement copy = leptris_element_create_with_view(
-        leptris_sv_from_cstr(name_copy), pool);
+        leptris_sv_from_ptr(name_copy, name_view.length), pool);
     if (!copy) return NULL;
     leptris_elem_set_parent(copy, parent_copy);
 
@@ -2069,15 +2069,21 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
              leptris_element_get_first_attribute(source);
          sa; sa = leptris_attr_next(sa)) {
         if (leptris_sv_is_empty(&sa->name_view)) continue;
-        char* n = leptris_pool_strdup(pool, sa->name_view.data);
+        /* Length-based pooled copies — the source views carry their
+         * lengths; pool_strdup would strlen each one again (38% of
+         * the 100-book subtree copy), and add_attribute re-copies
+         * what we pass, so route the lengths through. */
+        char* n = leptris_sv_to_cstr_pooled(&sa->name_view, pool);
         if (!n) continue;
         LeptrisStringView sav_ = leptris_attr_value_sv(sa);
         char* v = leptris_sv_is_empty(&sav_)
                       ? NULL
-                      : leptris_pool_strdup(pool, sav_.data);
-        LeptrisStringView nv = leptris_sv_from_cstr(n);
+                      : leptris_sv_to_cstr_pooled(&sav_, pool);
+        LeptrisStringView nv = leptris_sv_from_ptr(
+            n, sa->name_view.length);
         LeptrisStringView vv =
-            v ? leptris_sv_from_cstr(v) : leptris_sv_from_cstr("");
+            v ? leptris_sv_from_ptr(v, sav_.length)
+              : leptris_sv_from_cstr("");
         leptris_element_add_attribute(copy, nv, vv, pool);
     }
 
