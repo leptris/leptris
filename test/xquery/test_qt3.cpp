@@ -635,6 +635,20 @@ TEST(Qt3Subset, FnContains) {
     run_test_set("fn/contains.xml", {}, 46);
 }
 
+/* String case family (lever 6 stage-2, string tails batch 1):
+ * upper-case/lower-case (Unicode mapping) and codepoint-equal. */
+TEST(Qt3Subset, FnStringCase) {
+    /* 23 of 30 / 23 of 28 run-and-agree — the rest carry
+     * unsupported env shapes (codepoint-sequence channels).
+     * cbcl-* codepoint-equal cases define local: helpers — corpus
+     * plumbing outside the engine surface (the tz-batch
+     * precedent); 24 of 37 adopt. */
+    run_test_set("fn/upper-case.xml", {}, 23);
+    run_test_set("fn/lower-case.xml", {}, 23);
+    const std::vector<const char*> no_local = {"local:"};
+    run_test_set("fn/codepoint-equal.xml", {}, 24, no_local);
+}
+
 TEST(Qt3Subset, FnStartsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
     run_test_set("fn/starts-with.xml", {}, 43);
