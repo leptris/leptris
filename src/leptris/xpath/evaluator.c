@@ -846,6 +846,29 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
         return NULL;
     }
 
+    /* Zero-arg context builtins (the per-eval hot pair):
+     * position() and last() read the eval context directly — no
+     * registry lookup, no argument array, no extension fallback
+     * chain. Positional predicates re-evaluate these for every
+     * candidate, so the by-name lookup dominated per-eval cost
+     * there. Values mirror the registry handlers exactly; core
+     * functions cannot be shadowed, so the registry entry and
+     * this path can never disagree. Arity errors stay on the
+     * registry path (child_count != 0 falls through). */
+    if (ast->child_count == 0) {
+        if (strcmp(func_name, "position") == 0 ||
+            strcmp(func_name, "last") == 0) {
+            struct leptris_xpath_result* r =
+                xpath_result_new(XPATH_RESULT_NUMBER);
+            if (r) {
+                r->value.number_value = (double)
+                    (func_name[0] == 'p' ? ctx->context_position
+                                         : ctx->context_size);
+            }
+            return r;
+        }
+    }
+
     /* Get function registry */
     if (!ctx->function_registry) {
         snprintf(ctx->error_msg, sizeof(ctx->error_msg),
