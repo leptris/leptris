@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.277] - 2026-09-30
+
+### Fixed
+
+- direct attr placement keeps the attr_count increment (leptris#682) (dom)
+
+### Performance
+
+- direct attr placement in element_copy + zero-arg position()/last() fast path (leptris#682) (dom,xpath)
+
+
+
 ## [1.9.276] - 2026-09-30
 
 ### Fixed
