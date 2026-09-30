@@ -48,10 +48,8 @@ std::string run_apply_doc(const char* sheet_body, const char* xml) {
     if (out) {
         LeptrisElement root = leptris_document_root(out);
         r = root ? leptris_element_name(root) : "(no-root)";
-        if (root) {
-            char* xout = leptris_document_serialize(out, 0);
-            if (xout) { r += "|"; r += xout; leptris_free_string(xout); }
-        }
+        char* xout = leptris_document_serialize(out, 0);
+        if (xout) { r += "|"; r += xout; leptris_free_string(xout); }
         leptris_document_free(out);
     }
     leptris_document_free(d);
