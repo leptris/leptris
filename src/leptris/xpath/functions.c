@@ -15,6 +15,7 @@
 #include "../dom/cdata.h"
 #include "../dom/comment.h"
 #include "../common/port.h"
+#include "../unicode/unicode.h"
 #include "../dtd/model.h"   /* ttdtd_lookup_attribute (id() §4.1) */
 #include <string.h>
 #include <stdlib.h>
@@ -2708,14 +2709,19 @@ static struct leptris_xpath_result* xpath_func_upper_case(
     char* src = result_to_string(arg);
     xpath_result_free(arg);
     if (!src) return NULL;
+    /* Unicode case mapping (F&O §7.4.7); ASCII fallback when
+     * utf8proc is compiled out. */
     size_t n = strlen(src);
-    char* out = LEPTRIS_ALLOC_N(char, n + 1);
-    if (!out) { LEPTRIS_FREE(src); return NULL; }
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)src[i];
-        out[i] = (char)((c >= 'a' && c <= 'z') ? c - 32 : c);
+    char* out = leptris_unicode_to_upper(src, n, &n);
+    if (!out) {
+        out = LEPTRIS_ALLOC_N(char, n + 1);
+        if (!out) { LEPTRIS_FREE(src); return NULL; }
+        for (size_t i = 0; i < n; i++) {
+            unsigned char c = (unsigned char)src[i];
+            out[i] = (char)((c >= 'a' && c <= 'z') ? c - 32 : c);
+        }
+        out[n] = 0;
     }
-    out[n] = 0;
     LEPTRIS_FREE(src);
     struct leptris_xpath_result* result =
         xpath_result_new(XPATH_RESULT_STRING);
@@ -2734,13 +2740,16 @@ static struct leptris_xpath_result* xpath_func_lower_case(
     xpath_result_free(arg);
     if (!src) return NULL;
     size_t n = strlen(src);
-    char* out = LEPTRIS_ALLOC_N(char, n + 1);
-    if (!out) { LEPTRIS_FREE(src); return NULL; }
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)src[i];
-        out[i] = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+    char* out = leptris_unicode_to_lower(src, n, &n);
+    if (!out) {
+        out = LEPTRIS_ALLOC_N(char, n + 1);
+        if (!out) { LEPTRIS_FREE(src); return NULL; }
+        for (size_t i = 0; i < n; i++) {
+            unsigned char c = (unsigned char)src[i];
+            out[i] = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
+        }
+        out[n] = 0;
     }
-    out[n] = 0;
     LEPTRIS_FREE(src);
     struct leptris_xpath_result* result =
         xpath_result_new(XPATH_RESULT_STRING);

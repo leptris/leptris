@@ -108,25 +108,40 @@ char* leptris_unicode_normalize(const char* str, size_t len,
 /**
  * Convert UTF-8 string to uppercase
  */
+/* Unicode CASE MAPPING (F&O upper-case/lower-case): per-codepoint
+ * utf8proc_toupper/tolower — NOT case folding. The previous
+ * UTF8PROC_CASEFOLD map folded to the canonical (lowercase-shaped)
+ * fold form, which is neither operation and left fn:upper-case
+ * wrong for every non-ASCII input (fn-upper-case-20: U+01CB must
+ * map to U+01CA). Case mapping is codepoint-wise in utf8proc's
+ * property API; encode the mapped sequence back to UTF-8. The
+ * mapped form of a BMP codepoint is <= 3 bytes, so a 4-byte worst
+ * case per input byte is a safe bound (surrogates never appear in
+ * valid UTF-8). */
 char* leptris_unicode_to_upper(const char* str, size_t len, size_t* out_len) {
     if (!str || !out_len) {
         return NULL;
     }
 
-    utf8proc_uint8_t* result = NULL;
-    utf8proc_ssize_t result_len = utf8proc_map(
-        (const utf8proc_uint8_t*)str,
-        (utf8proc_ssize_t)len,
-        &result,
-        UTF8PROC_STABLE | UTF8PROC_CASEFOLD | UTF8PROC_COMPOSE
-    );
-
-    if (result_len < 0) {
-        return NULL;
+    char* out = (char*)malloc(len * 4 + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t i = 0; i < len; ) {
+        utf8proc_int32_t cp;
+        utf8proc_ssize_t used = utf8proc_iterate(
+            (const utf8proc_uint8_t*)str + i,
+            (utf8proc_ssize_t)(len - i), &cp);
+        if (used < 1) { free(out); return NULL; }
+        cp = utf8proc_toupper(cp);
+        utf8proc_ssize_t written = utf8proc_encode_char(
+            cp, (utf8proc_uint8_t*)out + w);
+        if (written < 1) { free(out); return NULL; }
+        w += (size_t)written;
+        i += (size_t)used;
     }
-
-    *out_len = (size_t)result_len;
-    return (char*)result;
+    out[w] = 0;
+    *out_len = w;
+    return out;
 }
 
 /**
@@ -137,20 +152,25 @@ char* leptris_unicode_to_lower(const char* str, size_t len, size_t* out_len) {
         return NULL;
     }
 
-    utf8proc_uint8_t* result = NULL;
-    utf8proc_ssize_t result_len = utf8proc_map(
-        (const utf8proc_uint8_t*)str,
-        (utf8proc_ssize_t)len,
-        &result,
-        UTF8PROC_STABLE | UTF8PROC_CASEFOLD | UTF8PROC_COMPOSE
-    );
-
-    if (result_len < 0) {
-        return NULL;
+    char* out = (char*)malloc(len * 4 + 1);
+    if (!out) return NULL;
+    size_t w = 0;
+    for (size_t i = 0; i < len; ) {
+        utf8proc_int32_t cp;
+        utf8proc_ssize_t used = utf8proc_iterate(
+            (const utf8proc_uint8_t*)str + i,
+            (utf8proc_ssize_t)(len - i), &cp);
+        if (used < 1) { free(out); return NULL; }
+        cp = utf8proc_tolower(cp);
+        utf8proc_ssize_t written = utf8proc_encode_char(
+            cp, (utf8proc_uint8_t*)out + w);
+        if (written < 1) { free(out); return NULL; }
+        w += (size_t)written;
+        i += (size_t)used;
     }
-
-    *out_len = (size_t)result_len;
-    return (char*)result;
+    out[w] = 0;
+    *out_len = w;
+    return out;
 }
 
 /**
@@ -162,10 +182,25 @@ int leptris_unicode_casecmp(const char* str1, size_t len1,
         return (str1 == str2) ? 0 : (str1 ? 1 : -1);
     }
 
-    /* Normalize both strings to lowercase for comparison */
+    /* Fold both strings for comparison — case folding, NOT
+     * lower-case mapping: the fold form is the canonical
+     * case-insensitive identity (the old to_lower did this
+     * implicitly; true case mapping is not a substitute). */
     size_t norm1_len, norm2_len;
-    char* norm1 = leptris_unicode_to_lower(str1, len1, &norm1_len);
-    char* norm2 = leptris_unicode_to_lower(str2, len2, &norm2_len);
+    utf8proc_uint8_t *f1 = NULL, *f2 = NULL;
+    utf8proc_ssize_t n1 = utf8proc_map(
+        (const utf8proc_uint8_t*)str1, (utf8proc_ssize_t)len1, &f1,
+        UTF8PROC_STABLE | UTF8PROC_CASEFOLD | UTF8PROC_COMPOSE);
+    utf8proc_ssize_t n2 = utf8proc_map(
+        (const utf8proc_uint8_t*)str2, (utf8proc_ssize_t)len2, &f2,
+        UTF8PROC_STABLE | UTF8PROC_CASEFOLD | UTF8PROC_COMPOSE);
+    if (n1 < 0 || n2 < 0) {
+        free(f1); free(f2);
+        return (str1 == str2) ? 0 : 1;
+    }
+    char* norm1 = (char*)f1;
+    char* norm2 = (char*)f2;
+    (void)0;
 
     if (!norm1 || !norm2) {
         free(norm1);
