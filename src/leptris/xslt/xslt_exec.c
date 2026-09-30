@@ -374,11 +374,12 @@ static void xslt_append_fragment_node(XsltExec* ex, LeptrisNodeRef n);
 static void stream_emit_text(struct SerializeBuffer* b, const char* t) {
     if (!t) return;
     for (const char* p = t; *p; ) {
-        size_t run = strcspn(p, "&<>");
+        size_t run = strcspn(p, "&<>\r");
         if (run) buffer_append_len(b, p, run);
         if (!p[run]) break;
         buffer_append(b, p[run] == '&' ? "&amp;"
-                        : p[run] == '<' ? "&lt;" : "&gt;");
+                        : p[run] == '<' ? "&lt;"
+                        : p[run] == '>' ? "&gt;" : "&#13;");
         p += run + 1;
     }
 }
@@ -856,6 +857,25 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
     LeptrisElement parent = ex->pending_parent;
     const char* out_name = apply_ns_alias(ex->sheet, in->name);
     if (ex->streaming) {
+        /* Dynamic output-method parity (bug-28-): the tree path's
+         * serializer switches to the HTML method when the result
+         * root is an unprefixed <html> (effective_html_method's
+         * trigger); the stream emitters cover only the XML method.
+         * Instead of duplicating the html rules here, bail — the
+         * driver restarts the transform on the result-tree path. An
+         * explicit xsl:output method never bails (out_method_set
+         * disables the dynamic switch). */
+        if (!parent && !ex->sheet->out_method_set && out_name &&
+            !strchr(out_name, ':') &&
+            (!in->ns_uri || !in->ns_uri[0]) &&
+            strlen(out_name) == 4 &&
+            tolower((unsigned char)out_name[0]) == 'h' &&
+            tolower((unsigned char)out_name[1]) == 't' &&
+            tolower((unsigned char)out_name[2]) == 'm' &&
+            tolower((unsigned char)out_name[3]) == 'l') {
+            ex->stream_bail_html = 1;
+            return 1;
+        }
         /* Gate guarantees: no namespaces, no attr-sets, no
          * xsl:attribute children — the open tag is complete before
          * the children run, so it emits whole and the empty case
@@ -4816,9 +4836,10 @@ void xslt_exec_free(XsltExec* ex) {
     free(ex);
 }
 
-XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
-                             LeptrisDocument sheet_doc,
-                             LeptrisDocument source) {
+static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
+                                  LeptrisDocument sheet_doc,
+                                  LeptrisDocument source,
+                                  int allow_stream) {
     if (!sheet || !source) return NULL;
     register_ops();
 
@@ -4831,7 +4852,7 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     ex->current_size = 1;  /* last() default context size */
     ex->result = leptris_document_create();
     if (!ex->result) { xslt_exec_free(ex); return NULL; }
-    if (sheet->can_stream) {
+    if (allow_stream && sheet->can_stream) {
         ex->sbuf = buffer_create(0);
         if (ex->sbuf) ex->streaming = 1;
     }
@@ -4912,6 +4933,17 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
 
     src_doc->xslt_state = saved_xslt_state;
     leptris_xpath_invalidate_fn_registry(src_doc);
+    return ex;
+}
+
+XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
+                             LeptrisDocument sheet_doc,
+                             LeptrisDocument source) {
+    XsltExec* ex = transform_doc_ex(sheet, sheet_doc, source, 1);
+    if (ex && ex->streaming && ex->stream_bail_html) {
+        xslt_exec_free(ex);
+        ex = transform_doc_ex(sheet, sheet_doc, source, 0);
+    }
     return ex;
 }
 

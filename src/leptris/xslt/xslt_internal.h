@@ -634,6 +634,10 @@ typedef struct xslt_exec {
      * PI + control flow; everything else keeps the result tree). */
     struct SerializeBuffer* sbuf;
     int streaming;
+    /* Dynamic html-method bail (bug-28-): set when the stream path
+     * hits a fragment-level <html> root and the output method is
+     * dynamic — the driver restarts on the result-tree path. */
+    int stream_bail_html;
     int cache_owner_set; int cache_owner_prev;
 
     /* current(): the node being processed by the template rule or
