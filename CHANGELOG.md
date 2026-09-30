@@ -4,7 +4,14 @@
 
 ### Performance
 
-- element_copy routes the source views' lengths — no strlen on the copy path (leptris#682) (dom)
+- `leptris_element_copy` routes the source views' lengths instead of re-deriving them: the
+  deep-copy path paid four strlens per attribute (two `leptris_pool_strdup` copies plus two
+  `leptris_sv_from_cstr` reconstructions) and one per element name before copying everything
+  again — a profile put `strlen` at 38% of a 100-book subtree copy. Length-based pooled
+  copies (which also intern recurring attribute names) take the same fixture from
+  0.099 to 0.050 ms per copy (~2x; ~1.9x faster than lxml's deepcopy). Behavior is
+  byte-identical; the #696/#721/#213 copy-semantics suites pin the output (leptris#682,
+  leptris#1445).
 
 
 
