@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.274] - 2026-09-30
+
+### Fixed
+
+- the stream gate also rejects xsl:output encoding — the emitters don't convert (bug-169) (xslt)
+
+### Performance
+
+- stream plain sheets — the on-no-match gate was keeping the engine dark (#682) (xslt)
+
+
+
 ## [1.9.273] - 2026-09-29
 
 ### Fixed
