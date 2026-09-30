@@ -5,6 +5,12 @@
 ### Fixed
 
 - the rootmap generation bump links on MSVC x86 — CAS loop over cmpxchg8b (_InterlockedIncrement64 is x64/ARM-only) (dom)
+- regression pins for the two XSLT document-face shapes the 1.9.274 binding ride caught
+  (leptris#1448): an `<html>` root must trip the streaming bail and return the restarted
+  result-tree document (root present, content intact), and a value-of-only sheet must
+  produce the same rootless shape as the result-tree path for the same transform
+  (verified byte-identical via an `xsl:output encoding` twin). No behavior change —
+  coverage armor so the document face cannot regress silently again (leptris#1457).
 
 
 
