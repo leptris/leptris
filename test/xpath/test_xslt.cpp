@@ -31,6 +31,34 @@ std::string run(const char* sheet_body, const char* xml) {
     return r;
 }
 
+/* The DOCUMENT-result face (leptris_xslt_apply): #682 streaming
+ * sheets emit into the exec buffer — the face must materialize the
+ * streamed markup as the returned document (root present), not
+ * hand back the empty result tree. */
+std::string run_apply_doc(const char* sheet_body, const char* xml) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='1.0'>" + sheet_body +
+                        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    if (!x) return "(compile-failed)";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    if (!d) { leptris_xslt_free(x); return "(parse-failed)"; }
+    LeptrisDocument out = leptris_xslt_apply(x, d);
+    std::string r = "(null)";
+    if (out) {
+        LeptrisElement root = leptris_document_root(out);
+        r = root ? leptris_element_name(root) : "(no-root)";
+        if (root) {
+            char* xout = leptris_document_serialize(out, 0);
+            if (xout) { r += "|"; r += xout; leptris_free_string(xout); }
+        }
+        leptris_document_free(out);
+    }
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    return r;
+}
+
 /* Same, pinned to version='3.0' — XSLT 3.0 semantics (sequence
  * display forms, versioned value-of, expand-text). */
 std::string run30(const char* sheet_body, const char* xml) {
@@ -4262,4 +4290,19 @@ TEST(XsltFull, DispatchIndexOverflowFiresAllTemplates) {
         for (int i = 0; i < 120; i++) want += "V" + std::to_string(i);
         EXPECT_EQ(out, want);
     }
+}
+
+
+/* #682 follow-up: the document face materializes streamed output.
+ * Plain value-of sheet (stream-eligible since the mode_on_no_match
+ * gate admits 0). */
+TEST(XsltStreamApplyDoc, DocumentFaceMaterializesStreamedOutput) {
+    std::string r = run_apply_doc(
+        "<xsl:template match='/'><summary>"
+        "<xsl:value-of select='//title'/></summary>"
+        "</xsl:template>",
+        "<doc><title>hello</title><item/><item/></doc>");
+    EXPECT_EQ(r.find("(no-root)"), std::string::npos);
+    EXPECT_NE(r.find("summary"), std::string::npos);
+    EXPECT_NE(r.find("hello"), std::string::npos);
 }
