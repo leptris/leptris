@@ -643,9 +643,21 @@ TEST(Qt3Subset, FnStringCase) {
      * cbcl-* codepoint-equal cases define local: helpers — corpus
      * plumbing outside the engine surface (the tz-batch
      * precedent); 24 of 37 adopt. */
+    const std::vector<const char*> no_local = {"local:"};
+#ifdef LEPTRIS_HAS_UTF8PROC
     run_test_set("fn/upper-case.xml", {}, 23);
     run_test_set("fn/lower-case.xml", {}, 23);
-    const std::vector<const char*> no_local = {"local:"};
+#else
+    /* Without utf8proc (the Windows core-test leg builds with
+     * LEPTRIS_ENABLE_UTF8PROC=OFF) the *-20 Unicode-mapping
+     * cases run on the ASCII fallback and disagree — excluded,
+     * not counted down (agree must equal run). */
+    /* excluded_cases matches by exact case NAME. */
+    const std::vector<const char*> no_unicode = {
+        "fn-upper-case-20", "fn-lower-case-20"};
+    run_test_set("fn/upper-case.xml", {}, 22, {}, no_unicode);
+    run_test_set("fn/lower-case.xml", {}, 22, {}, no_unicode);
+#endif
     run_test_set("fn/codepoint-equal.xml", {}, 24, no_local);
 }
 
