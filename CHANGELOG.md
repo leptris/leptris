@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.280] - 2026-09-30
+
+### Fixed
+
+- the rootmap generation bump links on MSVC x86 — CAS loop over cmpxchg8b (_InterlockedIncrement64 is x64/ARM-only) (dom)
+
+
+
 ## [1.9.279] - 2026-09-30
 
 ### Fixed
