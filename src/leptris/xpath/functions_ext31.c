@@ -5094,28 +5094,67 @@ static struct leptris_xpath_result* fn_codepoint_equal(XPathContext* ctx,
 }
 
 #ifdef LEPTRIS_HAS_UTF8PROC
+static int form_eq(const char* a, const char* b) {
+    while (*a && *b) {
+        char ca = *a, cb = *b;
+        if (ca >= 'a' && ca <= 'z') ca -= 'a' - 'A';
+        if (cb >= 'a' && cb <= 'z') cb -= 'a' - 'A';
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static struct leptris_xpath_result* fn_normalize_unicode(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* in = re_str_arg(ctx, args, 0);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
     if (!out) { free(in); return NULL; }
-    out->value.string_value = in;
-    if (n >= 2) {
-        char* form = re_str_arg(ctx, args, 1);
-        leptris_unicode_normalization_t f = LEPTRIS_UNICODE_NFC;
-        if (form) {
-            if (strcmp(form, "NFD") == 0) f = LEPTRIS_UNICODE_NFD;
-            else if (strcmp(form, "NFKC") == 0) f = LEPTRIS_UNICODE_NFKC;
-            else if (strcmp(form, "NFKD") == 0) f = LEPTRIS_UNICODE_NFKD;
+    /* F&O 7.4.4.1: the single-argument form normalizes with NFC
+     * (the old code only normalized in the two-argument branch,
+     * so normalize-unicode('A'+U+030A+U+0301') returned the
+     * decomposed sequence instead of composing to Ǻ). The form's
+     * leading/trailing whitespace is stripped; a zero-length form
+     * means NO normalization — the value returns unchanged
+     * (fn-normalize-unicode2args-4: U+00C5 and U+212B stay
+     * distinct under ''). Any other form is unsupported:
+     * FOCH0003 (K-NormalizeUnicodeFunc-3, cbcl-006a — the
+     * XQuery 1.0-era FULLY-NORMALIZED form is gone from F&O 3.x). */
+    char* form = (n >= 2) ? re_str_arg(ctx, args, 1) : NULL;
+    leptris_unicode_normalization_t f = LEPTRIS_UNICODE_NFC;
+    int identity = 0;
+    if (form) {
+        char* p = form;
+        while (*p == ' ' || (*p >= '\t' && *p <= '\r')) p++;
+        char* e = p + strlen(p);
+        while (e > p && (e[-1] == ' ' || (e[-1] >= '\t' && e[-1] <= '\r')))
+            e--;
+        *e = '\0';
+        if (p[0] == '\0') identity = 1;
+        else if (form_eq(p, "NFD")) f = LEPTRIS_UNICODE_NFD;
+        else if (form_eq(p, "NFKC")) f = LEPTRIS_UNICODE_NFKC;
+        else if (form_eq(p, "NFKD")) f = LEPTRIS_UNICODE_NFKD;
+        else if (!form_eq(p, "NFC")) {
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "Unsupported normalization form '%s'", p);
+            snprintf(ctx->error_code, sizeof(ctx->error_code), "FOCH0003");
             free(form);
-        }
-        size_t ol = 0;
-        char* norm = leptris_unicode_normalize(in ? in : "",
-                                               in ? strlen(in) : 0, f, &ol);
-        if (norm) {
             free(in);
-            out->value.string_value = norm;
+            xpath_result_free(out);
+            return NULL;
         }
+        free(form);
+    }
+    size_t ol = 0;
+    char* norm = identity ? NULL : leptris_unicode_normalize(
+        in ? in : "", in ? strlen(in) : 0, f, &ol);
+    if (norm) {
+        free(in);
+        out->value.string_value = norm;
+    } else {
+        /* utf8proc rejected the input (or is disabled): the
+         * identity string is the F&O-conformant fallback. */
+        out->value.string_value = in ? in : leptris_strdup("");
     }
     return out;
 }
