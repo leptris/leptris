@@ -488,6 +488,27 @@ void run_test_set(const char* set_path,
                 break;
             }
         if (named_out) continue;
+        /* Dependency gate: cases requiring a normalization form the
+         * engine does not implement (FULLY-NORMALIZED — XQuery 1.0
+         * era, dropped from F&O 3.x) are skipped; their
+         * satisfied="false" twins run and expect FOCH0003. */
+        bool dep_out = false;
+        for (LeptrisElement dp = find_child(tc, "dependency"); dp;
+             dp = next_elem(dp)) {
+            const char* dt = leptris_element_attribute(dp, "type");
+            const char* dv = leptris_element_attribute(dp, "value");
+            const char* sat = leptris_element_attribute(dp, "satisfied");
+            if (dt && strcmp(dt, "unicode-normalization-form") == 0 &&
+                dv && strcmp(dv, "FULLY-NORMALIZED") == 0 &&
+                (!sat || strcmp(sat, "false") != 0)) {
+                dep_out = true;
+                break;
+            }
+        }
+        if (dep_out) {
+            skipped++;
+            continue;
+        }
         LeptrisElement test = find_child(tc, "test");
         LeptrisElement result = find_child(tc, "result");
         LeptrisElement env = find_child(tc, "environment");
@@ -641,6 +662,18 @@ TEST(Qt3Subset, FnContains) {
  * with the unreserved set). 25 of 30 run-and-agree — the empty-
  * string zero-arity and HTML-page env cases skip (unsupported
  * env shapes). */
+/* String tails batch 3: normalize-unicode — 1-arg form = NFC,
+ * zero-length form = identity, unknown form = FOCH0003. The
+ * FULLY-NORMALIZED-required cbcl-001/006 are skipped by the
+ * runner's dependency gate; their satisfied="false" twins run.
+ * The function itself is utf8proc-gated in the engine — without
+ * it (Windows core-test leg) the whole family stays out. */
+#ifdef LEPTRIS_HAS_UTF8PROC
+TEST(Qt3Subset, FnNormalizeUnicode) {
+    run_test_set("fn/normalize-unicode.xml", {}, 29);
+}
+#endif
+
 TEST(Qt3Subset, FnEncodeForUri) {
     run_test_set("fn/encode-for-uri.xml", {}, 25);
 }
