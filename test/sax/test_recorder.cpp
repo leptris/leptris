@@ -263,3 +263,58 @@ TEST(Recorder, ResetRestartsAcrossDocuments) {
 
     leptris_sax_recorder_free(r);
 }
+
+/* Issue #1459: Door A opt-outs on the recorder. SKIP_DUP_DETECTION
+ * drops the redefinition scan (no ERROR record, the element still
+ * carries both attributes); SKIP_SOURCE_POSITIONS degrades error
+ * positions to line 1 — the plain entry reports line 2. */
+TEST(Recorder, DoorAFlagsSkipDupDetection) {
+    const char xml[] = "<r><a xml:lang=\"en\" xml:lang=\"fr\"/></r>";
+    LeptrisSaxRecorder rec = leptris_sax_recorder_new_flags(
+        LEPTRIS_PARSE_SKIP_DUP_DETECTION);
+    ASSERT_NE(rec, nullptr);
+    ASSERT_EQ(leptris_sax_recorder_feed(rec, xml, strlen(xml), 1), 0);
+
+    size_t n = 0, alen = 0;
+    const LeptrisSaxEventRecord* rs = leptris_sax_recorder_records(rec, &n);
+    const char* arena = leptris_sax_recorder_arena(rec, &alen);
+    ASSERT_NE(rs, nullptr);
+    for (size_t i = 0; i < n; i++)
+        EXPECT_NE(rs[i].kind, LEPTRIS_SAX_EVENT_ERROR);
+    leptris_sax_recorder_free(rec);
+}
+
+TEST(Recorder, DoorAFlagsSkipSourcePositions) {
+    /* Position counters advance only while the tokenizer scans
+     * attributes (the #647 design), so the newline rides INSIDE the
+     * first value: without flags the redefinition error carries
+     * line 2; with SKIP_SOURCE_POSITIONS it degrades to line 1. */
+    const char xml[] = "<r a=\"x\ny\" a=\"dup\"/>";
+
+    LeptrisSaxRecorder plain = leptris_sax_recorder_new();
+    ASSERT_NE(plain, nullptr);
+    leptris_sax_recorder_feed(plain, xml, strlen(xml), 1);
+    size_t n = 0;
+    const LeptrisSaxEventRecord* rs =
+        leptris_sax_recorder_records(plain, &n);
+    ASSERT_NE(rs, nullptr);
+    int err_i = -1;
+    for (size_t i = 0; i < n; i++)
+        if (rs[i].kind == LEPTRIS_SAX_EVENT_ERROR) err_i = (int)i;
+    ASSERT_GE(err_i, 0);
+    EXPECT_EQ(rs[err_i].line, 2u);
+    leptris_sax_recorder_free(plain);
+
+    LeptrisSaxRecorder rec = leptris_sax_recorder_new_flags(
+        LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS);
+    ASSERT_NE(rec, nullptr);
+    leptris_sax_recorder_feed(rec, xml, strlen(xml), 1);
+    rs = leptris_sax_recorder_records(rec, &n);
+    ASSERT_NE(rs, nullptr);
+    err_i = -1;
+    for (size_t i = 0; i < n; i++)
+        if (rs[i].kind == LEPTRIS_SAX_EVENT_ERROR) err_i = (int)i;
+    ASSERT_GE(err_i, 0);
+    EXPECT_EQ(rs[err_i].line, 1u);
+    leptris_sax_recorder_free(rec);
+}

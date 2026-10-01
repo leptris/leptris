@@ -95,8 +95,11 @@ static void sxs_set_error(LeptrisSAXParser* p, const char* msg);
 
 /* Position tracking for attribute diagnostics (issue #647): the
  * attribute scans advance line/column per consumed byte; other
- * states leave the counters where the last attribute ended. */
+ * states leave the counters where the last attribute ended.
+ * SKIP_SOURCE_POSITIONS (#1459) freezes the counters — the per-byte
+ * accounting is pure error-narration cost. */
 static inline void sxs_pos_putc(LeptrisSAXParser* p, char c) {
+    if (p->skip_flags & LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS) return;
     if (c == '\n') { p->line++; p->column = 1; }
     else p->column++;
 }
@@ -941,8 +944,9 @@ static int sxs_step_attr_value(LeptrisSAXParser* p, int is_final) {
     /* Recoverable well-formedness error (issue #647): a duplicate
      * attribute reports through the error channel with libxml2's
      * message, and the parse CONTINUES — libxml2 --recover keeps
-     * every attribute in the event. */
-    {
+     * every attribute in the event. SKIP_DUP_DETECTION (#1459)
+     * drops the linear redefinition scan. */
+    if (!(p->skip_flags & LEPTRIS_PARSE_SKIP_DUP_DETECTION)) {
         SaxElementFrame* f = sxs_elem_top(p);
         if (f) {
             for (size_t i = 0; i < f->attr_count; i++) {
@@ -1617,4 +1621,11 @@ LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int s
 LEPTRIS_API void leptris_sax_parser_set_one_shot(LeptrisSAXParser* parser,
                                                  int one_shot) {
     if (parser) parser->one_shot = one_shot;
+}
+
+/* Lane-18 Door A opt-outs on the streaming path (#1459). Flags are
+ * LEPTRIS_PARSE_SKIP_*; 0 (the create default) changes nothing. */
+LEPTRIS_API void leptris_sax_parser_set_skip_flags(LeptrisSAXParser* parser,
+                                                   unsigned flags) {
+    if (parser) parser->skip_flags = flags;
 }

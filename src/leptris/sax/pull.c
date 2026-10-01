@@ -267,9 +267,13 @@ static struct leptris_pull_parser* pull_alloc(void) {
 }
 
 /* TODO.engine/01: shared construction — memory source. */
-
-/* TODO.engine/01: shared construction — memory source. */
 LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
+    return leptris_pull_new_flags(xml, len, 0);
+}
+
+LEPTRIS_API LeptrisPullParser leptris_pull_new_flags(const char* xml,
+                                                     size_t len,
+                                                     unsigned flags) {
     if (!xml || len == 0) return NULL;
     struct leptris_pull_parser* p = pull_alloc();
     if (!p) return NULL;
@@ -279,17 +283,24 @@ LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len) {
      * paths (TODO.max-perf/2-3 slice 1). File mode keeps the
      * chunked-streaming paths. */
     leptris_sax_parser_set_one_shot(p->sax, 1);
+    if (flags) leptris_sax_parser_set_skip_flags(p->sax, flags);
     return p;
 }
 
 /* TODO.engine/01: file source — chunks stream off disk. */
 LEPTRIS_API LeptrisPullParser leptris_pull_new_file(const char* path) {
+    return leptris_pull_new_file_flags(path, 0);
+}
+
+LEPTRIS_API LeptrisPullParser leptris_pull_new_file_flags(const char* path,
+                                                          unsigned flags) {
     if (!path || !*path) return NULL;
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     struct leptris_pull_parser* p = pull_alloc();
     if (!p) { fclose(f); return NULL; }
     p->file = f;
+    if (flags) leptris_sax_parser_set_skip_flags(p->sax, flags);
     /* The memory path is unused; keep the invariant pos==len==0. */
     return p;
 }

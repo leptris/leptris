@@ -47,6 +47,7 @@ struct leptris_iterparse {
     LeptrisElement stack[IT_MAX_DEPTH];
     int depth;                    /* open element depth (root=1) */
     LeptrisIterparseMode mode;
+    int keep_first_dup;           /* SKIP_DUP_DETECTION: DOM-parity (#1459) */
     char* text_buf;
     size_t text_len, text_cap;
     LeptrisElement done;          /* completed element handed out */
@@ -170,13 +171,16 @@ static void it_append_text(struct leptris_iterparse* it,
 }
 
 static LeptrisIterparse it_new_common(LeptrisPullParser pull,
-                                      LeptrisIterparseMode mode) {
+                                      LeptrisIterparseMode mode,
+                                      unsigned flags) {
     if (!pull) return NULL;
     struct leptris_iterparse* it =
         (struct leptris_iterparse*)calloc(1, sizeof(*it));
     if (!it) { leptris_pull_free(pull); return NULL; }
     it->pull = pull;
     it->mode = mode;
+    it->keep_first_dup =
+        (flags & LEPTRIS_PARSE_SKIP_DUP_DETECTION) ? 1 : 0;
     it->sub_arena = leptris_arena_create(IT_SUBTREE_ARENA_BYTES);
     return it;
 }
@@ -188,8 +192,15 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new(const char* xml,
 
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new_ex(
         const char* xml, size_t len, LeptrisIterparseMode mode) {
+    return leptris_iterparse_new_ex_flags(xml, len, mode, 0);
+}
+
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_ex_flags(
+        const char* xml, size_t len, LeptrisIterparseMode mode,
+        unsigned flags) {
     if (!xml || len == 0) return NULL;
-    return it_new_common(leptris_pull_new(xml, len), mode);
+    return it_new_common(leptris_pull_new_flags(xml, len, flags),
+                         mode, flags);
 }
 
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path) {
@@ -198,8 +209,14 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path) {
 
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex(
         const char* path, LeptrisIterparseMode mode) {
+    return leptris_iterparse_new_file_ex_flags(path, mode, 0);
+}
+
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex_flags(
+        const char* path, LeptrisIterparseMode mode, unsigned flags) {
     if (!path || !*path) return NULL;
-    return it_new_common(leptris_pull_new_file(path), mode);
+    return it_new_common(leptris_pull_new_file_flags(path, flags),
+                         mode, flags);
 }
 
 /* Advance past the last yield. When a completed TOP-LEVEL child was
@@ -308,7 +325,13 @@ static LeptrisElement handle_start(struct leptris_iterparse* it,
     attach_namespaces(it, e, prefix);
     size_t na = leptris_pull_attr_count(it->pull);
     for (size_t i = 0; i < na; i++) {
-        leptris_element_set_attribute(e, leptris_pull_attr_name(it->pull, i),
+        const char* an = leptris_pull_attr_name(it->pull, i);
+        /* SKIP_DUP_DETECTION admits duplicates with DOM parity:
+         * keep the first (direct_parse's dup-skip contract); the
+         * lookup runs only when the opt-out is armed. */
+        if (it->keep_first_dup && leptris_element_attribute(e, an))
+            continue;
+        leptris_element_set_attribute(e, an,
                                       leptris_pull_attr_value(it->pull, i));
     }
     if (it->depth == 0) {

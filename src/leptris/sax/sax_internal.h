@@ -96,6 +96,11 @@ struct LeptrisSAXParser {
     int has_error;
     char error_message[256];
 
+    /* Lane-18 Door A opt-outs (#1459): LEPTRIS_PARSE_SKIP_*
+     * consumers on the streaming path — 0 (the default) keeps the
+     * duplicate-attribute scan and per-byte position accounting. */
+    unsigned skip_flags;
+
     /* Scratch arena (TODO 102). Block chain: every string handed to
      * callbacks (element/attr names, attr values, comments, PI data)
      * lives until parser free. Blocks are appended as needed and

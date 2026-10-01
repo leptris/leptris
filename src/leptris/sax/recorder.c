@@ -180,6 +180,11 @@ static void cb_error(void* ud, const char* message, int line, int column) {
 }
 
 LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new(void) {
+    return leptris_sax_recorder_new_flags(0);
+}
+
+LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new_flags(
+        unsigned flags) {
     leptris_sax_recorder* r =
         (leptris_sax_recorder*)calloc(1, sizeof(*r));
     if (!r) return NULL;
@@ -201,6 +206,7 @@ LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new(void) {
     /* Streaming mode: events emit per chunk, memory bounded by
      * depth — the recorder is for chunked hosts by construction. */
     leptris_sax_parser_set_streaming(r->parser, 1);
+    if (flags) leptris_sax_parser_set_skip_flags(r->parser, flags);
     return r;
 }
 
