@@ -5,6 +5,9 @@
 ### Fixed
 
 - Door A skip flags must survive recorder reset and be accepted by sax_records (sax)
+  - `leptris_sax_recorder_reset()` rebuilt the parser without the creation-time `LEPTRIS_PARSE_SKIP_DUP_DETECTION` / `LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS` bits, silently re-enabling both probes mid-stream: record counts diverged between the first pass and post-reset passes on the same document. The recorder now stores its flags and re-applies them on reset.
+  - `leptris_sax_records_parse()` rejected every nonzero flag, so the bulk-records lane could not opt out of either probe. The two Door A bits are now accepted (no-ops on the interleaved lane, which carries neither probe); unknown bits still return `LEPTRIS_ERROR_INVALID_ARG`.
+  - Regression specs: `Recorder.DoorAFlagsSurviveReset`, `SaxRecords.DoorAFlagsAccepted`. (#1472)
 
 
 
