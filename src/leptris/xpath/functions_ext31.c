@@ -1632,6 +1632,13 @@ static struct leptris_xpath_result* fn_format_integer(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     struct leptris_xpath_result* v = xpath_evaluate(ctx, args[0]);
     char* pic = re_str_arg(ctx, args, 1);
+    /* F&O 4.6.3: the 3-arg form's $language selects the worded
+     * spelling; the engine speaks English only (the Saxon-HE
+     * default). Evaluate the argument for its error semantics,
+     * then use the English tables — default-language-002's
+     * 2-arg-vs-3-arg equality holds. */
+    char* lang = (n >= 3) ? re_str_arg(ctx, args, 2) : NULL;
+    free(lang);
     long x = v ? (long)leptris_xpath_result_number(v) : 0;
     if (v) leptris_xpath_result_free(v);
     (void)n;
@@ -1720,6 +1727,15 @@ static struct leptris_xpath_result* fn_contains_token(XPathContext* ctx,
         return out;
     }
     out->value.boolean_value = 0;
+    /* F&O 5.5.5: the token argument is trimmed of leading and
+     * trailing whitespace before matching (fn-contains-token-61/62
+     * pass " abc  " and tab/CR/LF-wrapped forms). */
+    const char* tp = tok;
+    while (*tp == ' ' || *tp == '\t' || *tp == '\n' || *tp == '\r') tp++;
+    size_t tl = strlen(tp);
+    while (tl && (tp[tl - 1] == ' ' || tp[tl - 1] == '\t' ||
+                  tp[tl - 1] == '\n' || tp[tl - 1] == '\r'))
+        tl--;
     const char* p = in;
     while (*p) {
         while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
@@ -1727,14 +1743,34 @@ static struct leptris_xpath_result* fn_contains_token(XPathContext* ctx,
         const char* st = p;
         while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
             p++;
-        if ((size_t)(p - st) == strlen(tok) &&
-            strncmp(st, tok, (size_t)(p - st)) == 0) {
+        if ((size_t)(p - st) == tl && strncmp(st, tp, tl) == 0) {
             out->value.boolean_value = 1;
             break;
         }
     }
     free(in); free(tok);
     (void)n;
+    return out;
+}
+
+/* Static-context accessors. The engine has exactly one collation
+ * (codepoint) and no language configuration (the Saxon-HE default
+ * "en" — format-integer's default language spelling agrees). */
+static struct leptris_xpath_result* fn_default_collation(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)ctx; (void)args; (void)n;
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (out)
+        out->value.string_value = leptris_strdup(
+            "http://www.w3.org/2005/xpath-functions/collation/codepoint");
+    return out;
+}
+
+static struct leptris_xpath_result* fn_default_language(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    (void)ctx; (void)args; (void)n;
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = leptris_strdup("en");
     return out;
 }
 
@@ -5708,8 +5744,10 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "abs", fn_abs, 1, 1);
     xpath_function_registry_register(registry, "round-half-to-even", fn_round_half_even, 1, 2);
 
-    xpath_function_registry_register(registry, "format-integer", fn_format_integer, 2, 2);
+    xpath_function_registry_register(registry, "format-integer", fn_format_integer, 2, 3);
     xpath_function_registry_register(registry, "contains-token", fn_contains_token, 2, 2);
+    xpath_function_registry_register(registry, "default-collation", fn_default_collation, 0, 0);
+    xpath_function_registry_register(registry, "default-language", fn_default_language, 0, 0);
     xpath_function_registry_register(registry, "string-to-codepoints", fn_string_to_codepoints, 1, 1);
     xpath_function_registry_register(registry, "codepoints-to-string", fn_codepoints_to_string, 1, 1);
     xpath_function_registry_register(registry, "encode-for-uri", fn_encode_for_uri, 1, 1);
