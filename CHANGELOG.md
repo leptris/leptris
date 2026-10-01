@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.284] - 2026-10-01
+
+### Added
+
+- adopt contains-token + boolean/collation accessors — string tails batch 5 (xquery)
+
+### Fixed
+
+- current-date/-time/-dateTime — POSIX gmtime_r args were reversed + F&O eval stability (xpath)
+- full-document iterparse tree stayed intact — root children were detached (sax)
+
+
+
 ## [1.9.283] - 2026-10-01
 
 ### Fixed
