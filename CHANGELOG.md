@@ -2,13 +2,11 @@
 
 ## [1.9.282] - 2026-10-01
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
-
+- QT3 string-tails batch 2: fn/encode-for-uri adopted — 25 of 30 cases run-and-agree on the
+  existing implementation (the remainder skip on unsupported environment shapes), pinning the
+  RFC 3986 %XX escaping behavior as a permanent regression guard (leptris#1182, leptris#1462).
 
 ## [1.9.281] - 2026-09-30
 
@@ -22,10 +20,6 @@
   explicitly. Builds without utf8proc keep the ASCII fallback (leptris#1182, leptris#1460).
 
 ### Added
-
-- QT3 string-tails batch 2: fn/encode-for-uri adopted — 25 of 30 cases run-and-agree on the
-  existing implementation (the remainder skip on unsupported environment shapes), pinning the
-  RFC 3986 %XX escaping behavior as a permanent regression guard (leptris#1182, leptris#1462).
 
 - QT3 string-case corpus family adopted (leptris#1182, corpus growth resumed): fn/upper-case
   (23/30), fn/lower-case (23/28), fn/codepoint-equal (24/37). The runner's corpus counts now
