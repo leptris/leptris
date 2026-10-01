@@ -4224,7 +4224,7 @@ static LeptrisElement h_open_element_borrowed(HBuilder* b, char* name,
     if (!e) return NULL;
     memset(e, 0, sizeof(struct leptris_element));
     e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
-    e->name = name;
+    elem_set_name(e, name);
     size_t nl = strlen(name);
     e->name_len = (nl > 254) ? 0xFF : (uint8_t)nl;
     e->name_hash = leptris_name_hash_compute(name);

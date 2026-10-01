@@ -58,8 +58,9 @@ LeptrisElement leptris_element_create_with_view(
 
     memset(elem, 0, sizeof(struct leptris_element));
     elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
-    elem->name = leptris_sv_to_cstr_pooled(&name_view, pool);
-    elem->name_hash = leptris_name_hash_compute(elem->name);
+    char* nm = leptris_sv_to_cstr_pooled(&name_view, pool);
+    elem_set_name(elem, nm);
+    elem->name_hash = leptris_name_hash_compute(nm);
     elem->name_len = (name_view.length > 254)
         ? 0xFF : (uint8_t)name_view.length;
     /* Pool copy is writable: a QName splits in place (#846). */
@@ -79,7 +80,8 @@ LeptrisElement leptris_element_create_pooled_inplace(char* name, LeptrisMemoryPo
 
 /* Create an element skeleton with no name — for the deferred-NUL
  * zero-copy parser path (TODO 113 Phase 5). The parser fills in
- * elem->name/prefix after consuming the opening tag's terminator,
+ * elem->name/prefix (via elem_set_name / leptris_elem_set_prefix)
+ * after consuming the opening tag's terminator,
  * at which point writing a NUL at name_view.data[name_view.length]
  * is safe (the parser has moved past that byte).
  *
@@ -413,7 +415,7 @@ const char* leptris_element_get_name(LeptrisElement elem) {
     }
 
     /* name_view removed (TODO 90) — name is set eagerly by create_with_view. */
-    return elem->name;
+    return elem_name(elem);
 }
 
 /* Set prefix using StringView (zero-copy!) */
