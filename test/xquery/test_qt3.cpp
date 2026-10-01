@@ -637,6 +637,14 @@ TEST(Qt3Subset, FnContains) {
 
 /* String case family (lever 6 stage-2, string tails batch 1):
  * upper-case/lower-case (Unicode mapping) and codepoint-equal. */
+/* String tails batch 2: encode-for-uri (RFC 3986 %XX escaping
+ * with the unreserved set). 25 of 30 run-and-agree — the empty-
+ * string zero-arity and HTML-page env cases skip (unsupported
+ * env shapes). */
+TEST(Qt3Subset, FnEncodeForUri) {
+    run_test_set("fn/encode-for-uri.xml", {}, 25);
+}
+
 TEST(Qt3Subset, FnStringCase) {
     /* 23 of 30 / 23 of 28 run-and-agree — the rest carry
      * unsupported env shapes (codepoint-sequence channels).
