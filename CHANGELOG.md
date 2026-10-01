@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.283] - 2026-10-01
+
+### Fixed
+
+- URI escaper conformance — iri-to-uri '#', escape-html-uri printable-ASCII, doubled-quote literals (xpath)
+- fn:normalize-unicode F&O conformance — 1-arg NFC, FOCH0003, form matching (xquery)
+
+### Performance
+
+- Door A parse opt-outs on the streaming path (#1459) (sax)
+
+
+
 ## [1.9.282] - 2026-10-01
 
 ### Added
