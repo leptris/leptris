@@ -4,12 +4,15 @@
 
 ### Fixed
 
-- URI escaper conformance — iri-to-uri '#', escape-html-uri printable-ASCII, doubled-quote literals (xpath)
-- fn:normalize-unicode F&O conformance — 1-arg NFC, FOCH0003, form matching (xquery)
+- **fn:normalize-unicode (F&O conformance)**: the single-argument form now normalizes with NFC (it previously returned the input unchanged); an unknown normalization form raises `FOCH0003` instead of silently falling back to NFC; form matching is case-insensitive with leading/trailing whitespace trimmed, and a zero-length form stays identity. Pinned by the QT3 corpus (29 run-and-agree) with a new runner-side dependency gate for the FULLY-NORMALIZED twins.
+- **fn:iri-to-uri / fn:escape-html-uri (F&O conformance)**: `#` is IRI-legal and no longer percent-encodes; escape-html-uri now keeps printable US-ASCII (0x20–0x7E) and percent-encodes every other UTF-8 byte — it previously emitted HTML entities like `&lt;`. Pinned by the QT3 corpora (38 + 30 run-and-agree).
+- **XQuery lexer**: doubled-quote escapes (XQuery 3.1 A.1 EscapeQuot/EscapeApos) — `"a ""b"" c"` previously failed to parse; the literal decoder also collapses them.
+- **fn:contains-token**: the token argument is trimmed of surrounding whitespace before matching (F&O 5.5.5).
+- **fn:default-collation / fn:default-language** are now implemented (codepoint collation URI; `en`), and `format-integer` accepts its 3-argument language form.
 
-### Performance
+### Added
 
-- Door A parse opt-outs on the streaming path (#1459) (sax)
+- **Door A parse opt-outs on the streaming path** (#1459): `leptris_iterparse_new_ex_flags` / `leptris_iterparse_new_file_ex_flags`, `leptris_pull_new_flags` / `leptris_pull_new_file_flags`, `leptris_sax_recorder_new_flags`, and the `leptris_sax_parser_set_skip_flags` primitive — `LEPTRIS_PARSE_SKIP_DUP_DETECTION` and `LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS` now reach iterparse/pull/recorder, with duplicate attributes admitted keeping the first value (DOM parity).
 
 
 
