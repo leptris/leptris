@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.285] - 2026-10-01
+
+### Fixed
+
+- full-document iterparse dropped TEXT at depth >= 2 — pool every node into root_doc (sax)
+
+
+
 ## [1.9.284] - 2026-10-01
 
 
