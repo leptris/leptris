@@ -200,4 +200,51 @@ TEST(IterparseV2, FileVariantSupportsFullMode) {
     remove(path.c_str());
 }
 
+/* Issue #1459: the lane-18 Door A parse opt-outs on the streaming
+ * path. SKIP_DUP_DETECTION admits a redefined attribute instead of
+ * failing the walk; the plain entry keeps reporting it — the flag
+ * is load-bearing, not a no-op. */
+TEST(IterparseV2, DoorAFlagsSkipDupDetection) {
+    /* TOP_LEVEL mode yields the root's children — the duplicate
+     * rides the yielded element. */
+    const char xml[] = "<r><c a=\"1\" a=\"2\"/></r>";
+
+    LeptrisIterparse plain = leptris_iterparse_new(xml, strlen(xml));
+    ASSERT_NE(plain, nullptr);
+    EXPECT_EQ(leptris_iterparse_next(plain), nullptr);
+    EXPECT_NE(leptris_iterparse_error(plain), nullptr);
+    leptris_iterparse_free(plain);
+
+    LeptrisIterparse it = leptris_iterparse_new_ex_flags(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_TOP_LEVEL,
+        LEPTRIS_PARSE_SKIP_DUP_DETECTION);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement e = leptris_iterparse_next(it);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "c");
+    EXPECT_STREQ(leptris_element_attribute(e, "a"), "1");
+    EXPECT_EQ(leptris_iterparse_next(it), nullptr);
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    leptris_iterparse_free(it);
+}
+
+TEST(IterparseV2, DoorAFlagsFileVariant) {
+    std::string path = std::string(testing::TempDir()) +
+                       "leptris_iterparse_door_a.xml";
+    FILE* f = fopen(path.c_str(), "w");
+    ASSERT_NE(f, nullptr);
+    fputs("<r><c a=\"1\" a=\"2\"/></r>", f);
+    fclose(f);
+    LeptrisIterparse it = leptris_iterparse_new_file_ex_flags(
+        path.c_str(), LEPTRIS_ITERPARSE_TOP_LEVEL,
+        LEPTRIS_PARSE_SKIP_DUP_DETECTION);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement e = leptris_iterparse_next(it);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "c");
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    leptris_iterparse_free(it);
+    remove(path.c_str());
+}
+
 }  // namespace

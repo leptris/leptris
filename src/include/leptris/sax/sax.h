@@ -312,6 +312,21 @@ LEPTRIS_API int leptris_sax_parser_set_streaming(LeptrisSAXParser* parser, int s
 LEPTRIS_API void leptris_sax_parser_set_one_shot(LeptrisSAXParser* parser,
                                                  int one_shot);
 
+/**
+ * Set the lane-18 Door A parse opt-outs (#1459): any combination of
+ * LEPTRIS_PARSE_SKIP_DUP_DETECTION (drop the duplicate-attribute
+ * redefinition scan — duplicates are admitted silently) and
+ * LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS (freeze per-byte line/column
+ * accounting; error reports degrade to the position of the last
+ * tracked state). 0 (the create default) keeps full conformance
+ * behavior. These are the same bits leptris_parse_flags consumes on
+ * the DOM path.
+ *
+ * Thread safety: Not thread-safe. Set once before the first feed().
+ */
+LEPTRIS_API void leptris_sax_parser_set_skip_flags(LeptrisSAXParser* parser,
+                                                   unsigned flags);
+
 /* ============================================================================
  * Pull (StAX-style) API — TODO.bindings/04, issue #510 Tier 2
  * ============================================================================ */
@@ -333,6 +348,18 @@ LEPTRIS_API void leptris_sax_parser_set_one_shot(LeptrisSAXParser* parser,
 LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len);
 
 /**
+ * Create a pull parser with the Door A parse opt-outs (#1459)
+ *
+ * Same event semantics as leptris_pull_new; `flags` is any
+ * combination of LEPTRIS_PARSE_SKIP_DUP_DETECTION and
+ * LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS (see
+ * leptris_sax_parser_set_skip_flags). 0 matches leptris_pull_new.
+ */
+LEPTRIS_API LeptrisPullParser leptris_pull_new_flags(const char* xml,
+                                                     size_t len,
+                                                     unsigned flags);
+
+/**
  * Create a pull parser streaming from a file (TODO.engine/01)
  *
  * Same event semantics as leptris_pull_new; input is read from disk
@@ -343,6 +370,14 @@ LEPTRIS_API LeptrisPullParser leptris_pull_new(const char* xml, size_t len);
  * @return New puller, or NULL when the file cannot be opened
  */
 LEPTRIS_API LeptrisPullParser leptris_pull_new_file(const char* path);
+
+/**
+ * Create a file-backed pull parser with the Door A parse opt-outs
+ * (#1459) — flags as in leptris_pull_new_flags. 0 matches
+ * leptris_pull_new_file.
+ */
+LEPTRIS_API LeptrisPullParser leptris_pull_new_file_flags(const char* path,
+                                                          unsigned flags);
 
 /**
  * Return the next event, feeding input as needed
@@ -449,6 +484,20 @@ LEPTRIS_API void leptris_pull_free(LeptrisPullParser pull);
  * Memory: free with leptris_sax_recorder_free.
  */
 LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new(void);
+
+/**
+ * Create a chunked SAX event recorder with the Door A parse
+ * opt-outs (#1459)
+ *
+ * Same record semantics as leptris_sax_recorder_new; `flags` is any
+ * combination of LEPTRIS_PARSE_SKIP_DUP_DETECTION (no ERROR record
+ * for a redefined attribute) and
+ * LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS (ERROR record positions
+ * degrade to the last tracked state). 0 matches
+ * leptris_sax_recorder_new.
+ */
+LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new_flags(
+    unsigned flags);
 
 /**
  * Feed one input chunk and buffer the events it produces
@@ -563,6 +612,28 @@ LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file(const char* path);
  */
 LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex(
     const char* path, LeptrisIterparseMode mode);
+
+/**
+ * Create an incremental tree-iterator with explicit yield mode and
+ * the Door A parse opt-outs (#1459)
+ *
+ * Same yield semantics as leptris_iterparse_new_ex; `flags` is any
+ * combination of LEPTRIS_PARSE_SKIP_DUP_DETECTION (duplicate
+ * attributes are admitted instead of failing the walk — the first
+ * value surfaces) and LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS (error
+ * positions degrade to the last tracked state). 0 matches
+ * leptris_iterparse_new_ex. Iterparse over huge files is exactly
+ * the workload that never consumes diagnostics.
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_ex_flags(
+    const char* xml, size_t len, LeptrisIterparseMode mode,
+    unsigned flags);
+
+/**
+ * File-backed twin of leptris_iterparse_new_ex_flags
+ */
+LEPTRIS_API LeptrisIterparse leptris_iterparse_new_file_ex_flags(
+    const char* path, LeptrisIterparseMode mode, unsigned flags);
 
 /**
  * Return the next completed top-level element
