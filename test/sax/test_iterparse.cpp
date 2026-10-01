@@ -325,6 +325,48 @@ TEST(IterparseV2, FullDocumentFieldShapeClassIntact) {
 
 /* Deep nesting: at the root's yield the WHOLE subtree (grand-
  * children, great-grandchildren) must still be attached. */
+
+/* Text must survive at EVERY depth in full mode — 1.9.284's tree
+ * fix materialized elements but pooled text against a doc that is
+ * never created in full mode, so nested text silently vanished
+ * (<deep>x</deep> yielded <deep/>). */
+TEST(IterparseV2, FullDocumentTextSurvivesAtAllDepths) {
+    const char xml[] =
+        "<sections>intro<child id=\"a\"><deep>x</deep></child>"
+        "<child id=\"b\"><deep><deepest>z</deepest></deep></child>"
+        "</sections>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement sections = nullptr, deep_a = nullptr,
+                   deep_b = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it))) {
+        const char* n = leptris_element_name(e);
+        if (strcmp(n, "sections") == 0) sections = e;
+        else if (strcmp(n, "deep") == 0) {
+            if (!deep_a) deep_a = e; else deep_b = e;
+        }
+    }
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(sections, nullptr);
+    ASSERT_NE(deep_a, nullptr);
+    ASSERT_NE(deep_b, nullptr);
+    /* deep_a: first child is the TEXT "x" */
+    LeptrisNodeRef ta = leptris_node_first_child((LeptrisNodeRef)deep_a);
+    ASSERT_NE(ta, nullptr);
+    EXPECT_EQ(leptris_node_get_type(ta), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_STREQ(leptris_text_node_get_content(ta), "x");
+    /* deep_b: child <deepest> whose first child is TEXT "z" */
+    LeptrisElement deepest = leptris_element_first_child_any(deep_b);
+    ASSERT_NE(deepest, nullptr);
+    LeptrisNodeRef tz = leptris_node_first_child((LeptrisNodeRef)deepest);
+    ASSERT_NE(tz, nullptr);
+    EXPECT_EQ(leptris_node_get_type(tz), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_STREQ(leptris_text_node_get_content(tz), "z");
+    leptris_iterparse_free(it);
+}
+
 TEST(IterparseV2, FullDocumentDeepSubtreeIntactAtRootYield) {
     const char xml[] =
         "<r><a><b><c deep='1'>leaf</c></b></a>"

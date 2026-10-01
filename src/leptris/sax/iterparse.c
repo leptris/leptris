@@ -139,14 +139,21 @@ static void it_flush_text(struct leptris_iterparse* it) {
     /* Text must be created in its PARENT's pool. At depth 1 the
      * parent is the document root (root_doc, full mode only); in v1
      * mode there is no materialized parent — the text is dropped,
-     * exactly as before. */
+     * exactly as before. FULL mode materializes ONE tree entirely
+     * inside root_doc — it->doc is never created there, so text at
+     * any depth must pool into root_doc as well (deeper text used
+     * to create against a NULL doc and silently vanish: nested
+     * <deep>x</deep> yielded <deep/>). */
+    int full_mode = (it->mode == LEPTRIS_ITERPARSE_FULL_DOCUMENT);
     int root_level = (it->depth == 1);
     if (it->text_len == 0 || it->depth < 1 ||
-        (root_level && !it->root_doc)) {
+        (full_mode && !it->root_doc) ||
+        (!full_mode && root_level && !it->root_doc)) {
         it->text_len = 0;
         return;
     }
-    LeptrisDocument pool_doc = root_level ? it->root_doc : it->doc;
+    LeptrisDocument pool_doc =
+        (full_mode || root_level) ? it->root_doc : it->doc;
     it->text_buf[it->text_len] = '\0';
     LeptrisNodeRef t = leptris_text_node_create(pool_doc, it->text_buf);
     if (t) {
