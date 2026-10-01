@@ -463,3 +463,24 @@ TEST(IterparseV2, MalformedEmptyTagsErrorNotCrash) {
         leptris_iterparse_free(it2);
     }
 }
+
+/* F&O 14.5-14.7: current-date/-time/-dateTime are STABLE within one
+ * evaluation (K2-CodepointEqual-1 concatenates current-time() into
+ * both operands). Statistical trap: 2000 fresh evals of the
+ * equality; the per-call clock read straddles a second boundary
+ * ~per-hundred and flips one iteration. */
+TEST(Qt3Stability, CurrentTimeStableWithinOneEval) {
+    for (int i = 0; i < 2000; i++) {
+        const char q[] = "current-time() eq current-time()";
+        LeptrisStatus st;
+        LeptrisDocument d = leptris_parse_string("<e/>", 4, &st);
+        ASSERT_NE(d, nullptr);
+        LeptrisXPathResult r = leptris_xpath_eval(d, NULL, q);
+        char* s = r ? leptris_xpath_result_string(r) : NULL;
+        ASSERT_NE(s, nullptr) << "iter " << i;
+        EXPECT_STREQ(s, "true") << "iter " << i;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_document_free(d);
+    }
+}
