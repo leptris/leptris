@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.286] - 2026-10-01
+
+### Fixed
+
+- Door A skip flags must survive recorder reset and be accepted by sax_records (sax)
+
+
+
 ## [1.9.285] - 2026-10-01
 
 ### Fixed
