@@ -23,6 +23,10 @@
 
 ### Added
 
+- QT3 string-tails batch 2: fn/encode-for-uri adopted — 25 of 30 cases run-and-agree on the
+  existing implementation (the remainder skip on unsupported environment shapes), pinning the
+  RFC 3986 %XX escaping behavior as a permanent regression guard (leptris#1182, leptris#1462).
+
 - QT3 string-case corpus family adopted (leptris#1182, corpus growth resumed): fn/upper-case
   (23/30), fn/lower-case (23/28), fn/codepoint-equal (24/37). The runner's corpus counts now
   branch on the utf8proc capability — without it the two Unicode-mapping cases are excluded by
