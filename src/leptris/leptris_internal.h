@@ -774,6 +774,14 @@ typedef struct xpath_context {
      * 1e-18, INF/-INF) instead of the libxml2-parity XPath 1.0
      * printer. Set by the XQuery eval entry. */
     int xquery_spelling;
+
+    /* F&O 14.5-14.7 stability: current-date/-time/-dateTime return
+     * the same instant for the whole evaluation. First caller
+     * stamps it; the CURRENT_FN trio reads the cache (K2-Codepoint
+     * Equal-1 compares two current-time() renders in one query —
+     * a clock re-read straddling a second boundary flaked CI). */
+    int now_cached;
+    long now_sec;   /* time_t as long (keeps the header self-contained) */
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */

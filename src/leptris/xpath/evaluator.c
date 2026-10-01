@@ -108,6 +108,7 @@ void xpath_context_init(XPathContext* context,
     context->context_node = context_node;
     context->context_position = 1;
     context->context_size = 1;
+    context->now_cached = 0;
     context->error_msg[0] = '\0';
     context->current_predicate_node = NULL;
     context->to_boolean = 0;

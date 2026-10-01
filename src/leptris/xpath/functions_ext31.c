@@ -2986,13 +2986,32 @@ static struct tm h_utc_now(void) {
     return tmv;
 }
 
+/* F&O stability: one instant per evaluation (ctx-stamped). */
+static struct tm h_ctx_now(XPathContext* ctx) {
+    if (ctx) {
+        if (!ctx->now_cached) {
+            ctx->now_sec = (long)time(NULL);
+            ctx->now_cached = 1;
+        }
+        time_t t = (time_t)ctx->now_sec;
+        struct tm tmv;
+#ifdef _WIN32
+        gmtime_s(&tmv, &t);
+#else
+        gmtime_r(&t, &tmv);
+#endif
+        return tmv;
+    }
+    return h_utc_now();
+}
+
 #define CURRENT_FN(NAME, FORM)                                       \
     static struct leptris_xpath_result* fn_##NAME(                   \
             XPathContext* ctx, XPathASTNode** a, size_t n) {         \
         struct leptris_xpath_result* out =                            \
             xpath_result_new(XPATH_RESULT_STRING);                   \
         if (!out) return NULL;                                       \
-        struct tm tmv = h_utc_now();                                 \
+        struct tm tmv = h_ctx_now(ctx);                                 \
         char buf[40];                                                \
         strftime(buf, sizeof buf, FORM, &tmv);                       \
         out->value.string_value = leptris_strdup(buf);               \
