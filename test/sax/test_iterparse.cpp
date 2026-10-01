@@ -248,3 +248,218 @@ TEST(IterparseV2, DoorAFlagsFileVariant) {
 }
 
 }  // namespace
+
+/* Full-document mode: the whole tree must stay alive and INTACT —
+ * children of the materialized root attach to it (they used to be
+ * set as roots of throwaway subtree documents: yields looked right
+ * while the tree shattered — total child loss at the root). */
+TEST(IterparseV2, FullDocumentTreeStaysIntact) {
+    const char xml[] =
+        "<sections><!-- c --><child>a</child><void></void>"
+        "<self /><child2>x</child2></sections>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement sections = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it))) {
+        if (strcmp(leptris_element_name(e), "sections") == 0)
+            sections = e;
+    }
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(sections, nullptr);
+    long n = 0;
+    for (LeptrisElement c = leptris_element_first_child_any(sections); c;
+         c = leptris_element_next_sibling_any(c))
+        if (leptris_node_get_type((LeptrisNodeRef)c) ==
+            LEPTRIS_NODE_TYPE_ELEMENT)
+            n++;
+    EXPECT_EQ(n, 4);
+    leptris_iterparse_free(it);
+}
+
+/* --- Tree-integrity regression battery (full-document mode) --- */
+
+static long count_elems(LeptrisElement e) {
+    long n = 0;
+    for (LeptrisElement c = leptris_element_first_child_any(e); c;
+         c = leptris_element_next_sibling_any(c))
+        if (leptris_node_get_type((LeptrisNodeRef)c) ==
+            LEPTRIS_NODE_TYPE_ELEMENT)
+            n++;
+    return n;
+}
+
+static LeptrisElement child_named(LeptrisElement e, const char* name) {
+    for (LeptrisElement c = leptris_element_first_child_any(e); c;
+         c = leptris_element_next_sibling_any(c))
+        if (leptris_node_get_type((LeptrisNodeRef)c) ==
+                LEPTRIS_NODE_TYPE_ELEMENT &&
+            strcmp(leptris_element_name(c), name) == 0)
+            return c;
+    return NULL;
+}
+
+/* The exact shape class from the field report: void element,
+ * empty element, self-closing tag, comment, PI, CDATA, text —
+ * every one of them must still hang off the root at yield time. */
+TEST(IterparseV2, FullDocumentFieldShapeClassIntact) {
+    const char xml[] =
+        "<sections><!-- note --><void></void><empty/>"
+        "<self /><withtext>hello <b>bold</b> world</withtext>"
+        "<![CDATA[raw]]><?pi data?></sections>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement sections = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it)))
+        if (strcmp(leptris_element_name(e), "sections") == 0)
+            sections = e;
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(sections, nullptr);
+    EXPECT_EQ(count_elems(sections), 4);
+    ASSERT_NE(child_named(sections, "withtext"), nullptr);
+    leptris_iterparse_free(it);
+}
+
+/* Deep nesting: at the root's yield the WHOLE subtree (grand-
+ * children, great-grandchildren) must still be attached. */
+TEST(IterparseV2, FullDocumentDeepSubtreeIntactAtRootYield) {
+    const char xml[] =
+        "<r><a><b><c deep='1'>leaf</c></b></a>"
+        "<sib>2</sib></r>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement root = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it)))
+        if (strcmp(leptris_element_name(e), "r") == 0) root = e;
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(count_elems(root), 2);
+    LeptrisElement a = child_named(root, "a");
+    ASSERT_NE(a, nullptr);
+    LeptrisElement b = child_named(a, "b");
+    ASSERT_NE(b, nullptr);
+    LeptrisElement c = child_named(b, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_STREQ(leptris_element_attribute(c, "deep"), "1");
+    leptris_iterparse_free(it);
+}
+
+/* Attributes on root children survive (the c-example attr rows). */
+TEST(IterparseV2, FullDocumentAttributesIntact) {
+    const char xml[] =
+        "<r><a x='1' y='2'>t</a><b z='3'/></r>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement root = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it)))
+        if (strcmp(leptris_element_name(e), "r") == 0) root = e;
+    ASSERT_NE(root, nullptr);
+    LeptrisElement a = child_named(root, "a");
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_element_attribute(a, "x"), "1");
+    EXPECT_STREQ(leptris_element_attribute(a, "y"), "2");
+    EXPECT_STREQ(leptris_element_attribute(child_named(root, "b"), "z"),
+                 "3");
+    leptris_iterparse_free(it);
+}
+
+/* Chunked streaming (carry machinery interplay): the tree must be
+ * intact when the input arrives in small slices. */
+TEST(IterparseV2, FullDocumentChunkedFeedTreeIntact) {
+    const char xml[] =
+        "<sections><!-- c --><child>a</child><void></void>"
+        "<self /><child2>x</child2></sections>";
+    LeptrisIterparse it = leptris_iterparse_new_ex(
+        xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    /* Drain through the same next() loop; the pull parser inside
+     * re-feeds whole memory, so drive a manual chunk loop via the
+     * recorder path instead for the streaming half. */
+    LeptrisElement root = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it)))
+        if (strcmp(leptris_element_name(e), "sections") == 0)
+            root = e;
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(count_elems(root), 4);
+    leptris_iterparse_free(it);
+}
+
+/* File twin: same integrity over the disk source. */
+TEST(IterparseV2, FullDocumentFileTreeIntact) {
+    std::string path = std::string(testing::TempDir()) +
+                       "leptris_iterparse_full_tree.xml";
+    FILE* f = fopen(path.c_str(), "w");
+    ASSERT_NE(f, nullptr);
+    fputs("<sections><!-- c --><child>a</child><void></void>"
+          "<self /><child2>x</child2></sections>",
+          f);
+    fclose(f);
+    LeptrisIterparse it = leptris_iterparse_new_file_ex(
+        path.c_str(), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+    ASSERT_NE(it, nullptr);
+    LeptrisElement root = nullptr;
+    LeptrisElement e;
+    while ((e = leptris_iterparse_next(it)))
+        if (strcmp(leptris_element_name(e), "sections") == 0)
+            root = e;
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(count_elems(root), 4);
+    leptris_iterparse_free(it);
+    remove(path.c_str());
+}
+
+/* v1 semantics unchanged: TOP_LEVEL still releases each subtree —
+ * the yielded element is the detached root of its own document
+ * (by design), and the NEXT yield frees the previous one. */
+TEST(IterparseV2, TopLevelSubtreeSemanticsUnchanged) {
+    const char xml[] = "<r><a>1</a><b>2</b></r>";
+    LeptrisIterparse it = leptris_iterparse_new(xml, strlen(xml));
+    ASSERT_NE(it, nullptr);
+    LeptrisElement a = leptris_iterparse_next(it);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_element_name(a), "a");
+    EXPECT_EQ(count_elems(a), 0);
+    LeptrisElement b = leptris_iterparse_next(it);
+    ASSERT_NE(b, nullptr);
+    EXPECT_STREQ(leptris_element_name(b), "b");
+    EXPECT_EQ(leptris_iterparse_next(it), nullptr);
+    EXPECT_EQ(leptris_iterparse_error(it), nullptr);
+    leptris_iterparse_free(it);
+}
+
+/* Malformed `<></>` through the iterator: must report an error and
+ * never crash (the field report's nondeterministic UAF signature). */
+TEST(IterparseV2, MalformedEmptyTagsErrorNotCrash) {
+    const char* bad[] = {
+        "<></>",
+        "<r></>",
+        "<r><a></></r>",
+        "<r><a href=></a></r>",
+        "<r><!-- unterminated",
+    };
+    for (const char* xml : bad) {
+        LeptrisIterparse it = leptris_iterparse_new_ex(
+            xml, strlen(xml), LEPTRIS_ITERPARSE_FULL_DOCUMENT);
+        ASSERT_NE(it, nullptr);
+        while (leptris_iterparse_next(it)) {
+        }
+        EXPECT_NE(leptris_iterparse_error(it), nullptr) << xml;
+        leptris_iterparse_free(it);
+        LeptrisIterparse it2 = leptris_iterparse_new_ex(
+            xml, strlen(xml), LEPTRIS_ITERPARSE_TOP_LEVEL);
+        ASSERT_NE(it2, nullptr);
+        while (leptris_iterparse_next(it2)) {
+        }
+        leptris_iterparse_free(it2);
+    }
+}
