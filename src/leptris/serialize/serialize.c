@@ -463,7 +463,7 @@ static int html_elem_sem_flags(const LeptrisElement e) {
     if (!e) return 0;
     const char* pfx = leptris_element_get_prefix(e);
     if (pfx && pfx[0]) return 0;
-    const char* n = e->name;
+    const char* n = elem_name(e);
     if (!n) return 0;
     size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len : strlen(n);
     return html_elem_flags_ci(n, nl);
@@ -517,7 +517,7 @@ static int xhtml_head_wants_meta(LeptrisElement head) {
          m; m = leptris_node_get_next_sibling(m)) {
         if (m->type != LEPTRIS_NODE_TYPE_ELEMENT) continue;
         LeptrisElement me = (LeptrisElement)m;
-        const char* mn = me->name;
+        const char* mn = elem_name(me);
         size_t mnl = (me->name_len != 0xFF)
             ? (size_t)me->name_len : (mn ? strlen(mn) : 0);
         if (!mn || mnl != 4 || memcmp(mn, "meta", 4) != 0) continue;
@@ -585,7 +585,10 @@ static int html_break_after_elem(LeptrisElement elem,
         leptris_node_get_next_sibling((LeptrisNode*)elem);
     if (!next || next->type == LEPTRIS_NODE_TYPE_TEXT) return 0;
     LeptrisElement parent = leptris_element_get_parent(elem);
-    if (parent && parent->name && parent->name[0] == 'p') return 0;
+    if (parent) {
+        const char* pn = elem_name(parent);
+        if (pn && pn[0] == 'p') return 0;
+    }
     return 1;
 }
 
@@ -986,7 +989,7 @@ static void ser_frames_free(SerFrame* st, int sp) {
 }
 
 void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, int is_root) {
-    if (!root_elem || !root_elem->name) return;
+    if (!root_elem || !elem_name(root_elem)) return;
 
     /* Heap-grown frames (TODO 194e follow-up): a fixed 512-deep
      * array needed a recursive fallback walker that duplicated the
@@ -1076,7 +1079,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 /* §16.2 rawtext parent: mixed-content text inside
                  * script/style is verbatim under method=html. */
                 if (buf->html_method && sp > 0 && st[sp - 1].e) {
-                    const char* rn = st[sp - 1].e->name;
+                    const char* rn = elem_name(st[sp - 1].e);
                     if (rn &&
                         (html_elem_sem_flags(st[sp - 1].e) & HTML_F_RAW)) {
                         const char* tr = leptris_text_get_content(
@@ -1114,7 +1117,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         LeptrisElement e = (LeptrisElement)cur;
         /* #534: children of a mixed-content parent emit inline. */
         int parent_mixed = (sp > 0) && st[sp - 1].mixed;
-        const char* name = e->name;
+        const char* name = elem_name(e);
         size_t nl = (e->name_len != 0xFF) ? (size_t)e->name_len
                                           : strlen(name);
         const char* epfx = leptris_element_get_prefix(e);
@@ -1126,7 +1129,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         int addmeta = 0;
         if (buf->xhtml && sp == 1 && st[0].e &&
             nl == 4 && memcmp(name, "head", 4) == 0) {
-            const char* rn = st[0].e->name;
+            const char* rn = elem_name(st[0].e);
             size_t rnl = (st[0].e->name_len != 0xFF)
                 ? (size_t)st[0].e->name_len
                 : (rn ? strlen(rn) : 0);
@@ -1690,7 +1693,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 ser_frame_cd_flush(buf, &st[sp]);
             free(st[sp].cd_buf);
             st[sp].cd_buf = NULL;
-            const char* pn = pe->name;
+            const char* pn = elem_name(pe);
             size_t pnl2 = st[sp].nl;
             const char* pfx2 = leptris_element_get_prefix(pe);
             /* #534: no indent inside a mixed-content element. HTML

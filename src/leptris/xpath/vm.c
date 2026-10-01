@@ -2567,9 +2567,11 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                     while (child) {
                         if (child->type == LEPTRIS_NODE_TYPE_ELEMENT) {
                             LeptrisElement ce = (LeptrisElement)child;
-                            if (ce->name_hash == target_hash && ce->name &&
-                                strlen(ce->name) == child_name_len &&
-                                memcmp(ce->name, child_name, child_name_len) == 0) {
+                            char* cn = (ce->name_hash == target_hash)
+                                ? elem_name(ce) : NULL;
+                            if (cn &&
+                                strlen(cn) == child_name_len &&
+                                memcmp(cn, child_name, child_name_len) == 0) {
                                 match = ce;
                                 break;
                             }

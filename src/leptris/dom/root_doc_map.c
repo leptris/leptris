@@ -409,7 +409,7 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
      * keep the walk — the namebp stamp is the CREATE-time doc
      * (dp_il elements are stamped then attached, where the slot
      * is not the tree's doc). */
-    if (elem->name && leptris_elem_has_namebp(elem) &&
+    if (elem_name(elem) && leptris_elem_has_namebp(elem) &&
         !leptris_elem_parent(elem))
         return leptris_elem_namebp_doc(elem);
     LeptrisElement cur = elem;
@@ -449,7 +449,7 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
      * below always misses for them — the append/builder loop paid
      * the mutex on every call to reach the same answer. The namebp
      * value is stamped at create and cannot go stale. */
-    if (cur->name && leptris_elem_has_namebp(cur))
+    if (elem_name(cur) && leptris_elem_has_namebp(cur))
         return leptris_elem_namebp_doc(cur);
     /* Locked bucket walk with an UNDER-THE-LOCK generation
      * snapshot: a death that acquires the lock after we release
@@ -477,7 +477,7 @@ struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
     /* Round 21: unattached mutation elements carry their doc in the
      * name slot backpointer — a stateless fallback that replaced the
      * register-on-create / unregister-on-attach map pair. */
-    if (cur->name && leptris_elem_has_namebp(cur)) {
+    if (elem_name(cur) && leptris_elem_has_namebp(cur)) {
         return leptris_elem_namebp_doc(cur);
     }
     return NULL;

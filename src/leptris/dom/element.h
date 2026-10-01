@@ -429,16 +429,48 @@ struct leptris_element {
      * 3a: cold diagnostics-only data was costing hot-path cache
      * lines. 0-means-unknown semantics preserved (absent = 0). */
 
-    /* Cached NULL-terminated name — LAST so the int32 block above
-     * packs tight against the base/header and the 8-aligned pointer
-     * lands without padding: 72 -> 64 bytes (#1285 slice 3a).
-     * Accessed on every serialize/XPath hit. */
-    char* name;                        /* NULL until first access */
+    /* Element name — self-relative int32 byte offset to the
+     * NUL-terminated name string (pool copy, dp block carve, or
+     * mut-block slot): 0 = no name; >2GB deltas spill to the
+     * overflow table. The same encoding as the tree edges above;
+     * replacing the 8-byte pointer with it took the struct
+     * 48 -> 40 bytes (#1285). Reads/writes go through
+     * elem_name()/elem_set_name(). */
+    int32_t name_off;
 
-    /* TODO 155 Phase A: `document` field is GONE — element now fits
-     * one 64-byte cache line. Non-root elements reach their document
-     * via leptris_element_get_document() in dom/root_doc_map.h. */
+    /* TODO 155 Phase A: `document` field is GONE — at 40 bytes the
+     * element shares a cache line with a neighbor. Non-root elements
+     * reach their document via leptris_element_get_document() in
+     * dom/root_doc_map.h. */
 };
+
+/* Element-name accessors (#1285): the name string is reached via a
+ * self-relative int32 offset (0 = none; overflow-table fallback for
+ * >2GB spans) — the tree-edge encoding. */
+static inline char* elem_name(const struct leptris_element* e) {
+    return (char*)leptris_compact_int32_decode_inline(
+        (void*)e, e->name_off, &e->name_off);
+}
+static inline void elem_set_name(struct leptris_element* e, char* p) {
+    e->name_off = leptris_compact_int32_encode_inline(e, p, &e->name_off);
+}
+
+/* Doc-tagged stamp (#1320 pattern): the >2GB spill must register in
+ * the overflow table tagged with the EXPLICIT document — public node
+ * creators and mutation carves run outside parse context, where the
+ * TLS current-doc slot is unset or stale and a mis-tagged entry
+ * would outlive its document. Parse-lane sites (TLS doc valid) use
+ * elem_set_name; every site holding a document uses this form. */
+static inline void elem_set_name_doc(struct leptris_element* e, char* p,
+                                     struct leptris_document* doc) {
+    if (!p) { e->name_off = 0; return; }
+    ptrdiff_t d = (char*)p - (char*)e;
+    if (d < INT32_MIN || d >= INT32_MAX)
+        e->name_off = leptris_compact_int32_encode_doc(
+            e, p, &e->name_off, doc);
+    else
+        e->name_off = (int32_t)d;
+}
 
 /* Namespace side-cache accessors (#1285 slice 3a): the cache is
  * reached via a self-relative int32 offset (0 = none; overflow-table
@@ -494,7 +526,7 @@ static inline int leptris_elem_has_namebp(const LeptrisElement e) {
 static inline struct leptris_document* leptris_elem_namebp_doc(
     const LeptrisElement e) {
     /* name points at slot+8; slot start holds the doc pointer. */
-    return ((struct leptris_document* const*)e->name)[-1];
+    return ((struct leptris_document* const*)elem_name(e))[-1];
 }
 
 /* Compute 16-bit FNV-1a hash of an element name string. Used
@@ -513,8 +545,10 @@ static inline struct leptris_document* leptris_elem_namebp_doc(
  * names in ~1ns vs ~5ns for strcmp on short names. */
 static inline int leptris_elem_name_is(LeptrisElement e, const char* name,
                                        uint16_t target_hash) {
-    if (!e || !e->name || e->name_hash != target_hash) return 0;
-    return strcmp(e->name, name) == 0;
+    if (!e || e->name_hash != target_hash) return 0;
+    char* n = elem_name(e);
+    if (!n) return 0;
+    return strcmp(n, name) == 0;
 }
 
 /* Inline accessors — use these instead of direct field access. */
@@ -576,7 +610,9 @@ static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
  * No-op for colon-free names. */
 static inline void leptris_elem_split_qname(LeptrisElement e,
                                             LeptrisMemoryPool* pool) {
-    if (!e || !e->name) return;
+    if (!e) return;
+    char* nm = elem_name(e);
+    if (!nm) return;
     /* Colon probe (S8): a prefix needs >= 3 bytes (prefix + ':' +
      * local), and e->name_len is exact here (every caller sets it
      * before splitting; >254-byte names store 0xFF which keeps the
@@ -584,14 +620,14 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
      * one strchr libc call per created element cost more than the
      * scan (the dp_split_hash_name law). */
     char* colon = NULL;
-    size_t probe_len = (e->name_len != 0xFF) ? e->name_len : strlen(e->name);
+    size_t probe_len = (e->name_len != 0xFF) ? e->name_len : strlen(nm);
     if (probe_len >= 3) {
         if (probe_len <= 16) {
-            for (const char* c9 = e->name; *c9; c9++) {
+            for (const char* c9 = nm; *c9; c9++) {
                 if (*c9 == ':') { colon = (char*)c9; break; }
             }
         } else {
-            colon = strchr(e->name, ':');
+            colon = strchr(nm, ':');
         }
     }
     if (!colon) return;
@@ -608,18 +644,19 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
     struct leptris_document* bp_doc =
         leptris_elem_has_namebp(e) ? leptris_elem_namebp_doc(e) : NULL;
     *colon = '\0';
-    leptris_elem_set_prefix(e, e->name, pool);
-    e->name = colon + 1;
+    leptris_elem_set_prefix(e, nm, pool);
+    elem_set_name(e, colon + 1);
     if (bp_doc && pool) {
-        size_t keep_len = strlen(e->name);
+        char* local = elem_name(e);
+        size_t keep_len = strlen(local);
         char* slot = (char*)leptris_pool_alloc(
             pool, sizeof(struct leptris_document*) + keep_len + 1);
         if (slot) {
             *(struct leptris_document**)slot = bp_doc;
             memcpy(slot + sizeof(struct leptris_document*),
-                   e->name, keep_len);
+                   local, keep_len);
             slot[sizeof(struct leptris_document*) + keep_len] = '\0';
-            e->name = slot + sizeof(struct leptris_document*);
+            elem_set_name(e, slot + sizeof(struct leptris_document*));
         } else {
             e->header.flags &=
                 (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
@@ -630,9 +667,10 @@ static inline void leptris_elem_split_qname(LeptrisElement e,
          * flag must not outlive the slot. */
         e->header.flags &= (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
     }
-    size_t local_len = strlen(e->name);
+    char* local = elem_name(e);
+    size_t local_len = strlen(local);
     e->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
-    e->name_hash = leptris_name_hash_compute(e->name);
+    e->name_hash = leptris_name_hash_compute(local);
 }
 
 /* Get the linked list of xmlns:* declarations on this element.
@@ -701,16 +739,18 @@ static inline struct leptris_namespace** leptris_elem_namespaces_ptr(
  * pinned structs hold only pointers and int-sized scalars, so i686
  * and armv7 produce identical layouts. */
 #if SIZE_MAX == UINT64_MAX
-LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 48,
-    "#1285 slice 3b: binding_wrapper out of the base -> 48 bytes");
+LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 44,
+    "#1285: name char* -> int32 offset; last 8-aligned field gone -> 44");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 40,
     "round 19 attr layout: 16+16+4+2+2 = 40");
 #else
 /* ILP32: LeptrisNode 16->12 (#1285 slice 3b); attribute
- * name_view 16->8 (value union stays 16 via inline_value[16]). */
+ * name_view 16->8 (value union stays 16 via inline_value[16]).
+ * Name char* -> int32 is size-neutral here (pointers are 4 bytes):
+ * base 12 + 8 + 6*4 = 44 bytes. */
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_element) == 44,
-    "#1285 slice 3b ILP32: base 12 + 8 + 6*4 + ptr 4 = 44 bytes");
+    "#1285 ILP32: base 12 + 8 + 6*4 = 44 bytes");
 
 LEPTRIS_STATIC_ASSERT(sizeof(struct leptris_attribute) == 32,
     "leptris_attribute ILP32 layout: 8+16+4+2+2 = 32");
@@ -1017,11 +1057,10 @@ void leptris_element_set_namespace_uri(LeptrisElement elem, const char* uri);
  * Internal StringView Accessors (for performance-critical internal code)
  * ============================================================================ */
 
-/* Get element name as StringView (derived from cached char* — TODO 90). */
+/* Get element name as StringView (derived from the name string). */
 static inline LeptrisStringView leptris_element_name_view(LeptrisElement elem) {
-    return elem && elem->name
-        ? leptris_sv_from_ptr(elem->name, strlen(elem->name))
-        : leptris_sv_empty();
+    char* n = elem ? elem_name(elem) : NULL;
+    return n ? leptris_sv_from_ptr(n, strlen(n)) : leptris_sv_empty();
 }
 
 /* Get element prefix as StringView (NO conversion, O(1) access) */
@@ -1048,14 +1087,18 @@ static inline LeptrisStringView leptris_attribute_value_view(const struct leptri
 
 /* Fast name comparison helpers (for hot paths like traversal) */
 static inline int leptris_element_name_equals(LeptrisElement elem, LeptrisStringView name) {
-    if (!elem || !elem->name) return 0;
-    return name.length == strlen(elem->name) &&
-           memcmp(elem->name, name.data, name.length) == 0;
+    if (!elem) return 0;
+    char* n = elem_name(elem);
+    if (!n) return 0;
+    return name.length == strlen(n) &&
+           memcmp(n, name.data, name.length) == 0;
 }
 
 static inline int leptris_element_name_equals_lit(LeptrisElement elem, const char* lit) {
-    if (!elem || !lit || !elem->name) return 0;
-    return strcmp(elem->name, lit) == 0;
+    if (!elem || !lit) return 0;
+    char* n = elem_name(elem);
+    if (!n) return 0;
+    return strcmp(n, lit) == 0;
 }
 
 /* ============================================================================

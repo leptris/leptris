@@ -867,12 +867,12 @@ static LEPTRIS_ALWAYS_INLINE int dp_split_hash_name(DParser* p,
     if (colon) {
         *colon = '\0';
         leptris_elem_set_prefix(elem, name_start, pool);
-        elem->name = colon + 1;
+        elem_set_name(elem, colon + 1);
         size_t local_len = name_len - (size_t)(colon + 1 - name_start);
         elem->name_len = (local_len > 254) ? 0xFF : (uint8_t)local_len;
 
     } else {
-        elem->name = name_start;
+        elem_set_name(elem, name_start);
         elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
 
     }
@@ -1914,7 +1914,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * Compare the local part of the close tag, which is
              * everything after ':' (or the whole name if no ':'). */
             LeptrisElement open = p.open_stack[p.depth - 1];
-            const char* open_name = open->name;
+            const char* open_name = elem_name(open);
             size_t open_len = (open->name_len != 0xFF)
                 ? (size_t)open->name_len : strlen(open_name);
             const char* close_local = close_start;
@@ -1922,14 +1922,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             /* Strip the close tag's prefix ONLY when the open element
              * was prefixed. Exact, allocation-independent test: the
              * open tag's colon was NUL-terminated in-place, so
-             * open->name[-1] is that NUL for prefixed names and '<'
+             * name[-1] is that NUL for prefixed names and '<'
              * for unprefixed ones (element names directly follow '<').
              * An unprefixed open closed by a prefixed name already
              * fails the length compare below — same result as the old
              * unconditional scan, without the per-element memchr call
              * (a libc call for a 1-6 byte span — the TODO 174 law). */
             const char* colon = NULL;
-            if (open->name[-1] == '\0') {
+            if (open_name[-1] == '\0') {
                 if (close_len < 16) {
                     for (const char* c = close_start;
                          c < close_start + close_len; c++) {

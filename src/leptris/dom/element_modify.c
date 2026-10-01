@@ -188,7 +188,7 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 memset(elem, 0, sizeof(struct leptris_element));
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
                 elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
-                elem->name = name_copy;
+                elem_set_name_doc(elem, name_copy, doc);
                 elem->name_hash = leptris_name_hash_compute(name_copy);
                 elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
                 /* Round 20 contract: create registers every new element
@@ -216,7 +216,7 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 char* pooled = leptris_pool_strdup(doc->pool, name);
                 if (!pooled) return NULL;
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
-                elem->name = pooled;
+                elem_set_name_doc(elem, pooled, doc);
                 elem->name_hash = leptris_name_hash_compute(pooled);
                 elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
                 leptris_root_doc_register(elem, doc);
@@ -641,42 +641,46 @@ LeptrisStatus leptris_element_set_name(LeptrisElement elem, const char* name) {
      * the bit and register in the root map instead. */
     struct leptris_document* sn_doc = leptris_element_get_document(elem);
     elem->header.flags &= (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
+    char* nm;
     if (sn_doc && sn_doc->pool) {
         /* Use pool allocation for consistency with parsing */
-        elem->name = leptris_pool_strdup(sn_doc->pool, name);
-        if (elem->name) leptris_root_doc_register(elem, sn_doc);
+        nm = leptris_pool_strdup(sn_doc->pool, name);
+        elem_set_name_doc(elem, nm, sn_doc);
+        if (nm) leptris_root_doc_register(elem, sn_doc);
     } else {
         /* Fallback to malloc for standalone elements */
-        elem->name = leptris_strdup(name);
+        nm = leptris_strdup(name);
+        elem_set_name(elem, nm);
     }
-    if (!elem->name) return LEPTRIS_ERROR_MEMORY;
+    if (!nm) return LEPTRIS_ERROR_MEMORY;
     /* #817: keep the prefix cache coherent with the new name — an
      * UNQUALIFIED rename must not let the serializer resurrect the
      * old prefix (p:child renamed to child emitted p:child). A
      * qualified rename adopts the lexical prefix; its URI stays
      * whatever is in scope (set_namespace rebinds explicitly). */
     {
-        const char* colon = strchr(elem->name, ':');
+        const char* colon = strchr(nm, ':');
         LeptrisMemoryPool* npool = leptris_element_get_pool(elem);
-        if (colon && colon > elem->name) {
-            size_t pl = (size_t)(colon - elem->name);
+        if (colon && colon > nm) {
+            size_t pl = (size_t)(colon - nm);
             char* pfx = (char*)leptris_pool_alloc(
                 npool, pl + 1);
             if (pfx) {
-                memcpy(pfx, elem->name, pl);
+                memcpy(pfx, nm, pl);
                 pfx[pl] = 0;
                 leptris_elem_set_prefix(elem, pfx, npool);
                 /* Name storage is the LOCAL part; slide past the
                  * prefix. */
-                elem->name = (char*)colon + 1;
+                elem_set_name(elem, (char*)colon + 1);
             }
         } else {
             leptris_elem_set_prefix(elem, NULL, npool);
         }
     }
-    elem->name_hash = leptris_name_hash_compute(elem->name);
-    elem->name_len = (uint8_t)(strlen(elem->name) > 254
-                                   ? 0xFF : strlen(elem->name));
+    char* local = elem_name(elem);
+    elem->name_hash = leptris_name_hash_compute(local);
+    elem->name_len = (uint8_t)(strlen(local) > 254
+                                   ? 0xFF : strlen(local));
 
     /* COW: Increment version */
     leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(elem));

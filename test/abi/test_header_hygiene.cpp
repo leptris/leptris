@@ -55,18 +55,18 @@ TEST(HeaderHygiene, NamespaceTypedefIsPointerSized) {
     EXPECT_EQ(sizeof(LeptrisNamespace), sizeof(void*));
 }
 
-// Report the internal element struct size for tracking (TODO 90).
-// The public LeptrisElement is an opaque pointer (8 bytes); the struct
-// it points to is 80 bytes after TODO 90 Phase 2d (first/last attribute
-// pointers compressed to int32_t offsets). pugixml compact node: 12 B.
-// Phase 2e (string/document-context pointers) is a stretch goal.
+// Pin the internal element struct size (#1285): the public
+// LeptrisElement is an opaque pointer; the struct it points to must
+// stay at 44 bytes after the name pointer became a self-relative
+// int32 offset (48 -> 44 — the last 8-aligned field is gone, so the
+// struct's alignment drops to 4 and the tail padding with it).
+// pugixml compact node: 12 B. The _Static_assert in element.h
+// guards compile-time; this pins it for the CI artifact too.
 TEST(HeaderHygiene, ElementStructSizeTracked) {
-    /* This test prints the actual size via a record_property call so
-     * the CI artifact captures it.  No assertion — the _Static_assert
-     * in element.h guards against growth. */
     testing::Test::RecordProperty("element_struct_size_bytes",
-                                   "see_element_h_static_assert");
-    SUCCEED() << "Element struct size guarded by _Static_assert in element.h";
+                                   std::to_string(sizeof(struct leptris_element)));
+    EXPECT_EQ(sizeof(struct leptris_element), 44u)
+        << "#1285: name char* -> int32 offset must hold the element at 44 bytes";
 }
 
 TEST(HeaderHygiene, StatusEnumValuesAreStable) {
@@ -125,6 +125,31 @@ TEST(HeaderHygiene, ElementTreeEdgeRoundTrip) {
     EXPECT_EQ(leptris_elem_first_child(a), (LeptrisNode*)b);
     EXPECT_EQ(leptris_elem_last_child(a), (LeptrisNode*)b);
     EXPECT_EQ(leptris_elem_next_sibling(a), (LeptrisNode*)b);
+}
+
+TEST(HeaderHygiene, ElementNameOffsetRoundTrip) {
+    /* #1285: the element name is a self-relative int32 offset (same
+     * encoding as the tree edges). Exercise the encode/decode pair:
+     * set, read back, slide (the QName-split move), and clear. */
+    static const size_t kAlign = alignof(struct leptris_element);
+    alignas(kAlign) char buf[2 * sizeof(struct leptris_element) + 64];
+    struct leptris_element* e = (struct leptris_element*)buf;
+    memset(buf, 0, sizeof(buf));
+
+    char* nm = buf + sizeof(*e); /* nearby, like every real carve */
+    nm[0] = 'p'; nm[1] = ':'; nm[2] = 'a'; nm[3] = '\0';
+
+    elem_set_name(e, nm);
+    EXPECT_EQ(elem_name(e), nm);
+
+    /* QName split slides the name past the colon and re-encodes. */
+    elem_set_name(e, nm + 2);
+    EXPECT_EQ(elem_name(e), nm + 2);
+    EXPECT_STREQ(elem_name(e), "a");
+
+    /* NULL round-trip (name_off 0 decodes to NULL). */
+    elem_set_name(e, NULL);
+    EXPECT_EQ(elem_name(e), nullptr);
 }
 
 TEST(HeaderHygiene, ElementAttributeEdgeRoundTrip) {
