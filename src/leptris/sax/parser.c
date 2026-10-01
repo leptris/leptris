@@ -62,6 +62,7 @@ LEPTRIS_API LeptrisSAXParser* leptris_sax_parser_create(LeptrisSAXHandler* handl
     parser->line = 1;
     parser->column = 1;
     parser->has_error = 0;
+    parser->skip_flags = 0;
     parser->error_message[0] = '\0';
     parser->scratch = NULL;
     parser->scratch_tail = NULL;
