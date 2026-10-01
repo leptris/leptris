@@ -295,8 +295,13 @@ static LeptrisElement handle_start(struct leptris_iterparse* it,
     /* depth==1: a new top-level child — a fresh document over the
      * REUSED arena (bump-reset at release; grown when a child nearly
      * fills the span). Arena creation failure falls back to the
-     * plain 32 KB-page document. */
-    if (it->depth == 1 && !it->doc) {
+     * plain 32 KB-page document. TOP_LEVEL only: full-document mode
+     * materializes ONE tree in root_doc — depth-1 children used to
+     * take this path too and became roots of throwaway subtree
+     * documents, shattering the tree at every root child
+     * (yields looked right; the parent ended up empty). */
+    if (it->mode == LEPTRIS_ITERPARSE_TOP_LEVEL &&
+        it->depth == 1 && !it->doc) {
         it->doc = it->sub_arena
             ? leptris_document_create_on_arena(it->sub_arena)
             : leptris_document_create();
@@ -317,8 +322,11 @@ static LeptrisElement handle_start(struct leptris_iterparse* it,
         prefix_buf[plen] = '\0';
         prefix = prefix_buf;
     }
-    LeptrisDocument target =
-        (it->depth == 0) ? it->root_doc : it->doc;
+    LeptrisDocument target;
+    if (it->mode == LEPTRIS_ITERPARSE_FULL_DOCUMENT)
+        target = it->root_doc;   /* one tree, one pool (#592 contract) */
+    else
+        target = (it->depth == 0) ? it->root_doc : it->doc;
     LeptrisElement e = leptris_element_create(target, local);
     if (!e) { it->exhausted = 1; return NULL; }
     if (prefix) leptris_element_set_prefix(e, prefix);
@@ -336,11 +344,13 @@ static LeptrisElement handle_start(struct leptris_iterparse* it,
     }
     if (it->depth == 0) {
         leptris_document_set_root(it->root_doc, e);
-    } else if (it->depth == 1) {
-        /* A top-level child is the ROOT of its own subtree document —
-         * never attached to the document root (that would link two
-         * pools; freeing the subtree would leave the root's child
-         * chain dangling — the ASAN UAF in PR #590). */
+    } else if (it->mode == LEPTRIS_ITERPARSE_TOP_LEVEL && it->depth == 1) {
+        /* TOP_LEVEL: a top-level child is the ROOT of its own
+         * subtree document — never attached to the document root
+         * (that would link two pools; freeing the subtree would
+         * leave the root's child chain dangling — the ASAN UAF in
+         * PR #590). FULL_DOCUMENT appends below: the whole tree
+         * lives in root_doc and must stay INTACT. */
         leptris_document_set_root(it->doc, e);
     } else {
         leptris_element_append_child(it->stack[it->depth - 1], e);
