@@ -2659,13 +2659,19 @@ static XPathASTNode* parse_switch_expr(XPathParser* parser) {
  * (QT3 K-CodepointToStringFunc-13) -- and the five predefined
  * entity refs expand likewise. A '&' that is not a well-formed
  * reference stays literal (the text-path leniency). Codepoints are
- * UTF-8 encoded, so astral refs work. */
-static char* decode_string_literal(const char* p, size_t n) {
+ * UTF-8 encoded, so astral refs work. A doubled quote char (the
+ * lexer's EscapeQuot/EscapeApos carry-through) collapses to one. */
+static char* decode_string_literal(const char* p, size_t n, char quote) {
     char* out = (char*)malloc(n + 1);
     if (!out) return NULL;
     size_t o = 0;
     const char* pe = p + n;
     while (p < pe) {
+        if (*p == quote && p + 1 < pe && p[1] == quote) {
+            out[o++] = quote;
+            p += 2;
+            continue;
+        }
         if (*p != '&') {
             out[o++] = *p++;
             continue;
@@ -2785,14 +2791,16 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         XPathASTNode* node = ast_node_new(XPATH_AST_STRING);
         if (!node) return NULL;
 
-        /* Remove quotes; expand references when present. The scan
-         * for '&' keeps the plain-literal path a memcpy (the common
-         * case pays nothing). */
+        /* Remove quotes; unescape references and doubled quotes
+         * when either is present. The scans keep the plain-literal
+         * path a memcpy (the common case pays nothing). */
         if (tok->value_len >= 2) {
             const char* bp = tok->value + 1;
             size_t blen = tok->value_len - 2;
-            if (blen && memchr(bp, '&', blen)) {
-                node->value = decode_string_literal(bp, blen);
+            char quote = tok->value[0];
+            if (blen && (memchr(bp, '&', blen) ||
+                         memchr(bp, quote, blen))) {
+                node->value = decode_string_literal(bp, blen, quote);
             }
             if (!node->value) {
                 node->value = LEPTRIS_ALLOC_N(char, blen + 1);

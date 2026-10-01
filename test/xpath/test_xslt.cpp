@@ -3206,7 +3206,11 @@ TEST(Xslt30, FnStringsQNameUri) {
         "</xsl:template>",
         "<r><i a='x'>t</i></r>")),
         "[003 ap VII zero][true false][AB]"
-        "[a%20b%26c a%20b &amp;lt;a&amp;gt;]"
+        /* escape-html-uri keeps printable ASCII: '<a>' stays and
+         * the serializer XML-escapes it once (the QT3 corpus
+         * fn/escape-html-uri.xml pins the printable-ASCII rule;
+         * the old pin recorded the entity-emitting bug). */
+        "[a%20b%26c a%20b &lt;a&gt;]"
         "[p:l l p u][i]");
 }
 

@@ -678,6 +678,29 @@ TEST(Qt3Subset, FnEncodeForUri) {
     run_test_set("fn/encode-for-uri.xml", {}, 25);
 }
 
+/* String tails batch 4: the URI escaper siblings.
+ *
+ * iri-to-uri: '#' is IRI-legal and must survive (fn-iri-to-uri-3,
+ * 1args-1, K2-9). fn-iri-to-uri-18A is excluded — the vendored
+ * mirror double-escaped its four '&' sites (escaping inside a
+ * CDATA twin is the artifact signature; entity/charref expansion
+ * in literals is pinned the OTHER way by 18 and by
+ * K-CodepointToStringFunc-13), so no conformant processor can
+ * satisfy it on this file.
+ *
+ * escape-html-uri: keep printable US-ASCII 0x20-0x7E, percent-
+ * encode every other UTF-8 byte (cbcl-001: tab and U+0080 encode;
+ * fn-*-20/21: non-ASCII encodes; space and punctuation stay). */
+TEST(Qt3Subset, FnIriToUri) {
+    const std::vector<const char*> mirror_artifact = {
+        "fn-iri-to-uri-18A"};
+    run_test_set("fn/iri-to-uri.xml", {}, 38, {}, mirror_artifact);
+}
+
+TEST(Qt3Subset, FnEscapeHtmlUri) {
+    run_test_set("fn/escape-html-uri.xml", {}, 30);
+}
+
 TEST(Qt3Subset, FnStringCase) {
     /* 23 of 30 / 23 of 28 run-and-agree — the rest carry
      * unsupported env shapes (codepoint-sequence channels).
