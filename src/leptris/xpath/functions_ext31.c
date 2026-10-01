@@ -1788,16 +1788,28 @@ static struct leptris_xpath_result* fn_codepoints_to_string(XPathContext* ctx,
     return out;
 }
 
-static int uri_escape(char* dst, const char* s, int keep_delims) {
+/* mode 0: RFC 3986 unreserved kept (encode-for-uri). mode 1:
+ * iri-to-uri — the IRI-reference character set is kept instead
+ * ('#' included: the fragment delimiter survives, per
+ * fn-iri-to-uri-3/1args-1). mode 2: escape-html-uri — every
+ * printable US-ASCII byte (0x20-0x7E) is kept and all else
+ * percent-encodes byte-wise (the input is UTF-8). */
+static int uri_escape(char* dst, const char* s, int mode) {
     static const char* hex = "0123456789ABCDEF";
     size_t o = 0;
     for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
         unsigned char c = *p;
-        int unres = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                    (c >= '0' && c <= '9') || c == '-' || c == '.' ||
-                    c == '_' || c == '~';
-        int extra = keep_delims && (strchr(";/?:@&=+$,[]-._~!'()*%", c) != NULL);
-        if (unres || extra) {
+        int keep;
+        if (mode == 2) keep = c >= 0x20 && c <= 0x7E;
+        else {
+            int unres = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '-' || c == '.' ||
+                        c == '_' || c == '~';
+            int extra = mode == 1 &&
+                        (strchr("#;/?:@&=+$,[]-._~!'()*%", c) != NULL);
+            keep = unres || extra;
+        }
+        if (keep) {
             dst[o++] = (char)c;
         } else {
             dst[o++] = '%';
@@ -1826,32 +1838,8 @@ static struct leptris_xpath_result* fn_encode_for_uri(XPathContext* c,
 static struct leptris_xpath_result* fn_iri_to_uri(XPathContext* c,
         XPathASTNode** a, size_t n) { return fn_uri_escape(c, a, n, 1); }
 
-static struct leptris_xpath_result* fn_escape_html_uri(XPathContext* ctx,
-        XPathASTNode** args, size_t n) {
-    char* in = re_str_arg(ctx, args, 0);
-    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
-    if (!out) { free(in); return NULL; }
-    size_t cap = (in ? strlen(in) : 0) * 6 + 1;
-    out->value.string_value = (char*)calloc(cap, 1);
-    size_t o = 0;
-    if (in)
-        for (const char* p = in; *p; p++) {
-            unsigned char c = (unsigned char)*p;
-            if (c < 0x80 && !isalnum(c) && !strchr("-_.~", c)) {
-                const char* ent = c == '<' ? "&lt;" : c == '>' ? "&gt;" :
-                                  c == '&' ? "&amp;" : c == '"' ? "&quot;" :
-                                  c == '\'' ? "&apos;" : NULL;
-                if (ent) { strcpy(out->value.string_value + o, ent); o += strlen(ent); continue; }
-            }
-            if (c < 0x80 && (isalnum(c) || strchr("-_.~", c)))
-                out->value.string_value[o++] = (char)c;
-            else
-                out->value.string_value[o++] = (char)c;  /* non-ASCII kept */
-        }
-    free(in);
-    (void)n;
-    return out;
-}
+static struct leptris_xpath_result* fn_escape_html_uri(XPathContext* c,
+        XPathASTNode** a, size_t n) { return fn_uri_escape(c, a, n, 2); }
 
 /* QName family — value-level string representation ("prefix:local").
  * The namespace URI rides a thread-local side channel set by the

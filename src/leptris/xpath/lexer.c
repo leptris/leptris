@@ -470,7 +470,21 @@ XPathToken xpath_lexer_next_token(XPathLexer* lexer) {
         lexer->pos++;
         lexer->column++;
 
-        while (lexer->pos < lexer->end && *lexer->pos != quote) {
+        /* XPath 2.0+/XQuery escape: a doubled quote inside the
+         * literal is one quote of content (XQuery 3.1 A.1
+         * EscapeQuot/EscapeApos). Valid XPath 1.0 never has two
+         * adjacent literals, so the merge changes no 1.0 expr. */
+        for (;;) {
+            if (lexer->pos >= lexer->end)
+                break;
+            if (*lexer->pos == quote) {
+                if (lexer->pos + 1 < lexer->end && lexer->pos[1] == quote) {
+                    lexer->pos += 2;
+                    lexer->column += 2;
+                    continue;
+                }
+                break;
+            }
             if (*lexer->pos == '\n') {
                 lexer->line++;
                 lexer->column = 1;
