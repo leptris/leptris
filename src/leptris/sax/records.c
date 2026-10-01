@@ -32,7 +32,14 @@ LeptrisStatus leptris_sax_records_parse(const char* xml, size_t len,
                                         LeptrisSaxRecords** out) {
     if (out) *out = NULL;
     if (!xml || !out) return LEPTRIS_ERROR_NULL_ARG;
-    if (flags != 0) return LEPTRIS_ERROR_INVALID_ARG;
+    /* #1472: the Door A bits are accepted for flag uniformity
+     * across parse entries (one options object in every binding
+     * call). The interleaved lane performs neither the
+     * duplicate-attribute probe nor per-byte position accounting,
+     * so both bits are no-ops here; unknown bits still reject. */
+    if (flags & ~(LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+                  LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS))
+        return LEPTRIS_ERROR_INVALID_ARG;
 
     IlCtx c;
     char* scratch = NULL;

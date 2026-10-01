@@ -194,3 +194,28 @@ TEST(SaxRecords, CanonShapeDrains) {
     EXPECT_GT(leptris_sax_records_count(r), (size_t)5000);
     leptris_sax_records_free(r);
 }
+
+/* #1472 part 2: the Door A bits must be ACCEPTED by
+ * leptris_sax_records_parse (uniform flags across parse entries —
+ * the binding passes one options object everywhere). The
+ * interleaved lane performs neither the duplicate-attribute probe
+ * nor per-byte position accounting, so the bits are no-ops here;
+ * genuinely unknown bits still reject. */
+TEST(SaxRecords, DoorAFlagsAccepted) {
+    const char xml[] = "<r a=\"1\"><b>t</b></r>";
+    LeptrisSaxRecords* r = NULL;
+    ASSERT_EQ(leptris_sax_records_parse(xml, strlen(xml),
+                                        LEPTRIS_PARSE_SKIP_DUP_DETECTION, &r),
+              LEPTRIS_OK);
+    leptris_sax_records_free(r);
+    r = NULL;
+    ASSERT_EQ(leptris_sax_records_parse(
+                  xml, strlen(xml),
+                  LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+                      LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS, &r),
+              LEPTRIS_OK);
+    leptris_sax_records_free(r);
+    r = NULL;
+    EXPECT_EQ(leptris_sax_records_parse(xml, strlen(xml), 0x8000, &r),
+              LEPTRIS_ERROR_INVALID_ARG);
+}

@@ -19,6 +19,7 @@
 typedef struct leptris_sax_recorder {
     LeptrisSAXParser* parser;
     LeptrisSAXHandler handler;
+    unsigned flags;   /* creation-time Door A bits; reset re-applies */
     LeptrisSaxEventRecord* recs;
     size_t rec_count, rec_cap;
     char* arena;
@@ -206,6 +207,7 @@ LEPTRIS_API LeptrisSaxRecorder leptris_sax_recorder_new_flags(
     /* Streaming mode: events emit per chunk, memory bounded by
      * depth — the recorder is for chunked hosts by construction. */
     leptris_sax_parser_set_streaming(r->parser, 1);
+    r->flags = flags;
     if (flags) leptris_sax_parser_set_skip_flags(r->parser, flags);
     return r;
 }
@@ -230,6 +232,7 @@ LEPTRIS_API int leptris_sax_recorder_reset(LeptrisSaxRecorder r) {
     r->parser = leptris_sax_parser_create(&r->handler, r);
     if (!r->parser) return -1;
     leptris_sax_parser_set_streaming(r->parser, 1);
+    if (r->flags) leptris_sax_parser_set_skip_flags(r->parser, r->flags);
     r->rec_count = 0;
     r->arena_len = 0;
     return 0;

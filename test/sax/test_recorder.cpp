@@ -318,3 +318,27 @@ TEST(Recorder, DoorAFlagsSkipSourcePositions) {
     EXPECT_EQ(rs[err_i].line, 1u);
     leptris_sax_recorder_free(rec);
 }
+
+/* #1472 part 1: reset must preserve the creation-time Door A flags —
+ * the shared-recorder reuse pattern (one flagged recorder, reset
+ * between documents) must not silently regain the diagnostics. */
+TEST(Recorder, DoorAFlagsSurviveReset) {
+    const char xml[] = "<r><a xml:lang=\"en\" xml:lang=\"fr\"/></r>";
+    LeptrisSaxRecorder rec = leptris_sax_recorder_new_flags(
+        LEPTRIS_PARSE_SKIP_DUP_DETECTION);
+    ASSERT_NE(rec, nullptr);
+    ASSERT_EQ(leptris_sax_recorder_feed(rec, xml, strlen(xml), 1), 0);
+    size_t n1 = 0;
+    leptris_sax_recorder_records(rec, &n1);
+
+    ASSERT_EQ(leptris_sax_recorder_reset(rec), 0);
+    ASSERT_EQ(leptris_sax_recorder_feed(rec, xml, strlen(xml), 1), 0);
+    size_t n = 0;
+    const LeptrisSaxEventRecord* rs = leptris_sax_recorder_records(rec, &n);
+    ASSERT_NE(rs, nullptr);
+    EXPECT_EQ(n, n1) << "reset changed the flagged behavior";
+    for (size_t i = 0; i < n; i++)
+        EXPECT_NE(rs[i].kind, LEPTRIS_SAX_EVENT_ERROR)
+            << "ERROR record returned after reset on a flagged recorder";
+    leptris_sax_recorder_free(rec);
+}
