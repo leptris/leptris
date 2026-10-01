@@ -2,16 +2,17 @@
 
 ## [1.9.284] - 2026-10-01
 
+
 ### Added
 
 - adopt contains-token + boolean/collation accessors — string tails batch 5 (xquery)
 
 ### Fixed
 
-- current-date/-time/-dateTime — POSIX gmtime_r args were reversed + F&O eval stability (xpath)
-- full-document iterparse tree stayed intact — root children were detached (sax)
 
-
+- **iterparse full-document mode silently detached every child of the materialized root** (field-reported total child loss): `<sections><!-- c --><child/>...</sections>` yielded `sections` with 0 children — depth-1 elements were created as roots of throwaway subtree documents instead of appending to the parent. Full-document mode now materializes one intact tree; yields carry the whole subtree at every step. Shipped with an 8-test tree-integrity regression battery (reported shape class, deep subtrees, attributes, chunked/file sources, the v1 contract pinned unchanged, malformed-input error paths).
+- **`fn:current-date` / `fn:current-time` / `fn:current-dateTime` computed from an uninitialized clock and smashed the stack on every call** — the POSIX `gmtime_r` arguments in `h_utc_now` were reversed (`(struct tm*, time_t*)` instead of `(const time_t*, struct tm*)`), so each call read a garbage epoch and wrote the 36-byte result over an 8-byte local. Values are now real (verified against the system clock); the Windows `gmtime_s` branch was always correct.
+- **F&O 14.5-14.7 stability**: the current-date/-time/-dateTime trio now returns ONE instant per evaluation (context-stamped) instead of re-reading the clock per call — same-query comparisons (`current-time() eq current-time()`) can no longer straddle a second boundary. Verified by a 100k-iteration equality loop and a 2000-iteration spec.
 
 ## [1.9.283] - 2026-10-01
 
