@@ -701,6 +701,22 @@ TEST(Qt3Subset, FnEscapeHtmlUri) {
     run_test_set("fn/escape-html-uri.xml", {}, 30);
 }
 
+/* String tails batch 5: contains-token + the boolean/collation
+ * accessors. RED first. */
+TEST(Qt3Subset, FnContainsToken) {
+    run_test_set("fn/contains-token.xml", {}, 33);
+}
+
+TEST(Qt3Subset, FnTrueFalse) {
+    run_test_set("fn/true.xml", {}, 23);
+    run_test_set("fn/false.xml", {}, 22);
+}
+
+TEST(Qt3Subset, FnDefaultAccessors) {
+    run_test_set("fn/default-collation.xml", {}, 4);
+    run_test_set("fn/default-language.xml", {}, 4);
+}
+
 TEST(Qt3Subset, FnStringCase) {
     /* 23 of 30 / 23 of 28 run-and-agree — the rest carry
      * unsupported env shapes (codepoint-sequence channels).
