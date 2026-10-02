@@ -174,7 +174,10 @@ TEST(XsltFull, TopLevelParamOverrideDocFace) {
     ASSERT_NE(d, nullptr);
     LeptrisDocument out = leptris_xslt_apply_params(x, d, pairs, 1);
     ASSERT_NE(out, nullptr);
-    EXPECT_EQ(body(leptris_document_serialize(out, nullptr)), "<e>OV</e>");
+    char* ser = leptris_document_serialize(out, nullptr);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_EQ(body(ser), "<e>OV</e>");
+    leptris_free_string(ser);
     leptris_document_free(out);
     leptris_document_free(d);
     leptris_xslt_free(x);
