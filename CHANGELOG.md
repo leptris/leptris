@@ -5,6 +5,7 @@
 ### Fixed
 
 - top-level param values are XPath expressions (libxslt convention) — follow-up to #1478 (xslt)
+  - **Semantics correction to `leptris_xslt_apply_params` / `leptris_xslt_apply_string_params`, released briefly in 1.9.287:** value strings are now evaluated as XPath EXPRESSIONS (libxslt `params` convention; nokogiri's `quote_params` exists for exactly this), not bound as raw strings. Callers pass quoted literals — `{"n", "'7'"}` binds the string `7`; under 1.9.287 the quotes were part of the value. Numbers and source-derived expressions work (`7 * 6` → 42, `string(/r/@v)`), a later pair may reference an earlier one, a global `xsl:variable` may consume a caller value (§11 ordering), undeclared names bind into scope (libxslt parity), and a malformed expression fails the transform. Caller values bind before the globals run and a declared `xsl:param` default whose name a caller supplied never evaluates (§11.4). Specs ported from #1478 plus three RED-first expression cases; 1771/1771 and an external-consumer end-to-end probe. (#1481)
 
 
 
