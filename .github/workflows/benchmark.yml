@@ -119,6 +119,7 @@ jobs:
               ../build/benchmarks/bench_serialize \
               ../build/benchmarks/bench_modify_leptris \
               ../build/benchmarks/benchmark_parse \
+              ../build/benchmarks/bench_parse_ab \
               ../build/benchmarks/benchmark_parse_ops \
               ../build/benchmarks/benchmark_first_access \
               ../build/benchmarks/benchmark_memory \
