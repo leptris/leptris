@@ -252,8 +252,11 @@ TEST(Plan1490, StructSizeAccessorsLetBindingsDetectSkew) {
     EXPECT_EQ(leptris_plan_spec_struct_size(), sizeof(leptris_plan_spec));
     EXPECT_EQ(leptris_plan_predicate_row_size(),
               sizeof(leptris_attr_predicate));
-    /* the #1486 layout: 40 on LP64 */
-    EXPECT_EQ(leptris_plan_attr_row_size(), 40u);
+    /* the #1486 layout: 40 on LP64 — pointers halve on ILP32, where
+     * the width-independent accessor-vs-sizeof checks above carry
+     * the skew-detection contract. */
+    if (sizeof(void*) == 8)
+        EXPECT_EQ(leptris_plan_attr_row_size(), 40u);
 }
 
 TEST(Plan1115, EveryValueKindCarriesPosition) {
