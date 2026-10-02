@@ -14,6 +14,17 @@
  * leptris_plan_abi_version() and hosts refuse mismatched pools at
  * load. The spec structs are POD — the tree lives in caller-owned
  * arrays referenced by index.
+ *
+ * Size discipline (#1490): TRAILING additive fields grow these
+ * structs between minor releases without an abi_version bump (the
+ * #1115/#1272/#1486 pattern — zero values preserve behavior), so a
+ * host's cdef row stride can legitimately differ from the loaded
+ * engine's. Bindings must call leptris_plan_spec_struct_size() /
+ * leptris_plan_element_row_size() / leptris_plan_child_row_size() /
+ * leptris_plan_attr_row_size() / leptris_plan_predicate_row_size()
+ * at load and refuse to pass spec arrays when their cdef row size
+ * is SMALLER than the engine's (a larger cdef row only appends
+ * zero-valued trailing bytes, which the engine normalizes away).
  */
 
 #ifndef LEPTRIS_DESCRIPTOR_H
@@ -171,6 +182,20 @@ typedef enum {
 
 /* Descriptor ABI version — versioned lockstep with the structs above. */
 LEPTRIS_API uint32_t leptris_plan_abi_version(void);
+
+/* Spec struct sizes as the LOADED ENGINE sees them (#1490). The
+ * trailing-additive pattern (#1115/#1272/#1486) legitimately grows
+ * these between minor releases without an abi_version bump, so a
+ * binding's cdef row stride can differ from the engine's; passing
+ * an array whose rows are SMALLER than the engine's shifts every
+ * element after the first. Bindings assert cdef_size >= these at
+ * load and refuse otherwise (a larger cdef only appends zero
+ * bytes, which leptris_plan_build normalizes away). */
+LEPTRIS_API size_t leptris_plan_spec_struct_size(void);
+LEPTRIS_API size_t leptris_plan_element_row_size(void);
+LEPTRIS_API size_t leptris_plan_child_row_size(void);
+LEPTRIS_API size_t leptris_plan_attr_row_size(void);
+LEPTRIS_API size_t leptris_plan_predicate_row_size(void);
 
 /* Compile a descriptor: deep-copies every plan, string, and array into
  * an engine-owned pool — the spec (and its strings) may be freed by the

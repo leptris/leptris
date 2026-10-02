@@ -11,6 +11,7 @@
  * outlives the document. Nodes are plain malloc'd structs freed
  * recursively by leptris_plan_result_free. */
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,6 +278,22 @@ static void dp_plan_free(LeptrisPlan p) {
 
 LEPTRIS_API uint32_t leptris_plan_abi_version(void) {
     return LEPTRIS_PLAN_ABI_VERSION;
+}
+
+LEPTRIS_API size_t leptris_plan_spec_struct_size(void) {
+    return sizeof(leptris_plan_spec);
+}
+LEPTRIS_API size_t leptris_plan_element_row_size(void) {
+    return sizeof(leptris_element_plan);
+}
+LEPTRIS_API size_t leptris_plan_child_row_size(void) {
+    return sizeof(leptris_child_plan);
+}
+LEPTRIS_API size_t leptris_plan_attr_row_size(void) {
+    return sizeof(leptris_attr_plan);
+}
+LEPTRIS_API size_t leptris_plan_predicate_row_size(void) {
+    return sizeof(leptris_attr_predicate);
 }
 
 

@@ -171,6 +171,91 @@ TEST(Plan1486, AttrRowsBindNamespaceIdentity) {
     leptris_document_free(doc);
 }
 
+// ---- #1490: ns attr rows in NESTED child plans (pin) ---------
+
+TEST(Plan1490, NestedChildPlanAttrNsFormsBindLikeTheRoot) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(
+        "<r xmlns:a=\"urn:a\"><i a:id=\"A\" id=\"bare\"/></r>",
+        strlen("<r xmlns:a=\"urn:a\"><i a:id=\"A\" id=\"bare\"/></r>"), &st);
+    ASSERT_NE(doc, (LeptrisDocument)nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_attr_plan i_attrs[1] = {};
+    i_attrs[0].wire_name = "id";
+    i_attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    i_attrs[0].type_tag = 7;
+    i_attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    i_attrs[0].ns_uri = "urn:a";
+
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "i";
+    kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    kids[0].type_tag = 7;
+    kids[0].child_plan_index = 1;
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    plans[1].element_name = "i";
+    plans[1].attribute_count = 1;
+    plans[1].attribute_plans = i_attrs;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    /* EXACT match: the child matches and carries a:id="A". */
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, (LeptrisPlan)nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, (LeptrisPlanResult)nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    EXPECT_STREQ(leptris_plan_value_attribute(
+        leptris_plan_value_at(r, 0), "id"), "A");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+
+    /* Non-matching URI: the child STILL matches — the attr is
+     * simply absent, the element is not dropped. */
+    i_attrs[0].ns_uri = "urn:other";
+    plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, (LeptrisPlan)nullptr);
+    r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, (LeptrisPlanResult)nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    EXPECT_EQ(leptris_plan_value_attribute(
+        leptris_plan_value_at(r, 0), "id"), nullptr);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+
+    /* Zero form: historical bare-attr lookup. */
+    i_attrs[0].ns_form = 0;
+    i_attrs[0].ns_uri = NULL;
+    plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, (LeptrisPlan)nullptr);
+    r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, (LeptrisPlanResult)nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    EXPECT_STREQ(leptris_plan_value_attribute(
+        leptris_plan_value_at(r, 0), "id"), "bare");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1490, StructSizeAccessorsLetBindingsDetectSkew) {
+    EXPECT_EQ(leptris_plan_attr_row_size(), sizeof(leptris_attr_plan));
+    EXPECT_EQ(leptris_plan_child_row_size(), sizeof(leptris_child_plan));
+    EXPECT_EQ(leptris_plan_element_row_size(), sizeof(leptris_element_plan));
+    EXPECT_EQ(leptris_plan_spec_struct_size(), sizeof(leptris_plan_spec));
+    EXPECT_EQ(leptris_plan_predicate_row_size(),
+              sizeof(leptris_attr_predicate));
+    /* the #1486 layout: 40 on LP64 */
+    EXPECT_EQ(leptris_plan_attr_row_size(), 40u);
+}
+
 TEST(Plan1115, EveryValueKindCarriesPosition) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(
