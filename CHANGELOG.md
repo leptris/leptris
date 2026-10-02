@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.288] - 2026-10-02
+
+### Fixed
+
+- top-level param values are XPath expressions (libxslt convention) — follow-up to #1478 (xslt)
+
+
+
 ## [1.9.287] - 2026-10-02
 
 ### Added
