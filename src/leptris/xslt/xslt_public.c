@@ -119,9 +119,16 @@ static int effective_html_method(const XsltStylesheet* sheet,
 
 LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                                LeptrisDocument source) {
+    return leptris_xslt_apply_params(xslt, source, NULL, 0);
+}
+
+LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
+    LeptrisXslt xslt, LeptrisDocument source,
+    const char* const* pairs, size_t pair_count) {
     if (!xslt || !source) return NULL;
-    XsltExec* ex = xslt_transform_doc(xslt->compiled,
-                                     xslt->sheet_doc, source);
+    XsltExec* ex = xslt_transform_doc_params(xslt->compiled,
+                                             xslt->sheet_doc, source,
+                                             pairs, pair_count);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     /* #682 stream mode: the result bytes live in the exec buffer,
@@ -376,9 +383,16 @@ static char* latin1_from_utf8(const char* enc, const char* s,
 
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                             LeptrisDocument source) {
+    return leptris_xslt_apply_string_params(xslt, source, NULL, 0);
+}
+
+LEPTRIS_API char* leptris_xslt_apply_string_params(
+    LeptrisXslt xslt, LeptrisDocument source,
+    const char* const* pairs, size_t pair_count) {
     if (!xslt || !source) return NULL;
-    XsltExec* ex = xslt_transform_doc(xslt->compiled,
-                                     xslt->sheet_doc, source);
+    XsltExec* ex = xslt_transform_doc_params(xslt->compiled,
+                                             xslt->sheet_doc, source,
+                                             pairs, pair_count);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     if (ex->streaming) {
