@@ -152,7 +152,7 @@ TEST(XsltFull, TopLevelParamDefaultWhenAbsent) {
         "<r/>")), "<v>D</v>");
 }
 
-TEST(XsltFull, TopLevelParamOverrideMultipleAndSkipsUnknown) {
+TEST(XsltFull, TopLevelParamOverrideMultipleUnknownUnset) {
     const char* pairs[] = {"a", "1", "zz", "x"};
     EXPECT_EQ(body(run_params(
         "<xsl:param name='a' select=\"'DA'\"/>"
@@ -162,7 +162,7 @@ TEST(XsltFull, TopLevelParamOverrideMultipleAndSkipsUnknown) {
 }
 
 TEST(XsltFull, TopLevelParamOverrideDocFace) {
-    const char* pairs[] = {"t", "OV"};
+    const char* pairs[] = {"t", "'OV'"};
     std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
         " version='1.0'>"
         "<xsl:param name='t' select=\"'DF'\"/>"
@@ -206,6 +206,89 @@ TEST(XsltFull, TemplateParamDefaults) {
         "<xsl:param name='v' select=\"'D'\"/>"
         "<p><xsl:value-of select='$v'/></p></xsl:template>",
         "<r/>")), "<p>D</p><p>P</p>");
+}
+
+/* leptris#360 / leptris-ruby#360: caller-supplied top-level
+ * parameters. leptris_xslt_apply_params takes a flat name/expression
+ * pair list (libxslt convention: the value strings are XPath
+ * expressions — callers pre-quote literals). The caller value wins
+ * over the declared default (§11.4); unspecified params keep their
+ * defaults; the pairs may reference each other and source nodes
+ * (evaluated in the globals context, §11). */
+static std::string run_apply_params(const char* sheet_body, const char* xml,
+                                    const char* const* pairs, size_t count) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='1.0'>" + sheet_body +
+                        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    if (!x) return "(compile-failed)";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    if (!d) { leptris_xslt_free(x); return "(parse-failed)"; }
+    LeptrisDocument out = leptris_xslt_apply_params(x, d, pairs, count);
+    std::string r = "(null)";
+    if (out) {
+        char* s = leptris_document_serialize(out, 0);
+        if (s) { r = s; leptris_free_string(s); }
+        leptris_document_free(out);
+    }
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    return r;
+}
+
+TEST(XsltFull, TopLevelCallerParamsOverrideDefaults) {
+    const char* sheet =
+        "<xsl:param name='n' select=\"'default'\"/>"
+        "<xsl:template match='/'><o><xsl:value-of select='$n'/></o>"
+        "</xsl:template>";
+    /* caller value replaces the declared default */
+    const char* p1[] = {"n", "'supplied'"};
+    EXPECT_EQ(run_apply_params(sheet, "<r/>", p1, 1), "<o>supplied</o>");
+    /* no pairs: the default stands */
+    EXPECT_EQ(run_apply_params(sheet, "<r/>", nullptr, 0),
+              "<o>default</o>");
+    /* the value is an EXPRESSION, not a raw string (libxslt
+     * convention): numbers compute, source nodes resolve */
+    const char* p2[] = {"n", "7 * 6"};
+    EXPECT_EQ(run_apply_params(sheet, "<r/>", p2, 1), "<o>42</o>");
+    const char* p3[] = {"n", "string(/r/@v)"};
+    EXPECT_EQ(run_apply_params(sheet, "<r v='attr'/>", p3, 1),
+              "<o>attr</o>");
+}
+
+TEST(XsltFull, TopLevelCallerParamsCoexistWithGlobalsAndOtherParams) {
+    /* unspecified sibling params keep defaults; a global variable
+     * declared AFTER the param still sees the caller value (§11
+     * order), and later caller pairs may reference earlier ones. */
+    const char* sheet =
+        "<xsl:param name='a' select=\"'A'\"/>"
+        "<xsl:param name='b' select=\"'B'\"/>"
+        "<xsl:variable name='g' select=\"concat($a, $b)\"/>"
+        "<xsl:template match='/'><o><xsl:value-of select='$g'/></o>"
+        "</xsl:template>";
+    const char* p[] = {"a", "'X'", "b", "$a"};
+    EXPECT_EQ(run_apply_params(sheet, "<r/>", p, 2), "<o>XX</o>");
+}
+
+TEST(XsltFull, TopLevelCallerParamsStringFace) {
+    /* the string face takes the same pair list */
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " version='1.0'>"
+        "<xsl:param name='n' select=\"'default'\"/>"
+        "<xsl:template match='/'><o><xsl:value-of select='$n'/></o>"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_TRUE(x);
+    LeptrisDocument d =
+        leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_TRUE(d);
+    const char* p[] = {"n", "'via-string'"};
+    char* s = leptris_xslt_apply_string_params(x, d, p, 1);
+    /* apply_string carries the declaration by contract */
+    EXPECT_STREQ(s, "<?xml version=\"1.0\"?>\n<o>via-string</o>");
+    leptris_free_string(s);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
 }
 
 /* §5.6 apply-imports: the imported rule runs when the importing
