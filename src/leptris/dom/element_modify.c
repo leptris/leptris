@@ -545,7 +545,12 @@ LeptrisStatus leptris_element_remove_child(LeptrisElement parent, LeptrisElement
         leptris_elem_set_last_child(parent, (LeptrisNode*)prev_child);
     }
 
-    /* Clear parent and decrement count */
+    /* Clear parent and decrement count. The unlinked child must also
+     * lose its OWN next_sibling: leptris_node_unlink and the document
+     * chain remover both clear it, and a surviving link splices the
+     * former following siblings into whichever parent later adopts
+     * the child — up to self-containing cycles (leptris-ruby #370). */
+    leptris_elem_set_next_sibling(child, NULL);
     leptris_elem_set_parent(child, NULL);
     parent->child_count--;
 
@@ -601,6 +606,9 @@ LeptrisStatus leptris_element_remove_all_children(LeptrisElement elem) {
             default:
                 break;
         }
+        /* Each removed child becomes a clean orphan: the sibling run
+         * must not survive the bulk removal (leptris-ruby #370). */
+        leptris_node_set_next_sibling(child, NULL);
         child = next;
     }
 
