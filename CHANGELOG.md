@@ -5,7 +5,9 @@
 ### Performance
 
 - open-id compares for the scope/table-context stack walks (#1218 slice 6, tranche 2) (html)
+  - The scope walks (p-in-button-scope, button-in-scope, AFE `kn`), the table-context searches, and the table-context dispatch block compare `b->open_id[k]` integers instead of fetching the element name and running case-insensitive literal chains per stack slot. The AFE furthest-block scan deliberately keeps the name fetch — it runs mid-AFE between stack splices, where the id stack is not yet authoritative (webkit02:14). Interleaved A/B vs the tranche-1 tree: 48.2-53.7 -> 51.0-58.2 MB/s (+11% median) on the 2.6MB table-rows shape. (#1485)
 - id-LUT membership for the foster/formatting/stack checks (#1218 slice 6) (html)
+  - The classifier table grows the 22 compared-but-unlisted names (HTML4 formatting set + MathML/SVG integration points, inert flags); `h_is_formatting` (14-way) and `h_fosterable` (15-way) become id-LUT lookups; 15 insertion-mode stack checks read `open_id[]` directly. 56.1 -> 59.0 MB/s (+5.2%) interleaved. Cumulative slice 6: ~+15% on the issue's fixture shape; the 3.4-7x deficit the issue reported at 1.9.203 is now a 1.3-1.55x LEAD over htmlReadMemory locally. (#1484)
 
 
 
