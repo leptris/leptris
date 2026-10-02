@@ -246,6 +246,7 @@ static void dp_plan_free(LeptrisPlan p) {
         dp_plan* d = &p->plans[i];
         for (uint32_t a = 0; a < d->attribute_count; a++) {
             free((char *)d->attribute_plans[a].wire_name);
+            free((char *)d->attribute_plans[a].ns_uri);
             for (uint16_t pi = 0;
                  pi < d->attribute_plans[a].predicate_count; pi++) {
                 free((char*)d->attribute_plans[a]
@@ -331,6 +332,32 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                     d->attribute_plans[a].predicates = NULL;
                     d->attribute_plans[a].predicate_count = 0;
                     d->attribute_plans[a].pad_pred = 0;
+                }
+                /* #1486 additive-ABI guard (the #1272 lesson): a
+                 * host that mallocs the spec leaves the trailing
+                 * ns fields garbage — normalize unset forms so the
+                 * walker never reads a garbage pointer, and deep-
+                 * copy EXACT uris. EXACT without a uri cannot
+                 * express an identity: reject the spec. */
+                if (!s->attribute_plans[a].ns_form) {
+                    d->attribute_plans[a].ns_form = 0;
+                    d->attribute_plans[a].pad_ns = 0;
+                    d->attribute_plans[a].ns_uri = NULL;
+                } else {
+                    d->attribute_plans[a].pad_ns = 0;
+                    if (s->attribute_plans[a].ns_form ==
+                            LEPTRIS_PLAN_NS_EXACT) {
+                        if (!s->attribute_plans[a].ns_uri) {
+                            if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                            dp_plan_free(p);
+                            return NULL;
+                        }
+                        d->attribute_plans[a].ns_uri =
+                            dp_strdup(s->attribute_plans[a].ns_uri);
+                        if (!d->attribute_plans[a].ns_uri) goto oom;
+                    } else {
+                        d->attribute_plans[a].ns_uri = NULL;
+                    }
                 }
                 if (s->attribute_plans[a].wire_name) {
                     d->attribute_plans[a].wire_name =
@@ -491,6 +518,50 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                             const LeptrisPlan pool,
                             struct leptris_plan_result* out);
 
+/* #1486 attribute-row binding. ns_form 0 = the historical
+ * wire-name lookup (the string exactly as it appears on the
+ * wire). A set form matches (namespace, local): the row's
+ * wire_name is the LOCAL name; each attribute's prefix resolves
+ * through the ELEMENT's in-scope bindings, so the identity holds
+ * across prefix spellings. Unprefixed attributes have no
+ * namespace (XML namespaces §5.2) — EXACT never binds them. */
+static const char* dp_attr_value(LeptrisElement elem,
+                                 const leptris_attr_plan* ap) {
+    if (!ap->ns_form)
+        return leptris_element_attribute(elem, ap->wire_name);
+    for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+         at; at = leptris_attribute_next(at)) {
+        const char* qn = leptris_attribute_get_name(at);
+        if (!qn) continue;
+        const char* colon = strchr(qn, ':');
+        const char* local = colon ? colon + 1 : qn;
+        if (strcmp(local, ap->wire_name) != 0) continue;
+        const char* uri = NULL;
+        if (colon) {
+            char prefix[128];
+            size_t plen = (size_t)(colon - qn);
+            if (plen >= sizeof(prefix)) continue;
+            memcpy(prefix, qn, plen);
+            prefix[plen] = 0;
+            uri = leptris_element_namespace_for_prefix(elem, prefix);
+        }
+        switch (ap->ns_form) {
+            case LEPTRIS_PLAN_NS_NONE:
+                if (uri) continue;
+                break;
+            case LEPTRIS_PLAN_NS_EXACT:
+                if (!uri || !ap->ns_uri ||
+                    strcmp(uri, ap->ns_uri) != 0)
+                    continue;
+                break;
+            default: /* ANY */
+                break;
+        }
+        return leptris_attribute_get_value(elem, at);
+    }
+    return NULL;
+}
+
 static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
                                                    const dp_plan* plan,
                                                    const LeptrisPlan pool) {
@@ -510,7 +581,7 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
         for (uint32_t a = 0; a < plan->attribute_count; a++) {
             const leptris_attr_plan* ap = &plan->attribute_plans[a];
             if (!ap->wire_name) continue;
-            const char* val = leptris_element_attribute(elem, ap->wire_name);
+            const char* val = dp_attr_value(elem, ap);
             if (!val) continue;
             v->attr_names[v->attr_count] = dp_strdup(ap->wire_name);
             v->attr_values[v->attr_count] = dp_strdup(val);
