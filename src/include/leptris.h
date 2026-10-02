@@ -3097,20 +3097,6 @@ LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt);
 LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                                 LeptrisDocument doc);
 /**
- * Apply a compiled stylesheet with top-level xsl:param overrides
- *
- * `pairs` is a flat name/value array: 2*pair_count entries,
- * pairs[2*i] is the param name, pairs[2*i+1] its string value
- * (bound as an XPath string — consumers doing numeric quoting own
- * that, matching libxslt conventions). A supplied name never
- * evaluates the param's select/@default; absent names keep them.
- * The array is borrowed for the duration of the call only.
- */
-LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
-    LeptrisXslt xslt, LeptrisDocument doc,
-    const char* const* pairs, size_t pair_count);
-
-/**
  * Apply a compiled stylesheet and serialize the result
  *
  * Convenience wrapper: leptris_xslt_apply + serialize, including
@@ -3123,15 +3109,50 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
  */
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                              LeptrisDocument doc);
+
 /**
- * Apply with top-level param overrides and serialize the result
+ * Apply a compiled stylesheet with caller-supplied top-level params
  *
- * Same pair encoding and semantics as leptris_xslt_apply_params;
- * leptris_xslt_apply_string otherwise.
+ * Binds the given xsl:param values BEFORE the stylesheet's globals
+ * run (XSLT §11.4): a caller value replaces the declared default,
+ * unspecified params keep their defaults, and the value expressions
+ * may reference the source document and earlier pairs.
+ *
+ * pairs is a flat name/value array — [name0, value0, name1,
+ * value1, ...] — and count is the number of PAIRS (the array holds
+ * 2*count entries). Each value is an XPath EXPRESSION evaluated
+ * with the source document node as context; callers pre-quote
+ * string literals ("'text'"), matching the libxslt convention.
+ *
+ * @param xslt Compiled stylesheet
+ * @param doc Source document (not modified)
+ * @param pairs Flat name/expression array, or NULL with count 0
+ * @param count Number of name/expression pairs
+ * @return Result tree (free with leptris_document_free), or NULL on
+ *         error — including a value expression that fails to
+ *         compile (message via leptris_document_last_error)
+ */
+LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
+    LeptrisXslt xslt, LeptrisDocument doc,
+    const char* const* pairs, size_t count);
+
+/**
+ * Apply with caller-supplied top-level params and serialize
+ *
+ * leptris_xslt_apply_params + the leptris_xslt_apply_string
+ * serialization contract (top-level text nodes and fragments
+ * preserved).
+ *
+ * @param xslt Compiled stylesheet
+ * @param doc Source document
+ * @param pairs Flat name/expression array (see
+ *        leptris_xslt_apply_params), or NULL with count 0
+ * @param count Number of name/expression pairs
+ * @return Serialized result (free with leptris_free_string), or NULL
  */
 LEPTRIS_API char* leptris_xslt_apply_string_params(
     LeptrisXslt xslt, LeptrisDocument doc,
-    const char* const* pairs, size_t pair_count);
+    const char* const* pairs, size_t count);
 
 /**
  * Custom XPath function handler (string-valued).

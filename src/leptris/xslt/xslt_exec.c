@@ -4811,6 +4811,11 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_avt_free(ex);
     if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
+    if (ex->caller_param_names) {
+        for (size_t i = 0; i < ex->caller_param_count; i++)
+            free(ex->caller_param_names[i]);
+        free(ex->caller_param_names);
+    }
     while (ex->tunnel_vars) {
         XsltVar* t = ex->tunnel_vars;
         ex->tunnel_vars = t->prev;
@@ -4840,9 +4845,8 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
                                   LeptrisDocument sheet_doc,
                                   LeptrisDocument source,
                                   int allow_stream,
-                                  const char* const* param_pairs,
-                                  size_t param_pair_count) {
-    if (!sheet || !source) return NULL;
+                                  const char* const* pairs,
+                                  size_t pair_count) {    if (!sheet || !source) return NULL;
     register_ops();
 
     XsltExec* ex = (XsltExec*)calloc(1, sizeof(*ex));
@@ -4850,8 +4854,6 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
     ex->sheet = sheet;
     ex->sheet_doc = sheet_doc;   /* set BEFORE the body: document('') */
     ex->source = source;
-    ex->param_pairs = param_pairs;
-    ex->param_pair_count = param_pair_count;
     ex->current_pos = 1;   /* §12.4: position() default context position */
     ex->current_size = 1;  /* last() default context size */
     ex->result = leptris_document_create();
@@ -4896,41 +4898,63 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
      * source, bug-224). */
     LeptrisElement globals_ctx = (LeptrisElement)
         leptris_document_get_node((struct leptris_document*)source);
+    /* Caller-supplied top-level params (ruby#360, §11.4): bound
+     * BEFORE the globals loop, in the same document-node context
+     * the loop uses (§11) and through xslt_push_var so the varset
+     * cache sees them. A later pair may reference an earlier one.
+     * Names are duped exec-side; the loop below skips declared
+     * defaults whose name a caller bound, so the caller value is
+     * never shadowed. A malformed expression fails the transform
+     * (eval_error), matching compile-attr strictness. */
+    if (pair_count) {
+        ex->caller_param_names = (char**)calloc(
+            pair_count, sizeof(char*));
+        if (!ex->caller_param_names) {
+            xslt_exec_free(ex);
+            return NULL;
+        }
+        ex->caller_param_count = pair_count;
+        for (size_t i = 0; i < pair_count; i++) {
+            const char* nm = pairs ? pairs[2 * i] : NULL;
+            const char* expr = pairs ? pairs[2 * i + 1] : NULL;
+            if (!nm || !*nm || !expr) {
+                ex->eval_error = 1;
+                break;
+            }
+            ex->caller_param_names[i] = leptris_strdup(nm);
+            if (!ex->caller_param_names[i]) {
+                ex->eval_error = 1;
+                break;
+            }
+            LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+            if (!c) { ex->eval_error = 1; break; }
+            struct leptris_xpath_result* v = xslt_eval(ex, c, globals_ctx);
+            leptris_xpath_compiled_free(c);
+            if (!v) { ex->eval_error = 1; break; }
+            xslt_push_var(ex, ex->caller_param_names[i], v);
+            /* keep the §11 call-template reset point current while
+             * caller bindings accumulate (same rationale as the
+             * globals loop below). */
+            ex->global_vars = ex->vars;
+        }
+        if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
+    }
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
         if (g->kind == XSLT_INSTR_VARIABLE) {
-            /* Top-level xsl:param override (leptris_xslt_apply_params,
-             * leptris-ruby#360): a supplied name/value pair binds the
-             * STRING directly — select/@default never evaluate, §11
-             * winner rules for duplicate params still hold (the last
-             * binding wins, matching the loop's natural order). */
-            if (g->is_param && g->name && ex->param_pair_count) {
-                const char* hit = NULL;
-                for (size_t pi = 0; pi < ex->param_pair_count; pi++) {
-                    if (ex->param_pairs[2 * pi] &&
-                        strcmp(ex->param_pairs[2 * pi], g->name) == 0) {
-                        hit = ex->param_pairs[2 * pi + 1];
-                        break;
-                    }
-                }
-                if (hit) {
-                    struct leptris_xpath_result* pv =
-                        xpath_result_new(XPATH_RESULT_STRING);
-                    if (pv) {
-                        pv->value.string_value = leptris_strdup(hit);
-                        if (pv->value.string_value) {
-                            xslt_push_var(ex, g->name, pv);
-                            ex->global_vars = ex->vars;
-                            continue;
-                        }
-                        leptris_xpath_result_free(pv);
-                    }
-                    /* fall through to the default on alloc failure */
+            int caller_bound = 0;
+            for (size_t i = 0; i < ex->caller_param_count; i++) {
+                if (g->name && ex->caller_param_names[i] &&
+                    strcmp(g->name, ex->caller_param_names[i]) == 0) {
+                    caller_bound = 1;
+                    break;
                 }
             }
-            LeptrisXPathNsSet saved_gns = ex->current_ns;
-            ex->current_ns = g->ns;
-            op_variable(ex, g, globals_ctx);
-            ex->current_ns = saved_gns;
+            if (!caller_bound) {
+                LeptrisXPathNsSet saved_gns = ex->current_ns;
+                ex->current_ns = g->ns;
+                op_variable(ex, g, globals_ctx);
+                ex->current_ns = saved_gns;
+            }
             /* §11: a named template invoked while later globals are
              * still evaluating (bug-192: $template-value calls
              * get-dummy mid-loop) must see the globals bound so far —
@@ -4975,17 +4999,18 @@ XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
     return xslt_transform_doc_params(sheet, sheet_doc, source, NULL, 0);
 }
 
+
 XsltExec* xslt_transform_doc_params(const XsltStylesheet* sheet,
                                     LeptrisDocument sheet_doc,
                                     LeptrisDocument source,
                                     const char* const* pairs,
-                                    size_t pair_count) {
+                                    size_t count) {
     XsltExec* ex = transform_doc_ex(sheet, sheet_doc, source, 1,
-                                    pairs, pair_count);
+                                    pairs, count);
     if (ex && ex->streaming && ex->stream_bail_html) {
         xslt_exec_free(ex);
         ex = transform_doc_ex(sheet, sheet_doc, source, 0,
-                              pairs, pair_count);
+                              pairs, count);
     }
     return ex;
 }

@@ -117,18 +117,14 @@ LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt) {
 static int effective_html_method(const XsltStylesheet* sheet,
                                  LeptrisElement peek);
 
-LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
-                                               LeptrisDocument source) {
-    return leptris_xslt_apply_params(xslt, source, NULL, 0);
-}
-
-LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
-    LeptrisXslt xslt, LeptrisDocument source,
-    const char* const* pairs, size_t pair_count) {
+static LeptrisDocument apply_doc_ex(LeptrisXslt xslt,
+                                    LeptrisDocument source,
+                                    const char* const* pairs,
+                                    size_t count) {
     if (!xslt || !source) return NULL;
     XsltExec* ex = xslt_transform_doc_params(xslt->compiled,
-                                             xslt->sheet_doc, source,
-                                             pairs, pair_count);
+                                     xslt->sheet_doc, source,
+                                     pairs, count);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     /* #682 stream mode: the result bytes live in the exec buffer,
@@ -194,6 +190,21 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
     ex->result = NULL;    /* ownership moved */
     xslt_exec_free(ex);
     return out;
+}
+
+LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
+                                               LeptrisDocument source) {
+    return apply_doc_ex(xslt, source, NULL, 0);
+}
+
+/* Caller-supplied top-level params (ruby#360): pairs is a flat
+ * name/expression array, count the number of PAIRS. Value strings
+ * are XPath expressions — callers pre-quote literals (libxslt
+ * convention). */
+LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
+    LeptrisXslt xslt, LeptrisDocument source,
+    const char* const* pairs, size_t count) {
+    return apply_doc_ex(xslt, source, pairs, count);
 }
 
 /* One fragment node by kind: element -> subtree serialize;
@@ -381,18 +392,12 @@ static char* latin1_from_utf8(const char* enc, const char* s,
 }
 #endif
 
-LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
-                                            LeptrisDocument source) {
-    return leptris_xslt_apply_string_params(xslt, source, NULL, 0);
-}
-
-LEPTRIS_API char* leptris_xslt_apply_string_params(
-    LeptrisXslt xslt, LeptrisDocument source,
-    const char* const* pairs, size_t pair_count) {
+static char* apply_string_ex(LeptrisXslt xslt, LeptrisDocument source,
+                             const char* const* pairs, size_t count) {
     if (!xslt || !source) return NULL;
     XsltExec* ex = xslt_transform_doc_params(xslt->compiled,
-                                             xslt->sheet_doc, source,
-                                             pairs, pair_count);
+                                     xslt->sheet_doc, source,
+                                     pairs, count);
     if (!ex) return NULL;
     if (ex->eval_error) { xslt_exec_free(ex); return NULL; }
     if (ex->streaming) {
@@ -783,4 +788,15 @@ LEPTRIS_API char* leptris_xslt_apply_string_params(
     leptris_document_free(out);
     xslt_exec_free(ex);
     return final;
+}
+
+LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
+                                            LeptrisDocument source) {
+    return apply_string_ex(xslt, source, NULL, 0);
+}
+
+LEPTRIS_API char* leptris_xslt_apply_string_params(
+    LeptrisXslt xslt, LeptrisDocument source,
+    const char* const* pairs, size_t count) {
+    return apply_string_ex(xslt, source, pairs, count);
 }
