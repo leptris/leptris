@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.289] - 2026-10-02
+
+### Performance
+
+- open-id compares for the scope/table-context stack walks (#1218 slice 6, tranche 2) (html)
+- id-LUT membership for the foster/formatting/stack checks (#1218 slice 6) (html)
+
+
+
 ## [1.9.288] - 2026-10-02
 
 ### Fixed
