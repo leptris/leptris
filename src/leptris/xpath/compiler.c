@@ -759,7 +759,8 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                 child->child_count == 1) {
                 XPathASTNode* dstest = child->children[0];
                 int ds_ok = (dstest &&
-                             (dstest->type == XPATH_AST_NODE_TEST_ALL ||
+                             ((dstest->type == XPATH_AST_NODE_TEST_ALL &&
+                               !dstest->prefix) ||
                               (dstest->type == XPATH_AST_NODE_TEST_TYPE &&
                                dstest->value &&
                                strcmp(dstest->value, "node") == 0)));
@@ -770,8 +771,12 @@ static void compile_step_sequence(CompilerState* st, XPathASTNode** children,
                     int c_name = (ctest &&
                                   ctest->type == XPATH_AST_NODE_TEST_NAME &&
                                   ctest->value);
+                    /* prefix:* is namespace-scoped, not a plain
+                     * wildcard — the matcher (literal or URI-bound)
+                     * must see it, so no fusion (leptris-ruby #368). */
                     int c_wild = (ctest &&
-                                  ctest->type == XPATH_AST_NODE_TEST_ALL);
+                                  ctest->type == XPATH_AST_NODE_TEST_ALL &&
+                                  !ctest->prefix);
                     /* Attribute and child-num-cmp predicates are
                      * per-element (context-independent), so they apply
                      * identically before or after the fusion — the same
@@ -1223,7 +1228,8 @@ static void compile_absolute_path(CompilerState* st, XPathASTNode* node) {
         first_step->child_count == 1) {
         XPathASTNode* dstest = first_step->children[0];
         int ds_ok2 = (dstest &&
-                      (dstest->type == XPATH_AST_NODE_TEST_ALL ||
+                      ((dstest->type == XPATH_AST_NODE_TEST_ALL &&
+                        !dstest->prefix) ||
                        (dstest->type == XPATH_AST_NODE_TEST_TYPE &&
                         dstest->value &&
                         strcmp(dstest->value, "node") == 0)));
