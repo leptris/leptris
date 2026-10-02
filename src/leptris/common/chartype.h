@@ -24,6 +24,16 @@
                               * Matches flat_parser's lenient UTF-8
                               * fallback (c >= 0xC0 for start, c >= 0x80
                               * for continuation). */
+/* Attr-loop delimiter bits (#1436 fused scanner). The open-tag/
+ * attribute loop dispatches on ONE table load: the whitespace skip
+ * itself yields the stop byte's class — tag close, self-close, '=',
+ * or the value quote (pugixml ct_parse_attr's combined-mask shape).
+ * These five bytes carry none of the flags above, so every existing
+ * mask is unaffected. */
+#define CT_ATTR_GT     0x10  /* '>' — end of the open tag */
+#define CT_ATTR_SLASH  0x20  /* '/' — self-close (with '>' lookahead) */
+#define CT_ATTR_EQ     0x40  /* '=' — name/value separator */
+#define CT_ATTR_QUOTE  0x80  /* '"', '\'' — value delimiters */
 
 /* The shared table. Defined once in chartype.c — fully static and
  * const, including the CT_UTF8 entries for bytes >= 0x80 (no

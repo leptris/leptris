@@ -223,6 +223,22 @@ static inline void dp_skip_ws(DParser* p) {
     while (IS_WS(*p->pos)) p->pos++;
 }
 
+/* #1436 fused scanner: skip whitespace AND return the stop byte's
+ * chartype class in one table load per byte. The attr loop's head
+ * previously probed '>' and '/' by compare plus a second table load
+ * for IS_NAME_START after dp_skip_ws had already classified the same
+ * byte — one load now feeds both the skip and the dispatch. NUL
+ * (the sentinel) carries no bits and reaches every caller's error
+ * path, exactly as the former compares did. */
+static LEPTRIS_ALWAYS_INLINE unsigned dp_class_after_ws(DParser* p) {
+    unsigned ch = leptris_chartype_table[(unsigned char)*p->pos];
+    while (ch & CT_WS) {
+        p->pos++;
+        ch = leptris_chartype_table[(unsigned char)*p->pos];
+    }
+    return ch;
+}
+
 /* Phase B (TODO 166): name-char scan helper.
  *
  * Originally prototyped a 4-byte ASCII fast path
@@ -912,17 +928,29 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
      * same return -1 through the character checks, so the compares
      * were pure overhead (3-4 per attribute). */
     for (;;) {
-        dp_skip_ws(p);
-        char c = *p->pos;
-        if (c == '>' || (c == '/' && p->pos[1] == '>')) {
-            int self_close = (c == '/');
-            p->pos += self_close ? 2 : 1;
-            elem->attr_count = (uint8_t)p->cur_attr_count;
-            /* Issue #542: prefixed attrs got their owner-stamped
-             * side-cache inline in dp_add_attr_inline. */
-            return self_close ? 1 : 0;
+        /* #1436 fused head: dp_class_after_ws skips the whitespace
+         * AND classifies the stop byte from the same table load —
+         * the '>' / '/' compares and the IS_NAME_START re-probe (a
+         * second load of an already-classified byte) leave the
+         * per-attribute path. The next-attribute case dispatches on
+         * the first test; close-tag bytes pay one predicted miss. */
+        unsigned ch = dp_class_after_ws(p);
+        if (!(ch & (CT_NAME_START | CT_UTF8))) {
+            if (ch & CT_ATTR_GT) {
+                p->pos++;
+                elem->attr_count = (uint8_t)p->cur_attr_count;
+                /* Issue #542: prefixed attrs got their owner-stamped
+                 * side-cache inline in dp_add_attr_inline. */
+                return 0;
+            }
+            if (ch & CT_ATTR_SLASH) {
+                if (p->pos[1] != '>') return -1; /* '/' not followed by '>' */
+                p->pos += 2;
+                elem->attr_count = (uint8_t)p->cur_attr_count;
+                return 1;
+            }
+            return -1;
         }
-        if (c == '/') return -1;  /* '/' not followed by '>' */
 
         /* Attribute name — scan as (pointer, length), no NUL-term.
          * Lane-18 round 9: ONE fused pass yields the name end, the
@@ -931,7 +959,6 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
          * probe, hash) — for short names the pass overhead, not the
          * bytes, was the cost. */
         char* name_start = p->pos;
-        if (!IS_NAME_START(*p->pos)) return -1;
         /* The name hash feeds only the duplicate probe (the dup
          * confirm is bytewise) — SKIP_DUP_DETECTION callers skip the
          * whole serial-multiply chain. */
@@ -974,14 +1001,14 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
 
-        /* Skip = and whitespace. NUL sentinel fails the '=' test. */
-        dp_skip_ws(p);
-        if (*p->pos != '=') return -1;
+        /* Skip = and whitespace — the fused class test again: the
+         * stop byte after the name's trailing ws must be '='. NUL
+         * sentinel fails CT_ATTR_EQ. */
+        if (!(dp_class_after_ws(p) & CT_ATTR_EQ)) return -1;
         p->pos++;
         /* '=' consumed — the delimiter byte at name_end is no longer
          * needed. Safe to NUL-terminate the name in-place now. */
         if (dp_nul(p, name_end)) return -1;
-        dp_skip_ws(p);
 
         /* Quoted value — FUSED scan (TODO 184): one pass finds the
          * closing quote AND flags '&' for entity routing. Replaces
@@ -995,8 +1022,9 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
          * for '&' over the scanned prefix. pugixml's single-table
          * ct_parse_attr loop is the model; this is its shape with a
          * SIMD tail. */
+        /* NUL sentinel fails CT_ATTR_QUOTE. */
+        if (!(dp_class_after_ws(p) & CT_ATTR_QUOTE)) return -1;
         char quote = *p->pos;
-        if (quote != '"' && quote != '\'') return -1; /* NUL sentinel fails */
         p->pos++;
         char* val_start = p->pos;
         int has_amp = 0;
