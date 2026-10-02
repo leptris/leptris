@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.292] - 2026-10-02
+
+### Added
+
+- set_root adopts foreign roots by copy — leptris-ruby #371 (dom)
+
+
+
 ## [1.9.291] - 2026-10-02
 
 ### Fixed
