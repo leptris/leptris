@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.291] - 2026-10-02
+
+### Fixed
+
+- remove_child/remove_all_children must leave clean orphans (dom)
+- prefix:* is namespace-scoped — stop fusing it to any-element opcodes (xpath)
+- pin nested-child attr ns forms + spec-struct size accessors (#1490) (plan)
+
+
+
 ## [1.9.290] - 2026-10-02
 
 <!-- Edit this section with the actual release notes. -->
