@@ -800,6 +800,17 @@ TEST(Qt3Subset, FnStringLength) {
     run_test_set("fn/string-length.xml", {}, 28);
 }
 
+/* fn:not (string-tails batch 6, #1182): zero-fix adoption. 166
+ * catalog cases — 48 assert-false + 28 assert-true over xs:*
+ * constructor arguments run and agree with zero engine changes
+ * (Lane 06 constructors + the typed-atom wave carry them). The
+ * rest skip via the driver's own rules: 3 assert-eq comparisons
+ * and cases whose result kinds are unsupported, plus one
+ * empty-argument edge. */
+TEST(Qt3Subset, FnNot) {
+    run_test_set("fn/not.xml", {}, 75);
+}
+
 
 /* Stage-3 corpus slice (lever 6): sequence-cardinality families.
  * Adopted now: empty, exists, head, tail, count. The numeric
