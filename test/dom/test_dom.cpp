@@ -108,15 +108,21 @@ TEST(DomBasics, DocumentSetRootRejectsNullInputs) {
 // the previous operation left behind (a stale XPath parse error).
 TEST(DomBasics, DocumentSetRootFailureSetsFreshError) {
     LeptrisDocument doc_a = leptris_document_create();
-    LeptrisDocument doc_b = leptris_document_create();
     ASSERT_NE(doc_a, nullptr);
-    ASSERT_NE(doc_b, nullptr);
     /* Poison the thread-local slot with an unrelated message. */
     ASSERT_EQ(leptris_parse_string("<a><b></a>", 10, nullptr), nullptr);
 
-    LeptrisElement foreign = leptris_element_create(doc_b, "b");
-    ASSERT_NE(foreign, nullptr);
-    EXPECT_EQ(leptris_document_set_root(doc_a, foreign),
+    /* A parented element still rejects — the fresh-error contract
+     * rides that failure (foreign roots ADOPT since leptris-ruby
+     * #371, so they no longer produce an error at all). */
+    const char xml[] = "<r><b/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc_b = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc_b, nullptr);
+    LeptrisElement parented = (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(leptris_document_root(doc_b)));
+    ASSERT_NE(parented, nullptr);
+    EXPECT_EQ(leptris_document_set_root(doc_a, parented),
               LEPTRIS_ERROR_INVALID_ARG);
     const char* msg = leptris_last_error();
     ASSERT_NE(msg, nullptr);
@@ -127,15 +133,17 @@ TEST(DomBasics, DocumentSetRootFailureSetsFreshError) {
     leptris_document_free(doc_b);
 }
 
-TEST(DomBasics, DocumentSetRootRejectsForeignElement) {
+TEST(DomBasics, DocumentSetRootAdoptsForeignElement) {
+    /* leptris-ruby #371: foreign roots adopt by copy instead of
+     * EINVAL — the previous rejection contract is retired. */
     LeptrisDocument doc_a = leptris_document_create();
     LeptrisDocument doc_b = leptris_document_create();
     ASSERT_NE(doc_a, nullptr);
     ASSERT_NE(doc_b, nullptr);
     LeptrisElement foreign = leptris_element_create(doc_b, "b");
     ASSERT_NE(foreign, nullptr);
-    EXPECT_EQ(leptris_document_set_root(doc_a, foreign),
-              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_document_set_root(doc_a, foreign), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_name(leptris_document_root(doc_a)), "b");
     leptris_document_free(doc_a);
     leptris_document_free(doc_b);
 }
@@ -247,18 +255,14 @@ TEST(DomBasics, DocumentSetRootRejectionSetsFreshError) {
     EXPECT_TRUE(strstr(err, "root") != nullptr)
         << "expected a set_root-specific message, got: " << err;
 
-    /* Cross-document rejection refreshes the channel too. */
+    /* Cross-document roots no longer reject (#371: adoption by
+     * copy) — success must NOT touch the error channel at all. */
     LeptrisDocument other = leptris_document_create();
     ASSERT_NE(other, nullptr);
     LeptrisElement foreign = leptris_element_create(other, "f");
     ASSERT_NE(foreign, nullptr);
-    EXPECT_EQ(leptris_document_set_root(doc, foreign),
-              LEPTRIS_ERROR_INVALID_ARG);
-    err = leptris_last_error();
-    ASSERT_TRUE(err != nullptr && err[0] != '\0');
-    EXPECT_STRNE(err, poisoned.c_str());
-    EXPECT_TRUE(strstr(err, "document") != nullptr)
-        << "expected a cross-document message, got: " << err;
+    EXPECT_EQ(leptris_document_set_root(doc, foreign), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_name(leptris_document_root(doc)), "f");
     leptris_document_free(other);
     leptris_document_free(doc);
 }

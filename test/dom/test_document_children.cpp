@@ -268,3 +268,95 @@ TEST(DocumentChildren, PublicFirstChildWalksTheChain) {
     EXPECT_EQ(leptris_document_first_child(nullptr), nullptr);
     leptris_document_free(doc);
 }
+
+/* leptris-ruby #371: set_root on a foreign element adopts it. Pool
+ * ownership makes a MOVE impossible (the subtree's memory belongs to
+ * the source document's arena and would dangle after its free), so
+ * adoption is a deep copy into this document's pool — with the
+ * Nokogiri-steal observable: the source document loses its root. */
+TEST(DocumentChildren, SetRootAdoptsForeignRootByCopy) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char old_xml[] = "<old><a/></old>";
+    LeptrisDocument doc =
+        leptris_parse_string(old_xml, std::strlen(old_xml), &st);
+    ASSERT_NE(doc, nullptr);
+    const char new_xml[] =
+        "<new xmlns:n='urn:n'><b n:k='v'><c/>t</b></new>";
+    LeptrisDocument other =
+        leptris_parse_string(new_xml, std::strlen(new_xml), &st);
+    ASSERT_NE(other, nullptr);
+    LeptrisElement foreign = leptris_document_root(other);
+    ASSERT_NE(foreign, nullptr);
+
+    /* The engine hands back the INSTALLED element — a fresh handle
+     * in doc's pool, not the borrowed source pointer. */
+    LeptrisElement installed = nullptr;
+    ASSERT_EQ(leptris_document_set_root_ex(doc, foreign, &installed),
+              LEPTRIS_OK);
+    ASSERT_NE(installed, nullptr);
+    EXPECT_NE(installed, foreign);
+    EXPECT_STREQ(leptris_element_name(installed), "new");
+
+    /* Content survives the adoption: attribute, child, text. */
+    LeptrisElement b = leptris_element_child(installed, 0);
+    ASSERT_NE(b, nullptr);
+    EXPECT_STREQ(leptris_element_name(b), "b");
+    EXPECT_STREQ(leptris_element_attribute(b, "n:k"), "v");
+    char* ser = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_STRNE(ser, "");
+    EXPECT_NE(strstr(ser, "<b n:k=\"v\">"), nullptr) << ser;
+    leptris_free_string(ser);
+
+    /* The source document lost its root (steal observability); a
+     * rootless parsed document serializes to NULL by contract. */
+    EXPECT_EQ(leptris_document_root(other), nullptr);
+    EXPECT_EQ(leptris_document_serialize(other, nullptr), nullptr);
+
+    /* The adopted tree outlives the source document — the copy is
+     * pool-owned by doc, not other. */
+    leptris_document_free(other);
+    EXPECT_STREQ(leptris_element_name(installed), "new");
+    ser = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_NE(strstr(ser, "<b n:k=\"v\">"), nullptr) << ser;
+    leptris_free_string(ser);
+    leptris_document_free(doc);
+}
+
+TEST(DocumentChildren, SetRootForeignRootLegacyEntryAdopts) {
+    /* The original entry keeps its signature; foreign roots adopt
+     * instead of EINVAL (leptris-ruby #371's exact repro). */
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string("<old/>", 6, &st);
+    LeptrisDocument other =
+        leptris_parse_string("<new><b/></new>", 15, &st);
+    ASSERT_EQ(leptris_document_set_root(doc, leptris_document_root(other)),
+              LEPTRIS_OK);
+    EXPECT_EQ(leptris_document_root(doc) != nullptr, true);
+    EXPECT_EQ(leptris_document_root(other), nullptr);
+    leptris_document_free(other);
+    EXPECT_STREQ(leptris_element_name(leptris_document_root(doc)), "new");
+    leptris_document_free(doc);
+}
+
+TEST(DocumentChildren, SetRootAdoptsDetachedForeignElement) {
+    /* An element created in another document but never attached:
+     * adoption copies it; nothing to steal from the source. */
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisDocument other = leptris_document_create();
+    ASSERT_NE(other, nullptr);
+    LeptrisElement e = leptris_element_create(other, "detached");
+    ASSERT_NE(e, nullptr);
+
+    ASSERT_EQ(leptris_document_set_root(doc, e), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_name(leptris_document_root(doc)),
+                 "detached");
+    EXPECT_EQ(leptris_document_root(other), nullptr);
+    leptris_document_free(other);
+    EXPECT_STREQ(leptris_element_name(leptris_document_root(doc)),
+                 "detached");
+    leptris_document_free(doc);
+}
