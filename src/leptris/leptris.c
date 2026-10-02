@@ -284,6 +284,13 @@ struct leptris_document* leptris_document_create_on_arena(
  */
 LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
                                                     LeptrisElement root) {
+    return leptris_document_set_root_ex(doc, root, NULL);
+}
+
+LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
+    LeptrisDocument doc, LeptrisElement root,
+    LeptrisElement* out_installed) {
+    if (out_installed) *out_installed = NULL;
     if (!doc || !root) {
         leptris_set_error(LEPTRIS_ERROR_NULL_ARG,
                           "set_root: NULL document or element");
@@ -301,14 +308,55 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
     /* Cross-document attach would dangle the source pool on free.
      * Lane 18 P1: resolve via get_document (map + namebp fallback)
      * — public mut-block creates carry no map entry, and the raw
-     * lookup rejected every one of them. */
+     * lookup rejected every one of them. Adoption (leptris-ruby
+     * #371) satisfies that constraint by DEEP-COPYING the subtree
+     * into this document's pool — the source element stays valid in
+     * its own pool until the source document is freed. The source
+     * loses the element (Nokogiri steal observability); the
+     * installed root is a new handle, reported through
+     * out_installed for bindings to wrap. */
     extern struct leptris_document* leptris_element_get_document(
         LeptrisElement elem);
     if (leptris_element_get_document(root) != doc) {
-        leptris_set_error(LEPTRIS_ERROR_INVALID_ARG,
-                          "set_root: element belongs to a different document");
-        return LEPTRIS_ERROR_INVALID_ARG;
+        extern LeptrisElement leptris_element_copy(
+            LeptrisElement src, LeptrisDocument dest_doc);
+        LeptrisElement copy = leptris_element_copy(root, doc);
+        if (!copy) {
+            leptris_set_error(LEPTRIS_ERROR_MEMORY,
+                              "set_root: adoption copy failed");
+            return LEPTRIS_ERROR_MEMORY;
+        }
+        struct leptris_document* src_doc =
+            leptris_element_get_document(root);
+        if (src_doc) {
+            /* Parsed roots live in new_dom_root; programmatic ones
+             * in root — clear whichever names the element. */
+            if (src_doc->root == root) src_doc->root = NULL;
+            if (src_doc->new_dom_root == root) src_doc->new_dom_root = NULL;
+            /* Splice the element out of the source's document-child
+             * chain (roots sit between prolog and epilog nodes). */
+            LeptrisNode* c = (LeptrisNode*)src_doc->doc_children_head;
+            LeptrisNode* prev = NULL;
+            while (c && c != (LeptrisNode*)root) {
+                prev = c;
+                c = leptris_node_get_next_sibling(c);
+            }
+            if (c) {
+                LeptrisNode* next = leptris_node_get_next_sibling(c);
+                if (prev) leptris_node_set_next_sibling(prev, next);
+                else src_doc->doc_children_head = next;
+                if (src_doc->doc_children_tail == c)
+                    src_doc->doc_children_tail = prev;
+                leptris_node_set_next_sibling(c, NULL);
+            }
+            /* The detached element stays root-map registered against
+             * the source — its handle keeps resolving (the orphan
+             * precedent from leptris_node_unlink) until the source
+             * document is freed. */
+        }
+        root = copy;
     }
+    if (out_installed) *out_installed = root;
 
     doc->root = root;
     doc->new_dom_root = root;

@@ -799,14 +799,41 @@ LEPTRIS_API LeptrisDocument leptris_document_create_html(void);
  * Replaces any existing root; the previous root is not freed — it
  * remains a pool-owned, detached element.
  *
+ * A foreign element (owned by another document) is ADOPTED by copy
+ * (leptris-ruby #371): nodes are pool-owned by their document, so a
+ * move would dangle after the source document's free. The subtree is
+ * deep-copied into @p doc's pool, the source document loses the
+ * element (if it was its root, the source becomes rootless), and the
+ * installed element is a NEW handle — see leptris_document_set_root_ex
+ * to receive it.
+ *
  * @param doc Document handle
  * @param root Element to attach as root
  * @return LEPTRIS_OK on success, LEPTRIS_ERROR_NULL_ARG on NULL
  *         inputs, or LEPTRIS_ERROR_INVALID_ARG when the element
- *         belongs to another document or already has a parent
+ *         already has a parent
  */
 LEPTRIS_API LeptrisStatus leptris_document_set_root(LeptrisDocument doc,
                                                     LeptrisElement root);
+
+/**
+ * Attach an element as root, reporting the INSTALLED element
+ *
+ * Same contract as leptris_document_set_root. @p out_installed
+ * receives the element that is now @p doc's root — always distinct
+ * from @p root for foreign (adopted-by-copy) elements, identical to
+ * @p root otherwise. Bindings must wrap this handle, never the
+ * borrowed source pointer.
+ *
+ * @param doc Document handle
+ * @param root Element to attach as root
+ * @param out_installed Out-param for the installed root (may be NULL)
+ * @return As leptris_document_set_root; LEPTRIS_ERROR_MEMORY when the
+ *         adoption copy cannot be allocated
+ */
+LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
+    LeptrisDocument doc, LeptrisElement root,
+    LeptrisElement* out_installed);
 
 /**
  * Parse XML string into document
