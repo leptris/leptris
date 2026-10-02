@@ -2138,7 +2138,7 @@ static int h_is_heading(const char* n) {
  * (13.2.6.4.7 "in body" block set + h/pre/form/li/dd/dt/plaintext/
  * hr/xmp). */
 typedef struct {
-    char name[12];
+    char name[16];
     uint8_t len;
     uint8_t special;   /* WHATWG 13.2.4 special set */
     uint8_t no_fmt;    /* never reconstructed (formatting) */
@@ -2855,6 +2855,10 @@ static int h_body_still_empty(HBuilder* b) {
 /* #659: <noscript> opened in the head phase (scripting off) —
  * WHATWG 12.2.6.4.5 "in head noscript": head content and
  * comments stay inside; the first body-ish token pops it. */
+/* #1218 slice 6: tentative decls — this check sits above the
+ * id globals; definitions follow with the classifier cluster. */
+static uint8_t h_id_noscript, h_id_html;
+
 static int h_in_head_noscript(HBuilder* b) {
     if (!b->whatwg || b->body_tag_seen || b->depth < 1 ||
         !h_body_still_empty(b))
@@ -2862,11 +2866,10 @@ static int h_in_head_noscript(HBuilder* b) {
     /* [noscript] at the top, or [html..., noscript] when the
      * html tag was explicit (tests18:5: <html><noscript> keeps
      * two html entries on the stack). */
-    if (!h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
-                   "noscript"))
+    if (b->open_id[b->depth - 1] != h_id_noscript)
         return 0;
     for (size_t i = 0; i + 1 < b->depth; i++)
-        if (!h_ieq_raw(leptris_element_name(b->open[i]), "html"))
+        if (b->open_id[i] != h_id_html)
             return 0;
     return 1;
 }
@@ -2959,59 +2962,16 @@ static void h_apply_attrs(HBuilder* b, LeptrisElement e, char** attrs,
 /* WHATWG 12.2.6.1: only nodes NOT allowed in table context foster
  * — table-structure elements stay, whitespace-only text stays in
  * the table ("in table text"), comments stay. */
-static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
-    int ty = leptris_node_get_type(n);
-    if (ty == LEPTRIS_NODE_TYPE_COMMENT) return 0;
-    if (ty == LEPTRIS_NODE_TYPE_TEXT) {
-        const char* t = leptris_text_get_content((LeptrisTextNode*)n);
-        if (!t) return 0;
-        for (const char* p = t; *p; p++)
-            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
-                return 1;
-        return 0;   /* whitespace-only stays */
-    }
-    if (ty != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
-    const char* nname = leptris_element_name((LeptrisElement)n);
-    /* 13.2.6.4.9: <input type=hidden> in a table is inserted AT
-     * the spot - no fostering (tests7:16-20; html5test-com:20's
-     * form-over-table keeps it inside the form). */
-    if (b->input_hidden_tag && h_ieq_raw(nname, "input"))
-        return 0;
-    return !(h_ieq_raw(nname, "table") || h_ieq_raw(nname, "tbody") ||
-             h_ieq_raw(nname, "thead") || h_ieq_raw(nname, "tfoot") ||
-             h_ieq_raw(nname, "tr") || h_ieq_raw(nname, "td") ||
-             h_ieq_raw(nname, "th") || h_ieq_raw(nname, "caption") ||
-             h_ieq_raw(nname, "col") || h_ieq_raw(nname, "colgroup") ||
-             h_ieq_raw(nname, "tbody") || h_ieq_raw(nname, "form") ||
-             h_ieq_raw(nname, "script") || h_ieq_raw(nname, "style") ||
-             h_ieq_raw(nname, "template"));
-}
-
-/* WHATWG formatting elements (the adoption agency's subject). */
-static int h_is_formatting(const char* n) {
-    return h_ieq_raw(n, "a") || h_ieq_raw(n, "b") ||
-           h_ieq_raw(n, "big") || h_ieq_raw(n, "code") ||
-           h_ieq_raw(n, "em") || h_ieq_raw(n, "font") ||
-           h_ieq_raw(n, "i") || h_ieq_raw(n, "nobr") ||
-           h_ieq_raw(n, "s") || h_ieq_raw(n, "small") ||
-           h_ieq_raw(n, "strike") || h_ieq_raw(n, "strong") ||
-           h_ieq_raw(n, "tt") || h_ieq_raw(n, "u");
-}
-
-/* WHATWG "special" category (13.2.4.2) — the adoption agency's
- * furthest-block candidates. */
-/* Generated tag classifier (#1218 hot path): one first-char
- * bucket walk replaces the ~78-entry strcmp scans that the
- * sampler pinned at ~21% of WHATWG parse (h_is_special_ww +
- * h_reconstructs). Keep in sync with the WHATWG special and
- * no-formatting sets. */
-
 static const HTagInfo h_tag_infos[] = {
+    {"a", 1, 0, 0, 0, 0, 0, 0},
+    {"annotation-xml", 14, 0, 1, 0, 0, 0, 0},
     {"address", 7, 1, 1, 3, 0, 0, 0x01},
     {"applet", 6, 1, 0, 0, 2, 0, 0},
     {"area", 4, 1, 0, 0, 3, 0, 0},
     {"article", 7, 1, 1, 3, 0, 0, 0x01},
     {"aside", 5, 1, 1, 3, 0, 0, 0x01},
+    {"b", 1, 0, 0, 0, 0, 0, 0},
+    {"big", 3, 0, 0, 0, 0, 0, 0},
     {"base", 4, 1, 1, 0, 1, 0, 0},
     {"basefont", 8, 1, 1, 0, 1, 0, 0},
     {"bgsound", 7, 1, 1, 0, 1, 0, 0},
@@ -3019,10 +2979,12 @@ static const HTagInfo h_tag_infos[] = {
     {"body", 4, 1, 1, 0, 0, 0, 0},
     {"br", 2, 1, 0, 0, 3, 0, 0},
     {"button", 6, 1, 0, 0, 2, 0, 0},
+    {"code", 4, 0, 0, 0, 0, 0, 0},
     {"caption", 7, 1, 1, 0, 0, 0, 0},
     {"center", 6, 1, 1, 1, 0, 0, 0x01},
     {"col", 3, 1, 1, 0, 1, 0, 0},
     {"colgroup", 8, 1, 1, 0, 0, 0, 0},
+    {"desc", 4, 0, 1, 0, 0, 0, 0},
     {"dd", 2, 1, 1, 1, 2, 0x04, 0x05},
     {"details", 7, 1, 1, 3, 0, 0, 0x01},
     {"dialog", 6, 1, 1, 3, 0, 0, 0x01},
@@ -3030,7 +2992,10 @@ static const HTagInfo h_tag_infos[] = {
     {"div", 3, 1, 1, 3, 0, 0, 0x01},
     {"dl", 2, 1, 1, 3, 0, 0, 0x01},
     {"dt", 2, 1, 1, 1, 2, 0x04, 0x05},
+    {"em", 2, 0, 0, 0, 0, 0, 0},
     {"embed", 5, 1, 0, 0, 3, 0, 0},
+    {"font", 4, 0, 0, 0, 0, 0, 0},
+    {"foreignobject", 13, 0, 1, 0, 0, 0, 0},
     {"fieldset", 8, 1, 1, 3, 0, 0, 0x01},
     {"figcaption", 10, 1, 1, 3, 0, 0, 0x01},
     {"figure", 6, 1, 1, 3, 0, 0, 0x01},
@@ -3049,6 +3014,7 @@ static const HTagInfo h_tag_infos[] = {
     {"hgroup", 6, 1, 1, 3, 0, 0, 0x01},
     {"hr", 2, 1, 1, 3, 3, 0, 0x41},
     {"html", 4, 1, 1, 0, 0, 0, 0},
+    {"i", 1, 0, 0, 0, 0, 0, 0},
     {"iframe", 6, 1, 0, 0, 2, 0, 0},
     {"img", 3, 1, 0, 0, 3, 0, 0},
     {"input", 5, 1, 0, 0, 3, 0, 0},
@@ -3056,10 +3022,16 @@ static const HTagInfo h_tag_infos[] = {
     {"li", 2, 1, 1, 3, 2, 0x02, 0x03},
     {"link", 4, 1, 1, 0, 1, 0, 0},
     {"listing", 7, 1, 1, 1, 2, 0, 0x01},
+    {"mi", 2, 0, 1, 0, 0, 0, 0},
+    {"mn", 2, 0, 1, 0, 0, 0, 0},
+    {"mo", 2, 0, 1, 0, 0, 0, 0},
+    {"ms", 2, 0, 1, 0, 0, 0, 0},
+    {"mtext", 5, 0, 1, 0, 0, 0, 0},
     {"main", 4, 1, 1, 3, 0, 0, 0x01},
     {"marquee", 7, 1, 0, 0, 2, 0, 0},
     {"menu", 4, 1, 1, 3, 0, 0, 0x01},
     {"meta", 4, 1, 1, 0, 1, 0, 0},
+    {"nobr", 4, 0, 0, 0, 0, 0, 0},
     {"nav", 3, 1, 1, 3, 0, 0, 0x01},
     {"noembed", 7, 1, 0, 0, 2, 0, 0},
     {"noframes", 8, 1, 1, 0, 2, 0, 0},
@@ -3076,6 +3048,10 @@ static const HTagInfo h_tag_infos[] = {
     {"rp", 2, 0, 0, 0, 0, 0, 0},
     {"rt", 2, 0, 0, 0, 0, 0, 0},
     {"rtc", 3, 0, 0, 0, 0, 0, 0},
+    {"s", 1, 0, 0, 0, 0, 0, 0},
+    {"small", 5, 0, 0, 0, 0, 0, 0},
+    {"strike", 6, 0, 0, 0, 0, 0, 0},
+    {"strong", 6, 0, 0, 0, 0, 0, 0},
     {"script", 6, 1, 1, 0, 0, 0, 0},
     {"search", 6, 1, 1, 1, 0, 0, 0x01},
     {"section", 7, 1, 1, 3, 0, 0, 0x01},
@@ -3083,6 +3059,7 @@ static const HTagInfo h_tag_infos[] = {
     {"source", 6, 1, 0, 0, 1, 0, 0},
     {"style", 5, 1, 1, 0, 0, 0, 0},
     {"summary", 7, 1, 1, 1, 0, 0, 0x01},
+    {"tt", 2, 0, 0, 0, 0, 0, 0},
     {"table", 5, 1, 1, 2, 2, 0, 0x39},
     {"tbody", 5, 1, 1, 0, 0, 0x20, 0x38},
     {"td", 2, 1, 1, 0, 0, 0x08, 0x08},
@@ -3094,6 +3071,7 @@ static const HTagInfo h_tag_infos[] = {
     {"title", 5, 1, 1, 0, 0, 0, 0},
     {"tr", 2, 1, 1, 0, 0, 0x10, 0x18},
     {"track", 5, 1, 0, 0, 1, 0, 0},
+    {"u", 1, 0, 0, 0, 0, 0, 0},
     {"ul", 2, 1, 1, 3, 0, 0, 0x01},
     {"wbr", 3, 1, 0, 0, 3, 0, 0},
     {"xmp", 3, 1, 0, 1, 2, 0, 0},
@@ -3101,9 +3079,7 @@ static const HTagInfo h_tag_infos[] = {
 
 /* bucket[first_char] = start index; bucket[first_char+1] = end */
 static const uint8_t h_tag_bucket[27] = {
-    0, 5, 12, 16, 23, 24, 31, 31, 42,
-    45, 45, 46, 49, 53, 57, 61, 65, 65,
-    69, 76, 87, 88, 88, 89, 90, 90, 90,
+    0, 7, 16, 21, 29, 31, 40, 40, 51, 55, 55, 56, 59, 68, 73, 77, 81, 81, 85, 96, 108, 110, 110, 111, 112, 112, 112,
 };
 
 /* Resolve a (lowercased) tag name's flags; NULL when unknown.
@@ -3126,12 +3102,6 @@ static const HTagInfo* h_tag_lookup(const char* n) {
     return NULL;
 }
 
-/* #1218: tag ids + per-id LUTs. The sampler pinned the strcmp
- * scans (h_is_void 18 names, h_clears_frameset_ok 26 names) and
- * the open-stack walks (name fetch + strcmp per element) at the
- * top of WHATWG self-time on table-heavy pages. ids are
- * h_tag_infos indexes, so one first-char bucket walk per start
- * tag serves every later classification of that name. */
 #define H_ID_UNKNOWN 255u
 static uint8_t h_tag_id(const char* n) {
     const HTagInfo* t = h_tag_lookup(n);
@@ -3153,6 +3123,14 @@ static uint8_t h_id_p, h_id_li, h_id_dd, h_id_dt, h_id_ol, h_id_ul,
     h_id_rt, h_id_rp, h_id_rtc, h_id_listing, h_id_plaintext;
 static uint8_t h_heading_lut[256], h_ruby_lut[256], h_p_fence_lut[256],
     h_li_fence_lut[256], h_dd_fence_lut[256];
+/* #1218 slice 6: the per-name strcmp chains the sampler pinned at
+ * ~37% of non-tokenizer time. h_fmt4_lut = the HTML4 formatting
+ * set (h_is_formatting's exact 14 names); h_foster_lut = the
+ * table-context names h_fosterable keeps in place. UNKNOWN ids
+ * are never set — an unknown name fails every membership test,
+ * matching the string chains they replace. */
+static uint8_t h_fmt4_lut[256], h_foster_lut[256];
+static uint8_t h_id_input, h_id_form, h_id_col, h_id_script, h_id_style, h_id_head, h_id_body, h_id_noscript;
 
 static void h_id_luts_init(void) {
     static int done;
@@ -3190,6 +3168,42 @@ static void h_id_luts_init(void) {
     h_id_rtc = h_tag_id("rtc");
     h_id_listing = h_tag_id("listing");
     h_id_plaintext = h_tag_id("plaintext");
+    h_id_head = h_tag_id("head");
+    h_id_body = h_tag_id("body");
+    h_id_noscript = h_tag_id("noscript");
+    h_id_input = h_tag_id("input");
+    h_id_form = h_tag_id("form");
+    h_id_col = h_tag_id("col");
+    h_id_script = h_tag_id("script");
+    h_id_style = h_tag_id("style");
+    h_fmt4_lut[h_tag_id("a")] = 1;
+    h_fmt4_lut[h_tag_id("b")] = 1;
+    h_fmt4_lut[h_tag_id("big")] = 1;
+    h_fmt4_lut[h_tag_id("code")] = 1;
+    h_fmt4_lut[h_tag_id("em")] = 1;
+    h_fmt4_lut[h_tag_id("font")] = 1;
+    h_fmt4_lut[h_tag_id("i")] = 1;
+    h_fmt4_lut[h_tag_id("nobr")] = 1;
+    h_fmt4_lut[h_tag_id("s")] = 1;
+    h_fmt4_lut[h_tag_id("small")] = 1;
+    h_fmt4_lut[h_tag_id("strike")] = 1;
+    h_fmt4_lut[h_tag_id("strong")] = 1;
+    h_fmt4_lut[h_tag_id("tt")] = 1;
+    h_fmt4_lut[h_tag_id("u")] = 1;
+    h_foster_lut[h_tag_id("table")] = 1;
+    h_foster_lut[h_tag_id("tbody")] = 1;
+    h_foster_lut[h_tag_id("thead")] = 1;
+    h_foster_lut[h_tag_id("tfoot")] = 1;
+    h_foster_lut[h_tag_id("tr")] = 1;
+    h_foster_lut[h_tag_id("td")] = 1;
+    h_foster_lut[h_tag_id("th")] = 1;
+    h_foster_lut[h_tag_id("caption")] = 1;
+    h_foster_lut[h_tag_id("col")] = 1;
+    h_foster_lut[h_tag_id("colgroup")] = 1;
+    h_foster_lut[h_tag_id("form")] = 1;
+    h_foster_lut[h_tag_id("script")] = 1;
+    h_foster_lut[h_tag_id("style")] = 1;
+    h_foster_lut[h_tag_id("template")] = 1;
     for (int i = 0; i < (int)(sizeof(h_tag_infos) /
                               sizeof(h_tag_infos[0])); i++) {
         uint8_t id = (uint8_t)i;
@@ -3231,6 +3245,49 @@ static void h_id_luts_init(void) {
     h_dd_fence_lut[h_id_select] = 1;
     h_dd_fence_lut[h_id_html] = 1;
 }
+
+static int h_fosterable(HBuilder* b, LeptrisNodeRef n) {
+    int ty = leptris_node_get_type(n);
+    if (ty == LEPTRIS_NODE_TYPE_COMMENT) return 0;
+    if (ty == LEPTRIS_NODE_TYPE_TEXT) {
+        const char* t = leptris_text_get_content((LeptrisTextNode*)n);
+        if (!t) return 0;
+        for (const char* p = t; *p; p++)
+            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+                return 1;
+        return 0;   /* whitespace-only stays */
+    }
+    if (ty != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
+    const char* nname = leptris_element_name((LeptrisElement)n);
+    /* 13.2.6.4.9: <input type=hidden> in a table is inserted AT
+     * the spot - no fostering (tests7:16-20; html5test-com:20's
+     * form-over-table keeps it inside the form). */
+    uint8_t fid = h_tag_id(nname);
+    if (b->input_hidden_tag && fid == h_id_input)
+        return 0;
+    return !h_foster_lut[fid];
+}
+
+/* WHATWG formatting elements (the adoption agency's subject). */
+static int h_is_formatting(const char* n) {
+    return h_fmt4_lut[h_tag_id(n)];
+}
+
+/* WHATWG "special" category (13.2.4.2) — the adoption agency's
+ * furthest-block candidates. */
+/* Generated tag classifier (#1218 hot path): one first-char
+ * bucket walk replaces the ~78-entry strcmp scans that the
+ * sampler pinned at ~21% of WHATWG parse (h_is_special_ww +
+ * h_reconstructs). Keep in sync with the WHATWG special and
+ * no-formatting sets. */
+
+
+/* #1218: tag ids + per-id LUTs. The sampler pinned the strcmp
+ * scans (h_is_void 18 names, h_clears_frameset_ok 26 names) and
+ * the open-stack walks (name fetch + strcmp per element) at the
+ * top of WHATWG self-time on table-heavy pages. ids are
+ * h_tag_infos indexes, so one first-char bucket walk per start
+ * tag serves every later classification of that name. */
 
 /* Implied-end decision on ids: does starting `start_id` close an
  * open element with id `open_id`? Bit-for-bit replacement of the
@@ -3936,8 +3993,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
         (b->depth == 0
              ? !b->top_head
              : (b->depth == 1 && b->open[0] &&
-                h_ieq_raw(leptris_element_name(b->open[0]),
-                          "html") &&
+                b->open_id[0] == h_id_html &&
                 !leptris_node_first_child(
                     (LeptrisNodeRef)b->open[0]))) &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
@@ -3981,8 +4037,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
     if (b->whatwg && b->depth > 0 &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
         b->tmpl_mode[b->depth - 1] == H_TPLM_IN_CGROUP &&
-        h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
-                  "template")) {
+        b->open_id[b->depth - 1] == h_id_template) {
         const char* ht = leptris_text_node_get_content(n);
         int nonws = 0;
         if (ht)
@@ -4015,8 +4070,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
     if (b->whatwg && b->depth > 0 &&
         leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
         b->open_ns[b->depth - 1] == H_NS_HTML &&
-        h_ieq_raw(leptris_element_name(b->open[b->depth - 1]),
-                  "colgroup") &&
+        b->open_id[b->depth - 1] == h_id_colgroup &&
         h_fosterable(b, n)) {
         const char* ct = leptris_text_node_get_content(n);
         size_t cw = 0;
@@ -4048,10 +4102,9 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
         int tbl_ctx = h_id_table_ctx(b->open_id[b->depth - 1]);
         if (!tbl_ctx && b->depth >= 2 &&
             b->open_ns[b->depth - 1] == H_NS_HTML &&
-            h_ieq_raw(leptris_element_name(top), "form") &&
+            b->open_id[b->depth - 1] == h_id_form &&
             b->open_ns[b->depth - 2] == H_NS_HTML &&
-            h_ieq_raw(leptris_element_name(b->open[b->depth - 2]),
-                      "table"))
+            b->open_id[b->depth - 2] == h_id_table)
             tbl_ctx = 1;
         /* #659 foster (WHATWG only): text/elements in table context
          * go before the nearest open table in ITS parent. */
@@ -6250,8 +6303,7 @@ static LeptrisDocument html_parse_shared(
                     } else if (b.whatwg && strcmp(lname, "head") == 0) {
                         int head_found2 = 0;
                         for (size_t d2 = b.depth; d2 > 0; d2--)
-                            if (h_ieq_raw(leptris_element_name(
-                                              b.open[d2 - 1]), "head")) {
+                            if (b.open_id[d2 - 1] == h_id_head) {
                                 b.head_end_seen = 1;
                                 b.head_end_tail = b.top_tail;
                                 head_found2 = 1;
@@ -6332,9 +6384,7 @@ static LeptrisDocument html_parse_shared(
                         int body_open2 = 0;
                         for (size_t d3 = 0; d3 < b.depth; d3++)
                             if (b.open_ns[d3] == H_NS_HTML &&
-                                h_ieq_raw(leptris_element_name(
-                                              b.open[d3]),
-                                          "body"))
+                                b.open_id[d3] == h_id_body)
                                 body_open2 = 1;
                         if (!body_open2) {
                             b.after_body = 1;
@@ -6787,8 +6837,7 @@ static LeptrisDocument html_parse_shared(
                     if (ws_only2 &&
                         (b.depth == 0 ||
                          (b.depth == 1 && b.open[0] &&
-                          h_ieq_raw(leptris_element_name(b.open[0]),
-                                    "html") &&
+                          b.open_id[0] == h_id_html &&
                           !leptris_node_first_child(
                               (LeptrisNodeRef)b.open[0]))))
                         text = p;
@@ -6815,7 +6864,7 @@ static LeptrisDocument html_parse_shared(
         int structural_ctx =
             b.depth == 0 ||
             (b.whatwg && b.depth == 1 && b.open[0] &&
-             h_ieq_raw(leptris_element_name(b.open[0]), "html"));
+             b.open_id[0] == h_id_html);
         if (structural_ctx && !b.frameset &&
             (strcmp(name, "head") == 0 || strcmp(name, "body") == 0)) {
             /* Flush pending text first: the branch continues below,
@@ -6886,7 +6935,7 @@ static LeptrisDocument html_parse_shared(
                  * (plain-text-unsafe:2/3 regressed without). */
                 b.depth =
                     (b.depth > 0 && b.open[0] &&
-                     h_ieq_raw(leptris_element_name(b.open[0]), "html"))
+                     b.open_id[0] == h_id_html)
                         ? 1 : 0;
                 /* falls through: the normal open pushes it */
             } else if (!(b.frameset && b.depth > 0)) {
@@ -7574,11 +7623,9 @@ static LeptrisDocument html_parse_shared(
                  * (html5test-com:20). */
                 if (b.input_hidden_tag && b.depth >= 2 &&
                     b.open_ns[b.depth - 1] == H_NS_HTML &&
-                    h_ieq_raw(leptris_element_name(b.open[b.depth - 1]),
-                              "form") &&
+                    b.open_id[b.depth - 1] == h_id_form &&
                     b.open_ns[b.depth - 2] == H_NS_HTML &&
-                    h_ieq_raw(leptris_element_name(b.open[b.depth - 2]),
-                              "table")) {
+                    b.open_id[b.depth - 2] == h_id_table) {
                     b.depth--;
                     b.form_open = 0;
                 }
@@ -7609,8 +7656,7 @@ static LeptrisDocument html_parse_shared(
          * <colgroup><math>, tests10:16: <colgroup><svg>). */
         if (b.whatwg && elem_ns != H_NS_HTML && b.depth > 0 &&
             b.open_ns[b.depth - 1] == H_NS_HTML &&
-            h_ieq_raw(leptris_element_name(b.open[b.depth - 1]),
-                      "colgroup")) {
+            b.open_id[b.depth - 1] == h_id_colgroup) {
             for (size_t d2 = b.depth; d2 > 0; d2--) {
                 const char* on2 =
                     leptris_element_name(b.open[d2 - 1]);
