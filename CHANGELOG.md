@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.287] - 2026-10-02
+
+### Added
+
+- top-level param overrides — leptris_xslt_apply_params / _apply_string_params (leptris-ruby#360) (xslt)
+
+### Performance
+
+- fused attr-loop dispatch on the shared chartype table (#1436) (parser)
+
+
+
 ## [1.9.286] - 2026-10-02
 
 ### Added
