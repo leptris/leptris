@@ -5,10 +5,12 @@
 <!-- Edit this section with the actual release notes. -->
 <!-- See https://keepachangelog.com for format guidance. -->
 
-### Changed
+### Added
 
-- (describe changes here)
-
+- namespace forms for attribute plan rows — `ns_form`/`ns_uri` on `leptris_attr_plan` (#1486)
+  - Extends #1115's child-row pattern to attribute rows: `ns_form = 0` (the zero value) keeps the historical wire-name lookup byte-for-byte and existing aggregate initializers stay valid; `LEPTRIS_PLAN_NS_EXACT` + `ns_uri` makes `wire_name` the LOCAL name and binds the (namespace URI, local) identity through the element's in-scope prefix bindings — prefix-spelling-independent, so a `w14:paraId`-typed row binds whatever prefix the document uses for the Word 2010 URI. `LEPTRIS_PLAN_NS_ANY` matches the local name in any namespace; unprefixed attributes have no namespace and never bind EXACT (XML Namespaces §5.2).
+  - Unlocks the plan fast path for typed-attribute models: lutaml-model's `attr_type_ns` opt-out (one `w14:paraId` leaf cascading the WordprocessingML paragraph chain out of the plan path, against a measured 33% parse-CPU saving) can now emit ns-exact attribute rows instead.
+  - Build deep-copies `ns_uri`, zero-guards the trailing fields for hosts that `malloc` the spec without value-initialization (#1272 lesson), rejects `EXACT` without a URI as `INVALID_ARG`; free releases the copies. RED-first spec plus the full battery (1773/1773). (#1487)
 
 ## [1.9.289] - 2026-10-02
 
