@@ -4839,7 +4839,9 @@ void xslt_exec_free(XsltExec* ex) {
 static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
                                   LeptrisDocument sheet_doc,
                                   LeptrisDocument source,
-                                  int allow_stream) {
+                                  int allow_stream,
+                                  const char* const* param_pairs,
+                                  size_t param_pair_count) {
     if (!sheet || !source) return NULL;
     register_ops();
 
@@ -4848,6 +4850,8 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
     ex->sheet = sheet;
     ex->sheet_doc = sheet_doc;   /* set BEFORE the body: document('') */
     ex->source = source;
+    ex->param_pairs = param_pairs;
+    ex->param_pair_count = param_pair_count;
     ex->current_pos = 1;   /* §12.4: position() default context position */
     ex->current_size = 1;  /* last() default context size */
     ex->result = leptris_document_create();
@@ -4894,6 +4898,35 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
         leptris_document_get_node((struct leptris_document*)source);
     for (const XsltInstr* g = sheet->globals; g; g = g->next) {
         if (g->kind == XSLT_INSTR_VARIABLE) {
+            /* Top-level xsl:param override (leptris_xslt_apply_params,
+             * leptris-ruby#360): a supplied name/value pair binds the
+             * STRING directly — select/@default never evaluate, §11
+             * winner rules for duplicate params still hold (the last
+             * binding wins, matching the loop's natural order). */
+            if (g->is_param && g->name && ex->param_pair_count) {
+                const char* hit = NULL;
+                for (size_t pi = 0; pi < ex->param_pair_count; pi++) {
+                    if (ex->param_pairs[2 * pi] &&
+                        strcmp(ex->param_pairs[2 * pi], g->name) == 0) {
+                        hit = ex->param_pairs[2 * pi + 1];
+                        break;
+                    }
+                }
+                if (hit) {
+                    struct leptris_xpath_result* pv =
+                        xpath_result_new(XPATH_RESULT_STRING);
+                    if (pv) {
+                        pv->value.string_value = leptris_strdup(hit);
+                        if (pv->value.string_value) {
+                            xslt_push_var(ex, g->name, pv);
+                            ex->global_vars = ex->vars;
+                            continue;
+                        }
+                        leptris_xpath_result_free(pv);
+                    }
+                    /* fall through to the default on alloc failure */
+                }
+            }
             LeptrisXPathNsSet saved_gns = ex->current_ns;
             ex->current_ns = g->ns;
             op_variable(ex, g, globals_ctx);
@@ -4939,10 +4972,20 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
 XsltExec* xslt_transform_doc(const XsltStylesheet* sheet,
                              LeptrisDocument sheet_doc,
                              LeptrisDocument source) {
-    XsltExec* ex = transform_doc_ex(sheet, sheet_doc, source, 1);
+    return xslt_transform_doc_params(sheet, sheet_doc, source, NULL, 0);
+}
+
+XsltExec* xslt_transform_doc_params(const XsltStylesheet* sheet,
+                                    LeptrisDocument sheet_doc,
+                                    LeptrisDocument source,
+                                    const char* const* pairs,
+                                    size_t pair_count) {
+    XsltExec* ex = transform_doc_ex(sheet, sheet_doc, source, 1,
+                                    pairs, pair_count);
     if (ex && ex->streaming && ex->stream_bail_html) {
         xslt_exec_free(ex);
-        ex = transform_doc_ex(sheet, sheet_doc, source, 0);
+        ex = transform_doc_ex(sheet, sheet_doc, source, 0,
+                              pairs, pair_count);
     }
     return ex;
 }

@@ -763,6 +763,11 @@ typedef struct xslt_exec {
      * wrong append. */
     LeptrisElement last_append_parent;
     LeptrisNodeRef last_append_child;
+    /* Top-level xsl:param overrides for THIS application
+     * (leptris_xslt_apply_params): flat name/value pairs, borrowed
+     * for the exec lifetime. NULL/0 = defaults (the v1 face). */
+    const char* const* param_pairs;
+    size_t param_pair_count;
 } XsltExec;
 
 /* xslt_exec.c — public transform entry. */
@@ -839,6 +844,11 @@ struct leptris_xpath_result* xslt_eval(XsltExec* ex,
                                        LeptrisElement node);
 void xslt_push_var(XsltExec* ex, const char* name,
                    struct leptris_xpath_result* v);
+XsltExec* xslt_transform_doc_params(const XsltStylesheet* sheet,
+                                   LeptrisDocument sheet_doc,
+                                   LeptrisDocument source,
+                                   const char* const* pairs,
+                                   size_t pair_count);
 void xslt_pop_var(XsltExec* ex, const char* name);
 void xslt_pop_vars_to(XsltExec* ex, XsltVar* mark);
 struct leptris_xpath_result* xslt_copy_result(

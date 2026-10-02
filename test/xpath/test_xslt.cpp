@@ -115,6 +115,71 @@ std::string run2(const char* body_with_key, const char* xml) {
 /* §11 block scope: an inner xsl:variable shadows within its
  * containing element and RESTORES the outer binding afterwards.
  * Before: the inner binding persisted (flat chain, no scope). */
+
+/* leptris_xslt_apply_string_params (leptris-ruby#360): run with a
+ * flat name/value pair array. */
+std::string run_params(const char* sheet_body, const char* xml,
+                       const char* const* pairs, size_t count) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='1.0'>" + sheet_body +
+                        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    if (!x) return "(compile-failed)";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), nullptr);
+    if (!d) { leptris_xslt_free(x); return "(parse-failed)"; }
+    char* out = leptris_xslt_apply_string_params(x, d, pairs, count);
+    std::string r = out ? out : "(null)";
+    leptris_free_string(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+    return r;
+}
+
+TEST(XsltFull, TopLevelParamOverride) {
+    const char* pairs[] = {"n", "7"};
+    EXPECT_EQ(run_params(
+        "<xsl:param name='n' select=\"'D'\"/>"
+        "<xsl:template match='/'><v><xsl:value-of select='$n'/></v>"
+        "</xsl:template>",
+        "<r/>", pairs, 1), "<?xml version=\"1.0\"?>\n<v>7</v>");
+}
+
+TEST(XsltFull, TopLevelParamDefaultWhenAbsent) {
+    EXPECT_EQ(body(run(
+        "<xsl:param name='n' select=\"'D'\"/>"
+        "<xsl:template match='/'><v><xsl:value-of select='$n'/></v>"
+        "</xsl:template>",
+        "<r/>")), "<v>D</v>");
+}
+
+TEST(XsltFull, TopLevelParamOverrideMultipleAndSkipsUnknown) {
+    const char* pairs[] = {"a", "1", "zz", "x"};
+    EXPECT_EQ(body(run_params(
+        "<xsl:param name='a' select=\"'DA'\"/>"
+        "<xsl:param name='b' select=\"'DB'\"/>"
+        "<xsl:template match='/'><w a='{$a}' b='{$b}'/></xsl:template>",
+        "<r/>", pairs, 2)), "<w a=\"1\" b=\"DB\"/>");
+}
+
+TEST(XsltFull, TopLevelParamOverrideDocFace) {
+    const char* pairs[] = {"t", "OV"};
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+        " version='1.0'>"
+        "<xsl:param name='t' select=\"'DF'\"/>"
+        "<xsl:template match='/'><e><xsl:value-of select='$t'/></e>"
+        "</xsl:template></xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_NE(x, nullptr);
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(d, nullptr);
+    LeptrisDocument out = leptris_xslt_apply_params(x, d, pairs, 1);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(body(leptris_document_serialize(out, nullptr)), "<e>OV</e>");
+    leptris_document_free(out);
+    leptris_document_free(d);
+    leptris_xslt_free(x);
+}
+
 TEST(XsltFull, BlockScopeVariablesShadowAndRestore) {
     EXPECT_EQ(body(run(
         "<xsl:template match='/'>"

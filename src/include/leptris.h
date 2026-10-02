@@ -3096,6 +3096,19 @@ LEPTRIS_API void leptris_xslt_free(LeptrisXslt xslt);
  */
 LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
                                                 LeptrisDocument doc);
+/**
+ * Apply a compiled stylesheet with top-level xsl:param overrides
+ *
+ * `pairs` is a flat name/value array: 2*pair_count entries,
+ * pairs[2*i] is the param name, pairs[2*i+1] its string value
+ * (bound as an XPath string — consumers doing numeric quoting own
+ * that, matching libxslt conventions). A supplied name never
+ * evaluates the param's select/@default; absent names keep them.
+ * The array is borrowed for the duration of the call only.
+ */
+LEPTRIS_API LeptrisDocument leptris_xslt_apply_params(
+    LeptrisXslt xslt, LeptrisDocument doc,
+    const char* const* pairs, size_t pair_count);
 
 /**
  * Apply a compiled stylesheet and serialize the result
@@ -3110,6 +3123,15 @@ LEPTRIS_API LeptrisDocument leptris_xslt_apply(LeptrisXslt xslt,
  */
 LEPTRIS_API char* leptris_xslt_apply_string(LeptrisXslt xslt,
                                              LeptrisDocument doc);
+/**
+ * Apply with top-level param overrides and serialize the result
+ *
+ * Same pair encoding and semantics as leptris_xslt_apply_params;
+ * leptris_xslt_apply_string otherwise.
+ */
+LEPTRIS_API char* leptris_xslt_apply_string_params(
+    LeptrisXslt xslt, LeptrisDocument doc,
+    const char* const* pairs, size_t pair_count);
 
 /**
  * Custom XPath function handler (string-valued).
