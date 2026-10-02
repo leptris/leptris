@@ -9,6 +9,13 @@
   - `leptris_sax_records_parse()` rejected every nonzero flag, so the bulk-records lane could not opt out of either probe. The two Door A bits are now accepted (no-ops on the interleaved lane, which carries neither probe); unknown bits still return `LEPTRIS_ERROR_INVALID_ARG`.
   - Regression specs: `Recorder.DoorAFlagsSurviveReset`, `SaxRecords.DoorAFlagsAccepted`. (#1472)
 
+### Changed
+
+- element name stored as a self-relative int32 offset — `struct leptris_element` 48 → 44 bytes (#1285)
+  - The `char* name` was the struct's last 8-aligned member; replacing it with the tree-edge offset encoding drops the struct alignment to 4 and reclaims the tail padding.
+  - The dp parse lane packs element arrays at true size: peak RSS on a 15 MB / 400k-element document drops 253 → 239 MB (-5.4%) with parse and serialize times flat. Pool-allocated elements keep their stride (`LEPTRIS_POOL_ALIGNMENT` rounds up); ILP32 layouts are unchanged.
+  - Mutation/public-creator name stamps use the doc-tagged compact encoder (#1320 pattern) so far-mut-block spills register with the correct document. New specs: `ElementNameOffsetRoundTrip` plus a hard 44-byte size pin.
+
 
 
 ## [1.9.285] - 2026-10-01
