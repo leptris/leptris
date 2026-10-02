@@ -95,6 +95,18 @@ typedef struct {
     uint16_t predicate_count;
     uint16_t pad_pred;
     const leptris_attr_predicate* predicates;
+    /* #1486 (additive trailing fields, the #1115 child-row
+     * pattern): attribute-level namespace form. A row with
+     * ns_form set matches by (namespace URI, local name) —
+     * wire_name is the LOCAL name and the prefix spelling on the
+     * wire is irrelevant. NONE (0, the zero value) keeps the
+     * historical behavior: lookup by wire_name exactly as it
+     * appears on the wire (prefixed or bare). Unprefixed
+     * attributes have no namespace; EXACT requires a prefixed
+     * attribute whose prefix binds to ns_uri. */
+    uint8_t ns_form;       /* LeptrisPlanNsForm */
+    uint8_t pad_ns;
+    const char* ns_uri;    /* LEPTRIS_PLAN_NS_EXACT only */
 } leptris_attr_plan;
 
 typedef struct {

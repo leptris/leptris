@@ -97,6 +97,80 @@ TEST(Plan1115, RuleLevelNsFormsMatchSiblingsByUri) {
     leptris_document_free(doc);
 }
 
+// ---- #1486: attribute rows gain the #1115 ns forms ---------------
+
+TEST(Plan1486, AttrRowsBindNamespaceIdentity) {
+    LeptrisStatus st = LEPTRIS_OK;
+    /* Two prefixes -> two URIs, plus a bare same-local attribute:
+     * the (URI, local) identity is what EXACT binds, not the
+     * prefix spelling. */
+    const char* xml =
+        "<w:p xmlns:w14='urn:word2010' xmlns:z='urn:other' "
+        "w14:paraId='1A04' z:paraId='OTHER' paraId='bare'/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, (LeptrisDocument)nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_attr_plan attrs[3] = {};
+    attrs[0].wire_name = "paraId";
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].type_tag = 1;
+    attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;   /* #1486 */
+    attrs[0].ns_uri = "urn:word2010";
+    attrs[1].wire_name = "paraId";
+    attrs[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[1].type_tag = 2;
+    /* ns_form 0 = historical wire-name behavior: the bare attr */
+    attrs[2].wire_name = "paraId";
+    attrs[2].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[2].type_tag = 3;
+    attrs[2].ns_form = LEPTRIS_PLAN_NS_ANY;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "p";
+    plans[0].attribute_count = 3;
+    plans[0].attribute_plans = attrs;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, (LeptrisPlan)nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, (LeptrisPlanResult)nullptr);
+    EXPECT_STREQ(leptris_plan_value_attribute(r, "paraId"), "1A04");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+
+    /* Prefix independence: the SAME EXACT row binds when the
+     * document spells the URI with a different prefix — the
+     * WordprocessingML w14/wordml2010 scenario. */
+    const char* xml2 =
+        "<w:p xmlns:wm='urn:word2010' wm:paraId='9F77'/>";
+    LeptrisDocument doc2 = leptris_parse_string(xml2, strlen(xml2), &st);
+    ASSERT_NE(doc2, (LeptrisDocument)nullptr);
+    LeptrisElement root2 = leptris_document_root(doc2);
+    leptris_attr_plan one[1] = {};
+    one[0].wire_name = "paraId";
+    one[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    one[0].type_tag = 1;
+    one[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    one[0].ns_uri = "urn:word2010";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = one;
+    spec.plans = plans;
+    LeptrisPlan plan2 = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan2, (LeptrisPlan)nullptr);
+    LeptrisPlanResult r2 = leptris_plan_walk(doc2, root2, plan2, &st);
+    ASSERT_NE(r2, (LeptrisPlanResult)nullptr);
+    EXPECT_STREQ(leptris_plan_value_attribute(r2, "paraId"), "9F77");
+    leptris_plan_result_free(r2);
+    leptris_plan_free(plan2);
+    leptris_document_free(doc2);
+    leptris_document_free(doc);
+}
+
 TEST(Plan1115, EveryValueKindCarriesPosition) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(
