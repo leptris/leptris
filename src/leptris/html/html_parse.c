@@ -4561,17 +4561,16 @@ static int h_afe_end(HBuilder* b, const char* subject) {
         {
             int in_scope = 1;
             for (size_t k = b->depth; k > (size_t)si + 1; k--) {
-                const char* kn =
-                    leptris_element_name(b->open[k - 1]);
+                uint8_t kid = b->open_id[k - 1];
                 if (b->open_ns[k - 1] != H_NS_HTML ||
-                    h_ieq_raw(kn, "applet") ||
-                    h_ieq_raw(kn, "caption") ||
-                    h_ieq_raw(kn, "table") ||
-                    h_ieq_raw(kn, "td") ||
-                    h_ieq_raw(kn, "th") ||
-                    h_ieq_raw(kn, "marquee") ||
-                    h_ieq_raw(kn, "object") ||
-                    h_ieq_raw(kn, "template") ||
+                    kid == h_id_applet ||
+                    kid == h_id_caption ||
+                    kid == h_id_table ||
+                    kid == h_id_td ||
+                    kid == h_id_th ||
+                    kid == h_id_marquee ||
+                    kid == h_id_object ||
+                    kid == h_id_template ||
                     h_is_int_point(b, (int)(k - 1))) {
                     in_scope = 0;
                     break;
@@ -4590,7 +4589,10 @@ static int h_afe_end(HBuilder* b, const char* subject) {
         for (size_t k = (size_t)si + 1; k < b->depth; k++) {
             /* Only HTML-namespace elements are furthest-block
              * candidates — foreign elements with special-looking
-             * names (svg tr) are ordinary foreign content. */
+             * names (svg tr) are ordinary foreign content. The
+             * NAME is fetched (not open_id): this walk runs
+             * mid-AFE, between stack splices, where the id stack
+             * is not yet the source of truth (webkit02:14). */
             if (b->open_ns[k] == H_NS_HTML &&
                 h_is_special_ww(leptris_element_name(b->open[k]))) {
                 fbi = (int)k;
@@ -6175,23 +6177,21 @@ static LeptrisDocument html_parse_shared(
                         strcmp(lname, "p") == 0) {
                         int p_open = 0;
                         for (size_t d2 = b.depth; d2 > 0; d2--) {
-                            const char* on2 =
-                                leptris_element_name(b.open[d2 - 1]);
-                            if (!on2) break;
-                            if (strcmp(on2, "p") == 0) {
+                            uint8_t oid2 = b.open_id[d2 - 1];
+                            if (oid2 == h_id_p) {
                                 p_open = 1;
                                 break;
                             }
-                            if (h_ieq_raw(on2, "button") ||
-                                h_ieq_raw(on2, "applet") ||
-                                h_ieq_raw(on2, "caption") ||
-                                h_ieq_raw(on2, "table") ||
-                                h_ieq_raw(on2, "td") ||
-                                h_ieq_raw(on2, "th") ||
-                                h_ieq_raw(on2, "marquee") ||
-                                h_ieq_raw(on2, "object") ||
-                                h_ieq_raw(on2, "select") ||
-                                h_ieq_raw(on2, "template") ||
+                            if (oid2 == h_id_button ||
+                                oid2 == h_id_applet ||
+                                oid2 == h_id_caption ||
+                                oid2 == h_id_table ||
+                                oid2 == h_id_td ||
+                                oid2 == h_id_th ||
+                                oid2 == h_id_marquee ||
+                                oid2 == h_id_object ||
+                                oid2 == h_id_select ||
+                                oid2 == h_id_template ||
                                 h_is_int_point(&b, d2 - 1))
                                 break;
                         }
@@ -7221,11 +7221,9 @@ static LeptrisDocument html_parse_shared(
              strcmp(name, "colgroup") == 0)) {
             int col_tbl = 0;
             for (size_t d2 = b.depth; d2 > 0; d2--) {
-                const char* on2 =
-                    leptris_element_name(b.open[d2 - 1]);
-                if (on2 && (h_ieq_raw(on2, "table") ||
-                            h_ieq_raw(on2, "colgroup") ||
-                            h_ieq_raw(on2, "template"))) {
+                uint8_t oid2 = b.open_id[d2 - 1];
+                if (oid2 == h_id_table || oid2 == h_id_colgroup ||
+                    oid2 == h_id_template) {
                     col_tbl = 1;
                     break;
                 }
@@ -7528,20 +7526,19 @@ static LeptrisDocument html_parse_shared(
              * open ABOVE the table (a foster-parented <a>) pops
              * them before the wrapper synthesis runs. */
             {
-                const char* topn =
-                    leptris_element_name(b.open[b.depth - 1]);
+                uint8_t top_id = b.open_id[b.depth - 1];
                 /* A caption/col/colgroup start clears a
                  * row/section/cell back to the table - the new
                  * group is a TABLE child (tables01:13;
                  * tests1:108/109: each mid-table <col> closes
                  * the section and opens a fresh colgroup). */
                 int rowish =
-                    h_ieq_raw(topn, "tbody") ||
-                    h_ieq_raw(topn, "thead") ||
-                    h_ieq_raw(topn, "tfoot") ||
-                    h_ieq_raw(topn, "tr") ||
-                    h_ieq_raw(topn, "td") ||
-                    h_ieq_raw(topn, "th");
+                    top_id == h_id_tbody ||
+                    top_id == h_id_thead ||
+                    top_id == h_id_tfoot ||
+                    top_id == h_id_tr ||
+                    top_id == h_id_td ||
+                    top_id == h_id_th;
                 int group_start =
                     strcmp(name, "caption") == 0 ||
                     strcmp(name, "col") == 0 ||
@@ -7551,18 +7548,18 @@ static LeptrisDocument html_parse_shared(
                  * then fosters) - <colgroup><math> puts the math
                  * BEFORE the table (tests9:17/10:16). */
                 int tableish =
-                    h_ieq_raw(topn, "table") ||
+                    top_id == h_id_table ||
                     (rowish && !group_start) ||
-                    (h_ieq_raw(topn, "caption") &&
+                    (top_id == h_id_caption &&
                      strcmp(name, "caption") != 0) ||
-                    (h_ieq_raw(topn, "colgroup") &&
+                    (top_id == h_id_colgroup &&
                      group_start &&
                      strcmp(name, "colgroup") != 0);
                 /* 13.2.6.4.9 "in caption": a td/th/tr start pops
                  * the caption and reprocesses in table — the
                  * caption is NOT a table context for cells
                  * (tests6:16: <table><caption><td>). */
-                if (h_ieq_raw(topn, "caption") &&
+                if (top_id == h_id_caption &&
                     (strcmp(name, "td") == 0 ||
                      strcmp(name, "th") == 0 ||
                      strcmp(name, "tr") == 0))
@@ -7578,18 +7575,17 @@ static LeptrisDocument html_parse_shared(
                      strcmp(name, "th") == 0 ||
                      strcmp(name, "tr") == 0)) {
                     for (size_t d2 = b.depth; d2 > 0; d2--) {
-                        const char* on2 =
-                            leptris_element_name(b.open[d2 - 1]);
+                        uint8_t oid2 = b.open_id[d2 - 1];
                         /* #659 fence: a template between here and the
                          * table owns the token — no clearing past it
                          * (template-top no-ops the synthesis below). */
-                        if (on2 && h_ieq_raw(on2, "template"))
+                        if (oid2 == h_id_template)
                             break;
-                        if (on2 && h_ieq_raw(on2, "table")) {
+                        if (oid2 == h_id_table) {
                             b.depth = d2;
                             break;
                         }
-                        if (on2 && h_ieq_raw(on2, "tr") &&
+                        if (oid2 == h_id_tr &&
                             (strcmp(name, "td") == 0 ||
                              strcmp(name, "th") == 0)) {
                             b.depth = d2;
@@ -7602,14 +7598,13 @@ static LeptrisDocument html_parse_shared(
                  * reprocesses in table - the element then fosters
                  * before the table (tests18:13:
                  * <colgroup><plaintext>). */
-                if (h_ieq_raw(topn, "colgroup") && !group_start &&
+                if (top_id == h_id_colgroup && !group_start &&
                     strcmp(name, "template") != 0) {
                     for (size_t d2 = b.depth; d2 > 0; d2--) {
-                        const char* on2 =
-                            leptris_element_name(b.open[d2 - 1]);
-                        if (on2 && h_ieq_raw(on2, "template"))
+                        uint8_t oid2 = b.open_id[d2 - 1];
+                        if (oid2 == h_id_template)
                             break;
-                        if (on2 && h_ieq_raw(on2, "table")) {
+                        if (oid2 == h_id_table) {
                             b.depth = d2;
                             break;
                         }
@@ -7658,10 +7653,9 @@ static LeptrisDocument html_parse_shared(
             b.open_ns[b.depth - 1] == H_NS_HTML &&
             b.open_id[b.depth - 1] == h_id_colgroup) {
             for (size_t d2 = b.depth; d2 > 0; d2--) {
-                const char* on2 =
-                    leptris_element_name(b.open[d2 - 1]);
-                if (on2 && h_ieq_raw(on2, "template")) break;
-                if (on2 && h_ieq_raw(on2, "table")) {
+                uint8_t oid2 = b.open_id[d2 - 1];
+                if (oid2 == h_id_template) break;
+                if (oid2 == h_id_table) {
                     b.depth = d2;
                     break;
                 }
@@ -7735,20 +7729,19 @@ static LeptrisDocument html_parse_shared(
         if (b.whatwg && elem_ns == H_NS_HTML &&
             strcmp(name, "button") == 0) {
             for (size_t d2 = b.depth; d2 > 0; d2--) {
-                const char* on2 = leptris_element_name(b.open[d2 - 1]);
-                if (!on2) break;
-                if (strcmp(on2, "button") == 0) {
+                uint8_t oid2 = b.open_id[d2 - 1];
+                if (oid2 == h_id_button) {
                     b.depth = d2 - 1;
                     break;
                 }
-                if (h_ieq_raw(on2, "applet") ||
-                    h_ieq_raw(on2, "caption") ||
-                    h_ieq_raw(on2, "table") ||
-                    h_ieq_raw(on2, "td") ||
-                    h_ieq_raw(on2, "th") ||
-                    h_ieq_raw(on2, "marquee") ||
-                    h_ieq_raw(on2, "object") ||
-                    h_ieq_raw(on2, "template") ||
+                if (oid2 == h_id_applet ||
+                    oid2 == h_id_caption ||
+                    oid2 == h_id_table ||
+                    oid2 == h_id_td ||
+                    oid2 == h_id_th ||
+                    oid2 == h_id_marquee ||
+                    oid2 == h_id_object ||
+                    oid2 == h_id_template ||
                     h_is_int_point(&b, d2 - 1))
                     break;
             }
