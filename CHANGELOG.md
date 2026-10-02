@@ -4,7 +4,19 @@
 
 ### Added
 
-- set_root adopts foreign roots by copy — leptris-ruby #371 (dom)
+- **DOM: `set_root` adopts foreign roots (leptris-ruby #371)** — an element
+  owned by another document is no longer rejected with EINVAL. Nodes are
+  pool-owned by their document, so adoption deep-copies the subtree into the
+  target document's pool (all node kinds, attributes, and namespace
+  declarations survive); the source document loses the element (root pointers
+  cleared, element spliced out of its document-child chain — Nokogiri steal
+  observability), and the detached original stays resolvable in its own pool
+  until the source document is freed. The new
+  `leptris_document_set_root_ex(doc, root, &installed)` reports the installed
+  element — a fresh handle distinct from the source pointer — so bindings wrap
+  the right node; the legacy entry keeps its signature and adopts too.
+  Parent-attached elements still reject EINVAL, and same-document installs
+  are unchanged.
 
 
 
