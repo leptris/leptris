@@ -4,9 +4,34 @@
 
 ### Fixed
 
-- remove_child/remove_all_children must leave clean orphans (dom)
-- prefix:* is namespace-scoped — stop fusing it to any-element opcodes (xpath)
-- pin nested-child attr ns forms + spec-struct size accessors (#1490) (plan)
+- **DOM: removed nodes leave clean orphans** — `leptris_element_remove_child`
+  unlinked the child from the parent's list but left the child's own
+  `next_sibling` intact, so a later append spliced the stale sibling run into
+  the new parent — nodes reachable from two parents, up to self-containing
+  cycles that never terminate in serialization. `leptris_element_remove_all_children`
+  had the same defect through its parent-backpointer walk. Both now clear the
+  removed nodes' own sibling links, matching `leptris_node_unlink` and libxml2
+  `xmlUnlinkNode` semantics (leptris-ruby#370).
+- **XPath: `prefix:*` is namespace-scoped** — three bytecode fusion sites in
+  the compiler classified a prefixed wildcard as a plain wildcard and lowered
+  `.//m:*` and `/descendant-or-self::m:*` to the any-element fast opcodes,
+  ignoring the caller's namespace bindings entirely: a bound `m:*` matched
+  every element (no-namespace ones included), and the unbound literal-prefix
+  fallback never ran. Prefixed wildcards now stay on the generic step path,
+  whose matcher resolves the test prefix through the evaluation context's
+  bindings — URI equality across prefixes, literal-prefix comparison when
+  unbound (leptris-ruby#368).
+
+### Added
+
+- **Plan API: struct-size accessors for binding skew detection** —
+  `leptris_plan_spec_struct_size`, `leptris_plan_{element,child,attr,predicate}_row_size`
+  return the engine's compiled row layouts so bindings can verify them against
+  the headers they compiled with and fail loudly on version skew instead of
+  misparsing rows. Root cause behind #1490 (the engine's nested `ns_form`
+  semantics were correct; the consumer straddled an older engine with newer
+  headers). A nested-child regression spec now pins all three `ns_form`
+  behaviors, including that a non-matching URI keeps the child element.
 
 
 
