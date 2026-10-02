@@ -51,6 +51,10 @@ const uint8_t leptris_chartype_table[256] = {
     ['-']=CT_NAME, ['.']=CT_NAME,
     /* Whitespace */
     [' ']=CT_WS, ['\t']=CT_WS, ['\n']=CT_WS, ['\r']=CT_WS,
+    /* Attr-loop delimiters (#1436 fused scanner; see chartype.h) */
+    ['>']=CT_ATTR_GT, ['/']=CT_ATTR_SLASH,
+    ['=']=CT_ATTR_EQ,
+    ['"']=CT_ATTR_QUOTE, ['\'']=CT_ATTR_QUOTE,
     /* UTF-8 multibyte lead and continuation bytes — every byte
      * >= 0x80 is CT_UTF8 (lenient name scanning, <café>). */
 #define CT_U8(n) [n]=CT_UTF8
