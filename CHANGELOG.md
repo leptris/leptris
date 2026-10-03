@@ -4,7 +4,19 @@
 
 ### Fixed
 
-- string lt/gt codepoint semantics + codepoints-to-string sequence items (xquery)
+- **XQuery: string lt/gt are codepoint value comparisons** — the
+  shared XPath 1.0 comparison numeric-coerced strings, so two
+  collation-keys that both spell numbers compared as equal numbers.
+  Both comparison sites now codepoint-compare string operands when
+  the evaluation is XQuery-flavored (the evaluator's string branch
+  and the VM twin); XPath 1.0 evaluation is unchanged.
+  (PR #1513)
+
+- **XQuery: fn:codepoints-to-string encodes every item of its
+  sequence argument** — the collector collapsed a parenthesized
+  sequence to one scalar (its space-joined spelling), so
+  (37, 65500, 37) encoded as just the first codepoint. Collation-key
+  adoption rises to 12/56 run-and-agree. (PR #1513)
 
 
 
