@@ -12,6 +12,7 @@
 #include "xpath/xpath_variables.h"
 #include "dom/element.h"
 #include "dom/element_index.h"
+#include "dom/mut_recycle.h"
 #include "dom/node.h"
 #include "dom/text.h"
 #include "dom/comment.h"
@@ -1064,10 +1065,13 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
             doc->parse_scratch, doc->xml_buffer_len + 1 + 64);
         doc->parse_scratch = NULL;
     }
-    /* Free mutation element blocks (round 18). */
+    /* Free mutation element blocks (round 18). Recycle: park on the
+     * TLS free-list (the next doc-cycle carves the same sizes); the
+     * push refuses beyond the byte cap and we free normally. */
     while (doc->mut_elem_blocks) {
         struct leptris_mut_elem_block* next = doc->mut_elem_blocks->next;
-        free(doc->mut_elem_blocks);
+        if (!leptris_mut_recycle_push_elem(doc->mut_elem_blocks))
+            free(doc->mut_elem_blocks);
         doc->mut_elem_blocks = next;
     }
     doc->mut_elem_cursor = NULL;
@@ -1076,7 +1080,8 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     /* Free mutation name blocks (round 21). */
     while (doc->mut_name_blocks) {
         struct leptris_mut_name_block* next = doc->mut_name_blocks->next;
-        free(doc->mut_name_blocks);
+        if (!leptris_mut_recycle_push_name(doc->mut_name_blocks))
+            free(doc->mut_name_blocks);
         doc->mut_name_blocks = next;
     }
     doc->mut_name_cursor = NULL;
@@ -1085,7 +1090,8 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     /* Free mutation attr blocks (round 22). */
     while (doc->mut_attr_blocks) {
         struct leptris_mut_attr_block* next = doc->mut_attr_blocks->next;
-        free(doc->mut_attr_blocks);
+        if (!leptris_mut_recycle_push_attr(doc->mut_attr_blocks))
+            free(doc->mut_attr_blocks);
         doc->mut_attr_blocks = next;
     }
     doc->mut_attr_cursor = NULL;

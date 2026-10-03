@@ -44,6 +44,42 @@ int main(void) {
                (t1 - t0) / N_APPEND);
     }
 
+    /* ---- mut-doc-cycle: 20k create/build/free cycles, 1024
+     * children each (1 elem block + ~7 name blocks per cycle). The
+     * mut-block recycle target: without it every cycle frees those
+     * blocks back to malloc (madvise) and the next cycle re-mallocs
+     * and re-faults them on the carve memsets. */
+    const int N_CYCLE = 20000;
+    const int CYCLE_CHILDREN = 1024;
+    {
+        double t0 = now_ns();
+        for (int i = 0; i < N_CYCLE; i++) {
+            LeptrisDocument d = leptris_document_create();
+            LeptrisElement root = leptris_element_create(d, "root");
+            leptris_document_set_root(d, root);
+            for (int c = 0; c < CYCLE_CHILDREN; c++) {
+                LeptrisElement e = leptris_element_create(d, "c");
+                leptris_element_append_child(root, e);
+            }
+            leptris_document_free(d);
+        }
+        double t1 = now_ns();
+        printf("mutcycle leptris: %7.1f ns/child\n",
+               (t1 - t0) / ((double)N_CYCLE * CYCLE_CHILDREN));
+    }
+    {
+        double t0 = now_ns();
+        for (int i = 0; i < N_CYCLE; i++) {
+            pugi::xml_document d;
+            pugi::xml_node root = d.append_child("root");
+            for (int c = 0; c < CYCLE_CHILDREN; c++)
+                root.append_child("c");
+        }
+        double t1 = now_ns();
+        printf("mutcycle pugixml: %7.1f ns/child\n",
+               (t1 - t0) / ((double)N_CYCLE * CYCLE_CHILDREN));
+    }
+
     /* ---- attr-parse: parse 20k docs, 4 elems x 16 attrs ---- */
     std::string xml = "<r>";
     for (int e = 0; e < 4; e++) {

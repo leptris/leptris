@@ -89,6 +89,13 @@ typedef enum {
  * this single chain; the separate side-list store is gone. */
 
 /* Document structure */
+/* Mutation-block geometry (rounds 18/21/22). Shared by the carvers
+ * (element_modify.c) and the per-thread recycle (mut_recycle.c),
+ * whose byte accounting must match the carve mallocs exactly. */
+#define MUT_ELEM_BLOCK_COUNT 1024
+#define MUT_NAME_BLOCK_BYTES 4096
+#define MUT_ATTR_BLOCK_COUNT 128
+
 /* Contiguous block of mutation elements (round 18). Chained via
  * next; freed with the document. Elements are carved from [base,
  * base+count). */

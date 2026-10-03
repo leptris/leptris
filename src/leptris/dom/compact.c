@@ -10,6 +10,7 @@
 
 #include "compact.h"
 #include "../leptris_internal.h"   /* struct leptris_document (overflow_entries) */
+#include "mut_recycle.h"
 #include "../common/port.h"
 #include <stdlib.h>
 #include <string.h>
@@ -230,6 +231,9 @@ void leptris_compact_cleanup(void) {
         g_overflow_table = NULL;
     }
     g_overflow_table_refcount = 0;
+    /* Drop this thread's parked mutation blocks too (mut_recycle);
+     * leptris_explicit_cleanup is the LSan-clean escape hatch. */
+    leptris_mut_recycle_drain();
 }
 
 void leptris_compact_cleanup_document(struct leptris_document* doc) {
