@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.295] - 2026-10-03
+
+### Added
+
+- fn:index-of / distinct-values / sort honor collations (xpath)
+- fn:compare and fn:collation-key honor collation URIs (xpath)
+
+
+
 ## [1.9.294] - 2026-10-03
 
 ### Added
