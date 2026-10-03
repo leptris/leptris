@@ -17,6 +17,7 @@
 #if LEPTRIS_HAS_UTF8PROC
 #include "../unicode/unicode.h"
 #endif
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,16 +59,38 @@ int leptris_collation_from_uri(const char* uri, leptris_collation* out) {
 
     /* F&O 3.x parameter defaults, parsed from the query string:
      * strength, alternate. Unknown values reject the URI. */
+    /* The W3C UCA collation URI separates parameters with ';'
+     * (optionally ';'), NOT '&'. */
     const char* q = uri + base_len; /* NUL, or "?..." */
     if (*q == '?') q++;
     while (*q) {
         const char* eq = strchr(q, '=');
+        const char* semi = strchr(q, ';');
         const char* amp = strchr(q, '&');
-        if (!eq || (amp && eq > amp)) return -1;
-        const char* vend = amp ? amp : q + strlen(q);
+        const char* sep = semi && (!amp || semi < amp) ? semi : amp;
+        if (!eq || (sep && eq > sep)) return -1;
+        const char* vend = sep ? sep : q + strlen(q);
         size_t vlen = (size_t)(vend - (eq + 1));
 
-        if ((size_t)(eq - q) == 8 && strncmp(q, "strength", 8) == 0) {
+        if ((size_t)(eq - q) == 4 && strncmp(q, "lang", 4) == 0) {
+            /* DUCET is language-neutral (the root locale): accept a
+             * well-formed language tag and use the root weights. */
+            int ok = vlen > 0;
+            for (size_t i = 0; i < vlen && ok; i++)
+                if (!isalnum((unsigned char)eq[1 + i]) &&
+                    eq[1 + i] != '-' && eq[1 + i] != '_')
+                    ok = 0;
+            if (!ok) return -1;
+        } else if ((size_t)(eq - q) == 9 &&
+                   strncmp(q, "caseFirst", 9) == 0) {
+            if (vlen == 5 && strncmp(eq + 1, "upper", 5) == 0)
+                c.case_first = 1;
+            else if (vlen == 5 && strncmp(eq + 1, "lower", 5) == 0)
+                c.case_first = 2;
+            else
+                return -1;
+        } else if ((size_t)(eq - q) == 8 &&
+                   strncmp(q, "strength", 8) == 0) {
             if (vlen == 7 && strncmp(eq + 1, "primary", 7) == 0)
                 c.strength = LEPTRIS_COLL_STRENGTH_PRIMARY;
             else if (vlen == 9 && strncmp(eq + 1, "secondary", 9) == 0)
@@ -90,7 +113,7 @@ int leptris_collation_from_uri(const char* uri, leptris_collation* out) {
         } else {
             return -1; /* unknown parameter */
         }
-        q = amp ? amp + 1 : vend;
+        q = sep ? sep + 1 : vend;
     }
 
     *out = c;
@@ -167,7 +190,7 @@ static void ce_from_weights(struct ce* out, size_t w_idx, uint8_t var) {
  * the full UCA 7.1.1 two-CE implicit algorithm — refine when the
  * QT3 collation corpus demands the Tangut/Nushu ranges. */
 static void ce_implicit(struct ce* out, uint32_t cp) {
-    out->p = (uint16_t)(0xFB80u + ((cp >> 12) & 0x7Fu));
+    out->p = (uint16_t)(0xFB80u + (cp >> 12)); /* max 0xFC8F, fits */
     out->s = 0x20;
     out->t = 0x2;
     out->var = 0;
@@ -316,6 +339,19 @@ int leptris_collation_sortkey(const char* s, size_t len,
                               const leptris_collation* c,
                               unsigned char** out, size_t* out_len) {
     if (!s || !c || !out || !out_len) return -1;
+    if (c->kind == LEPTRIS_COLL_ASCII_CI) {
+        unsigned char* key =
+            (unsigned char*)malloc(len ? len : 1);
+        if (!key) return -1;
+        for (size_t i = 0; i < len; i++) {
+            unsigned char b = (unsigned char)s[i];
+            if (b >= 'A' && b <= 'Z') b += 32;
+            key[i] = b;
+        }
+        *out = key;
+        *out_len = len;
+        return 0;
+    }
     if (c->kind != LEPTRIS_COLL_UCA) return -1;
 
     struct ce_buf buf = {NULL, 0, 0};
@@ -354,7 +390,15 @@ int leptris_collation_sortkey(const char* s, size_t len,
 
     if (c->strength >= LEPTRIS_COLL_STRENGTH_TERTIARY) {
         for (size_t i = 0; i < buf.n; i++) {
-            if (buf.v[i].t != 0) emit_weight(&k, buf.v[i].t);
+            uint16_t t = buf.v[i].t;
+            /* caseFirst: DUCET tertiaries order lowercase (0x0002)
+             * before uppercase (0x0008); upper-first swaps the two
+             * case weights. */
+            if (c->case_first == 1) {
+                if (t == 0x0002) t = 0x0008;
+                else if (t == 0x0008) t = 0x0002;
+            }
+            if (t != 0) emit_weight(&k, t);
         }
         *k++ = 0x00;
     }

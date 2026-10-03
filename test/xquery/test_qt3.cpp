@@ -20,6 +20,7 @@
 // adoption for now — the count documents that.)
 
 #include "leptris.h"
+#include "leptris/error.h"
 #include "leptris/xquery/xquery.h"
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -247,8 +248,13 @@ bool all_numeric(const std::vector<std::string>& v) {
 
 bool check(const Assertion& a, LeptrisXPathResult r, LeptrisDocument doc) {
     if (a.kind == "any-of") {
-        for (const Assertion& c : a.children)
+        for (const Assertion& c : a.children) {
+            /* An <error> alternative inside any-of is satisfied by
+             * a failed evaluation (QT3 disjunction over error codes;
+             * code-exact matching is a later channel). */
+            if (c.kind == "error" && r == NULL) return true;
             if (is_supported(c) && check(c, r, doc)) return true;
+        }
         return false;
     }
     if (a.kind == "assert-true")
@@ -504,6 +510,17 @@ void run_test_set(const char* set_path,
                 dep_out = true;
                 break;
             }
+            /* UCA-collation-011..: the engine implements the strict
+             * F&O reading (unknown collation parameter values raise
+             * FOCH0002), not the optional lax "simple-uca-fallback"
+             * (ignore the setting, use the collation as-is). Cases
+             * requiring the fallback feature are out. */
+            if (dt && strcmp(dt, "feature") == 0 && dv &&
+                strcmp(dv, "simple-uca-fallback") == 0 &&
+                (!sat || strcmp(sat, "false") != 0)) {
+                dep_out = true;
+                break;
+            }
         }
         if (dep_out) {
             skipped++;
@@ -530,11 +547,17 @@ void run_test_set(const char* set_path,
         bool ok_kinds = !asserts.empty() || !expect_error.empty();
         for (const Assertion& a : asserts)
             if (!is_supported(a)) ok_kinds = false;
+#if !defined(LEPTRIS_HAS_DUCET)
         if (ok_kinds && strstr(q, "collation/UCA"))
             ok_kinds = false;  /* UCA collation args are not in the
                                 * engine surface; the codepoint and
                                 * html-ascii-case-insensitive URIs
-                                * ARE (3-arg contains) */
+                                * ARE (3-arg contains). A DUCET build
+                                * lifts this: UCA URIs are parsed and
+                                * compared (fn:compare, index-of,
+                                * distinct-values, sort, collation-
+                                * key). */
+#endif
         for (const char* ex : extra_excludes)
             if (ok_kinds && strstr(q, ex)) ok_kinds = false;
         if (!ok_kinds) {
@@ -598,6 +621,10 @@ void run_test_set(const char* set_path,
             }
         }
         qtext += q;
+        if (getenv("QT3_DEBUG"))
+            fprintf(stderr, "[qt3] q=%s\n[qt3] params=%d doc=%p\n",
+                    qtext.c_str(), params ? (int)params->size() : -1,
+                    (void*)doc);
         LeptrisXQuery xq = leptris_xquery_parse(qtext.c_str(),
                                                 qtext.size());
         LeptrisXPathResult r = NULL;
@@ -612,7 +639,16 @@ void run_test_set(const char* set_path,
         } else if (xq) {
             r = leptris_xquery_eval(xq, doc, NULL);
         }
-        std::string got = r ? result_string(r) : "(no result)";
+        if (getenv("QT3_DEBUG"))
+            fprintf(stderr, "[qt3] expect_error=%s asserts=%zu\n",
+                    expect_error.c_str(), asserts.size());
+        std::string got;
+        if (r) {
+            got = result_string(r);
+        } else {
+            const char* emsg = leptris_last_error();
+            got = std::string("(no result") + (emsg && *emsg ? ": " + std::string(emsg) : "") + ")";
+        }
         bool pass;
         if (!expect_error.empty()) {
             /* Error-assertion case: the query MUST fail. The code
@@ -620,10 +656,17 @@ void run_test_set(const char* set_path,
              * later channel. */
             pass = (r == NULL) && (xq == NULL || 1);
             if (!pass) got = std::string("expected error ") + expect_error;
-        } else {
-            pass = r != NULL;
+        } else if (r != NULL) {
+            pass = true;
             for (const Assertion& a : asserts)
                 if (!check(a, r, doc)) pass = false;
+        } else {
+            /* Failed evaluation: only an any-of carrying an <error>
+             * alternative can still be satisfied (the credit lives
+             * in check()). */
+            pass = false;
+            for (const Assertion& a : asserts)
+                if (a.kind == "any-of" && check(a, r, doc)) pass = true;
         }
         if (r) leptris_xpath_result_free(r);
         if (xq) leptris_xquery_free(xq);
@@ -653,7 +696,7 @@ TEST(Qt3Subset, FnSubstring) {
 TEST(Qt3Subset, FnContains) {
     /* The "-dyn" cases bind the set-level param environment as
      * external variables; UCA-collation cases still skip. */
-    run_test_set("fn/contains.xml", {}, 46);
+    run_test_set("fn/contains.xml", {}, 46, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
 }
 
 /* String case family (lever 6 stage-2, string tails batch 1):
@@ -671,6 +714,33 @@ TEST(Qt3Subset, FnContains) {
 #ifdef LEPTRIS_HAS_UTF8PROC
 TEST(Qt3Subset, FnNormalizeUnicode) {
     run_test_set("fn/normalize-unicode.xml", {}, 29);
+}
+#endif
+
+/* DUCET lane slice 4: the UCA ordering corpus (misc/UCACollation —
+ * compare() pairs over the Unicode Collation Algorithm) and
+ * fn:collation-key. Both are DUCET-gated end to end. */
+#if defined(LEPTRIS_HAS_UTF8PROC) && defined(LEPTRIS_HAS_DUCET)
+TEST(Qt3Subset, MiscUcaCollation) {
+    /* 62 of 176 run-and-agree: the simple-uca-fallback feature
+     * cases (unknown parameter values ignored) are dependency-gated
+     * out — this engine raises FOCH0002 — and the param-holding
+     * strength/caseFirst/... families beyond strength/alternate are
+     * excluded by the unknown-parameter gate. */
+    run_test_set("misc/UCACollation.xml", {}, 62);
+}
+TEST(Qt3Subset, FnCollationKey) {
+    /* 9 of 56 run-and-agree. 009u/009l/015 need XQuery-3.0 string
+     * lt/gt (codepoint collation on the hex keys): the shared
+     * comparison operator still numeric-coerces strings that look
+     * numeric (XPath 1.0 semantics), so key ordering compares as
+     * number equality - named follow-up, not a collation bug. The
+     * rest of the file is excluded by the unknown-parameter and
+     * simple-uca-fallback gates. */
+    run_test_set("fn/collation-key.xml", {}, 9,
+                 {},
+                 {"collation-key-009u", "collation-key-009l",
+                  "collation-key-015"});
 }
 #endif
 
@@ -743,12 +813,12 @@ TEST(Qt3Subset, FnStringCase) {
 
 TEST(Qt3Subset, FnStartsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
-    run_test_set("fn/starts-with.xml", {}, 43);
+    run_test_set("fn/starts-with.xml", {}, 43, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
 }
 
 TEST(Qt3Subset, FnEndsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
-    run_test_set("fn/ends-with.xml", {}, 34);
+    run_test_set("fn/ends-with.xml", {}, 34, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
 }
 
 TEST(Qt3Subset, FnConcat) {
@@ -774,11 +844,11 @@ TEST(Qt3Subset, FnNormalizeSpace) {
 }
 
 TEST(Qt3Subset, FnSubstringBefore) {
-    run_test_set("fn/substring-before.xml", {}, 12);
+    run_test_set("fn/substring-before.xml", {}, 12, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
 }
 
 TEST(Qt3Subset, FnSubstringAfter) {
-    run_test_set("fn/substring-after.xml", {}, 16);
+    run_test_set("fn/substring-after.xml", {}, 16, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
 }
 
 TEST(Qt3Subset, FnBoolean) {
@@ -1126,7 +1196,7 @@ TEST(Qt3Subset, FnDeepEqual) {
      * document{}-ctor and attribute{}-ctor cases (K2-14..43) need
      * the node-materializing ctor model, plus arrays-18 (nested
      * array:put/remove) and mix-args-031 (xs:time vs string). */
-    run_test_set("fn/deep-equal.xml", {}, 221, {},
+    run_test_set("fn/deep-equal.xml", {}, 221, {"collation/UCA"},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
