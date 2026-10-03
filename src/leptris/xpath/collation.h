@@ -39,6 +39,7 @@ typedef struct {
     uint8_t kind;
     uint8_t strength;  /* 1..5; default tertiary */
     uint8_t alternate; /* non-ignorable / shifted */
+    uint8_t case_first; /* 0 default, 1 upper-first, 2 lower-first */
 } leptris_collation;
 
 /* Parse a collation URI. Returns 0 on success, -1 when the URI or a

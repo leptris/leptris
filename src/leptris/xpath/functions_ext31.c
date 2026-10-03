@@ -5229,51 +5229,67 @@ static struct leptris_xpath_result* fn_compare(XPathContext* ctx,
 }
 
 #if LEPTRIS_HAS_DUCET
-/* fn:collation-key($key, $collation) — F&O 3.1 §14.6: the string's
+/* fn:collation-key($key[, $collation]) — F&O 3.1: the string's
  * sort key under the collation, as xs:base64Binary. The result type
  * system has no binary kind (the public enum is ABI-frozen), so the
- * base64 LEXICAL form travels as a string: base64 is injective, so
- * '=' on two keys is byte equality of the underlying sort keys. An
- * empty first operand yields the empty sequence. */
+ * key travels as its lowercase-hex LEXICAL form: hex is injective
+ * (eq = byte equality of the keys) AND order-preserving (lt/gt =
+ * byte-wise key order). The 1-arg form rides the static default
+ * collation (codepoint here: the key is the UTF-8 bytes). An empty
+ * first operand yields the empty sequence. */
 static struct leptris_xpath_result* fn_collation_key(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
-    (void)n;
     char* key = re_str_arg_opt(ctx, args, 0);
     if (!key) return xpath_result_new(XPATH_RESULT_NODESET);
-    char* uri = re_str_arg(ctx, args, 1);
     leptris_collation coll;
-    if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
-        snprintf(ctx->error_code, sizeof(ctx->error_code), "FOCH0002");
+    if (n >= 2) {
+        char* uri = re_str_arg(ctx, args, 1);
+        if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
+            snprintf(ctx->error_code, sizeof(ctx->error_code), "FOCH0002");
+            free(uri);
+            free(key);
+            return NULL;
+        }
         free(uri);
-        free(key);
-        return NULL;
+    } else {
+        /* collation-key#1 rides the static default collation, which
+         * this engine defines as the Unicode codepoint collation —
+         * its sort key is the string's own UTF-8 bytes (codepoint
+         * order is memcmp order over UTF-8). */
+        leptris_collation_from_uri(
+            "http://www.w3.org/2005/xpath-functions/collation/"
+            "codepoint",
+            &coll);
     }
-    free(uri);
     unsigned char* sk = NULL;
     size_t sklen = 0;
-    if (leptris_collation_sortkey(key, strlen(key), &coll, &sk, &sklen) != 0) {
+    if (coll.kind == LEPTRIS_COLL_CODEPOINT) {
+        sklen = strlen(key);
+        sk = (unsigned char*)leptris_strdup(key);
+        if (!sk && sklen) {
+            free(key);
+            return NULL;
+        }
+    } else if (leptris_collation_sortkey(key, strlen(key), &coll, &sk,
+                                         &sklen) != 0) {
         free(key);
         return NULL;
     }
     free(key);
-    static const char tab[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    size_t b64len = ((sklen + 2) / 3) * 4;
-    char* b64 = (char*)malloc(b64len + 1);
+    /* Lowercase hex: injective like base64, but ALSO order-
+     * preserving — '0'..'9' < 'a'..'f' keeps lexical lt equal to
+     * byte-wise key lt, so collation-key lt collation-key compares
+     * the underlying sort keys (base64's alphabet is not ordered). */
+    static const char hex[] = "0123456789abcdef";
+    char* b64 = (char*)malloc(sklen * 2 + 1);
     if (!b64) {
         free(sk);
         return NULL;
     }
     size_t o = 0;
-    for (size_t i = 0; i < sklen; i += 3) {
-        uint32_t v = (uint32_t)sk[i] << 16;
-        int pad = sklen - i;
-        if (pad > 1) v |= (uint32_t)sk[i + 1] << 8;
-        if (pad > 2) v |= sk[i + 2];
-        b64[o++] = tab[(v >> 18) & 0x3F];
-        b64[o++] = tab[(v >> 12) & 0x3F];
-        b64[o++] = pad > 1 ? tab[(v >> 6) & 0x3F] : '=';
-        b64[o++] = pad > 2 ? tab[v & 0x3F] : '=';
+    for (size_t i = 0; i < sklen; i++) {
+        b64[o++] = hex[sk[i] >> 4];
+        b64[o++] = hex[sk[i] & 0x0F];
     }
     b64[o] = '\0';
     free(sk);
@@ -5934,7 +5950,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "compare", fn_compare, 2, 3);
 #if LEPTRIS_HAS_DUCET
     xpath_function_registry_register(registry, "collation-key",
-                                     fn_collation_key, 2, 2);
+                                     fn_collation_key, 1, 2);
 #endif
     xpath_function_registry_register(registry, "codepoint-equal", fn_codepoint_equal, 2, 2);
 #ifdef LEPTRIS_HAS_UTF8PROC
