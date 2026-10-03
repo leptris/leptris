@@ -3530,6 +3530,7 @@ TEST(Xslt30, FnSortWithKey) {
         "[a b c][ay bx cz][1 2 3][1x 2y]");
 }
 
+#if LEPTRIS_HAS_DUCET  // windows CI legs build utf8proc-less: no DUCET, no UCA
 /* DUCET slice 2: fn:compare and fn:collation-key honor collation
  * URIs — the UCA URI with strength=primary collapses case and
  * accents to equal, while the default (tertiary) UCA keeps case
@@ -3569,6 +3570,7 @@ TEST(Xslt30, FnCollationKeyMatchesUnderUca) {
         "<r/>")),
         "[true][false][false]");
 }
+#endif
 
 TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): where-
