@@ -31,7 +31,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify the crate builds and links against the C core
+      # Build the C core and publish the library location via
+      # $GITHUB_ENV. The export MUST live in its own step: GITHUB_ENV
+      # changes only apply to SUBSEQUENT steps, and both cargo test
+      # and cargo publish (its package-verification build) link
+      # against libleptris through build.rs reading LEPTRIS_LIB_PATH.
+      # The first dispatch (run 37102814498) failed exactly here —
+      # build.rs never saw the variable, fell back to bare -lleptris,
+      # and the link failed.
+      - name: Build the C shared library
         run: |
           cmake -B build-shared -S . \
             -DCMAKE_BUILD_TYPE=Release \
@@ -46,8 +54,9 @@ jobs:
             exit 1
           fi
           echo "LEPTRIS_LIB_PATH=$PWD/$LIB" >> "$GITHUB_ENV"
-          cd bindings/rust
-          cargo test
+
+      - name: Verify the crate builds and links against the C core
+        run: cd bindings/rust && cargo test
 
       - name: Publish to crates.io
         # Trusted publishing (crates.io crate settings -> Trusted
