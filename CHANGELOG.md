@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.296] - 2026-10-03
+
+### Added
+
+- adopt the QT3 UCA collation corpora — 71 new cases (xpath)
+
+
+
 ## [1.9.295] - 2026-10-03
 
 ### Added
