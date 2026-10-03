@@ -730,17 +730,11 @@ TEST(Qt3Subset, MiscUcaCollation) {
     run_test_set("misc/UCACollation.xml", {}, 62);
 }
 TEST(Qt3Subset, FnCollationKey) {
-    /* 9 of 56 run-and-agree. 009u/009l/015 need XQuery-3.0 string
-     * lt/gt (codepoint collation on the hex keys): the shared
-     * comparison operator still numeric-coerces strings that look
-     * numeric (XPath 1.0 semantics), so key ordering compares as
-     * number equality - named follow-up, not a collation bug. The
-     * rest of the file is excluded by the unknown-parameter and
-     * simple-uca-fallback gates. */
-    run_test_set("fn/collation-key.xml", {}, 9,
-                 {},
-                 {"collation-key-009u", "collation-key-009l",
-                  "collation-key-015"});
+    /* 12 of 56 run-and-agree: XQuery-3.0 string lt/gt now does
+     * codepoint value comparison, so the key-ordering cases
+     * (009u/009l/015) agree. The rest of the file is excluded by
+     * the unknown-parameter and simple-uca-fallback gates. */
+    run_test_set("fn/collation-key.xml", {}, 12);
 }
 #endif
 

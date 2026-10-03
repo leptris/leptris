@@ -3598,8 +3598,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     result->value.boolean_value = matches;
                 }
             }
-            /* String comparison for equality operators when both are strings */
-            else if (is_equality_op &&
+            /* String comparison when both are strings: always for
+             * the equality operators; in XQuery 3.0 also for the
+             * relational ones (codepoint-collation value
+             * comparisons — XPath 1.0 numeric-coerces them). */
+            else if ((is_equality_op || ctx->xquery_spelling) &&
                      left->type == XPATH_RESULT_STRING &&
                      right->type == XPATH_RESULT_STRING) {
                 char* lstr = xpath_to_string(left);
@@ -3611,7 +3614,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 switch (op) {
                     case XPATH_OP_EQUAL: result->value.boolean_value = (cmp == 0); break;
                     case XPATH_OP_NOT_EQUAL: result->value.boolean_value = (cmp != 0); break;
-                    default: break;
+                    default:
+                        /* XQuery 3.0: lt/le/gt/ge on two xs:string
+                         * operands is a value comparison under the
+                         * codepoint collation — the XPath 1.0 numeric
+                         * coercion makes numeric-looking strings
+                         * compare as number equality (collation-key
+                         * hex ordering rides this path). */
+                        if (ctx->xquery_spelling) {
+                            result->value.boolean_value =
+                                op == XPATH_OP_LESS ? cmp < 0
+                                : op == XPATH_OP_LESS_EQUAL ? cmp <= 0
+                                : op == XPATH_OP_GREATER ? cmp > 0
+                                : cmp >= 0;
+                        }
+                        break;
                 }
 
                 if (lstr) LEPTRIS_FREE(lstr);

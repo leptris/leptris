@@ -1493,16 +1493,32 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
                       strcmp(lstr_owned, rstr_owned) == 0);
         int eq_num = (lnum == rnum);
         int eq = eq_str || eq_num;
+        /* XQuery 3.0: relational ops on two xs:string operands are
+         * codepoint-collation value comparisons (twin of the
+         * evaluate_operator branch). XPath 1.0 keeps the numeric
+         * coercion. */
+        int str_rel = (ctx->xquery_spelling &&
+                       left->type == XPATH_RESULT_STRING &&
+                       right->type == XPATH_RESULT_STRING &&
+                       lstr_owned && rstr_owned &&
+                       (op == XPATH_OP_LESS || op == XPATH_OP_LESS_EQUAL ||
+                        op == XPATH_OP_GREATER ||
+                        op == XPATH_OP_GREATER_EQUAL));
+        int scmp = str_rel ? strcmp(lstr_owned, rstr_owned) : 0;
         if (lstr_owned) free(lstr_owned);
         if (rstr_owned) free(rstr_owned);
 
         switch (op) {
             case XPATH_OP_EQUAL:         matches = eq; break;
             case XPATH_OP_NOT_EQUAL:     matches = !eq; break;
-            case XPATH_OP_LESS:          matches = (lnum <  rnum); break;
-            case XPATH_OP_LESS_EQUAL:    matches = (lnum <= rnum); break;
-            case XPATH_OP_GREATER:       matches = (lnum >  rnum); break;
-            case XPATH_OP_GREATER_EQUAL: matches = (lnum >= rnum); break;
+            case XPATH_OP_LESS:          matches = str_rel ? (scmp < 0)
+                                             : (lnum <  rnum); break;
+            case XPATH_OP_LESS_EQUAL:    matches = str_rel ? (scmp <= 0)
+                                             : (lnum <= rnum); break;
+            case XPATH_OP_GREATER:       matches = str_rel ? (scmp > 0)
+                                             : (lnum >  rnum); break;
+            case XPATH_OP_GREATER_EQUAL: matches = str_rel ? (scmp >= 0)
+                                             : (lnum >= rnum); break;
             default: break;
         }
         }
