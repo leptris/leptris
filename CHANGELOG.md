@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.293] - 2026-10-03
+
+### Performance
+
+- per-thread recycle of mutation blocks — mutcycle 19.4→15.1 ns/child (dom)
+
+
+
 ## [1.9.292] - 2026-10-02
 
 ### Added
