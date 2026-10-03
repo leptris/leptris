@@ -14,6 +14,18 @@
 #include "functions.h"
 #include "collation.h"
 #include "evaluator.h"
+
+#if LEPTRIS_HAS_DUCET
+/* Defined near fn_collation_key; used by the earlier sequence
+ * functions. */
+static int collation_arg_maybe(XPathContext* ctx, XPathASTNode** args,
+                               size_t idx, leptris_collation* out,
+                               int* routed);
+static void collation_needed_error(XPathContext* ctx);
+static int plain_str(const char* it);
+static int str_eq_coll(const char* a, const char* b,
+                       const leptris_collation* c);
+#endif
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
 #include "../dom/element.h"
@@ -416,13 +428,21 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
     size_t cnt;
     char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
-    /* Collation argument (3-arg form): accepted, folds to the
-     * codepoint comparison; evaluation errors propagate. */
+#if LEPTRIS_HAS_DUCET
+    leptris_collation coll;
+    int coll_routed = 0;
+    if (n > 2 &&
+        collation_arg_maybe(ctx, args, 2, &coll, &coll_routed) != 0) {
+        free_items(items, cnt);
+        return NULL;
+    }
+#else
     if (n > 2) {
         struct leptris_xpath_result* c = xpath_evaluate(ctx, args[2]);
         if (!c) { free_items(items, cnt); return NULL; }
         leptris_xpath_result_free(c);
     }
+#endif
     struct leptris_xpath_result* v = xpath_evaluate(ctx, args[1]);
     char* needle = NULL;
     if (v && v->type == XPATH_RESULT_BOOLEAN) {
@@ -467,9 +487,25 @@ static struct leptris_xpath_result* fn_index_of(XPathContext* ctx,
     }
     struct leptris_xpath_result* out = seq_new();
     if (out && needle)
-        for (size_t k = 0; k < cnt; k++)
-            if (leptris_atom_seq_eq_n(items[k], needle, 0))
-                seq_push_num(out, (double)(k + 1));
+        for (size_t k = 0; k < cnt; k++) {
+            int eq;
+#if LEPTRIS_HAS_DUCET
+            if (plain_str(items[k]) && plain_str(needle)) {
+                if (coll_routed < 0) {
+                    collation_needed_error(ctx);
+                    xpath_result_free(out);
+                    out = NULL;
+                    break;
+                }
+                if (coll_routed)
+                    eq = str_eq_coll(items[k], needle, &coll);
+                else
+                    eq = leptris_atom_seq_eq_n(items[k], needle, 0);
+            } else
+#endif
+                eq = leptris_atom_seq_eq_n(items[k], needle, 0);
+            if (out && eq) seq_push_num(out, (double)(k + 1));
+        }
     free(needle);
     if (v) leptris_xpath_result_free(v);
     free_items(items, cnt);
@@ -554,13 +590,21 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
     size_t cnt;
     char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     if (!items) return NULL;
-    /* 2-arg form: collation accepted (folds to codepoint); errors
-     * propagate. */
+#if LEPTRIS_HAS_DUCET
+    leptris_collation dvc;
+    int dv_routed = 0;
+    if (n > 1 &&
+        collation_arg_maybe(ctx, args, 1, &dvc, &dv_routed) != 0) {
+        free_items(items, cnt);
+        return NULL;
+    }
+#else
     if (n > 1) {
         struct leptris_xpath_result* c = xpath_evaluate(ctx, args[1]);
         if (!c) { free_items(items, cnt); return NULL; }
         leptris_xpath_result_free(c);
     }
+#endif
     struct leptris_xpath_result* out = seq_new();
     /* Dedup compares against KEPT items only: promotion eq is
      * non-transitive (float~decimal~double while float!~double), so
@@ -592,7 +636,18 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
                     if (dur_ms_parse(durj, &mj, &sj) &&
                         mj == mk && sj == sk)
                         dup = 1;
-                } else if (leptris_atom_seq_eq_n(items[k], items[j], 1)) {
+                } else if (
+#if LEPTRIS_HAS_DUCET
+                    plain_str(items[k]) && plain_str(items[j]) &&
+                    dv_routed != 0
+                        ? (dv_routed < 0
+                               ? (collation_needed_error(ctx),
+                                  xpath_result_free(out), out = NULL,
+                                  dup = 1, 1)
+                               : str_eq_coll(items[k], items[j], &dvc))
+                        :
+#endif
+                        leptris_atom_seq_eq_n(items[k], items[j], 1)) {
                     dup = 1;
                 }
             }
@@ -4595,13 +4650,46 @@ static struct leptris_xpath_result* fn_sort_seq(XPathContext* ctx,
             free(cc);
         }
     }
+#if LEPTRIS_HAS_DUCET
+    leptris_collation sc;
+    int sc_routed = 0;
+    if (n > 2 &&
+        collation_arg_maybe(ctx, args, 2, &sc, &sc_routed) != 0) {
+        free_items(xs, c);
+        return NULL;
+    }
+#if LEPTRIS_HAS_DUCET
+    if (sc_routed < 0) {
+        for (size_t k = 0; k < c; k++)
+            if (plain_str(xs[k])) {
+                collation_needed_error(ctx);
+                free_items(xs, c);
+                return NULL;
+            }
+        sc_routed = 0; /* only non-strings: the URI is unneeded */
+    }
+#endif
+#else
+    (void)n;
+#endif
     /* stable insertion sort by key (or the item itself) */
     for (size_t i = 1; i < c; i++) {
         char* it = xs[i];
         char* kt = keys ? keys[i] : it;
         size_t j = i;
         while (j > 0 &&
-               strcmp(keys ? keys[j - 1] : xs[j - 1], kt) > 0) {
+#if LEPTRIS_HAS_DUCET
+               (sc_routed
+                    ? leptris_collation_compare(keys ? keys[j - 1]
+                                                     : xs[j - 1],
+                                                strlen(keys ? keys[j - 1]
+                                                           : xs[j - 1]),
+                                                kt, strlen(kt), &sc)
+                    : strcmp(keys ? keys[j - 1] : xs[j - 1], kt)) > 0
+#else
+               strcmp(keys ? keys[j - 1] : xs[j - 1], kt) > 0
+#endif
+        ) {
             xs[j] = xs[j - 1];
             if (keys) keys[j] = keys[j - 1];
             j--;
@@ -5117,7 +5205,7 @@ static struct leptris_xpath_result* fn_compare(XPathContext* ctx,
             char* uri = re_str_arg(ctx, args, 2);
             if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
                 snprintf(ctx->error_code, sizeof(ctx->error_code),
-                         "FODC0004");
+                         "FOCH0002");
                 free(uri);
                 free(a);
                 free(b);
@@ -5155,7 +5243,7 @@ static struct leptris_xpath_result* fn_collation_key(XPathContext* ctx,
     char* uri = re_str_arg(ctx, args, 1);
     leptris_collation coll;
     if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
-        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0004");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FOCH0002");
         free(uri);
         free(key);
         return NULL;
@@ -5194,6 +5282,46 @@ static struct leptris_xpath_result* fn_collation_key(XPathContext* ctx,
     else free(b64);
     return out;
 }
+
+/* Slice 3: parse args[idx] as a collation URI for the sequence
+ * functions. Sets *routed when comparisons must route through the
+ * module (UCA or ascii-ci); codepoint stays the default fast path.
+ * Unknown URIs set FODC0004. Returns 0 on success. */
+#if LEPTRIS_HAS_DUCET
+static int collation_arg_maybe(XPathContext* ctx, XPathASTNode** args,
+                               size_t idx, leptris_collation* out,
+                               int* routed) {
+    *routed = 0;
+    char* uri = re_str_arg(ctx, args, idx);
+    if (!uri) return 0; /* absent/empty: default codepoint */
+    if (leptris_collation_from_uri(uri, out) != 0) {
+        free(uri);
+        /* QT3 K-SeqDistinctValuesFunc-2 / cbcl-016: an unknown but
+         * UNNEEDED collation may be ignored (any-of true|error) —
+         * defer: the caller errors only when a string comparison
+         * actually needs it. */
+        *routed = -1;
+        return 0;
+    }
+    free(uri);
+    *routed = (out->kind == LEPTRIS_COLL_UCA ||
+               out->kind == LEPTRIS_COLL_ASCII_CI);
+    return 0;
+}
+
+static void collation_needed_error(XPathContext* ctx) {
+    snprintf(ctx->error_code, sizeof(ctx->error_code), "FOCH0002");
+}
+
+/* Collation routing applies to plain string items only — -
+ * marked carriers (B/N/F/D/d) keep their value-space equality. */
+static int plain_str(const char* it) { return it[0] != '\x03'; }
+
+static int str_eq_coll(const char* a, const char* b,
+                       const leptris_collation* c) {
+    return leptris_collation_compare(a, strlen(a), b, strlen(b), c) == 0;
+}
+#endif
 #endif
 
 static struct leptris_xpath_result* fn_codepoint_equal(XPathContext* ctx,

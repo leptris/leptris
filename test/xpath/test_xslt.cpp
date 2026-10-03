@@ -3531,6 +3531,42 @@ TEST(Xslt30, FnSortWithKey) {
 }
 
 #if LEPTRIS_HAS_DUCET  // windows CI legs build utf8proc-less: no DUCET, no UCA
+/* DUCET slice 3: the sequence functions route string comparisons
+ * through the collation when one is given; strength=primary makes
+ * case irrelevant. */
+TEST(Xslt30, FnIndexOfHonorsUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"index-of(('a','A','b'), 'a', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[1 2]");
+}
+
+TEST(Xslt30, FnDistinctValuesHonorsUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"count(distinct-values(('a','A'), "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary'))\"/>]"
+        "[<xsl:value-of select=\"count(distinct-values(('a','A')))\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[1][2]");
+}
+
+TEST(Xslt30, FnSortHonorsUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"string-join(sort(('b','a','A'), (), "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary'), ' ')"
+        "\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[a A b]");
+}
+
+
 /* DUCET slice 2: fn:compare and fn:collation-key honor collation
  * URIs — the UCA URI with strength=primary collapses case and
  * accents to equal, while the default (tertiary) UCA keeps case
