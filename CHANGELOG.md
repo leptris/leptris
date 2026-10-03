@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.297] - 2026-10-03
+
+### Fixed
+
+- string lt/gt codepoint semantics + codepoints-to-string sequence items (xquery)
+
+
+
 ## [1.9.296] - 2026-10-03
 
 ### Added
