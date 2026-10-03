@@ -4,9 +4,22 @@
 
 ### Performance
 
-- per-thread recycle of mutation blocks — mutcycle 19.4→15.1 ns/child (dom)
+- DOM: per-thread recycle of mutation blocks. Document create/build/free
+  cycles now park their elem (45KB), name (4KB) and attr (5KB) blocks on
+  thread-local free-lists instead of returning them to malloc — the next
+  cycle carves from hot pages instead of re-faulting fresh ones. Byte-capped
+  (8MB elem, 4MB name/attr); POSIX threads drain via a pthread_key
+  destructor at thread exit, and `leptris_explicit_cleanup()` drains
+  synchronously. Mutation doc-cycle row: 19.4 → 15.1 ns/child (−22%), gap
+  to pugixml on that shape narrows 1.66x → 1.29x. Single-document append
+  throughput is unchanged. (PR #1503)
 
+### Rust bindings
 
+- First fully tokenless crates.io release: leptris v1.4.1 published from CI
+  via crates.io Trusted Publishing (`rust-lang/crates-io-auth-action` —
+  cargo itself has no native OIDC support). The Rust release lane now needs
+  no registry token of any kind. (PRs #1497, #1499–#1502)
 
 ## [1.9.292] - 2026-10-02
 
