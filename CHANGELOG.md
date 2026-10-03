@@ -4,7 +4,25 @@
 
 ### Added
 
-- adopt the QT3 UCA collation corpora — 71 new cases (xpath)
+- **XPath/XQuery: 71 QT3 collation cases adopted (DUCET slice 4)** —
+  the misc/UCACollation corpus (62 cases: the UCA ordering battery
+  over DUCET weights) and fn/collation-key (9 cases). The collation
+  URI grammar now parses the W3C semicolon-separated parameter form,
+  accepts lang= (DUCET is the root locale), and applies
+  caseFirst=upper|lower by swapping the DUCET case tertiaries.
+  fn:collation-key gains its 1-argument form (the static default
+  collation; codepoint keys are the UTF-8 bytes) and its keys are
+  lowercase hex — injective AND order-preserving, so lt/gt on two
+  keys is byte-wise key order. The QT3 runner now credits an
+  error alternative inside any-of for a failed evaluation, gates the
+  optional simple-uca-fallback feature (this engine raises FOCH0002
+  per the strict F&O reading), and lifts the pre-DUCET
+  collation/UCA exclusion under a DUCET build. (PR #1511)
+
+### Fixed
+
+- the DUCET implicit-weight fallback dropped a mask that broke
+  ordering between high codepoints. (PR #1511)
 
 
 
