@@ -382,13 +382,24 @@ endif()
 # DUCET table for UCA collation (fn:collation-key, UCA collation URIs)
 if(LEPTRIS_ENABLE_DUCET)
     if(NOT LEPTRIS_ENABLE_UTF8PROC)
-        message(FATAL_ERROR "LEPTRIS_ENABLE_DUCET requires LEPTRIS_ENABLE_UTF8PROC (NFD before weight lookup)")
+        # utf8proc-less configurations (cppcheck leg, Rust lane,
+        # ILP32, Windows static builds) must keep configuring: the
+        # UCA path needs NFD, so degrade to codepoint collation.
+        # PARENT_SCOPE: test/ is added by the root CMakeLists and
+        # must see the degraded value.
+        set(LEPTRIS_ENABLE_DUCET OFF)
+        set(LEPTRIS_ENABLE_DUCET OFF PARENT_SCOPE)
+        message(WARNING
+            "LEPTRIS_ENABLE_DUCET requires LEPTRIS_ENABLE_UTF8PROC "
+            "(NFD before weight lookup) - DUCET disabled; UCA "
+            "collation URIs will be rejected at runtime.")
+    else()
+        target_compile_definitions(leptris_objects PUBLIC LEPTRIS_HAS_DUCET=1)
+        target_sources(leptris_objects PRIVATE
+            leptris/xpath/collation.c
+        )
+        message(STATUS "DUCET/UCA collation: ENABLED")
     endif()
-    target_compile_definitions(leptris_objects PUBLIC LEPTRIS_HAS_DUCET=1)
-    target_sources(leptris_objects PRIVATE
-        leptris/xpath/collation.c
-    )
-    message(STATUS "DUCET/UCA collation: ENABLED")
 else()
     message(STATUS "DUCET/UCA collation: DISABLED")
 endif()
