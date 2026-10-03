@@ -4,11 +4,37 @@
 
 ### Added
 
-- UCA collation over vendored DUCET — module, table, specs (xpath)
+- **XPath: UCA collation over the vendored DUCET table (slice 1)** —
+  `http://www.w3.org/2013/collation/UCA` collation URIs parse
+  `strength` and `alternate` parameters per F&O 3.x (defaults:
+  tertiary, non-ignorable) and compare through multi-level sort keys:
+  NFD (utf8proc) → DUCET weights (Unicode 16.0.0, 38,443 single
+  codepoints + 964 contractions, vendored with an offline table
+  generator) → primary/secondary/tertiary levels with 0x00
+  separators; `alternate=shifted` demotes variable primaries to the
+  quaternary level. Codepoint and html-ascii-case-insensitive
+  collations keep their semantics. Unmapped codepoints get a coarse
+  deterministic fallback (the full UCA 7.1.1 implicit-weight
+  algorithm is a later slice). New CMake option
+  `LEPTRIS_ENABLE_DUCET` (default on, requires utf8proc; builds
+  without utf8proc degrade to codepoint collation). Function
+  wiring (fn:compare, fn:collation-key, default collation) and
+  QT3 UCA case adoption are the next slices. (PR #1506)
+
+- **XQuery: fn:normalize-unicode F&O conformance** — the
+  single-argument form normalizes with NFC instead of returning the
+  input unchanged; unknown normalization forms raise FOCH0003
+  instead of silently falling back to NFC; the form argument is
+  case-insensitive with surrounding whitespace tolerated
+  (FULLY-NORMALIZED is gone from F&O 3.x; its satisfied="false"
+  twins run). utf8proc-gated end to end; the 29-run
+  fn/normalize-unicode QT3 family is adopted. (PR #1505)
 
 ### Fixed
 
-- DUCET degrades without utf8proc instead of failing configure (cmake)
+- DUCET builds without utf8proc (cppcheck leg, Rust lane, ILP32,
+  Windows static) degrade to codepoint collation with a warning
+  instead of failing the configure. (PR #1506)
 
 
 
