@@ -4,8 +4,17 @@
 
 ### Added
 
-- fn:index-of / distinct-values / sort honor collations (xpath)
-- fn:compare and fn:collation-key honor collation URIs (xpath)
+- **XPath: collation-aware functions over the vendored DUCET
+  (slices 2-3)** — fn:compare's 3-argument form honors its collation
+  URI (unknown needed collations raise FOCH0002; unknown-but-unneeded
+  ones are ignored per the QT3 any-of expectations);
+  fn:collation-key($key, $collation) is new, returning the UCA sort
+  key as base64 text (the result-type enum is ABI-frozen with no
+  binary kind; base64 is injective, so key equality is byte equality);
+  fn:index-of, fn:distinct-values and fn:sort route plain-string
+  comparisons through the collation while typed atoms keep their
+  value-space equality. DUCET-gated: builds without utf8proc keep the
+  previous behavior. (PRs #1508, #1509)
 
 
 
