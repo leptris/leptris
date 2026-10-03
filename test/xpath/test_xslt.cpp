@@ -3530,6 +3530,46 @@ TEST(Xslt30, FnSortWithKey) {
         "[a b c][ay bx cz][1 2 3][1x 2y]");
 }
 
+/* DUCET slice 2: fn:compare and fn:collation-key honor collation
+ * URIs — the UCA URI with strength=primary collapses case and
+ * accents to equal, while the default (tertiary) UCA keeps case
+ * distinct (DUCET tertiary: lowercase before uppercase). */
+TEST(Xslt30, FnCompareHonorsUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"compare('a', 'A')\"/>]"
+        "[<xsl:value-of select=\"compare('a', 'A', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"compare('a', '\xC3\xA0', "
+        "'http://www.w3.org/2013/collation/UCA?"
+        "strength=primary')\"/>]"
+        "[<xsl:value-of select=\"compare('a', 'b', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[1][0][0][-1]");  /* 2-arg form: codepoint order (a > A) */
+}
+
+TEST(Xslt30, FnCollationKeyMatchesUnderUca) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"collation-key('a', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary') = "
+        "collation-key('A', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"collation-key('a', "
+        "'http://www.w3.org/2013/collation/UCA') = "
+        "collation-key('A', "
+        "'http://www.w3.org/2013/collation/UCA')\"/>]"
+        "[<xsl:value-of select=\"collation-key('ab', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary') = "
+        "collation-key('A', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[true][false][false]");
+}
+
 TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): where-
      * populated drops wholly-empty content; on-non-empty is

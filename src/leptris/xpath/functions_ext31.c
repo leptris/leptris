@@ -12,6 +12,7 @@
  * FnMath / FnRegex).
  */
 #include "functions.h"
+#include "collation.h"
 #include "evaluator.h"
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
@@ -5107,20 +5108,93 @@ static struct leptris_xpath_result* fn_compare(XPathContext* ctx,
     char* a = re_str_arg_opt(ctx, args, 0);
     char* b = re_str_arg_opt(ctx, args, 1);
     struct leptris_xpath_result* out = NULL;
+    (void)n;  /* consulted only in DUCET builds */
     if (a && b) {  /* an empty operand yields the empty sequence */
+        int cmp;
+#if LEPTRIS_HAS_DUCET
+        if (n > 2) {
+            leptris_collation coll;
+            char* uri = re_str_arg(ctx, args, 2);
+            if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
+                snprintf(ctx->error_code, sizeof(ctx->error_code),
+                         "FODC0004");
+                free(uri);
+                free(a);
+                free(b);
+                return NULL;
+            }
+            free(uri);
+            cmp = leptris_collation_compare(a, strlen(a), b, strlen(b),
+                                            &coll);
+        } else
+#endif
+            cmp = strcmp(a, b) < 0 ? -1 : strcmp(a, b) > 0 ? 1 : 0;
         out = xpath_result_new(XPATH_RESULT_NUMBER);
-        if (out)
-            out->value.number_value =
-                strcmp(a, b) < 0 ? -1 : strcmp(a, b) > 0 ? 1 : 0;
+        if (out) out->value.number_value = cmp;
     } else {
         out = xpath_result_new(XPATH_RESULT_NODESET);
         if (out) out->value.nodeset_value = xpath_nodeset_new();
     }
     free(a);
     free(b);
-    (void)n;
     return out;
 }
+
+#if LEPTRIS_HAS_DUCET
+/* fn:collation-key($key, $collation) — F&O 3.1 §14.6: the string's
+ * sort key under the collation, as xs:base64Binary. The result type
+ * system has no binary kind (the public enum is ABI-frozen), so the
+ * base64 LEXICAL form travels as a string: base64 is injective, so
+ * '=' on two keys is byte equality of the underlying sort keys. An
+ * empty first operand yields the empty sequence. */
+static struct leptris_xpath_result* fn_collation_key(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    (void)n;
+    char* key = re_str_arg_opt(ctx, args, 0);
+    if (!key) return xpath_result_new(XPATH_RESULT_NODESET);
+    char* uri = re_str_arg(ctx, args, 1);
+    leptris_collation coll;
+    if (!uri || leptris_collation_from_uri(uri, &coll) != 0) {
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "FODC0004");
+        free(uri);
+        free(key);
+        return NULL;
+    }
+    free(uri);
+    unsigned char* sk = NULL;
+    size_t sklen = 0;
+    if (leptris_collation_sortkey(key, strlen(key), &coll, &sk, &sklen) != 0) {
+        free(key);
+        return NULL;
+    }
+    free(key);
+    static const char tab[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t b64len = ((sklen + 2) / 3) * 4;
+    char* b64 = (char*)malloc(b64len + 1);
+    if (!b64) {
+        free(sk);
+        return NULL;
+    }
+    size_t o = 0;
+    for (size_t i = 0; i < sklen; i += 3) {
+        uint32_t v = (uint32_t)sk[i] << 16;
+        int pad = sklen - i;
+        if (pad > 1) v |= (uint32_t)sk[i + 1] << 8;
+        if (pad > 2) v |= sk[i + 2];
+        b64[o++] = tab[(v >> 18) & 0x3F];
+        b64[o++] = tab[(v >> 12) & 0x3F];
+        b64[o++] = pad > 1 ? tab[(v >> 6) & 0x3F] : '=';
+        b64[o++] = pad > 2 ? tab[v & 0x3F] : '=';
+    }
+    b64[o] = '\0';
+    free(sk);
+    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
+    if (out) out->value.string_value = b64;
+    else free(b64);
+    return out;
+}
+#endif
 
 static struct leptris_xpath_result* fn_codepoint_equal(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
@@ -5730,6 +5804,10 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "doc-available", fn_doc_available, 1, 1);
     xpath_function_registry_register(registry, "json-doc", fn_json_doc, 1, 1);
     xpath_function_registry_register(registry, "compare", fn_compare, 2, 3);
+#if LEPTRIS_HAS_DUCET
+    xpath_function_registry_register(registry, "collation-key",
+                                     fn_collation_key, 2, 2);
+#endif
     xpath_function_registry_register(registry, "codepoint-equal", fn_codepoint_equal, 2, 2);
 #ifdef LEPTRIS_HAS_UTF8PROC
     xpath_function_registry_register(registry, "normalize-unicode", fn_normalize_unicode, 1, 2);
