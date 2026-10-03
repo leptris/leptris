@@ -19,6 +19,7 @@
 #include "cdata.h"
 #include "pi.h"
 #include "entity_ref.h"
+#include "mut_recycle.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -32,8 +33,6 @@
  * (call chain + arena slack checks cost ~9ns for a 2-byte name;
  * this is bump + copy). Oversized names (> block size) fall back
  * to the pool. */
-#define MUT_NAME_BLOCK_BYTES 4096
-
 static char* mut_name_carve(struct leptris_document* doc,
                             const char* name, size_t name_len) {
     /* Slot layout: [8B doc backpointer][name bytes][NUL]. The
@@ -59,10 +58,12 @@ static char* mut_name_carve(struct leptris_document* doc,
     need = (need + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
     if (!doc->mut_name_cursor ||
         doc->mut_name_cursor + need > doc->mut_name_end) {
-        struct leptris_mut_name_block* blk =
-            (struct leptris_mut_name_block*)malloc(
+        struct leptris_mut_name_block* blk = leptris_mut_recycle_pop_name();
+        if (!blk) {
+            blk = (struct leptris_mut_name_block*)malloc(
                 sizeof(struct leptris_mut_name_block) + MUT_NAME_BLOCK_BYTES);
-        if (!blk) return NULL;
+            if (!blk) return NULL;
+        }
         blk->next = doc->mut_name_blocks;
         doc->mut_name_blocks = blk;
         doc->mut_name_cursor = blk->bytes;
@@ -89,17 +90,17 @@ static char* mut_name_carve(struct leptris_document* doc,
  * 40-byte-stride block (adjacent attrs keep their cp16 next-edges
  * in-range — no compact-overflow traffic for programmatic builds).
  * Falls back to the pool when a block can't be allocated. */
-#define MUT_ATTR_BLOCK_COUNT 128
-
 static struct leptris_attribute* mut_attr_carve(struct leptris_document* doc) {
     if (doc->mut_attr_cursor && doc->mut_attr_cursor < doc->mut_attr_end) {
         return doc->mut_attr_cursor++;
     }
-    struct leptris_mut_attr_block* blk =
-        (struct leptris_mut_attr_block*)malloc(
+    struct leptris_mut_attr_block* blk = leptris_mut_recycle_pop_attr();
+    if (!blk) {
+        blk = (struct leptris_mut_attr_block*)malloc(
             sizeof(struct leptris_mut_attr_block) +
             (size_t)MUT_ATTR_BLOCK_COUNT * sizeof(struct leptris_attribute));
-    if (!blk) return NULL;
+        if (!blk) return NULL;
+    }
     blk->next = doc->mut_attr_blocks;
     doc->mut_attr_blocks = blk;
     doc->mut_attr_cursor = (struct leptris_attribute*)blk->bytes;
@@ -120,10 +121,12 @@ static char* mut_str_carve(struct leptris_document* doc, const char* s,
     need = (need + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
     if (!doc->mut_name_cursor ||
         doc->mut_name_cursor + need > doc->mut_name_end) {
-        struct leptris_mut_name_block* blk =
-            (struct leptris_mut_name_block*)malloc(
+        struct leptris_mut_name_block* blk = leptris_mut_recycle_pop_name();
+        if (!blk) {
+            blk = (struct leptris_mut_name_block*)malloc(
                 sizeof(struct leptris_mut_name_block) + MUT_NAME_BLOCK_BYTES);
-        if (!blk) return NULL;
+            if (!blk) return NULL;
+        }
         blk->next = doc->mut_name_blocks;
         doc->mut_name_blocks = blk;
         doc->mut_name_cursor = blk->bytes;
@@ -143,18 +146,18 @@ static char* mut_str_carve(struct leptris_document* doc, const char* s,
  * every fresh malloc paid allocator + page costs. Contiguous
  * carving keeps sequential-append elements cache-adjacent. Blocks
  * chain via ->next and are freed with the document. */
-#define MUT_ELEM_BLOCK_COUNT 1024
-
 static LeptrisElement mut_elem_carve(struct leptris_document* doc) {
     if (doc->mut_elem_cursor && doc->mut_elem_cursor < doc->mut_elem_end) {
         return doc->mut_elem_cursor++;
     }
 
-    struct leptris_mut_elem_block* blk =
-        (struct leptris_mut_elem_block*)malloc(
+    struct leptris_mut_elem_block* blk = leptris_mut_recycle_pop_elem();
+    if (!blk) {
+        blk = (struct leptris_mut_elem_block*)malloc(
             sizeof(struct leptris_mut_elem_block) +
             (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
-    if (!blk) return NULL;
+        if (!blk) return NULL;
+    }
 
     blk->next = doc->mut_elem_blocks;
     doc->mut_elem_blocks = blk;
