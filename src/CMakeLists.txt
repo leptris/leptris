@@ -379,6 +379,20 @@ else()
     message(STATUS "utf8proc: DISABLED")
 endif()
 
+# DUCET table for UCA collation (fn:collation-key, UCA collation URIs)
+if(LEPTRIS_ENABLE_DUCET)
+    if(NOT LEPTRIS_ENABLE_UTF8PROC)
+        message(FATAL_ERROR "LEPTRIS_ENABLE_DUCET requires LEPTRIS_ENABLE_UTF8PROC (NFD before weight lookup)")
+    endif()
+    target_compile_definitions(leptris_objects PUBLIC LEPTRIS_HAS_DUCET=1)
+    target_sources(leptris_objects PRIVATE
+        leptris/xpath/collation.c
+    )
+    message(STATUS "DUCET/UCA collation: ENABLED")
+else()
+    message(STATUS "DUCET/UCA collation: DISABLED")
+endif()
+
 # iconv for encoding conversion
 if(LEPTRIS_ENABLE_ICONV)
     find_package(Iconv REQUIRED)

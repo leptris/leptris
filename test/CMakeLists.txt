@@ -91,6 +91,10 @@ target_compile_definitions(test_qt3 PRIVATE
 # objects' INTERFACE compile definition does not flow through to
 # test consumers — mirror the capability flag the runner's corpus
 # counts branch on.
+if(LEPTRIS_ENABLE_DUCET)
+    leptris_add_test(test_collation xpath/test_collation.cpp)
+endif()
+
 if(LEPTRIS_ENABLE_UTF8PROC)
     target_compile_definitions(test_qt3 PRIVATE LEPTRIS_HAS_UTF8PROC=1)
 endif()
