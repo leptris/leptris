@@ -1246,10 +1246,19 @@ TEST(XQueryCore, StringLtGtCodepointOrder) {
         {"'abc' lt 'abc'", "false"},
         {"'10' lt '9'", "true"},  /* codepoint, not numeric */
         {"1 lt 2", "true"},       /* numbers still numeric */
+    };
+#if defined(LEPTRIS_HAS_UTF8PROC) && defined(LEPTRIS_HAS_DUCET)
+    /* collation-key is DUCET-gated: absent on utf8proc-less legs
+     * (windows core tests build without utf8proc). */
+    struct {
+        const char* q;
+        const char* want;
+    } ducet_cases[] = {
         {"collation-key(codepoints-to-string((37, 65500, 37))) lt "
          "collation-key(codepoints-to-string((37, 100000, 37)))",
          "true"},
     };
+#endif
     for (auto& c : cases) {
         LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
         ASSERT_NE(xq, nullptr) << c.q;
@@ -1262,6 +1271,20 @@ TEST(XQueryCore, StringLtGtCodepointOrder) {
         leptris_xpath_result_free(r);
         leptris_xquery_free(xq);
     }
+#if defined(LEPTRIS_HAS_UTF8PROC) && defined(LEPTRIS_HAS_DUCET)
+    for (auto& c : ducet_cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+#endif
     leptris_document_free(doc);
 }
 
