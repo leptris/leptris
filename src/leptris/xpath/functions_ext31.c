@@ -1853,14 +1853,19 @@ static struct leptris_xpath_result* fn_string_to_codepoints(XPathContext* ctx,
 static struct leptris_xpath_result* fn_codepoints_to_string(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    /* collect_items collapses a parenthesized sequence to ONE
+     * scalar (its space-joined spelling) — the codepoint list then
+     * strtoul'd only the first number. collect_items_raw keeps the
+     * items; typed atoms carry a \x03 mark to strip. */
+    char** items = collect_items_raw(ctx, args, n, 0, &cnt);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_STRING);
     if (!out) { free_items(items, cnt); return NULL; }
     out->value.string_value = (char*)calloc(cnt * 5 + 1, 1);
     size_t o = 0;
     if (items)
         for (size_t k = 0; k < cnt; k++) {
-            unsigned cp = (unsigned)strtoul(items[k], NULL, 10);
+            const char* sv = items[k][0] == '\x03' ? items[k] + 2 : items[k];
+            unsigned cp = (unsigned)strtoul(sv, NULL, 10);
             if (cp < 0x80) out->value.string_value[o++] = (char)cp;
             else if (cp < 0x800) {
                 out->value.string_value[o++] = (char)(0xC0 | cp >> 6);

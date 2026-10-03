@@ -1229,6 +1229,74 @@ TEST(XQueryCore, MultiBindingFlwor) {
     leptris_document_free(doc);
 }
 
+/* XQuery 3.0 string lt/gt: two xs:string operands compare under
+ * the codepoint collation ('25ef...' lt '25f0...' is TRUE); the
+ * shared XPath-1.0 comparison numeric-coerces numeric-looking
+ * strings, which made key ordering compare as number equality. */
+TEST(XQueryCore, StringLtGtCodepointOrder) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        {"'25efbfb425' lt '25f0989aa025'", "true"},
+        {"'25f0989aa025' gt '25efbfb425'", "true"},
+        {"'abc' lt 'abd'", "true"},
+        {"'abc' lt 'abc'", "false"},
+        {"'10' lt '9'", "true"},  /* codepoint, not numeric */
+        {"1 lt 2", "true"},       /* numbers still numeric */
+        {"collation-key(codepoints-to-string((37, 65500, 37))) lt "
+         "collation-key(codepoints-to-string((37, 100000, 37)))",
+         "true"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
+/* codepoints-to-string round-trips high codepoints: the numeric
+ * item spelling of 65500 must reach strtoul intact (a scientific
+ * spelling broke the 3-byte encoding path). */
+TEST(XQueryCore, CodepointsToStringHighCp) {
+    LeptrisDocument doc = leptris_parse_string("<e/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    struct {
+        const char* q;
+        const char* want;
+    } cases[] = {
+        /* result_string spells only the first item of a sequence;
+         * join to observe every codepoint. */
+        {"string-join(string-to-codepoints(codepoints-to-string("
+         "(37, 65500, 37))), ' ')", "37 65500 37"},
+        {"string-join(string-to-codepoints(codepoints-to-string("
+         "(37, 100000, 37))), ' ')", "37 100000 37"},
+    };
+    for (auto& c : cases) {
+        LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));
+        ASSERT_NE(xq, nullptr) << c.q;
+        LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+        ASSERT_NE(r, nullptr) << c.q;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.q;
+        EXPECT_STREQ(s, c.want) << c.q;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+        leptris_xquery_free(xq);
+    }
+    leptris_document_free(doc);
+}
+
 /* Cross-type numeric eq is EXACT when either operand carries the
  * decimal lexical (XQuery 3.0: no double rounding of the decimal
  * operand) — the double widening used to make decimal(
