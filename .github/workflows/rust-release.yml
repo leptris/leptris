@@ -1,7 +1,8 @@
 # Rust crate publishing (TODO.engine/03). Publishes via crates.io
 # TRUSTED PUBLISHING (OIDC): the crate's settings register this repo
 # + workflow filename, the job mints an OIDC id-token (id-token:
-# write), and cargo exchanges it for a short-lived credential.
+# write), and rust-lang/crates-io-auth-action exchanges it for a
+# short-lived credential (cargo has no native OIDC support).
 # Mirrors the leptris-py release pattern: manual dispatch, or call it
 # from the C-repo release flow when wanted.
 name: Rust release
@@ -17,9 +18,10 @@ concurrency:
 
 permissions:
   contents: read
-  # crates.io trusted publishing: the OIDC id-token minted by Actions
-  # is exchanged for a short-lived registry credential — no static
-  # CARGO_REGISTRY_TOKEN secret exists or is wanted.
+  # crates.io trusted publishing: crates-io-auth-action exchanges the
+  # OIDC id-token minted by Actions for a short-lived registry
+  # credential — no static CARGO_REGISTRY_TOKEN secret exists or is
+  # wanted.
   id-token: write
 
 jobs:
@@ -61,11 +63,22 @@ jobs:
       - name: Verify the crate builds and links against the C core
         run: cd bindings/rust && cargo test
 
+      # Trusted publishing: cargo has NO native OIDC support (verified:
+      # no --trusted-publishing flag on 1.99, run 37104275665; no OIDC
+      # code in rust-lang/cargo; zero OIDC strings in the 1.98/1.99/
+      # nightly binaries; run 37106363016 failed with "no token found").
+      # The official client is rust-lang/crates-io-auth-action (RFC
+      # 3691): it exchanges the job's OIDC id-token for a short-lived
+      # registry token and exposes it as the `token` output; its post
+      # step auto-revokes the token when the job ends. Placed after the
+      # build/verify steps to minimize the token's live window.
+      - name: Authenticate with crates.io (trusted publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
       - name: Publish to crates.io
-        # Trusted publishing: cargo >= 1.90 has NO --trusted-publishing
-        # flag (run 37104275665 proved it) — the automatic mode is the
-        # mechanism: running inside Actions with id-token: write and no
-        # configured token, cargo mints the OIDC credential itself.
-        # stdin is closed so any fallback prompt errors immediately
-        # instead of idling to the job timeout.
+        # stdin is closed so any prompt errors immediately instead of
+        # idling to the job timeout.
         run: cd bindings/rust && cargo publish < /dev/null
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
