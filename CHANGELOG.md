@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.294] - 2026-10-03
+
+### Added
+
+- UCA collation over vendored DUCET — module, table, specs (xpath)
+
+### Fixed
+
+- DUCET degrades without utf8proc instead of failing configure (cmake)
+
+
+
 ## [1.9.293] - 2026-10-03
 
 ### Performance
