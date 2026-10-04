@@ -446,6 +446,10 @@ TEST(CliXslt, MissingStylesheetIsAnArgumentError) {
 // ---- --help lists every registered command ----------------------------------
 // The command list must come from the registry (the descriptors are
 // the single source of truth), not a hand-maintained printf list.
+// run_cli shells out with POSIX quoting — not exercised on Windows
+// (same harness limitation as the xquery specs).
+
+#if !defined(_WIN32)
 
 TEST(CliHelp, ListsEveryRegisteredCommand) {
     auto r = run_cli({"--help"});
@@ -456,6 +460,8 @@ TEST(CliHelp, ListsEveryRegisteredCommand) {
             << "command missing from --help: " << cmd;
     }
 }
+
+#endif  /* !_WIN32 */
 
 // ---- diff output modes (#1184 lever 8) --------------------------------------
 // run_cli shells out with POSIX quoting — not exercised on Windows.
