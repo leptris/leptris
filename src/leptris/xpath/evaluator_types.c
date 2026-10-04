@@ -308,7 +308,9 @@ char* get_node_text(void* node) {
                     const char* sep = strchr(c, '\x01');
                     return leptris_strdup(sep ? sep + 1 : "");
                 }
-                if (c[1] == 'N' || c[1] == 'B' || c[1] == 'D' ||
+                if (c[1] == 'B')
+                    return leptris_strdup(c[2] == 't' ? "true" : "false");
+                if (c[1] == 'N' || c[1] == 'D' ||
                     (c[1] == 'F' &&
                      !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R')) ||
                     (c[1] && strchr("ETtYJKQHXWZd", c[1])))
@@ -335,6 +337,24 @@ int xpath_to_boolean(struct leptris_xpath_result* result) {
         case XPATH_RESULT_NODESET: {
             XPathNodeSet* ns = result->value.nodeset_value;
             size_t cnt = ns ? xpath_nodeset_count(ns) : 0;
+            /* A var-bound synthetic carrier rides a nodeset without
+             * the sequence flag (function parameters); a singleton
+             * \x03-marked member is an atomic carrier — XML 1.0
+             * forbids raw control characters in real text content,
+             * so the marker cannot collide with document data. */
+            if (ns && cnt == 1 && !ns->is_sequence) {
+                void* nd = ns->nodes[0];
+                if (nd && XPATH_NODE_TYPE(nd) == LEPTRIS_NODE_TEXT) {
+                    const char* c = ((XPathTextNode*)nd)->content;
+                    if (c && c[0] == '\x03') {
+                        if (c[1] == 'B') return c[2] == 't';
+                        if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D') {
+                            double d = strtod(c + 2, NULL);
+                            return d != 0.0 && !isnan(d);
+                        }
+                    }
+                }
+            }
             /* XQuery sequence EBV: a singleton atomic carries the
              * item's EBV (fn:remove round-trips a false boolean as
              * falsy), while XPath node-existence EBV applies to

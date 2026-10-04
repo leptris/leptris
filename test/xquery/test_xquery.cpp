@@ -167,6 +167,44 @@ TEST(XQueryCore, SumOfIntegersIsExact) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, CarrierBooleansAreFalsyThroughFunctionParams) {
+    /* A false() bound as a function parameter rides a synthetic
+     * \x03B carrier; `and`/`if` must read its EBV, not string
+     * truthiness (fold-left-004 family). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:g($a) { if ($a) then 1 else 2 };"
+        " local:g(false())"), "2");
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:g($a) { if ($a) then 1 else 2 };"
+        " local:g(true())"), "1");
+    EXPECT_EQ(seq_string(doc,
+        "fold-left((true(), false(), false()), false(),"
+        " function($a, $b) { $a and $b })"), "false");
+    EXPECT_EQ(seq_string(doc,
+        "fold-left((true(), true()), true(),"
+        " function($a, $b) { $a and $b })"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "fold-left((true(), true()), false(),"
+        " function($a, $b) { $a and $b })"), "false");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, AbsEmptyAndDurationAggregates) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "empty(fn:abs(()))"), "true");
+    EXPECT_EQ(seq_string(doc, "abs(()) instance of xs:integer"), "false");
+    EXPECT_EQ(seq_string(doc, "fn:sum((), xs:dayTimeDuration(\"PT0S\"))"),
+              "PT0S");
+    EXPECT_EQ(seq_string(doc,
+        "avg(for $x in 1 to 10 return"
+        " xs:dayTimeDuration(concat(\"PT\", $x, \"H\")))"),
+              "PT5H30M");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);

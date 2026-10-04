@@ -703,23 +703,38 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
     if (!out) { free_items(items, cnt); return NULL; }
     if (!cnt) { out->value.number_value = 0; free_items(items, cnt); return out; }
     /* min/max over dayTimeDuration items pick by seconds and return
-     * the ORIGINAL lexical item (F&O: fn:min#3). */
-    if (which >= 2) {
+     * the ORIGINAL lexical item (F&O: fn:min#3); avg over durations
+     * divides the total seconds and formats (fn-avg-4). */
+    if (which >= 1) {
         double s0;
         int all_dur = 1;
         for (size_t k = 0; k < cnt && all_dur; k++)
             if (!leptris_dur_try_seconds(items[k], &s0)) all_dur = 0;
         if (all_dur && cnt > 0) {
             size_t bi = 0;
-            double bs = 0;
+            double bs = 0, tot = 0;
             for (size_t k = 0; k < cnt; k++) {
                 double sk;
                 leptris_dur_try_seconds(items[k], &sk);
+                tot += sk;
                 if (k == 0 ||
                     (which == 2 && sk < bs) ||
                     (which == 3 && sk > bs)) { bs = sk; bi = k; }
             }
             xpath_result_free(out);
+            /* fn:avg over durations: total seconds / count, spelled
+             * by the shared duration formatter (fn-avg-4: PT5H30M). */
+            if (which == 1) {
+                char dbuf[64];
+                out = xpath_result_new(XPATH_RESULT_STRING);
+                if (out) {
+                    leptris_dur_format(tot / (double)cnt, dbuf,
+                                       sizeof dbuf);
+                    out->value.string_value = leptris_strdup(dbuf);
+                }
+                free_items(items, cnt);
+                return out;
+            }
             out = xpath_result_new(XPATH_RESULT_STRING);
             if (out)
                 out->value.string_value = leptris_strdup(items[bi]);
@@ -876,6 +891,15 @@ static struct leptris_xpath_result* fn_abs(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (!r) return NULL;
+    /* fn:abs(()) is the empty sequence (K-ABSFunc-3); XQuery surface
+     * only — XPath 1.0 coercion gives NaN. */
+    if (ctx->xquery_spelling &&
+        r->type == XPATH_RESULT_NODESET &&
+        (!r->value.nodeset_value ||
+         r->value.nodeset_value->count == 0)) {
+        leptris_xpath_result_free(r);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
     int fl = xpath_result_is_float(r);
     int iv_int = r->is_int;
     long long iv = r->int_value;
@@ -4635,15 +4659,31 @@ static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
 }
 
 /* fn:fold-left(sequence, zero, $f) — f(acc, item) left to right */
+/* Argv string for closure calls: booleans ride the \x03B mark so
+ * param bindings keep falsiness; everything else stringifies. */
+static char* fn_item_arg_string(struct leptris_xpath_result* r) {
+    if (r && r->type == XPATH_RESULT_BOOLEAN) {
+        char* m = (char*)malloc(4);
+        if (m) {
+            m[0] = '\x03';
+            m[1] = 'B';
+            m[2] = r->value.boolean_value ? 't' : 'f';
+            m[3] = 0;
+        }
+        return m;
+    }
+    return r ? xpath_to_string(r) : NULL;
+}
+
 static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
+    char** items = collect_items_raw(ctx, args, 1, 0, &cnt);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
-    char* acc = zr ? xpath_to_string(zr) : NULL;
+    char* acc = fn_item_arg_string(zr);
     if (zr) xpath_result_free(zr);
     if (!acc) acc = leptris_strdup("");
     if (cc && acc) {
@@ -4651,17 +4691,25 @@ static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
             char* argv[2] = { acc, items[k] };
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 2);
-            char* ns = r ? xpath_to_string(r) : NULL;
+            char* ns = fn_item_arg_string(r);
             if (r) xpath_result_free(r);
             free(acc);
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    struct leptris_xpath_result* out =
-        xpath_result_new(XPATH_RESULT_STRING);
-    if (!out) { free(acc); acc = NULL; }
-    if (out) out->value.string_value = acc;
-    else free(acc);
+    /* A boolean accumulator returns as a boolean result, not the
+     * marked carrier string (fold-left-004). */
+    struct leptris_xpath_result* out;
+    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
+        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (out) out->value.boolean_value = acc[2] == 't';
+        free(acc);
+    } else {
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (!out) { free(acc); acc = NULL; }
+        if (out) out->value.string_value = acc;
+        else free(acc);
+    }
     free(cc);
     free_items(items, cnt);
     return out;
@@ -4672,11 +4720,11 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
+    char** items = collect_items_raw(ctx, args, 1, 0, &cnt);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
-    char* acc = zr ? xpath_to_string(zr) : NULL;
+    char* acc = fn_item_arg_string(zr);
     if (zr) xpath_result_free(zr);
     if (!acc) acc = leptris_strdup("");
     if (cc && acc) {
@@ -4684,16 +4732,24 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
             char* argv[2] = { items[k - 1], acc };
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 2);
-            char* ns = r ? xpath_to_string(r) : NULL;
+            char* ns = fn_item_arg_string(r);
             if (r) xpath_result_free(r);
             free(acc);
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    struct leptris_xpath_result* out =
-        xpath_result_new(XPATH_RESULT_STRING);
-    if (out) out->value.string_value = acc;
-    else free(acc);
+    /* A boolean accumulator returns as a boolean result, not the
+     * marked carrier string (fold-right's and-fold shape). */
+    struct leptris_xpath_result* out;
+    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
+        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (out) out->value.boolean_value = acc[2] == 't';
+        free(acc);
+    } else {
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out) out->value.string_value = acc;
+        else free(acc);
+    }
     free(cc);
     free_items(items, cnt);
     return out;
@@ -4959,7 +5015,7 @@ static struct leptris_xpath_result* fn_array_fold_left(XPathContext* ctx,
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
-    char* acc = zr ? xpath_to_string(zr) : NULL;
+    char* acc = fn_item_arg_string(zr);
     if (zr) xpath_result_free(zr);
     if (!acc) acc = leptris_strdup("");
     if (cc && acc) {
@@ -4967,16 +5023,24 @@ static struct leptris_xpath_result* fn_array_fold_left(XPathContext* ctx,
             char* argv[2] = { acc, items[k] };
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 2);
-            char* ns = r ? xpath_to_string(r) : NULL;
+            char* ns = fn_item_arg_string(r);
             if (r) xpath_result_free(r);
             free(acc);
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    struct leptris_xpath_result* out =
-        xpath_result_new(XPATH_RESULT_STRING);
-    if (out) out->value.string_value = acc;
-    else free(acc);
+    /* A boolean accumulator returns as a boolean result, not the
+     * marked carrier string (fold-right's and-fold shape). */
+    struct leptris_xpath_result* out;
+    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
+        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (out) out->value.boolean_value = acc[2] == 't';
+        free(acc);
+    } else {
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out) out->value.string_value = acc;
+        else free(acc);
+    }
     free(cc);
     free_items(items, cnt);
     return out;
@@ -4991,7 +5055,7 @@ static struct leptris_xpath_result* fn_array_fold_right(XPathContext* ctx,
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
-    char* acc = zr ? xpath_to_string(zr) : NULL;
+    char* acc = fn_item_arg_string(zr);
     if (zr) xpath_result_free(zr);
     if (!acc) acc = leptris_strdup("");
     if (cc && acc) {
@@ -4999,16 +5063,24 @@ static struct leptris_xpath_result* fn_array_fold_right(XPathContext* ctx,
             char* argv[2] = { items[k - 1], acc };
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 2);
-            char* ns = r ? xpath_to_string(r) : NULL;
+            char* ns = fn_item_arg_string(r);
             if (r) xpath_result_free(r);
             free(acc);
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    struct leptris_xpath_result* out =
-        xpath_result_new(XPATH_RESULT_STRING);
-    if (out) out->value.string_value = acc;
-    else free(acc);
+    /* A boolean accumulator returns as a boolean result, not the
+     * marked carrier string (fold-right's and-fold shape). */
+    struct leptris_xpath_result* out;
+    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
+        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+        if (out) out->value.boolean_value = acc[2] == 't';
+        free(acc);
+    } else {
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out) out->value.string_value = acc;
+        else free(acc);
+    }
     free(cc);
     free_items(items, cnt);
     return out;

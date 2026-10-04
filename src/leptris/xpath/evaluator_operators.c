@@ -3877,7 +3877,11 @@ struct leptris_xpath_result* xpath_call_function_item(
         for (size_t i = 0; i < na; i++) {
             memset(&argn[i], 0, sizeof(argn[i]));
             argn[i].type = XPATH_AST_STRING;
-            argn[i].value = argv[i];
+            /* Marked booleans spell as literals for named calls. */
+            if (argv[i] && argv[i][0] == '\x03' && argv[i][1] == 'B')
+                argn[i].value = argv[i][2] == 't' ? "true" : "false";
+            else
+                argn[i].value = argv[i];
             child_arr[i] = &argn[i];
         }
         XPathASTNode fc;

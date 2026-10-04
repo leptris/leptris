@@ -938,30 +938,28 @@ TEST(Qt3Subset, FnCount) {
 /* Numeric aggregate + rounding families and the higher-order
  * combiners, vendored from the upstream QT3 mirror. The named
  * excludes are the remaining typed-atom levers (instance-of
- * assertions, decimal-lexical aggregates, HOF local:* helpers)
- * — see the batch notes in #1182. */
+ * assertions, mixed-type aggregates, HOF zero-arity apply) —
+ * see the batch notes in #1182. */
 TEST(Qt3Subset, FnAbs) {
-    run_test_set("fn/abs.xml", {}, 37, {},
-                 {"K-ABSFunc-3",
-                 "K2-ABSFunc-27",
+    run_test_set("fn/abs.xml", {}, 38, {},
+                 {"K2-ABSFunc-27",
                  "K2-ABSFunc-28",
                  "K2-ABSFunc-29",
                  "K2-ABSFunc-30",
                  "fn-abs-1"});
 }
 TEST(Qt3Subset, FnAvg) {
-    run_test_set("fn/avg.xml", {}, 163, {},
+    run_test_set("fn/avg.xml", {}, 164, {},
                  {"K-SeqAVGFunc-17",
                  "K-SeqAVGFunc-18",
                  "K-SeqAVGFunc-3",
                  "K-SeqAVGFunc-39",
                  "K-SeqAVGFunc-40",
-                 "cbcl-avg-004",
                  "cbcl-avg-006",
                  "cbcl-avg-008",
                  "cbcl-avg-013",
                  "fn-avg-10",
-                 "fn-avg-4",
+                 "fn-avg-3",
                  "fn-avg-6",
                  "fn-avg-mix-args-002",
                  "fn-avg-mix-args-012",
@@ -1023,15 +1021,12 @@ TEST(Qt3Subset, FnRoundHalfToEven) {
                  "cbcl-round-half-to-even-012"});
 }
 TEST(Qt3Subset, FnSum) {
-    run_test_set("fn/sum.xml", {}, 200, {},
+    run_test_set("fn/sum.xml", {}, 203, {},
                  {"K-SeqSUMFunc-30",
-                 "K-SeqSUMFunc-31",
                  "K-SeqSUMFunc-5",
                  "fn-sum-11",
                  "fn-sum-12",
-                 "fn-sum-2",
                  "fn-sum-3",
-                 "fn-sum-5",
                  "fn-sum-6",
                  "fn-sum-8"});
 }
@@ -1055,9 +1050,8 @@ TEST(Qt3Subset, FnForEachPair) {
                  "fn-for-each-pair-027"});
 }
 TEST(Qt3Subset, FnFoldLeft) {
-    run_test_set("fn/fold-left.xml", {}, 6, {},
-                 {"fold-left-004",
-                 "fold-left-009",
+    run_test_set("fn/fold-left.xml", {}, 7, {},
+                 {"fold-left-009",
                  "fold-left-016",
                  "fold-left-019",
                  "fold-left-020",
@@ -1068,9 +1062,8 @@ TEST(Qt3Subset, FnFoldLeft) {
                  "fold-left-104"});
 }
 TEST(Qt3Subset, FnFoldRight) {
-    run_test_set("fn/fold-right.xml", {}, 8, {},
-                 {"fold-right-004",
-                 "fold-right-013",
+    run_test_set("fn/fold-right.xml", {}, 9, {},
+                 {"fold-right-013",
                  "fold-right-020",
                  "fold-right-101",
                  "fold-right-102",

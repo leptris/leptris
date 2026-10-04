@@ -402,7 +402,9 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
                 const char* sep = strchr(text->content, '\x01');
                 return sep ? sep + 1 : "";
             }
-            if (text->content[1] == 'N' || text->content[1] == 'B' ||
+            if (text->content[1] == 'B')
+                return text->content[2] == 't' ? "true" : "false";
+            if (text->content[1] == 'N' ||
                 text->content[1] == 'D' ||
                 (text->content[1] == 'F' &&
                  !((text->content[2] == 'N' &&
