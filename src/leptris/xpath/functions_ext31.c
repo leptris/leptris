@@ -102,7 +102,11 @@ static char* scalar_str(const struct leptris_xpath_result* r) {
              * 830993497117024304 as 8.30993e+17. */
             if (r->is_int)
                 return xpath_int_to_string(r->int_value);
-            char* s = xpath_number_to_string(r->value.number_value);
+            /* Shortest round-trip spelling: this string is a VALUE
+             * CARRIER (strtod reads it back), and the libxml2-parity
+             * printer renders DBL_MAX with 18 significant digits,
+             * which overflows to INF on read-back. */
+            char* s = xpath_number_to_string_xq(r->value.number_value);
             return s ? s : leptris_strdup("");
         }
         case XPATH_RESULT_BOOLEAN:
@@ -705,15 +709,34 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
     double acc = 0, best = 0;
     size_t numeric = 0;
     int first = 1;
+    /* F&O: max/min over non-numeric items (xs:string, xs:anyURI)
+     * compare in codepoint order and return the extreme ITEM. */
+    int all_str = (cnt > 0);
     for (size_t k = 0; k < cnt; k++) {
         char* end = NULL;
         double d = strtod(items[k], &end);
+        int is_num = items[k][0] != '\0' && end != items[k] &&
+                     *end == '\0';
+        if (is_num) all_str = 0;
         if (items[k][0] == '\0') d = 0;   /* empty string -> NaN in spec; treat 0 */
         acc += d;
         if (first) { best = d; first = 0; }
         else if (which == 2 && d < best) best = d;   /* min */
         else if (which == 3 && d > best) best = d;   /* max */
         numeric++;
+    }
+    if (which >= 2 && all_str) {
+        size_t bi = 0;
+        for (size_t k = 1; k < cnt; k++) {
+            int c = strcmp(items[k], items[bi]);
+            if ((which == 2 && c < 0) || (which == 3 && c > 0)) bi = k;
+        }
+        xpath_result_free(out);
+        out = xpath_result_new(XPATH_RESULT_STRING);
+        if (out)
+            out->value.string_value = leptris_strdup(items[bi]);
+        free_items(items, cnt);
+        return out;
     }
     out->value.number_value = (which == 1) ? acc / (double)numeric : best;
     free_items(items, cnt);
@@ -839,6 +862,15 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (!r) return NULL;
+    /* fn:round-half-to-even(()) is the empty sequence (K-RoundEvenFunc-3/4);
+     * XQuery surface only — XPath 1.0 coercion gives NaN. */
+    if (ctx->xquery_spelling &&
+        r->type == XPATH_RESULT_NODESET &&
+        (!r->value.nodeset_value ||
+         r->value.nodeset_value->count == 0)) {
+        leptris_xpath_result_free(r);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
     double v = leptris_xpath_result_number(r);
     leptris_xpath_result_free(r);
     int prec = 0;
