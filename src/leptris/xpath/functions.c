@@ -2340,9 +2340,10 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     xpath_result_free(arg_result);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
-    if (!result) return NULL;
+    if (!result) { LEPTRIS_FREE(zero_lex); return NULL; }
 
     if (has_nan) {
+        LEPTRIS_FREE(zero_lex);
         result->value.number_value = NAN;
     } else if (all_int && !zero_non_int && !iovf && (count > 0 || has_zero)) {
         result->is_int = 1;
@@ -2366,6 +2367,7 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         result->value.number_value = sum;
         if (all_float && count > 0) result->atomic_type = "xs:float";
     }
+    LEPTRIS_FREE(zero_lex);
     return result;
 }
 
