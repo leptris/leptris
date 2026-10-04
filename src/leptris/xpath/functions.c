@@ -35,6 +35,12 @@
 extern struct leptris_xpath_result* xpath_evaluate(XPathContext* context,
                                                    XPathASTNode* ast);
 
+/* Dense-array carriers flatten to their members for
+ * xs:anyAtomicType*-typed arguments (fn:sum([1,2,3]) = 6);
+ * implemented in functions_ext31.c beside the map machinery. */
+extern int xpath_array_members_of(const char* content, char*** out,
+                                  size_t* out_n);
+
 /* Helper functions.
  * get_node_text is implemented in evaluator_types.c; the extern
  * decl appears in the type-conversion block below. */
@@ -2187,6 +2193,36 @@ static struct leptris_xpath_result* xpath_func_number(XPathContext* context,
     return result;
 }
 
+/* One item's contribution to fn:sum's accumulators: blank items
+ * are skipped, NaN or non-numeric items force the NaN result,
+ * exact integer lexicals feed the int64 total in parallel. */
+static void sum_add_item(const char* s, double* sum, int* has_nan,
+                         long long* isum, int* all_int, int* iovf) {
+    while (isspace((unsigned char)*s)) s++;
+    if (*s == '\0') return;
+    char* endptr;
+    double value = strtod(s, &endptr);
+    while (isspace((unsigned char)*endptr)) endptr++;
+    if (*endptr != '\0') {
+        *has_nan = 1;
+        return;
+    }
+    if (isnan(value)) {
+        *has_nan = 1;
+        return;
+    }
+    *sum += value;
+    errno = 0;
+    char* iend;
+    long long iv = strtoll(s, &iend, 10);
+    if (errno == ERANGE || iend == s || *iend != '\0')
+        *all_int = 0;
+    else if (iv > 0 ? *isum > LLONG_MAX - iv : *isum < LLONG_MIN - iv)
+        *iovf = 1;
+    else
+        *isum += iv;
+}
+
 /* sum(node-set) - Sum the numeric values of all nodes */
 static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     XPathASTNode** args,
@@ -2259,8 +2295,25 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
             count = xpath_nodeset_count(nodeset);
             for (size_t i = 0; i < count; i++) {
                 void* node = xpath_nodeset_get(nodeset, i);
+                const char* mc = NULL;
+                if ((int)XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT)
+                    mc = ((XPathTextNode*)node)->content;
+                /* Atomizing: a dense-array argument contributes
+                 * its members (fn-sum-11: sum([1,2,3,4,5]) = 15). */
+                char** am = NULL;
+                size_t an = 0;
+                if (mc && mc[0] == '\x03' && mc[1] == 'M' &&
+                    xpath_array_members_of(mc, &am, &an)) {
+                    all_float = 0;
+                    for (size_t j = 0; j < an; j++)
+                        if (am[j])
+                            sum_add_item(am[j], &sum, &has_nan, &isum,
+                                         &all_int, &iovf);
+                    for (size_t j = 0; j < an; j++) free(am[j]);
+                    free(am);
+                    continue;
+                }
                 if ((int)XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
-                    const char* mc = ((XPathTextNode*)node)->content;
                     if (!(mc && mc[0] == '\x03' && mc[1] == 'F' &&
                           !(mc[2] == 'R' ||
                             (mc[2] == 'N' && mc[3] == '\x02'))))
@@ -2269,36 +2322,11 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
                     all_float = 0;
                 }
                 char* str = get_node_text(node);
-                const char* p = str;
-                while (isspace((unsigned char)*p)) p++;
-
-                if (*p != '\0') {
-                    char* endptr;
-                    double value = strtod(p, &endptr);
-                    while (isspace((unsigned char)*endptr)) endptr++;
-                    if (*endptr == '\0') {
-                        if (isnan(value)) {
-                            has_nan = 1;
-                        } else {
-                            sum += value;
-                            errno = 0;
-                            char* iend;
-                            long long iv = strtoll(p, &iend, 10);
-                            if (errno == ERANGE || iend == p ||
-                                *iend != '\0')
-                                all_int = 0;
-                            else if (iv > 0 ? isum > LLONG_MAX - iv
-                                            : isum < LLONG_MIN - iv)
-                                iovf = 1;
-                            else
-                                isum += iv;
-                        }
-                    } else {
-                        /* Non-numeric value found */
-                        has_nan = 1;
-                    }
+                if (str) {
+                    sum_add_item(str, &sum, &has_nan, &isum, &all_int,
+                                 &iovf);
+                    LEPTRIS_FREE(str);
                 }
-                LEPTRIS_FREE(str);
             }
         }
     } else if (arg_result->type == XPATH_RESULT_NUMBER) {

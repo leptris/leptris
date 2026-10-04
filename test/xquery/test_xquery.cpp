@@ -205,6 +205,45 @@ TEST(XQueryCore, AbsEmptyAndDurationAggregates) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, InstanceOfIntegerRequiresIntegrality) {
+    /* F&O: xs:integer admits only integral values; the subtype
+     * hierarchy (byte <: integer) still holds (K2-ABSFunc-27..30). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "1.1 instance of xs:integer"), "false");
+    EXPECT_EQ(seq_string(doc, "1 instance of xs:integer"), "true");
+    EXPECT_EQ(seq_string(doc, "fn:abs(1.1) instance of xs:integer"), "false");
+    EXPECT_EQ(seq_string(doc, "fn:abs(-3) instance of xs:integer"), "true");
+    EXPECT_EQ(seq_string(doc, "xs:byte(4) instance of xs:integer"), "true");
+    EXPECT_EQ(seq_string(doc, "1.1 instance of xs:double"), "true");
+    EXPECT_EQ(seq_string(doc, "1.5 instance of xs:decimal"), "true");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, AvgEdgeShapes) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "empty(avg(()))"), "true");
+    EXPECT_EQ(seq_string(doc, "avg([1,2,3,4,5])"), "3");
+    EXPECT_EQ(seq_string(doc,
+        "fn:avg((xs:yearMonthDuration(\"P1Y1M\"),"
+        " xs:yearMonthDuration(\"P11M\"),"
+        " xs:yearMonthDuration(\"P1Y\")))"), "P1Y");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, ArrayAtomizedAggregates) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "avg([1,2,3,4,5])"), "3");
+    EXPECT_EQ(seq_string(doc, "sum([1,2,3,4,5])"), "15");
+    EXPECT_EQ(seq_string(doc, "min([3,1,2])"), "1");
+    EXPECT_EQ(seq_string(doc, "max([1,5,3])"), "5");
+    /* item()-typed args do NOT atomize: an array is one item */
+    EXPECT_EQ(seq_string(doc, "count([1,2,3])"), "1");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);

@@ -2763,6 +2763,22 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                strcmp(base, "xs:time") == 0 ||
                                strcmp(base, "xs:duration") == 0;
             int is_bool_ty = strcmp(base, "xs:boolean") == 0;
+            /* The integer family admits only integral values
+             * (1.1 instance of xs:integer is false; the byte <:
+             * integer hierarchy still matches). */
+            int is_int_ty = strcmp(base, "xs:integer") == 0 ||
+                            strcmp(base, "xs:int") == 0 ||
+                            strcmp(base, "xs:long") == 0 ||
+                            strcmp(base, "xs:short") == 0 ||
+                            strcmp(base, "xs:byte") == 0 ||
+                            strcmp(base, "xs:nonNegativeInteger") == 0 ||
+                            strcmp(base, "xs:nonPositiveInteger") == 0 ||
+                            strcmp(base, "xs:positiveInteger") == 0 ||
+                            strcmp(base, "xs:negativeInteger") == 0 ||
+                            strcmp(base, "xs:unsignedLong") == 0 ||
+                            strcmp(base, "xs:unsignedInt") == 0 ||
+                            strcmp(base, "xs:unsignedShort") == 0 ||
+                            strcmp(base, "xs:unsignedByte") == 0;
             int is_num_ty = !is_string_ty && !is_bool_ty &&
                             strcmp(base, "node()") != 0 &&
                             strcmp(base, "item()") != 0 &&
@@ -2811,6 +2827,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         m = 0;
                     } else if (is_num_ty) {
                         m = is_num_member;
+                        if (m && is_int_ty && mc) {
+                            double iv = strtod(mc + 2, NULL);
+                            m = iv == floor(iv) && !isnan(iv);
+                        }
                     } else {
                         m = 0;
                     }
@@ -2820,7 +2840,14 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                  * occurrence indicator admits it. */
                 if (is_string_ty) m = v->type == XPATH_RESULT_STRING;
                 else if (is_bool_ty) m = v->type == XPATH_RESULT_BOOLEAN;
-                else if (is_num_ty) m = v->type == XPATH_RESULT_NUMBER;
+                else if (is_num_ty) {
+                    m = v->type == XPATH_RESULT_NUMBER;
+                    if (m && is_int_ty)
+                        m = v->is_int ||
+                            (v->value.number_value ==
+                                 floor(v->value.number_value) &&
+                             !isnan(v->value.number_value));
+                }
                 else if (strcmp(base, "item()") == 0) m = 1;
                 else m = 0;   /* node kinds: a scalar is not a node */
             }
