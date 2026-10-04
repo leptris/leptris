@@ -6,6 +6,7 @@
  */
 
 #include "functions.h"
+#include "collation.h"
 #include "evaluator.h"
 #include "evaluator_internal.h"
 #include "../include/leptris.h"
@@ -516,10 +517,12 @@ static struct leptris_xpath_result* xpath_func_concat(XPathContext* context,
     return result;
 }
 
-/* Collation-argument mode: 0 = codepoint (the default
- * semantics), 1 = html-ascii-case-insensitive, -1 = unknown
- * collation (error message set, callers return NULL). */
-static int collation_mode(XPathContext* context, XPathASTNode* arg) {
+/* Collation-argument mode: 0 = codepoint (the default semantics),
+ * 1 = html-ascii-case-insensitive, 2 = UCA (descriptor written to
+ * *out when non-NULL), -1 = unknown collation (error message set,
+ * callers return NULL). */
+static int collation_mode_c(XPathContext* context, XPathASTNode* arg,
+                            leptris_collation* out) {
     struct leptris_xpath_result* r = xpath_evaluate(context, arg);
     if (!r) return -1;
     char* uri = result_to_string(r);
@@ -531,14 +534,113 @@ static int collation_mode(XPathContext* context, XPathASTNode* arg) {
     } else if (uri && strcmp(uri,
             "http://www.w3.org/2005/xpath-functions/collation/"
             "codepoint") != 0) {
+#if LEPTRIS_HAS_DUCET
+        leptris_collation c;
+        if (leptris_collation_from_uri(uri, &c) == 0 &&
+            c.kind == LEPTRIS_COLL_UCA) {
+            mode = 2;
+            if (out) *out = c;
+        } else {
+            snprintf(context->error_msg, sizeof(context->error_msg),
+                    "unknown collation %s", uri);
+            mode = -1;
+        }
+#else
         snprintf(context->error_msg, sizeof(context->error_msg),
                 "unknown collation %s", uri);
         mode = -1;
+#endif
     }
     LEPTRIS_FREE(uri);
     xpath_result_free(r);
     return mode;
 }
+
+#if LEPTRIS_HAS_DUCET
+/* UTF-8 prefix helpers for collation-unit matching: F&O defines
+ * starts-with/contains/ends-with under a collation as equality of
+ * collation units; every unit boundary falls between codepoints,
+ * so scanning codepoint-aligned prefixes and comparing under the
+ * collation is exact (contractions spanning a cut are covered by
+ * a neighboring cut). */
+static size_t utf8_cp_len(const char* s, size_t len) {
+    size_t n = 0;
+    for (size_t i = 0; i < len; ) {
+        unsigned char b = (unsigned char)s[i];
+        size_t step = 1;
+        if ((b & 0xE0) == 0xC0) step = 2;
+        else if ((b & 0xF0) == 0xE0) step = 3;
+        else if ((b & 0xF8) == 0xF0) step = 4;
+        if (i + step > len) break;
+        i += step;
+        n++;
+    }
+    return n;
+}
+
+static size_t utf8_prefix_bytes(const char* s, size_t len, size_t cp_count) {
+    size_t i = 0, n = 0;
+    while (i < len && n < cp_count) {
+        unsigned char b = (unsigned char)s[i];
+        size_t step = 1;
+        if ((b & 0xE0) == 0xC0) step = 2;
+        else if ((b & 0xF0) == 0xE0) step = 3;
+        else if ((b & 0xF8) == 0xF0) step = 4;
+        if (i + step > len) break;
+        i += step;
+        n++;
+    }
+    return i;
+}
+
+static int uca_starts_with(const char* s, size_t slen,
+                           const char* p, size_t plen,
+                           const leptris_collation* c) {
+    size_t total = utf8_cp_len(s, slen);
+    for (size_t k = 0; k <= total; k++) {
+        size_t bytes = utf8_prefix_bytes(s, slen, k);
+        if (leptris_collation_compare(s, bytes, p, plen, c) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Leftmost-shortest first occurrence of sub under c: on hit writes
+ * the byte range [*off, *end). Windows start at k == i, so an
+ * empty (or fully ignorable) pattern matches the empty window at
+ * 0 — matching the 2-arg forms' empty-pattern behavior. */
+static int uca_find(const char* s, size_t slen,
+                    const char* sub, size_t sublen,
+                    const leptris_collation* c,
+                    size_t* off, size_t* end) {
+    size_t total = utf8_cp_len(s, slen);
+    for (size_t i = 0; i <= total; i++) {
+        size_t b0 = utf8_prefix_bytes(s, slen, i);
+        for (size_t k = i; k <= total; k++) {
+            size_t b1 = utf8_prefix_bytes(s, slen, k);
+            if (leptris_collation_compare(s + b0, b1 - b0, sub, sublen,
+                                          c) == 0) {
+                *off = b0;
+                *end = b1;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int uca_ends_with(const char* s, size_t slen,
+                         const char* p, size_t plen,
+                         const leptris_collation* c) {
+    size_t total = utf8_cp_len(s, slen);
+    for (size_t i = 0; i <= total; i++) {
+        size_t b0 = utf8_prefix_bytes(s, slen, i);
+        if (leptris_collation_compare(s + b0, slen - b0, p, plen, c) == 0)
+            return 1;
+    }
+    return 0;
+}
+#endif
 
 /* starts-with(string, string[, collation]) - Check if string
  * starts with prefix; the 3-arg form carries a collation URI. */
@@ -562,8 +664,17 @@ static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context
     }
 
     int ascii_ci = 0;
+#if LEPTRIS_HAS_DUCET
+    leptris_collation coll;
+    int uca = 0;
+#endif
     if (arg_count == 3) {
-        int mode = collation_mode(context, args[2]);
+#if LEPTRIS_HAS_DUCET
+        int mode = collation_mode_c(context, args[2], &coll);
+        uca = mode == 2;
+#else
+        int mode = collation_mode_c(context, args[2], NULL);
+#endif
         if (mode < 0) {
             xpath_result_free(str_result);
             xpath_result_free(prefix_result);
@@ -576,6 +687,13 @@ static struct leptris_xpath_result* xpath_func_starts_with(XPathContext* context
     char* prefix = result_to_string(prefix_result);
 
     int match;
+#if LEPTRIS_HAS_DUCET
+    if (uca) {
+        match = uca_starts_with(str ? str : "", str ? strlen(str) : 0,
+                                prefix ? prefix : "",
+                                prefix ? strlen(prefix) : 0, &coll);
+    } else
+#endif
     if (ascii_ci) {
         const char* a = str ? str : "";
         const char* b = prefix ? prefix : "";
@@ -625,8 +743,17 @@ static struct leptris_xpath_result* xpath_func_ends_with(XPathContext* context,
     }
 
     int ascii_ci = 0;
+#if LEPTRIS_HAS_DUCET
+    leptris_collation coll;
+    int uca = 0;
+#endif
     if (arg_count == 3) {
-        int mode = collation_mode(context, args[2]);
+#if LEPTRIS_HAS_DUCET
+        int mode = collation_mode_c(context, args[2], &coll);
+        uca = mode == 2;
+#else
+        int mode = collation_mode_c(context, args[2], NULL);
+#endif
         if (mode < 0) {
             xpath_result_free(str_result);
             xpath_result_free(suffix_result);
@@ -639,19 +766,29 @@ static struct leptris_xpath_result* xpath_func_ends_with(XPathContext* context,
     char* suffix = result_to_string(suffix_result);
 
     size_t sl = str ? strlen(str) : 0, fl = suffix ? strlen(suffix) : 0;
-    int match = fl <= sl;
-    if (match) {
-        const char* a = (str ? str : "") + sl - fl;
-        const char* b = suffix ? suffix : "";
-        if (ascii_ci) {
-            while (*a && *b &&
-                   tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
-                a++;
-                b++;
+    int match;
+#if LEPTRIS_HAS_DUCET
+    if (uca) {
+        match = uca_ends_with(str ? str : "", sl,
+                              suffix ? suffix : "", fl, &coll);
+    } else
+#endif
+    {
+        match = fl <= sl;
+        if (match) {
+            const char* a = (str ? str : "") + sl - fl;
+            const char* b = suffix ? suffix : "";
+            if (ascii_ci) {
+                while (*a && *b &&
+                       tolower((unsigned char)*a) ==
+                           tolower((unsigned char)*b)) {
+                    a++;
+                    b++;
+                }
+                match = *b == '\0';
+            } else {
+                match = memcmp(a, b, fl) == 0;
             }
-            match = *b == '\0';
-        } else {
-            match = memcmp(a, b, fl) == 0;
         }
     }
 
@@ -799,7 +936,8 @@ static int de_markup_equal_n(const char* a, size_t al,
  * canonically key-sorted at construction) compare entry-wise:
  * keys lexically, values with the markup fallback. Segment bytes
  * (\x02/\x01) cannot occur in XML content, so end-scan is safe. */
-static int de_map_equal(const char* a, const char* b) {
+static int de_map_equal(const char* a, const char* b,
+                        const leptris_collation* coll) {
     a += 4;
     b += 4;
     while (*a && *b) {
@@ -819,8 +957,19 @@ static int de_map_equal(const char* a, const char* b) {
         while (*a && *a != '\x02') a++;
         const char* vb = b;
         while (*b && *b != '\x02') b++;
-        if (a - va != b - vb ||
-            memcmp(va, vb, (size_t)(a - va)) != 0) {
+        int v_eq = a - va == b - vb &&
+                   memcmp(va, vb, (size_t)(a - va)) == 0;
+#if LEPTRIS_HAS_DUCET
+        /* Plain string values compare under the collation; marked
+         * carriers and markup keep the value-space comparison. */
+        if (!v_eq && coll && va[0] != '<' && vb[0] != '<' &&
+            va[0] != '\x03' && vb[0] != '\x03' &&
+            leptris_collation_compare(va, (size_t)(a - va),
+                                      vb, (size_t)(b - vb),
+                                      coll) == 0)
+            v_eq = 1;
+#endif
+        if (!v_eq) {
             if (va[0] != '<' || vb[0] != '<') return 0;
             if (!de_markup_equal_n(va, (size_t)(a - va),
                                    vb, (size_t)(b - vb)))
@@ -874,7 +1023,8 @@ static void de_item_clear(DeItem* it) {
     it->str = NULL;
 }
 
-static int de_item_equal(DeItem* a, DeItem* b) {
+static int de_item_equal(DeItem* a, DeItem* b,
+                         const leptris_collation* coll) {
     if (a->kind != b->kind) return 0;
     switch (a->kind) {
         case 0: return de_node_equal(a->node, b->node);
@@ -901,7 +1051,15 @@ static int de_item_equal(DeItem* a, DeItem* b) {
             if (de_str_class(a->type) && de_str_class(b->type)) {
                 if (strncmp(as, "\x03MAP", 4) == 0 &&
                     strncmp(bs, "\x03MAP", 4) == 0)
-                    return de_map_equal(as, bs);
+                    return de_map_equal(as, bs, coll);
+                /* UCA collation routes plain string atoms only —
+                 * \x03-marked carriers keep value-space equality. */
+#if LEPTRIS_HAS_DUCET
+                if (coll && as[0] != '\x03' && bs[0] != '\x03' &&
+                    leptris_collation_compare(as, strlen(as), bs,
+                                              strlen(bs), coll) == 0)
+                    return 1;
+#endif
                 if (strcmp(as, bs) == 0) return 1;
                 return as[0] == '<' && bs[0] == '<' &&
                        de_markup_equal_n(as, strlen(as), bs, strlen(bs));
@@ -1009,15 +1167,24 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
                 "deep-equal() requires 2 or 3 arguments, got %zu", arg_count);
         return NULL;
     }
+    leptris_collation coll;
+    int have_coll = 0;
     if (arg_count == 3) {
         /* Collation argument: the default and codepoint URIs (and,
          * per the QT3 corpus, any URI here) fold to the codepoint
          * comparison this engine implements; evaluation errors
-         * propagate. */
+         * propagate. UCA URIs route the string-atom compares. */
         struct leptris_xpath_result* c =
             xpath_evaluate(context, args[2]);
         if (!c) return NULL;
+        char* uri = result_to_string(c);
         leptris_xpath_result_free(c);
+#if LEPTRIS_HAS_DUCET
+        if (uri && leptris_collation_from_uri(uri, &coll) == 0 &&
+            coll.kind == LEPTRIS_COLL_UCA)
+            have_coll = 1;
+#endif
+        LEPTRIS_FREE(uri);
     }
 
     struct leptris_xpath_result* a = xpath_evaluate(context, args[0]);
@@ -1049,7 +1216,8 @@ static struct leptris_xpath_result* xpath_func_deep_equal(XPathContext* context,
 
     int equal = na == nb;
     for (size_t i = 0; equal && i < na; i++)
-        equal = de_item_equal(&ia[i], &ib[i]);
+        equal = de_item_equal(&ia[i], &ib[i],
+                              have_coll ? &coll : NULL);
 
     for (size_t i = 0; i < na; i++) de_item_clear(&ia[i]);
     for (size_t i = 0; i < nb; i++) de_item_clear(&ib[i]);
@@ -1106,8 +1274,17 @@ static struct leptris_xpath_result* xpath_func_contains(XPathContext* context,
     }
 
     int ascii_ci = 0;
+#if LEPTRIS_HAS_DUCET
+    leptris_collation coll;
+    int uca = 0;
+#endif
     if (arg_count == 3) {
-        int mode = collation_mode(context, args[2]);
+#if LEPTRIS_HAS_DUCET
+        int mode = collation_mode_c(context, args[2], &coll);
+        uca = mode == 2;
+#else
+        int mode = collation_mode_c(context, args[2], NULL);
+#endif
         if (mode < 0) {
             xpath_result_free(str_result);
             xpath_result_free(substr_result);
@@ -1119,10 +1296,22 @@ static struct leptris_xpath_result* xpath_func_contains(XPathContext* context,
     char* str = result_to_string(str_result);
     char* substr = result_to_string(substr_result);
 
-    int match = ascii_ci ? ascii_ci_contains(str ? str : "",
-                                              substr ? substr : "")
-                         : (strstr(str ? str : "",
-                                   substr ? substr : "") != NULL);
+    int match;
+#if LEPTRIS_HAS_DUCET
+    if (uca) {
+        size_t off = 0, end = 0;
+        match = uca_find(str ? str : "", str ? strlen(str) : 0,
+                         substr ? substr : "", substr ? strlen(substr) : 0,
+                         &coll, &off, &end);
+    } else
+#endif
+    if (ascii_ci) {
+        match = ascii_ci_contains(str ? str : "",
+                                  substr ? substr : "");
+    } else {
+        match = (strstr(str ? str : "",
+                        substr ? substr : "") != NULL);
+    }
 
     LEPTRIS_FREE(str);
     LEPTRIS_FREE(substr);
@@ -1268,10 +1457,14 @@ static struct leptris_xpath_result* xpath_func_substring_before(XPathContext* co
     XPathASTNode** args,
     size_t arg_count
 ) {
-    /* 3-arg (collation) overload: only the codepoint-collation URI
-     * (and its UTF-8 sibling) is supported — under it the collation
-     * is exactly the default byte comparison, so args[2] is
-     * validated and dropped (QT3 fn-substring-before/-after). */
+    /* 3-arg (collation) overload: the codepoint-collation URI (and
+     * its UTF-8 sibling) is the default byte comparison, so args[2]
+     * is validated and dropped; UCA URIs route the search through
+     * the collation module (QT3 fn-substring-before/-after). */
+#if LEPTRIS_HAS_DUCET
+    leptris_collation uca_coll;
+    int uca = 0;
+#endif
     if (arg_count == 3) {
         struct leptris_xpath_result* coll = xpath_evaluate(context, args[2]);
         if (!coll) return NULL;
@@ -1281,6 +1474,14 @@ static struct leptris_xpath_result* xpath_func_substring_before(XPathContext* co
             "http://www.w3.org/2005/xpath-functions/collation/"
             "codepoint";
         int ok = uri && (strcmp(uri, kCP) == 0 || strcmp(uri, "") == 0);
+#if LEPTRIS_HAS_DUCET
+        if (!ok && uri &&
+            leptris_collation_from_uri(uri, &uca_coll) == 0 &&
+            uca_coll.kind == LEPTRIS_COLL_UCA) {
+            ok = 1;
+            uca = 1;
+        }
+#endif
         leptris_xpath_result_free(coll);
         if (!ok) {
             snprintf(context->error_msg, sizeof(context->error_msg),
@@ -1317,6 +1518,21 @@ static struct leptris_xpath_result* xpath_func_substring_before(XPathContext* co
     }
 
     char* result_str;
+#if LEPTRIS_HAS_DUCET
+    if (uca) {
+        size_t off = 0, end = 0;
+        if (!uca_find(str, strlen(str), pattern, strlen(pattern),
+                      &uca_coll, &off, &end)) {
+            result_str = leptris_strdup("");
+        } else {
+            result_str = LEPTRIS_ALLOC_N(char, off + 1);
+            if (result_str) {
+                memcpy(result_str, str, off);
+                result_str[off] = '\0';
+            }
+        }
+    } else
+#endif
     if (pattern[0] == '\0') {
         /* Empty pattern returns empty string */
         result_str = leptris_strdup("");
@@ -1356,10 +1572,14 @@ static struct leptris_xpath_result* xpath_func_substring_after(XPathContext* con
     XPathASTNode** args,
     size_t arg_count
 ) {
-    /* 3-arg (collation) overload: only the codepoint-collation URI
-     * (and its UTF-8 sibling) is supported — under it the collation
-     * is exactly the default byte comparison, so args[2] is
-     * validated and dropped (QT3 fn-substring-before/-after). */
+    /* 3-arg (collation) overload: the codepoint-collation URI (and
+     * its UTF-8 sibling) is the default byte comparison, so args[2]
+     * is validated and dropped; UCA URIs route the search through
+     * the collation module (QT3 fn-substring-before/-after). */
+#if LEPTRIS_HAS_DUCET
+    leptris_collation uca_coll;
+    int uca = 0;
+#endif
     if (arg_count == 3) {
         struct leptris_xpath_result* coll = xpath_evaluate(context, args[2]);
         if (!coll) return NULL;
@@ -1369,6 +1589,14 @@ static struct leptris_xpath_result* xpath_func_substring_after(XPathContext* con
             "http://www.w3.org/2005/xpath-functions/collation/"
             "codepoint";
         int ok = uri && (strcmp(uri, kCP) == 0 || strcmp(uri, "") == 0);
+#if LEPTRIS_HAS_DUCET
+        if (!ok && uri &&
+            leptris_collation_from_uri(uri, &uca_coll) == 0 &&
+            uca_coll.kind == LEPTRIS_COLL_UCA) {
+            ok = 1;
+            uca = 1;
+        }
+#endif
         leptris_xpath_result_free(coll);
         if (!ok) {
             snprintf(context->error_msg, sizeof(context->error_msg),
@@ -1406,6 +1634,22 @@ static struct leptris_xpath_result* xpath_func_substring_after(XPathContext* con
 
     /* XPath spec: substring-after with empty pattern returns empty string */
     char* result_str;
+#if LEPTRIS_HAS_DUCET
+    if (uca) {
+        size_t off = 0, end = 0;
+        size_t slen = strlen(str);
+        if (!uca_find(str, slen, pattern, strlen(pattern),
+                      &uca_coll, &off, &end)) {
+            result_str = leptris_strdup("");
+        } else {
+            result_str = LEPTRIS_ALLOC_N(char, slen - end + 1);
+            if (result_str) {
+                memcpy(result_str, str + end, slen - end);
+                result_str[slen - end] = '\0';
+            }
+        }
+    } else
+#endif
     if (pattern[0] == '\0') {
         /* Empty pattern returns empty string for substring-after */
         /* Actually per XPath spec: substring-after('', '') = '' and substring-after('test', '') = 'test' */

@@ -95,6 +95,44 @@ TEST(Collation, UriParsing) {
         "http://www.w3.org/2013/collation/UCA?alternate=sideways", &c), 0);
 }
 
+/* UCA 7.1.1 implicit weights: unmapped codepoints order by
+ * codepoint within their group and after all assigned scripts;
+ * the registered @implicitweights scripts (Tangut 0x17000,
+ * base FB00) order ahead of unassigned (base FB80+). */
+TEST(Collation, ImplicitWeightOrdering) {
+    leptris_collation c;
+    ASSERT_EQ(leptris_collation_from_uri(
+        "http://www.w3.org/2013/collation/UCA", &c), 0);
+    /* two unassigned plane-15 codepoints: order by codepoint */
+    EXPECT_LT(leptris_collation_compare("\xF3\xB0\x80\x80", 4,
+                                        "\xF3\xB0\x80\x81", 4, &c), 0);
+    /* Tangut (registered base FB00) sorts before the unassigned
+     * zone (FB80+): U+17000 < U+F0000 */
+    EXPECT_LT(leptris_collation_compare("\xF0\x97\x80\x80", 4,
+                                        "\xF3\xB0\x80\x80", 4, &c), 0);
+    /* assigned script (Latin 'z') sorts before everything implicit */
+    EXPECT_LT(leptris_collation_compare("z", 1,
+                                        "\xF0\x97\x80\x80", 4, &c), 0);
+}
+
+/* alternate=blanked (UCA variable weighting): variable CEs are
+ * ignorable at every level — "c-d" equals "cd". Under
+ * alternate=shifted they survive at the quaternary level, so the
+ * two differ there (fn-contains-35..38). */
+TEST(Collation, AlternateBlanked) {
+    leptris_collation c;
+    ASSERT_EQ(leptris_collation_from_uri(
+        "http://www.w3.org/2013/collation/UCA?alternate=blanked", &c), 0);
+    EXPECT_EQ(c.alternate, LEPTRIS_COLL_ALTERNATE_BLANKED);
+    EXPECT_EQ(leptris_collation_compare("c-d", 3, "cd", 2, &c), 0);
+
+    leptris_collation sh;
+    ASSERT_EQ(leptris_collation_from_uri(
+        "http://www.w3.org/2013/collation/UCA?"
+        "strength=quaternary&alternate=shifted", &sh), 0);
+    EXPECT_NE(leptris_collation_compare("c-d", 3, "cd", 2, &sh), 0);
+}
+
 TEST(Collation, CodepointAndAsciiCiCompare) {
     leptris_collation cp, ci;
     ASSERT_EQ(leptris_collation_from_uri(
