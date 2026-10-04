@@ -24,6 +24,12 @@ char* xpath_number_to_string_xq(double number);
 char* xpath_number_to_string_xq_typed(double number, int float_prec);
 char* xpath_int_to_string(long long v);
 
+/* From evaluator_types.c — true when the numeric atom is xs:float
+ * (scalar typed-atom tag or the single synthetic \x03F member).
+ * Numeric functions copy this onto their results so the final
+ * spelling renders at float precision. */
+int xpath_result_is_float(const struct leptris_xpath_result* r);
+
 /* From evaluator_operators.c — synthetic sequence members and the
  * storage-independent nodeset copy (let unwind safety). */
 XPathTextNode* xpath_synth_text(const char* content, size_t len);

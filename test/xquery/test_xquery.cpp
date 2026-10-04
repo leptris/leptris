@@ -127,6 +127,46 @@ TEST(XQueryCore, TypedAtomDistinctFamilies) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, FloatSpellingSurvivesNumericFunctions) {
+    /* The typed-atom float tag must ride function results: the
+     * value prints at float precision, not the widened double
+     * (the fn-*-flt1args QT3 battery). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "round(xs:float(\"3.4028235E38\"))"),
+              "3.4028235E38");
+    EXPECT_EQ(seq_string(doc, "fn:abs(xs:float(\"-3.4028235E38\"))"),
+              "3.4028235E38");
+    EXPECT_EQ(seq_string(doc, "fn:avg((xs:float(\"3.4028235E38\")))"),
+              "3.4028235E38");
+    EXPECT_EQ(seq_string(doc,
+                         "fn:max((xs:float(\"3.4028235E38\"),"
+                         " xs:float(\"1\")))"),
+              "3.4028235E38");
+    EXPECT_EQ(seq_string(doc, "fn:sum((xs:float(\"3.4028235E38\")))"),
+              "3.4028235E38");
+    EXPECT_EQ(seq_string(doc,
+              "round-half-to-even(xs:float(\"3.4028235E38\"))"),
+              "3.4028235E38");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, SumOfIntegersIsExact) {
+    /* int64 accumulation: the double carrier loses the 2^53+
+     * digits of integer sums (fn-sumintg2args/lng2args). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "fn:sum((xs:integer(\"830993497117024304\"),"
+        "xs:integer(\"-999999999999999999\")))"),
+        "-169006502882975695");
+    EXPECT_EQ(seq_string(doc,
+        "fn:sum((xs:long(\"-47175562203048468\"),"
+        "xs:long(\"-45058158165499290\")))"),
+        "-92233720368547758");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);

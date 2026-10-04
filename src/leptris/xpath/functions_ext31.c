@@ -119,27 +119,47 @@ static char* scalar_str(const struct leptris_xpath_result* r) {
 /* Evaluate args[i] into a malloc'd array of malloc'd item strings.
  * Nodesets contribute one item per node; scalars one item. */
 static char** collect_items(XPathContext* ctx, XPathASTNode** args,
-                            size_t n, size_t i, size_t* out_n) {
+                            size_t n, size_t i, size_t* out_n,
+                            int* out_all_float) {
     *out_n = 0;
+    if (out_all_float) *out_all_float = 0;
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
     if (!r) return NULL;
     char** items = NULL;
     size_t cnt = 0;
+    int all_float = 1;
     if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
         XPathNodeSet* ns = r->value.nodeset_value;
         items = (char**)malloc((ns->count ? ns->count : 1) * sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
         for (size_t k = 0; k < ns->count; k++) {
-            char* t = get_node_text(ns->nodes[k]);
+            /* Typed numeric members ride \x03F/\x03N/\x03D marks
+             * (\x03FN\x02/\x03FR are closures, NOT floats); a
+             * float-derived aggregate spells at float precision. */
+            void* nd = ns->nodes[k];
+            if ((int)XPATH_NODE_TYPE(nd) == LEPTRIS_NODE_TEXT) {
+                const char* mc = ((XPathTextNode*)nd)->content;
+                int is_float = mc && mc[0] == '\x03' && mc[1] == 'F' &&
+                               !(mc[2] == 'R' ||
+                                 (mc[2] == 'N' && mc[3] == '\x02'));
+                if (!is_float) all_float = 0;
+            } else {
+                all_float = 0;
+            }
+            char* t = get_node_text(nd);
             items[cnt++] = t ? t : leptris_strdup("");
         }
     } else {
         items = (char**)malloc(sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
+        if (!(r->atomic_type &&
+              strcmp(r->atomic_type, "xs:float") == 0))
+            all_float = 0;
         items[cnt++] = scalar_str(r);
     }
     xpath_result_free(r);
     *out_n = cnt;
+    if (out_all_float && cnt) *out_all_float = all_float;
     (void)n;
     return items;
 }
@@ -270,7 +290,7 @@ static struct leptris_xpath_result* fn_empty(XPathContext* ctx,
 static struct leptris_xpath_result* fn_head(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out && cnt) seq_push_str(out, items[0]);
@@ -281,7 +301,7 @@ static struct leptris_xpath_result* fn_head(XPathContext* ctx,
 static struct leptris_xpath_result* fn_tail(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out) seq_from_items(out, items, cnt, 2, -1);
@@ -316,7 +336,7 @@ static struct leptris_xpath_result* fn_collection(XPathContext* ctx,
 static struct leptris_xpath_result* fn_unordered(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out) seq_from_items(out, items, cnt, 1, -1);
@@ -403,13 +423,13 @@ static struct leptris_xpath_result* fn_remove(XPathContext* ctx,
 static struct leptris_xpath_result* fn_insert_before(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* iv = xpath_evaluate(ctx, args[1]);
     long at = iv ? (long)leptris_xpath_result_number(iv) : 1;
     if (iv) leptris_xpath_result_free(iv);
     size_t icnt;
-    char** ins = collect_items(ctx, args, n, 2, &icnt);
+    char** ins = collect_items(ctx, args, n, 2, &icnt, NULL);
     struct leptris_xpath_result* out = seq_new();
     /* F&O: position < 1 inserts at 1; a position beyond the tail
      * inserts at the end (K-SeqInsertBeforeFunc-5/10/14/15). */
@@ -676,7 +696,8 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
 static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         XPathASTNode** args, size_t n, int which) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt);
+    int all_float = 0;
+    char** items = collect_items(ctx, args, n, 0, &cnt, &all_float);
     if (!items) return NULL;
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!out) { free_items(items, cnt); return NULL; }
@@ -739,6 +760,10 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         return out;
     }
     out->value.number_value = (which == 1) ? acc / (double)numeric : best;
+    /* Float-derived aggregates spell at float precision (the
+     * fn-*-flt1args battery). */
+    if (all_float && out->type == XPATH_RESULT_NUMBER)
+        out->atomic_type = "xs:float";
     free_items(items, cnt);
     return out;
 }
@@ -851,10 +876,22 @@ static struct leptris_xpath_result* fn_abs(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (!r) return NULL;
+    int fl = xpath_result_is_float(r);
+    int iv_int = r->is_int;
+    long long iv = r->int_value;
     double d = leptris_xpath_result_number(r);
     leptris_xpath_result_free(r);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
-    if (out && n) out->value.number_value = fabs(d);
+    if (out && n) {
+        if (iv_int) {
+            out->value.number_value = fabs(d);
+            out->is_int = 1;
+            out->int_value = iv < 0 ? -iv : iv;
+        } else {
+            out->value.number_value = fabs(d);
+        }
+        if (fl) out->atomic_type = "xs:float";
+    }
     return out;
 }
 
@@ -872,6 +909,7 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
         return xpath_result_new(XPATH_RESULT_NODESET);
     }
     double v = leptris_xpath_result_number(r);
+    int fl = xpath_result_is_float(r);
     leptris_xpath_result_free(r);
     int prec = 0;
     if (n >= 2) {
@@ -889,7 +927,10 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
     else
         rounded = floor(x + 0.5);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
-    if (out) out->value.number_value = rounded / scale;
+    if (out) {
+        out->value.number_value = rounded / scale;
+        if (fl) out->atomic_type = "xs:float";
+    }
     return out;
 }
 
@@ -3324,6 +3365,9 @@ static struct leptris_xpath_result* xs_int_bound(
         return xs_int_bound(ctx, a, n, LO, HI, TNAME);                  \
     }
 
+XS_INT_SUB(fn_xs_byte, -128, 127, "xs:byte")
+XS_INT_SUB(fn_xs_ubyte, 0, 255, "xs:unsignedByte")
+XS_INT_SUB(fn_xs_uint, 0, 4294967295LL, "xs:unsignedInt")
 XS_INT_SUB(fn_xs_int, -2147483647LL - 1, 2147483647LL, "xs:int")
 XS_INT_SUB(fn_xs_long, LLONG_MIN, LLONG_MAX, "xs:long")
 XS_INT_SUB(fn_xs_short, -32768, 32767, "xs:short")
@@ -4543,7 +4587,7 @@ static struct leptris_xpath_result* fn_for_each(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 1);
     struct leptris_xpath_result* out = seq_new();
@@ -4570,7 +4614,7 @@ static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 1);
     struct leptris_xpath_result* out = seq_new();
@@ -4595,7 +4639,7 @@ static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
@@ -4628,7 +4672,7 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* zr = xpath_evaluate(ctx, args[1]);
@@ -4663,7 +4707,7 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
 static struct leptris_xpath_result* fn_sort_seq(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t c = 0;
-    char** xs = collect_items(ctx, args, 1, 0, &c);
+    char** xs = collect_items(ctx, args, 1, 0, &c, NULL);
     struct leptris_xpath_result* out = seq_new();
     if (!xs || !out) {
         free_items(xs, c);
@@ -4748,9 +4792,9 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t c1, c2;
-    char** xs = collect_items(ctx, args, 1, 0, &c1);
+    char** xs = collect_items(ctx, args, 1, 0, &c1, NULL);
     if (!xs) return NULL;
-    char** ys = collect_items(ctx, args, 1, 1, &c2);
+    char** ys = collect_items(ctx, args, 1, 1, &c2, NULL);
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* out = seq_new();
     if (cc && out) {
@@ -6054,6 +6098,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "xs:double", fn_xs_double, 1, 1);
     xpath_function_registry_register(registry, "xs:float", fn_xs_float, 1, 1);
     xpath_function_registry_register(registry, "xs:decimal", fn_xs_decimal, 1, 1);
+    xpath_function_registry_register(registry, "xs:byte", fn_xs_byte, 1, 1);
+    xpath_function_registry_register(registry, "xs:unsignedByte", fn_xs_ubyte, 1, 1);
+    xpath_function_registry_register(registry, "xs:unsignedInt", fn_xs_uint, 1, 1);
     xpath_function_registry_register(registry, "xs:int", fn_xs_int, 1, 1);
     xpath_function_registry_register(registry, "xs:long", fn_xs_long, 1, 1);
     xpath_function_registry_register(registry, "xs:short", fn_xs_short, 1, 1);

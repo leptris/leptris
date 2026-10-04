@@ -937,26 +937,20 @@ TEST(Qt3Subset, FnCount) {
 
 /* Numeric aggregate + rounding families and the higher-order
  * combiners, vendored from the upstream QT3 mirror. The named
- * excludes are the typed-atom lane's remaining levers (xs:float
- * spelling through aggregates, int64-exact multi-arg sums,
- * instance-of results) — tracked in #1182. */
+ * excludes are the remaining typed-atom levers (instance-of
+ * assertions, decimal-lexical aggregates, HOF local:* helpers)
+ * — see the batch notes in #1182. */
 TEST(Qt3Subset, FnAbs) {
-    run_test_set("fn/abs.xml", {}, 31, {},
+    run_test_set("fn/abs.xml", {}, 37, {},
                  {"K-ABSFunc-3",
-                 "K2-ABSFunc-10",
-                 "K2-ABSFunc-12",
-                 "K2-ABSFunc-20",
-                 "K2-ABSFunc-23",
-                 "K2-ABSFunc-25",
                  "K2-ABSFunc-27",
                  "K2-ABSFunc-28",
                  "K2-ABSFunc-29",
                  "K2-ABSFunc-30",
-                 "K2-ABSFunc-7",
                  "fn-abs-1"});
 }
 TEST(Qt3Subset, FnAvg) {
-    run_test_set("fn/avg.xml", {}, 158, {},
+    run_test_set("fn/avg.xml", {}, 163, {},
                  {"K-SeqAVGFunc-17",
                  "K-SeqAVGFunc-18",
                  "K-SeqAVGFunc-3",
@@ -974,11 +968,6 @@ TEST(Qt3Subset, FnAvg) {
                  "fn-avg-mix-args-013",
                  "fn-avg-mix-args-014",
                  "fn-avg-mix-args-015",
-                 "fn-avg-mix-args-018",
-                 "fn-avgflt1args-1",
-                 "fn-avgflt1args-3",
-                 "fn-avgflt2args-2",
-                 "fn-avgflt2args-4",
                  "fn-avgintg2args-2",
                  "fn-avgintg2args-4"});
 }
@@ -989,32 +978,13 @@ TEST(Qt3Subset, FnCeiling) {
                  "fn-ceilingflt1args-3"});
 }
 TEST(Qt3Subset, FnFloor) {
-    run_test_set("fn/floor.xml", {}, 20, {},
+    run_test_set("fn/floor.xml", {}, 39, {},
                  {"K-FloorFunc-3",
-                 "fn-floordec1args-1",
-                 "fn-floordec1args-2",
-                 "fn-floordec1args-3",
                  "fn-floorflt1args-1",
-                 "fn-floorflt1args-3",
-                 "fn-floorintg1args-1",
-                 "fn-floorintg1args-2",
-                 "fn-floorintg1args-3",
-                 "fn-floorlng1args-1",
-                 "fn-floorlng1args-2",
-                 "fn-floorlng1args-3",
-                 "fn-floornint1args-1",
-                 "fn-floornint1args-2",
-                 "fn-floornni1args-2",
-                 "fn-floornni1args-3",
-                 "fn-floornpi1args-1",
-                 "fn-floornpi1args-2",
-                 "fn-floorpint1args-2",
-                 "fn-floorpint1args-3",
-                 "fn-floorulng1args-2",
-                 "fn-floorulng1args-3"});
+                 "fn-floorflt1args-3"});
 }
 TEST(Qt3Subset, FnMax) {
-    run_test_set("fn/max.xml", {}, 163, {},
+    run_test_set("fn/max.xml", {}, 165, {},
                  {"K-SeqMAXFunc-16",
                  "K-SeqMAXFunc-27",
                  "K-SeqMAXFunc-28",
@@ -1026,12 +996,10 @@ TEST(Qt3Subset, FnMax) {
                  "fn-max-19",
                  "fn-max-4",
                  "fn-max-6",
-                 "fn-max-7",
-                 "fn-maxflt1args-1",
-                 "fn-maxflt1args-3"});
+                 "fn-max-7"});
 }
 TEST(Qt3Subset, FnMin) {
-    run_test_set("fn/min.xml", {}, 163, {},
+    run_test_set("fn/min.xml", {}, 165, {},
                  {"K-SeqMINFunc-16",
                  "K-SeqMINFunc-27",
                  "K-SeqMINFunc-28",
@@ -1042,31 +1010,20 @@ TEST(Qt3Subset, FnMin) {
                  "fn-min-19",
                  "fn-min-4",
                  "fn-min-6",
-                 "fn-min-7",
-                 "fn-minflt1args-1",
-                 "fn-minflt1args-3"});
+                 "fn-min-7"});
 }
-TEST(Qt3Subset, FnRound) {
-    run_test_set("fn/round.xml", {}, 218, {},
-                 {"fn-roundflt1args-1",
-                 "fn-roundflt1args-3"});
-}
+TEST(Qt3Subset, FnRound) { run_test_set("fn/round.xml", {}, 220); }
 TEST(Qt3Subset, FnRoundHalfToEven) {
-    run_test_set("fn/round-half-to-even.xml", {}, 71, {},
-                 {"K2-RoundEvenFunc-19",
-                 "K2-RoundEvenFunc-20",
-                 "K2-RoundEvenFunc-28",
-                 "K2-RoundEvenFunc-6",
+    run_test_set("fn/round-half-to-even.xml", {}, 76, {},
+                 {"K2-RoundEvenFunc-6",
                  "K2-RoundEvenFunc-7",
                  "cbcl-round-half-to-even-001",
                  "cbcl-round-half-to-even-010",
                  "cbcl-round-half-to-even-011",
-                 "cbcl-round-half-to-even-012",
-                 "fn-round-half-to-evenflt1args-1",
-                 "fn-round-half-to-evenflt1args-3"});
+                 "cbcl-round-half-to-even-012"});
 }
 TEST(Qt3Subset, FnSum) {
-    run_test_set("fn/sum.xml", {}, 192, {},
+    run_test_set("fn/sum.xml", {}, 200, {},
                  {"K-SeqSUMFunc-30",
                  "K-SeqSUMFunc-31",
                  "K-SeqSUMFunc-5",
@@ -1076,15 +1033,7 @@ TEST(Qt3Subset, FnSum) {
                  "fn-sum-3",
                  "fn-sum-5",
                  "fn-sum-6",
-                 "fn-sum-8",
-                 "fn-sumflt1args-1",
-                 "fn-sumflt1args-3",
-                 "fn-sumflt3args-1",
-                 "fn-sumintg2args-1",
-                 "fn-sumintg2args-3",
-                 "fn-sumlng2args-1",
-                 "fn-sumlng2args-3",
-                 "fn-sumlng3args-3"});
+                 "fn-sum-8"});
 }
 TEST(Qt3Subset, FnApply) {
     run_test_set("fn/apply.xml", {}, 5, {},
