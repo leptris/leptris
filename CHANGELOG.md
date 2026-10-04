@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.299] - 2026-10-04
+
+### Added
+
+- numeric aggregate + HOF families adopted (QT3 #1182) (xquery)
+
+
+
 ## [1.9.298] - 2026-10-04
 
 ### Added
