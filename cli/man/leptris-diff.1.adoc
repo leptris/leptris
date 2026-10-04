@@ -1,0 +1,40 @@
+= leptris-diff(1)
+:doctype: manpage
+:man manual: Leptris Manual
+:man source: Leptris 1.9.297
+:man version: 1.9.297
+
+== NAME
+leptris-diff - structural diff between two XML documents
+
+== SYNOPSIS
+*leptris diff* [_OPTIONS_] _A_ _B_
+
+== DESCRIPTION
+Compare two XML documents structurally and report element, attribute
+and text deltas as edit operations.
+
+== OPTIONS
+
+*--summary*::
+    Print delta counts instead of the operation list.
+
+*--json*::
+    Print the edit operations as JSON.
+
+*-h*, *--help*::
+    Show command-specific help.
+
+== EXAMPLES
+
+Summarize the differences:
+
+    leptris diff --summary a.xml b.xml
+
+Machine-readable operations:
+
+    leptris diff --json a.xml b.xml
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.

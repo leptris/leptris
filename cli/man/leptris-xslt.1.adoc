@@ -1,0 +1,49 @@
+= leptris-xslt(1)
+:doctype: manpage
+:man manual: Leptris Manual
+:man source: Leptris 1.9.297
+:man version: 1.9.297
+
+== NAME
+leptris-xslt - apply an XSLT stylesheet to an XML document
+
+== SYNOPSIS
+*leptris xslt* _-s STYLESHEET_ [_INPUT_]
+
+== DESCRIPTION
+Apply an XSLT stylesheet to an XML document and print the serialized
+result tree to standard output. The stylesheet is compiled with full
+xsl:include/xsl:import resolution relative to its file path.
+
+== OPTIONS
+
+*-s* _FILE_::
+    Stylesheet to apply (required).
+
+*INPUT*::
+    Input document: a file path, '-' for standard input, or absent to
+    read standard input (the xsltproc convention).
+
+*-h*, *--help*::
+    Show command-specific help.
+
+== EXIT STATUS
+
+0::    Transformation succeeded.
+1::    Stylesheet or input parsing failed.
+4::    Invalid arguments.
+7::    Transformation failed at runtime.
+
+== EXAMPLES
+
+Transform a document:
+
+    leptris xslt -s style.xsl input.xml
+
+Read the input from standard input:
+
+    cat input.xml | leptris xslt -s style.xsl
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.

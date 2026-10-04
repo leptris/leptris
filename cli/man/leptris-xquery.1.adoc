@@ -1,0 +1,44 @@
+= leptris-xquery(1)
+:doctype: manpage
+:man manual: Leptris Manual
+:man source: Leptris 1.9.297
+:man version: 1.9.297
+
+== NAME
+leptris-xquery - execute XQuery queries
+
+== SYNOPSIS
+*leptris xquery* [_-s FILE_] (_-q FILE_ | _-e EXPR_)
+
+== DESCRIPTION
+Execute an XQuery query and print the result. Sequence results join
+space-separated (the value-of rule); atomic results print their string
+form.
+
+== OPTIONS
+
+*-s* _FILE_::
+    Source document for the context item (optional).
+
+*-q* _FILE_::
+    Query file, or '-' for standard input.
+
+*-e* _EXPR_::
+    Inline query expression.
+
+*-h*, *--help*::
+    Show command-specific help.
+
+== EXAMPLES
+
+Run a query file against a document:
+
+    leptris xquery -s books.xml -q query.xq
+
+Inline expression:
+
+    leptris xquery -e 'for $n in 1 to 3 return $n * 2'
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.

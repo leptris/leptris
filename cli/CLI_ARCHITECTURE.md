@@ -73,7 +73,7 @@ The Leptris CLI is a **thin layer** on top of the C library API (`libleptris`). 
 
 Every aspect of the CLI follows MECE principles:
 
-- **Commands**: Each command has distinct responsibility (parse, xpath, format, version)
+- **Commands**: Each command has distinct responsibility (parse, validate, xpath, format, diff, xquery, xslt, version — the registry is the single source of truth for this list and for --help)
 - **Options**: Three exclusive sources (CLI → ENV → Default)
 - **Output formats**: Three formats (XML, JSON, text), never mixed
 - **Error levels**: Three levels (warning, error, fatal), no overlap
