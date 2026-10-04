@@ -2188,51 +2188,92 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     XPathASTNode** args,
     size_t arg_count
 ) {
-    if (arg_count != 1) {
+    if (arg_count < 1 || arg_count > 2) {
         snprintf(context->error_msg, sizeof(context->error_msg),
-                "sum() requires exactly 1 argument");
+                "sum() requires 1 or 2 arguments");
         return NULL;
+    }
+
+    /* fn:sum#2 zero: the value returned for the empty sequence.
+     * XQuery-only surface; the numeric zero is the supported form
+     * (duration zeros need duration algebra). */
+    double zero = 0.0;
+    int has_zero = 0;
+    if (arg_count == 2) {
+        struct leptris_xpath_result* zr = xpath_evaluate(context, args[1]);
+        if (!zr) return NULL;
+        char* zs = result_to_string(zr);
+        xpath_result_free(zr);
+        if (!zs) return NULL;
+        char* zend;
+        zero = strtod(zs, &zend);
+        if (zend == zs) zero = 0.0;
+        LEPTRIS_FREE(zs);
+        has_zero = 1;
     }
 
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
-    if (arg_result->type != XPATH_RESULT_NODESET) {
-        snprintf(context->error_msg, sizeof(context->error_msg),
-                "sum() argument must be a nodeset");
-        xpath_result_free(arg_result);
-        return NULL;
-    }
-
-    XPathNodeSet* nodeset = arg_result->value.nodeset_value;
-    double sum = 0.0;
+    double sum = zero;
     int has_nan = 0;
+    size_t count = 0;
 
-    if (nodeset) {
-        size_t count = xpath_nodeset_count(nodeset);
-        for (size_t i = 0; i < count; i++) {
-            void* node = xpath_nodeset_get(nodeset, i);
-            char* str = get_node_text(node);
+    if (arg_result->type == XPATH_RESULT_NODESET) {
+        XPathNodeSet* nodeset = arg_result->value.nodeset_value;
+        if (nodeset) {
+            count = xpath_nodeset_count(nodeset);
+            for (size_t i = 0; i < count; i++) {
+                void* node = xpath_nodeset_get(nodeset, i);
+                char* str = get_node_text(node);
+                const char* p = str;
+                while (isspace((unsigned char)*p)) p++;
+
+                if (*p != '\0') {
+                    char* endptr;
+                    double value = strtod(p, &endptr);
+                    while (isspace((unsigned char)*endptr)) endptr++;
+                    if (*endptr == '\0') {
+                        if (isnan(value)) {
+                            has_nan = 1;
+                        } else {
+                            sum += value;
+                        }
+                    } else {
+                        /* Non-numeric value found */
+                        has_nan = 1;
+                    }
+                }
+                LEPTRIS_FREE(str);
+            }
+        }
+    } else if (arg_result->type == XPATH_RESULT_NUMBER) {
+        /* XQuery fn:sum over a single-item sequence: the adapter
+         * hands scalars through unwrapped (the nodeset form only
+         * materializes for multi-item sequences). */
+        double v = arg_result->value.number_value;
+        if (isnan(v)) has_nan = 1;
+        else sum += v;
+        count = 1;
+    } else {
+        char* str = result_to_string(arg_result);
+        if (str) {
             const char* p = str;
             while (isspace((unsigned char)*p)) p++;
-
             if (*p != '\0') {
                 char* endptr;
-                double value = strtod(p, &endptr);
+                double v = strtod(p, &endptr);
                 while (isspace((unsigned char)*endptr)) endptr++;
                 if (*endptr == '\0') {
-                    if (isnan(value)) {
-                        has_nan = 1;
-                    } else {
-                        sum += value;
-                    }
+                    if (isnan(v)) has_nan = 1;
+                    else sum += v;
                 } else {
-                    /* Non-numeric value found */
                     has_nan = 1;
                 }
             }
             LEPTRIS_FREE(str);
         }
+        count = 1;
     }
     xpath_result_free(arg_result);
 
@@ -2241,6 +2282,11 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
 
     if (has_nan) {
         result->value.number_value = NAN;
+    } else if (count == 0 && !has_zero) {
+        /* XPath 1.0 sum(()) is 0; XQuery fn:sum(()) is 0 too (the
+         * typed-atom form distinguishes xs:integer 0 — carried by
+         * the adapter, not here). */
+        result->value.number_value = 0;
     } else {
         result->value.number_value = sum;
     }
@@ -2307,6 +2353,17 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
+    /* fn:round(()) is the empty sequence (K-RoundFunc-3). XQuery
+     * only: XPath 1.0 round over an empty node-set is number()
+     * coercion -> NaN, and the libxslt suite pins that. */
+    if (context->xquery_spelling &&
+        arg_result->type == XPATH_RESULT_NODESET &&
+        (!arg_result->value.nodeset_value ||
+         arg_result->value.nodeset_value->count == 0)) {
+        xpath_result_free(arg_result);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
+
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
@@ -2330,7 +2387,13 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
         }
         scale = pow(10.0, pd);
     }
-    result->value.number_value = xpath_round_half_up(num * scale) / scale;
+    /* F&O: -0.5 < x*scale < 0 rounds to negative zero, not +0
+     * (round(-0.01) = -0). xpath_round_half_up is floor(x+0.5),
+     * which lands on +0; restore the sign. */
+    double scaled = num * scale;
+    double rounded = xpath_round_half_up(scaled);
+    if (scaled > -0.5 && scaled < 0) rounded = -0.0;
+    result->value.number_value = rounded / scale;
     return result;
 }
 
@@ -3192,7 +3255,7 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
 
     /* Number functions (5) */
     xpath_function_registry_register(registry, "number", xpath_func_number, 0, 1);
-    xpath_function_registry_register(registry, "sum", xpath_func_sum, 1, 1);
+    xpath_function_registry_register(registry, "sum", xpath_func_sum, 1, 2);
     xpath_function_registry_register(registry, "floor", xpath_func_floor, 1, 1);
     xpath_function_registry_register(registry, "ceiling", xpath_func_ceiling, 1, 1);
     xpath_function_registry_register(registry, "round", xpath_func_round, 1, 2);

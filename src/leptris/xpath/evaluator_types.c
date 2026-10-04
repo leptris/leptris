@@ -98,7 +98,10 @@ char* xpath_number_to_string_xq_typed(double number, int float_prec) {
     if (isnan(number)) return leptris_strdup("NaN");
     if (isinf(number))
         return leptris_strdup(number > 0 ? "INF" : "-INF");
-    if (number == 0.0) return leptris_strdup("0");
+    /* IEEE -0 is == 0.0; XQuery spells negative zero "-0"
+     * (round(-0.01) is -0, not 0). */
+    if (number == 0.0)
+        return leptris_strdup(signbit(number) ? "-0" : "0");
     if (number > -1e18 && number < 1e18 &&
         number == (double)(long long)number) {
         char buf[32];
@@ -166,11 +169,16 @@ char* xpath_number_to_string_xq_typed(double number, int float_prec) {
 
     char* start = work;
     while (*start == ' ') start++;
-    char* after = work + size;
-    char* ptr = after;
-    while (ptr > start && *(--ptr) == '0') { }
-    if (*ptr != '.') ptr++;
-    memmove(ptr, after, strlen(after) + 1);
+    /* Trim trailing fraction zeros ONLY when a decimal point is
+     * present: an integral fixed rendering ("%.0f" of 1e18) has no
+     * dot, and stripping its zeros destroys the magnitude. */
+    if (strchr(start, '.')) {
+        char* after = work + size;
+        char* ptr = after;
+        while (ptr > start && *(--ptr) == '0') { }
+        if (*ptr != '.') ptr++;
+        memmove(ptr, after, strlen(after) + 1);
+    }
     return leptris_strdup(start);
 }
 
