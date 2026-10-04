@@ -4,7 +4,32 @@
 
 ### Added
 
-- typed-atom channels through numeric functions (xquery)
+- **XQuery: the xs:float and int64 typed-atom channels survive the
+  numeric function hop (+49 QT3 agreements; the fifteen-family batch
+  pins rise 1078→1127 and fn:round is fully green at 220/220)**.
+  fn:abs, fn:round, fn:round-half-to-even and the avg/min/max
+  aggregates copy the float tag onto their results (round over
+  xs:float("3.4028235E38") spells 3.4028235E38, not the widened
+  double digits); fn:sum keeps an exact long-long total when every
+  member is an integer lexical (fn:sum#2's zero seeds it); fn:floor,
+  fn:ceiling, fn:round and fn:abs pass int64 atoms through unchanged
+  (floor(xs:integer("999999999999999999")) stays exact, not 1e18).
+  (PR #1520)
+
+- **xs:byte, xs:unsignedByte and xs:unsignedInt constructors** —
+  the three integer subtypes were unregistered and errored as
+  unknown functions. (PR #1520)
+
+### Fixed
+
+- **is_int results now also carry the double field** — eq and
+  boolean() comparisons read number_value, which the int64 path
+  left unset (sum((3,4,5)) eq 12 was false). (PR #1520)
+
+- **The float-precision speller snaps into the float domain before
+  spelling** — double arithmetic can leave a non-float-representable
+  value whose shortest float round-trip never terminates, spelling
+  18-digit mantissas. (PR #1520)
 
 
 
