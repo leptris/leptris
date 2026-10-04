@@ -1971,7 +1971,20 @@ static struct leptris_xpath_result* xq_fn_thunk(XPathContext* ctx,
     int ok = 1;
     for (size_t i = 0; i < arg_count; i++) {
         struct leptris_xpath_result* r = evaluate_expr(ctx, args[i]);
-        char* v = r ? xpath_to_string(r) : NULL;
+        char* v;
+        if (r && r->type == XPATH_RESULT_BOOLEAN) {
+            /* "\x03B" rides the argv so closure-param bindings keep
+             * falsiness (fold-left boolean accumulators). */
+            v = (char*)malloc(4);
+            if (v) {
+                v[0] = '\x03';
+                v[1] = 'B';
+                v[2] = r->value.boolean_value ? 't' : 'f';
+                v[3] = 0;
+            }
+        } else {
+            v = r ? xpath_to_string(r) : NULL;
+        }
         if (r) xpath_result_free(r);
         argv[i] = v ? v : strdup("");
         if (!argv[i]) ok = 0;
@@ -2009,6 +2022,15 @@ static int xq_bind(XPathContext* ctx, const char* name,
                     if (tn) xpath_nodeset_add(one, tn);
                 }
                 free(s);
+            } else if (v->type == XPATH_RESULT_BOOLEAN) {
+                /* "\x03B" keeps falsiness through the binding:
+                 * `let $x := false() return if ($x)...` reads the
+                 * item's EBV, not node existence (fold-left
+                 * accumulators bind through this path). */
+                const char* bm = v->value.boolean_value
+                                     ? "\x03" "Bt" : "\x03" "Bf";
+                XPathTextNode* tn = xpath_synth_text(bm, 3);
+                if (tn) xpath_nodeset_add(one, tn);
             } else {
                 char* s = xpath_to_string(v);
                 XPathTextNode* tn =

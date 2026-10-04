@@ -2085,8 +2085,11 @@ static struct leptris_xpath_result* xpath_func_not(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
-    /* Convert to boolean and negate */
-    int bool_value = result_to_boolean(arg_result);
+    /* fn:not takes the EBV — under XQuery a singleton false atom
+     * rides a \x03B carrier and is falsy, unlike node existence.
+     * xpath_to_boolean keeps the XPath 1.0 existence rule for real
+     * nodes, so the libxml2-parity surface is unchanged. */
+    int bool_value = xpath_to_boolean(arg_result);
     xpath_result_free(arg_result);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_BOOLEAN);
@@ -2202,6 +2205,7 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     int has_zero = 0;
     long long isum_seed = 0;
     int zero_non_int = 0;
+    char* zero_lex = NULL;  /* owned: the zero's lexical form */
     if (arg_count == 2) {
         struct leptris_xpath_result* zr = xpath_evaluate(context, args[1]);
         if (!zr) return NULL;
@@ -2215,13 +2219,20 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
             long long ziv = strtoll(zs, &full_end, 10);
             zero = strtod(zs, &zend);
             if (zend == zs) zero = 0.0;
-            /* Seed the int64 accumulator when the zero is an exact
-             * integer lexical (sum((), 3) = 3 exactly). */
-            if (errno == 0 && full_end != zs && *full_end == '\0')
-                isum_seed = ziv;
-            else
+            if (zend != zs && *zend == '\0') {
+                /* Seed the int64 accumulator when the zero is an
+                 * exact integer lexical (sum((), 3) = 3 exactly). */
+                if (errno == 0 && full_end != zs && *full_end == '\0')
+                    isum_seed = ziv;
+                else
+                    zero_non_int = 1;
+            } else {
+                /* Non-numeric zero (xs:dayTimeDuration): sum(())
+                 * returns the zero ITEM verbatim (fn-sum-2). */
+                zero_lex = zs;
                 zero_non_int = 1;
-            LEPTRIS_FREE(zs);
+            }
+            if (!zero_lex) LEPTRIS_FREE(zs);
             has_zero = 1;
         }
     }
@@ -2339,6 +2350,13 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         /* eq/boolean compare through the double field even when the
          * int64 channel carries the exact value. */
         result->value.number_value = (double)(isum + isum_seed);
+    } else if (count == 0 && zero_lex) {
+        xpath_result_free(result);
+        result = xpath_result_new(XPATH_RESULT_STRING);
+        if (result)
+            result->value.string_value = leptris_strdup(zero_lex);
+        LEPTRIS_FREE(zero_lex);
+        return result;
     } else if (count == 0 && !has_zero) {
         /* XPath 1.0 sum(()) is 0; XQuery fn:sum(()) is 0 too (the
          * typed-atom form distinguishes xs:integer 0 — carried by
