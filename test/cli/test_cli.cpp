@@ -402,6 +402,61 @@ TEST(CliXquery, SourceDocumentAndConstructors) {
 }
 #endif  /* !_WIN32 */
 
+// ---- xslt -------------------------------------------------------------------
+// run_cli shells out with POSIX quoting — not exercised on Windows
+// (same harness limitation as the xquery specs).
+
+#if !defined(_WIN32)
+
+TEST(CliXslt, AppliesStylesheetToInput) {
+    write_file("leptris_cli_xsl_sheet.tmp",
+               "<xsl:stylesheet version=\"1.0\""
+               " xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+               "<xsl:template match=\"/\">"
+               "<out><xsl:value-of select=\"count(//item)\"/></out>"
+               "</xsl:template></xsl:stylesheet>");
+    write_file("leptris_cli_xsl_in.tmp", "<r><item/><item/><item/></r>");
+    auto r = run_cli({"xslt", "-s", "leptris_cli_xsl_sheet.tmp",
+                      "leptris_cli_xsl_in.tmp"});
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("<out>3</out>"), std::string::npos) << r.out;
+}
+
+TEST(CliXslt, ReadsInputFromStdin) {
+    write_file("leptris_cli_xsl_sheet2.tmp",
+               "<xsl:stylesheet version=\"1.0\""
+               " xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+               "<xsl:template match=\"/\">"
+               "<n><xsl:value-of select=\"name(/*)\"/></n>"
+               "</xsl:template></xsl:stylesheet>");
+    auto r = run_cli({"xslt", "-s", "leptris_cli_xsl_sheet2.tmp"},
+                     "<r><item/></r>");
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("<n>r</n>"), std::string::npos) << r.out;
+}
+
+TEST(CliXslt, MissingStylesheetIsAnArgumentError) {
+    auto r = run_cli({"xslt"});
+    EXPECT_NE(r.exit_code, 0);
+    EXPECT_NE(r.err.find("-s"), std::string::npos) << r.err;
+}
+
+#endif  /* !_WIN32 */
+
+// ---- --help lists every registered command ----------------------------------
+// The command list must come from the registry (the descriptors are
+// the single source of truth), not a hand-maintained printf list.
+
+TEST(CliHelp, ListsEveryRegisteredCommand) {
+    auto r = run_cli({"--help"});
+    EXPECT_EQ(r.exit_code, 0);
+    for (const char* cmd : {"parse", "validate", "xpath", "format",
+                            "diff", "xquery", "xslt", "version"}) {
+        EXPECT_NE(r.out.find(cmd), std::string::npos)
+            << "command missing from --help: " << cmd;
+    }
+}
+
 // ---- diff output modes (#1184 lever 8) --------------------------------------
 // run_cli shells out with POSIX quoting — not exercised on Windows.
 

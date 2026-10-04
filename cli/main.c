@@ -16,15 +16,14 @@
 /* Helper Functions                                                          */
 /* ------------------------------------------------------------------------- */
 
-static void print_usage(void) {
+/* The command listing comes from the registry — the command
+ * descriptors are the single source of truth; this function only
+ * frames it with the usage and global-options sections. */
+static void print_usage(const cli_registry_t* registry) {
     printf("Usage: leptris [OPTIONS] COMMAND [ARGS...]\n");
     printf("\n");
     printf("Commands:\n");
-    printf("  parse      Parse and validate XML\n");
-    printf("  validate   Validate against RNG / Schematron\n");
-    printf("  xpath      Execute XPath queries\n");
-    printf("  format     Pretty-print XML\n");
-    printf("  version    Show version information\n");
+    cli_registry_print_all(registry);
     printf("\n");
     printf("Global Options:\n");
     printf("  -v, --verbose       Verbose output\n");
@@ -69,20 +68,6 @@ int main(int argc, char** argv) {
     cli_error_set_quiet(global_opts->quiet > 0);
     cli_error_set_color(global_opts->color);
 
-    /* Handle global --help */
-    if (global_opts->help) {
-        print_usage();
-        cli_global_options_free(global_opts);
-        return CLI_SUCCESS;
-    }
-
-    /* Handle global --version */
-    if (global_opts->version) {
-        print_version();
-        cli_global_options_free(global_opts);
-        return CLI_SUCCESS;
-    }
-
     /* Create command registry */
     registry = cli_registry_new();
     if (!registry) {
@@ -99,10 +84,27 @@ int main(int argc, char** argv) {
     cli_registry_register(registry, cli_command_xpath());
     cli_registry_register(registry, cli_command_format());
     cli_registry_register(registry, cli_command_xquery());
+    cli_registry_register(registry, cli_command_xslt());
+
+    /* Handle global --help */
+    if (global_opts->help) {
+        print_usage(registry);
+        cli_registry_free(registry);
+        cli_global_options_free(global_opts);
+        return CLI_SUCCESS;
+    }
+
+    /* Handle global --version */
+    if (global_opts->version) {
+        print_version();
+        cli_registry_free(registry);
+        cli_global_options_free(global_opts);
+        return CLI_SUCCESS;
+    }
 
     /* Check if command specified */
     if (argc < 2) {
-        print_usage();
+        print_usage(registry);
         result = CLI_ERROR_ARGS;
         goto cleanup;
     }
@@ -111,7 +113,7 @@ int main(int argc, char** argv) {
     cli_command_t* cmd = cli_registry_find(registry, argv[1]);
     if (!cmd) {
         cli_error("unknown command: %s", argv[1]);
-        print_usage();
+        print_usage(registry);
         result = CLI_ERROR_ARGS;
         goto cleanup;
     }

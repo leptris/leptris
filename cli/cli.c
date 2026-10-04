@@ -5,6 +5,7 @@
 
 #include "cli.h"
 #include "error.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -89,12 +90,45 @@ cli_command_t* cli_registry_find(
 void cli_registry_print_all(const cli_registry_t* registry) {
     if (!registry) return;
 
-    printf("Available commands:\n");
     for (size_t i = 0; i < registry->count; i++) {
         printf("  %-12s  %s\n",
             registry->commands[i]->name,
             registry->commands[i]->description);
     }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Shared Command Utilities                                                  */
+/* ------------------------------------------------------------------------- */
+
+char* cli_read_stream(FILE* fp, size_t* out_len) {
+    size_t cap = 4096, len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) return NULL;
+    for (;;) {
+        size_t n = fread(buf + len, 1, cap - len - 1, fp);
+        len += n;
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* grown = (char*)realloc(buf, cap);
+            if (!grown) { free(buf); return NULL; }
+            buf = grown;
+            continue;
+        }
+        break;
+    }
+    buf[len] = 0;
+    if (out_len) *out_len = len;
+    return buf;
+}
+
+char* cli_read_file(const char* path, size_t* out_len) {
+    if (strcmp(path, "-") == 0) return cli_read_stream(stdin, out_len);
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    char* s = cli_read_stream(fp, out_len);
+    fclose(fp);
+    return s;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -110,6 +144,7 @@ const char* cli_result_to_string(cli_result_t result) {
         case CLI_ERROR_ARGS:    return "invalid arguments";
         case CLI_ERROR_MEMORY:  return "memory allocation failed";
         case CLI_ERROR_INTERNAL: return "internal error";
+        case CLI_ERROR_XSLT:    return "xslt error";
         default:                return "unknown error";
     }
 }

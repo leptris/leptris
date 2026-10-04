@@ -1,0 +1,43 @@
+= leptris-validate(1)
+:doctype: manpage
+:man manual: Leptris Manual
+:man source: Leptris 1.9.297
+:man version: 1.9.297
+
+== NAME
+leptris-validate - validate XML documents
+
+== SYNOPSIS
+*leptris validate* [_OPTIONS_] _FILE_
+
+== DESCRIPTION
+Validate an XML document against a DTD, RELAX NG schema, or
+Schematron schema and report violations.
+
+== OPTIONS
+
+*--dtd* _FILE_::
+    Validate against a DTD.
+
+*--rng* _FILE_::
+    Validate against a RELAX NG schema.
+
+*--schematron* _FILE_::
+    Validate against a Schematron schema.
+
+*-h*, *--help*::
+    Show command-specific help.
+
+== EXAMPLES
+
+DTD validation:
+
+    leptris validate --dtd model.dtd input.xml
+
+RELAX NG validation:
+
+    leptris validate --rng model.rng input.xml
+
+== COPYRIGHT
+
+Copyright (c) 2024 Ribose Inc. Licensed under the MIT License.

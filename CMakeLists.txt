@@ -342,6 +342,10 @@ if(LEPTRIS_BUILD_CLI AND LEPTRIS_BUILD_MAN_PAGES)
         cli/man/leptris-parse.1.adoc
         cli/man/leptris-xpath.1.adoc
         cli/man/leptris-format.1.adoc
+        cli/man/leptris-validate.1.adoc
+        cli/man/leptris-diff.1.adoc
+        cli/man/leptris-xquery.1.adoc
+        cli/man/leptris-xslt.1.adoc
     )
 
     foreach(ADOC_SOURCE ${ADOC_MAN_SOURCES})

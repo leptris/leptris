@@ -17,36 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char* read_stream(FILE* fp, size_t* out_len) {
-    size_t cap = 4096, len = 0;
-    char* buf = (char*)malloc(cap);
-    if (!buf) return NULL;
-    for (;;) {
-        size_t n = fread(buf + len, 1, cap - len - 1, fp);
-        len += n;
-        if (len + 1 >= cap) {
-            cap *= 2;
-            char* grown = (char*)realloc(buf, cap);
-            if (!grown) { free(buf); return NULL; }
-            buf = grown;
-            continue;
-        }
-        break;
-    }
-    buf[len] = 0;
-    if (out_len) *out_len = len;
-    return buf;
-}
-
-static char* read_file(const char* path, size_t* out_len) {
-    if (strcmp(path, "-") == 0) return read_stream(stdin, out_len);
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return NULL;
-    char* s = read_stream(fp, out_len);
-    fclose(fp);
-    return s;
-}
-
 static void xquery_print_help(void);
 
 typedef struct {
@@ -105,7 +75,7 @@ static cli_result_t xquery_run(int argc, char** argv) {
     char* query = NULL;
     size_t query_len = 0;
     if (opts.query_file) {
-        query = read_file(opts.query_file, &query_len);
+        query = cli_read_file(opts.query_file, &query_len);
         if (!query) {
             cli_error("cannot read query file: %s", opts.query_file);
             return CLI_ERROR_IO;

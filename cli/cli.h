@@ -17,6 +17,7 @@
 #define LEPTRIS_CLI_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +44,8 @@ typedef enum {
     CLI_ERROR_IO = 3,       /**< I/O error (file not found, etc.) */
     CLI_ERROR_ARGS = 4,     /**< Invalid arguments */
     CLI_ERROR_MEMORY = 5,   /**< Memory allocation failed */
-    CLI_ERROR_INTERNAL = 6  /**< Internal error (bug) */
+    CLI_ERROR_INTERNAL = 6, /**< Internal error (bug) */
+    CLI_ERROR_XSLT = 7      /**< XSLT transformation failed */
 } cli_result_t;
 
 /* ------------------------------------------------------------------------- */
@@ -166,11 +168,38 @@ cli_command_t* cli_registry_find(
 /**
  * Print all registered commands
  *
- * Used for global --help output.
+ * Prints one aligned "name — description" line per registered
+ * command, in registration order, without a section header — the
+ * caller frames the listing. This is the single source of truth
+ * for the global --help command list: command descriptors carry
+ * their own description, and no hand-maintained copy of the list
+ * exists anywhere else.
  *
  * @param registry Registry to print
  */
 void cli_registry_print_all(const cli_registry_t* registry);
+
+/* ------------------------------------------------------------------------- */
+/* Shared Command Utilities                                                  */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Read a whole stream into a NUL-terminated heap buffer
+ *
+ * @param fp Stream to read (not closed)
+ * @param out_len Length in bytes excluding the NUL, or NULL
+ * @return Buffer (caller frees), or NULL on allocation failure
+ */
+char* cli_read_stream(FILE* fp, size_t* out_len);
+
+/**
+ * Read a whole file into a NUL-terminated heap buffer
+ *
+ * @param path File path, or "-" for stdin
+ * @param out_len Length in bytes excluding the NUL, or NULL
+ * @return Buffer (caller frees), NULL on open or allocation failure
+ */
+char* cli_read_file(const char* path, size_t* out_len);
 
 /* ------------------------------------------------------------------------- */
 /* Standard Commands (Forward Declarations)                                 */
@@ -224,6 +253,14 @@ extern cli_command_t* cli_command_validate(void);
  * Purpose: Execute an XQuery 1.0 query
  */
 extern cli_command_t* cli_command_xquery(void);
+
+/**
+ * Get the 'xslt' command
+ *
+ * Command: leptris xslt -s STYLESHEET [INPUT]
+ * Purpose: Apply an XSLT stylesheet to an XML document
+ */
+extern cli_command_t* cli_command_xslt(void);
 
 #ifdef __cplusplus
 }
