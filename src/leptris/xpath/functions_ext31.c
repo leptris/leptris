@@ -5037,7 +5037,7 @@ int xpath_array_members_of(const char* content, char*** out, size_t* out_n) {
             char** grown = (char**)realloc(flat, fcap * sizeof(char*));
             if (!grown) {
                 if (dense) free_items(sub, sn);
-                else free(slots[j]);
+                free(slots[j]);
                 for (size_t r = j + 1; r < n; r++) free(slots[r]);
                 free(slots);
                 free_items(flat, fn_);
