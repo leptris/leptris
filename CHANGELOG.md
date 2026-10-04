@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.298] - 2026-10-04
+
+### Added
+
+- route the six string functions through UCA collation (xpath)
+- xslt command + registry-driven --help (SSOT) (cli)
+
+
+
 ## [1.9.297] - 2026-10-03
 
 ### Fixed
