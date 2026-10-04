@@ -34,6 +34,19 @@ char* xpath_int_to_string(long long v) {
     return leptris_strdup(buf);
 }
 
+int xpath_result_is_float(const struct leptris_xpath_result* r) {
+    if (!r) return 0;
+    if (r->type != XPATH_RESULT_NODESET)
+        return r->atomic_type &&
+               strcmp(r->atomic_type, "xs:float") == 0;
+    if (!r->value.nodeset_value || r->value.nodeset_value->count != 1)
+        return 0;
+    void* nd = r->value.nodeset_value->nodes[0];
+    if ((int)XPATH_NODE_TYPE(nd) != LEPTRIS_NODE_TEXT) return 0;
+    const char* c = ((XPathTextNode*)nd)->content;
+    return c && c[0] == '\x03' && c[1] == 'F';
+}
+
 char* xpath_number_to_string(double number) {
     if (isnan(number)) return leptris_strdup("NaN");
     if (isinf(number))
@@ -93,8 +106,12 @@ char* xpath_number_to_string_xq(double number) {
 
 /* float_prec: the value is a float32-widened double — the shortest
  * round-trip loop reads back at float precision so xs:float spells
- * "3.4028235E38", not the widened-double digits. */
+ * "3.4028235E38", not the widened-double digits. Arithmetic on the
+ * double carrier can leave a non-float-representable value; a
+ * float-tagged number IS a float, so snap it into the float domain
+ * before spelling. */
 char* xpath_number_to_string_xq_typed(double number, int float_prec) {
+    if (float_prec) number = (double)(float)number;
     if (isnan(number)) return leptris_strdup("NaN");
     if (isinf(number))
         return leptris_strdup(number > 0 ? "INF" : "-INF");

@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <float.h>
 #include <errno.h>
+#include <limits.h>
 
 /* ============================================================================
  * Forward Declarations
@@ -2199,6 +2200,8 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
      * (duration zeros need duration algebra). */
     double zero = 0.0;
     int has_zero = 0;
+    long long isum_seed = 0;
+    int zero_non_int = 0;
     if (arg_count == 2) {
         struct leptris_xpath_result* zr = xpath_evaluate(context, args[1]);
         if (!zr) return NULL;
@@ -2206,10 +2209,21 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         xpath_result_free(zr);
         if (!zs) return NULL;
         char* zend;
-        zero = strtod(zs, &zend);
-        if (zend == zs) zero = 0.0;
-        LEPTRIS_FREE(zs);
-        has_zero = 1;
+        {
+            char* full_end;
+            errno = 0;
+            long long ziv = strtoll(zs, &full_end, 10);
+            zero = strtod(zs, &zend);
+            if (zend == zs) zero = 0.0;
+            /* Seed the int64 accumulator when the zero is an exact
+             * integer lexical (sum((), 3) = 3 exactly). */
+            if (errno == 0 && full_end != zs && *full_end == '\0')
+                isum_seed = ziv;
+            else
+                zero_non_int = 1;
+            LEPTRIS_FREE(zs);
+            has_zero = 1;
+        }
     }
 
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
@@ -2218,6 +2232,15 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     double sum = zero;
     int has_nan = 0;
     size_t count = 0;
+    /* int64-exact accumulation: integer sums past 2^53 lose digits
+     * in the double carrier (fn-sumintg2args/lng2args); track a
+     * long-long total in parallel and use it when every member was
+     * an exact integer lexical with no overflow. */
+    long long isum = 0;
+    int all_int = 1, iovf = 0;
+    /* Float propagation: sum over xs:float spells at float
+     * precision. */
+    int all_float = 1;
 
     if (arg_result->type == XPATH_RESULT_NODESET) {
         XPathNodeSet* nodeset = arg_result->value.nodeset_value;
@@ -2225,6 +2248,15 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
             count = xpath_nodeset_count(nodeset);
             for (size_t i = 0; i < count; i++) {
                 void* node = xpath_nodeset_get(nodeset, i);
+                if ((int)XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
+                    const char* mc = ((XPathTextNode*)node)->content;
+                    if (!(mc && mc[0] == '\x03' && mc[1] == 'F' &&
+                          !(mc[2] == 'R' ||
+                            (mc[2] == 'N' && mc[3] == '\x02'))))
+                        all_float = 0;
+                } else {
+                    all_float = 0;
+                }
                 char* str = get_node_text(node);
                 const char* p = str;
                 while (isspace((unsigned char)*p)) p++;
@@ -2238,6 +2270,17 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
                             has_nan = 1;
                         } else {
                             sum += value;
+                            errno = 0;
+                            char* iend;
+                            long long iv = strtoll(p, &iend, 10);
+                            if (errno == ERANGE || iend == p ||
+                                *iend != '\0')
+                                all_int = 0;
+                            else if (iv > 0 ? isum > LLONG_MAX - iv
+                                            : isum < LLONG_MIN - iv)
+                                iovf = 1;
+                            else
+                                isum += iv;
                         }
                     } else {
                         /* Non-numeric value found */
@@ -2254,6 +2297,14 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         double v = arg_result->value.number_value;
         if (isnan(v)) has_nan = 1;
         else sum += v;
+        if (arg_result->is_int) {
+            isum += arg_result->int_value;
+        } else {
+            all_int = 0;
+        }
+        if (!(arg_result->atomic_type &&
+              strcmp(arg_result->atomic_type, "xs:float") == 0))
+            all_float = 0;
         count = 1;
     } else {
         char* str = result_to_string(arg_result);
@@ -2282,6 +2333,12 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
 
     if (has_nan) {
         result->value.number_value = NAN;
+    } else if (all_int && !zero_non_int && !iovf && (count > 0 || has_zero)) {
+        result->is_int = 1;
+        result->int_value = isum + isum_seed;
+        /* eq/boolean compare through the double field even when the
+         * int64 channel carries the exact value. */
+        result->value.number_value = (double)(isum + isum_seed);
     } else if (count == 0 && !has_zero) {
         /* XPath 1.0 sum(()) is 0; XQuery fn:sum(()) is 0 too (the
          * typed-atom form distinguishes xs:integer 0 — carried by
@@ -2289,6 +2346,7 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         result->value.number_value = 0;
     } else {
         result->value.number_value = sum;
+        if (all_float && count > 0) result->atomic_type = "xs:float";
     }
     return result;
 }
@@ -2307,11 +2365,21 @@ static struct leptris_xpath_result* xpath_func_floor(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
+    int iv_int = arg_result->is_int;
+    long long iv = arg_result->int_value;
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!result) return NULL;
+    if (iv_int) {
+        /* floor of an integer is the integer — keep int64 fidelity
+         * (the double carrier rounds 999999999999999999 up to 1e18). */
+        result->value.number_value = floor(num);
+        result->is_int = 1;
+        result->int_value = iv;
+        return result;
+    }
     result->value.number_value = floor(num);
     return result;
 }
@@ -2330,11 +2398,19 @@ static struct leptris_xpath_result* xpath_func_ceiling(XPathContext* context,
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
+    int iv_int = arg_result->is_int;
+    long long iv = arg_result->int_value;
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!result) return NULL;
+    if (iv_int) {
+        result->value.number_value = ceil(num);
+        result->is_int = 1;
+        result->int_value = iv;
+        return result;
+    }
     result->value.number_value = ceil(num);
     return result;
 }
@@ -2364,6 +2440,9 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
         return xpath_result_new(XPATH_RESULT_NODESET);
     }
 
+    int arg_is_float = xpath_result_is_float(arg_result);
+    int iv_int = arg_result->is_int;
+    long long iv = arg_result->int_value;
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
@@ -2394,6 +2473,11 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
     double rounded = xpath_round_half_up(scaled);
     if (scaled > -0.5 && scaled < 0) rounded = -0.0;
     result->value.number_value = rounded / scale;
+    if (iv_int && scale == 1.0) {
+        result->is_int = 1;
+        result->int_value = iv;
+    }
+    if (arg_is_float) result->atomic_type = "xs:float";
     return result;
 }
 
