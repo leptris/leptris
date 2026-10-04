@@ -108,6 +108,8 @@ int leptris_collation_from_uri(const char* uri, leptris_collation* out) {
                 c.alternate = LEPTRIS_COLL_ALTERNATE_NON_IGNORABLE;
             else if (vlen == 7 && strncmp(eq + 1, "shifted", 7) == 0)
                 c.alternate = LEPTRIS_COLL_ALTERNATE_SHIFTED;
+            else if (vlen == 7 && strncmp(eq + 1, "blanked", 7) == 0)
+                c.alternate = LEPTRIS_COLL_ALTERNATE_BLANKED;
             else
                 return -1;
         } else {
@@ -184,16 +186,55 @@ static void ce_from_weights(struct ce* out, size_t w_idx, uint8_t var) {
     out->var = var;
 }
 
-/* Slice-1 implicit fallback for codepoints with no DUCET mapping
- * (unassigned + the @implicitweights scripts): one coarse CE keyed
- * off the codepoint's high bits. Deterministic and ordered, but NOT
- * the full UCA 7.1.1 two-CE implicit algorithm — refine when the
- * QT3 collation corpus demands the Tangut/Nushu ranges. */
-static void ce_implicit(struct ce* out, uint32_t cp) {
-    out->p = (uint16_t)(0xFB80u + (cp >> 12)); /* max 0xFC8F, fits */
-    out->s = 0x20;
-    out->t = 0x2;
-    out->var = 0;
+/* UCA 7.1.1 implicit weights for codepoints with no DUCET
+ * mapping. The @implicitweights scripts (allkeys.txt) take their
+ * registered FBxx base; everything else (unassigned) takes
+ * 0xFB80 + 2*(cp >> 15) — coarse groups that order after all
+ * assigned scripts. Per codepoint the algorithm emits two CEs:
+ *   [base + 2*offset     .0020.0002]
+ *   [base + 2*offset + 1 .0020.0004]
+ * The even/odd stride keeps neighbors from colliding and orders
+ * within a group by codepoint. Returns 2, or 1 when the trail CE
+ * would overflow the 16-bit weight space. */
+struct implicit_range {
+    uint32_t lo, hi, base;
+};
+static const struct implicit_range implicit_ranges[] = {
+    {0x17000, 0x18AFF, 0xFB00}, /* Tangut + Tangut Supplement */
+    {0x18B00, 0x18CFF, 0xFB02}, /* Khitan Small Script */
+    {0x1B170, 0x1B2FF, 0xFB01}, /* Nushu */
+};
+
+static int ce_implicit(struct ce* out, uint32_t cp) {
+    uint32_t base = 0, offset = 0;
+    int hit = 0;
+    for (size_t i = 0; i < sizeof(implicit_ranges) /
+                              sizeof(implicit_ranges[0]); i++) {
+        if (cp >= implicit_ranges[i].lo && cp <= implicit_ranges[i].hi) {
+            base = implicit_ranges[i].base;
+            offset = cp - implicit_ranges[i].lo;
+            hit = 1;
+            break;
+        }
+    }
+    if (!hit) {
+        /* Unassigned: each 32k-codepoint group gets its own base
+         * pair; the intra-group offset keeps codepoint order. */
+        base = 0xFB80u + (cp >> 15) * 2u;
+        offset = cp & 0x7FFFu;
+    }
+    uint32_t p1 = base + offset * 2u;
+    if (p1 > 0xFFFF) p1 = 0xFFFF;
+    out[0].p = (uint16_t)p1;
+    out[0].s = 0x20;
+    out[0].t = 0x2;
+    out[0].var = 0;
+    if (p1 >= 0xFFFF) return 1;
+    out[1].p = (uint16_t)(p1 + 1);
+    out[1].s = 0x20;
+    out[1].t = 0x4;
+    out[1].var = 0;
+    return 2;
 }
 
 /* Decode one UTF-8 sequence; advances *s. Invalid bytes decode as
@@ -241,7 +282,7 @@ static int ce_buf_push(struct ce_buf* buf, const struct ce* ce) {
 
 static int ces_from_string(const char* str, size_t len, struct ce_buf* buf) {
     /* DUCET lookups assume NFD; F&O default normalization=yes. */
-    char* nfd = str; /* borrow when no normalization possible */
+    const char* nfd = str; /* borrow when no normalization possible */
     size_t nfd_len = len;
     char* owned = NULL;
 #if LEPTRIS_HAS_UTF8PROC
@@ -310,9 +351,10 @@ static int ces_from_string(const char* str, size_t len, struct ce_buf* buf) {
                     oom |= ce_buf_push(buf, &ce);
                 }
             } else {
-                struct ce ce;
-                ce_implicit(&ce, cp);
-                oom = ce_buf_push(buf, &ce);
+                struct ce ces[2];
+                int n_implicit = ce_implicit(ces, cp);
+                for (int q = 0; q < n_implicit; q++)
+                    oom |= ce_buf_push(buf, &ces[q]);
             }
         }
         if (oom) {
@@ -370,12 +412,14 @@ int leptris_collation_sortkey(const char* s, size_t len,
     }
     unsigned char* k = key;
 
-    /* Primary. With alternate=shifted, variable CEs move their
-     * primary to the quaternary level (zeroed here). */
+    /* Primary. Under shifted/blanked variable weighting, variable
+     * CEs leave every ordinary level (shifted re-adds the primary
+     * at the quaternary level below; blanked drops them wholly). */
+    int var_off = c->alternate != LEPTRIS_COLL_ALTERNATE_NON_IGNORABLE;
     for (size_t i = 0; i < buf.n; i++) {
         const struct ce* ce = &buf.v[i];
         if (ce->p == 0) continue; /* primary-ignorable */
-        if (c->alternate == LEPTRIS_COLL_ALTERNATE_SHIFTED && ce->var)
+        if (var_off && ce->var)
             continue;
         emit_weight(&k, ce->p);
     }
@@ -383,6 +427,7 @@ int leptris_collation_sortkey(const char* s, size_t len,
 
     if (c->strength >= LEPTRIS_COLL_STRENGTH_SECONDARY) {
         for (size_t i = 0; i < buf.n; i++) {
+            if (var_off && buf.v[i].var) continue;
             if (buf.v[i].s != 0) emit_weight(&k, buf.v[i].s);
         }
         *k++ = 0x00;
@@ -390,6 +435,7 @@ int leptris_collation_sortkey(const char* s, size_t len,
 
     if (c->strength >= LEPTRIS_COLL_STRENGTH_TERTIARY) {
         for (size_t i = 0; i < buf.n; i++) {
+            if (var_off && buf.v[i].var) continue;
             uint16_t t = buf.v[i].t;
             /* caseFirst: DUCET tertiaries order lowercase (0x0002)
              * before uppercase (0x0008); upper-first swaps the two

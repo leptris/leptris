@@ -3608,6 +3608,42 @@ TEST(Xslt30, FnCollationKeyMatchesUnderUca) {
 }
 #endif
 
+#if LEPTRIS_HAS_DUCET
+/* DUCET lane tail: the substring-family and deep-equal functions
+ * honor UCA collations — 'Straße' starts-with 'STRASSE' under
+ * primary strength is false, but case-folded pairs match; accented
+ * prefixes match their bases at primary strength. */
+TEST(Xslt30, SubstringFnsHonorUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"starts-with('straße', 'STR', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"contains('A2B', 'a2', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"ends-with('abc', 'BC', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"substring-before('xay', 'A', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"substring-after('xay', 'A', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[true][true][true][x][y]");
+}
+
+TEST(Xslt30, DeepEqualHonorsUcaCollation) {
+    EXPECT_EQ(body(run30(
+        "<xsl:template match='/'>"
+        "[<xsl:value-of select=\"deep-equal('abc', 'ABC', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "[<xsl:value-of select=\"deep-equal('abc', 'ABD', "
+        "'http://www.w3.org/2013/collation/UCA?strength=primary')\"/>]"
+        "</xsl:template>",
+        "<r/>")),
+        "[true][false]");
+}
+#endif
+
 TEST(Xslt30, WherePopulatedOnNonEmptyNextMatch) {
     /* Saxon-HE 12.7 ground truth (TODO.xslt-full/09): where-
      * populated drops wholly-empty content; on-non-empty is

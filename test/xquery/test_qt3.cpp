@@ -33,6 +33,14 @@
 #define LEPTRIS_QT3_DIR "test/xquery/qt3"
 #endif
 
+/* The six collation-routed string suites adopt their UCA cases only
+ * in DUCET builds; the utf8proc-less config gates them out. */
+#if defined(LEPTRIS_HAS_DUCET)
+#define COLLPIN(with_ducet, without) (with_ducet)
+#else
+#define COLLPIN(with_ducet, without) (without)
+#endif
+
 namespace {
 
 std::string slurp(const std::string& path) {
@@ -514,9 +522,12 @@ void run_test_set(const char* set_path,
              * F&O reading (unknown collation parameter values raise
              * FOCH0002), not the optional lax "simple-uca-fallback"
              * (ignore the setting, use the collation as-is). Cases
-             * requiring the fallback feature are out. */
+             * requiring the fallback feature are out — likewise
+             * "advanced-uca-fallback" (lang-tailored handling beyond
+             * the root DUCET, e.g. fn-contains-34). */
             if (dt && strcmp(dt, "feature") == 0 && dv &&
-                strcmp(dv, "simple-uca-fallback") == 0 &&
+                (strcmp(dv, "simple-uca-fallback") == 0 ||
+                 strcmp(dv, "advanced-uca-fallback") == 0) &&
                 (!sat || strcmp(sat, "false") != 0)) {
                 dep_out = true;
                 break;
@@ -695,8 +706,9 @@ TEST(Qt3Subset, FnSubstring) {
 
 TEST(Qt3Subset, FnContains) {
     /* The "-dyn" cases bind the set-level param environment as
-     * external variables; UCA-collation cases still skip. */
-    run_test_set("fn/contains.xml", {}, 46, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
+     * external variables; UCA collations route through the
+     * collation module (alternate=blanked included). */
+    run_test_set("fn/contains.xml", {}, COLLPIN(63, 46));
 }
 
 /* String case family (lever 6 stage-2, string tails batch 1):
@@ -730,11 +742,12 @@ TEST(Qt3Subset, MiscUcaCollation) {
     run_test_set("misc/UCACollation.xml", {}, 62);
 }
 TEST(Qt3Subset, FnCollationKey) {
-    /* 12 of 56 run-and-agree: XQuery-3.0 string lt/gt now does
+    /* 11 of 56 run-and-agree: XQuery-3.0 string lt/gt now does
      * codepoint value comparison, so the key-ordering cases
      * (009u/009l/015) agree. The rest of the file is excluded by
-     * the unknown-parameter and simple-uca-fallback gates. */
-    run_test_set("fn/collation-key.xml", {}, 12);
+     * the unknown-parameter and the uca-fallback feature gates
+     * (blanked is now a known alternate value). */
+    run_test_set("fn/collation-key.xml", {}, 11);
 }
 #endif
 
@@ -807,12 +820,12 @@ TEST(Qt3Subset, FnStringCase) {
 
 TEST(Qt3Subset, FnStartsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
-    run_test_set("fn/starts-with.xml", {}, 43, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
+    run_test_set("fn/starts-with.xml", {}, COLLPIN(56, 43));
 }
 
 TEST(Qt3Subset, FnEndsWith) {
     /* UCA-collation cases (15) and error-assertion cases (6) skip. */
-    run_test_set("fn/ends-with.xml", {}, 34, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
+    run_test_set("fn/ends-with.xml", {}, COLLPIN(48, 34));
 }
 
 TEST(Qt3Subset, FnConcat) {
@@ -838,11 +851,11 @@ TEST(Qt3Subset, FnNormalizeSpace) {
 }
 
 TEST(Qt3Subset, FnSubstringBefore) {
-    run_test_set("fn/substring-before.xml", {}, 12, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
+    run_test_set("fn/substring-before.xml", {}, COLLPIN(26, 12));
 }
 
 TEST(Qt3Subset, FnSubstringAfter) {
-    run_test_set("fn/substring-after.xml", {}, 16, {"collation/UCA"}) /* UCA-URI cases skip: these six functions are not yet collation-module-routed (see the DUCET lane tail) */;
+    run_test_set("fn/substring-after.xml", {}, COLLPIN(29, 16));
 }
 
 TEST(Qt3Subset, FnBoolean) {
@@ -1190,7 +1203,7 @@ TEST(Qt3Subset, FnDeepEqual) {
      * document{}-ctor and attribute{}-ctor cases (K2-14..43) need
      * the node-materializing ctor model, plus arrays-18 (nested
      * array:put/remove) and mix-args-031 (xs:time vs string). */
-    run_test_set("fn/deep-equal.xml", {}, 221, {"collation/UCA"},
+    run_test_set("fn/deep-equal.xml", {}, COLLPIN(223, 221), {},
                  {
                    "K2-SeqDeepEqualFunc-14",
                    "K2-SeqDeepEqualFunc-15",
