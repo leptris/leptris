@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.300] - 2026-10-04
+
+### Added
+
+- typed-atom channels through numeric functions (xquery)
+
+
+
 ## [1.9.299] - 2026-10-04
 
 ### Added
