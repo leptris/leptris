@@ -4,11 +4,35 @@
 
 ### Added
 
-- atomize array arguments in aggregates + instance-of integrality (+14 QT3) (xquery)
+- **XQuery: aggregates atomize array arguments** — `fn:avg`,
+  `fn:sum`, `fn:min` and `fn:max` take `xs:anyAtomicType*`, so a
+  dense array argument now contributes its members instead of
+  leaking the internal carrier: `avg([1,2,3,4,5])` = 3,
+  `sum([1,2,3,4,5])` = 15 (fn-avg-10, fn-sum-11, fn-min-19,
+  fn-max-19). A new shared decoder turns carriers keyed exactly
+  1..n into positional members, recursing into nested arrays
+  (`[[1,2],[3]]` → 1,2,3); maps and sparse carriers stay single
+  items, and `item()`-typed functions such as `fn:count` still see
+  an array as one item, per XDM. `fn:sum`'s per-item accumulation
+  moved into a helper so atomized members feed the existing
+  int64-exact and xs:float channels unchanged.
+- **XQuery: `instance of` over the integer family demands
+  integrality** — `xs:integer` and its derived types
+  (int/long/short/byte/unsigned*/nonNegative…) now require an
+  integral value on both the sequence-member and scalar paths:
+  `fn:abs(1.1) instance of xs:integer` is false,
+  `fn:abs(-3) instance of xs:integer` is true.
 
 ### Fixed
 
-- free the nested carrier on the atomize OOM path (xquery)
+- **XQuery: `fn:avg` edge shapes** — `avg(())` returns the empty
+  sequence under XQuery (XPath 1.0 parity untouched), and averages
+  over `xs:yearMonthDuration` format through the shared months
+  formatter (cbcl-avg-006: `P1Y`). Also freed a nested-array
+  carrier on an allocation-failure path in the atomizing decoder.
+- QT3 re-pins from one verified run: fn/avg 164→173, fn/max
+  165→167, fn/min 165→167, fn/sum 203→204 (+14 adopted cases;
+  total pins 1134 → 1148; 61/61 suites green).
 
 
 
