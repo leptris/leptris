@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.302] - 2026-10-04
+
+### Added
+
+- atomize array arguments in aggregates + instance-of integrality (+14 QT3) (xquery)
+
+### Fixed
+
+- free the nested carrier on the atomize OOM path (xquery)
+
+
+
 ## [1.9.301] - 2026-10-04
 
 ### Fixed
