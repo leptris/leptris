@@ -4,8 +4,30 @@
 
 ### Fixed
 
-- free the lexical zero on every result path (LSan) (sum)
-- boolean carriers keep falsiness through bindings (xquery)
+- **XQuery: a false() bound anywhere read as truthy** — values
+  stringified to a marker-less "false" that every effective-boolean-
+  value site saw as a non-empty string, so `let $x := false() return
+  if ($x)...` took the then-branch and fold accumulators ignored a
+  false() zero (fold-left-004). Variable bindings, local:function
+  thunk arguments and the fold accumulators/items now carry the
+  boolean type marker; the EBV read honors it on singleton synthetic
+  members (XML 1.0 forbids raw control characters in text content,
+  so the marker cannot collide with document data); named-reference
+  closure calls spell marked booleans back to literals; both string
+  consumers render them as true/false. (PR #1522)
+
+- **fn:not uses the effective boolean value** — not(false()) is
+  true while fn:empty((false())) stays false; real nodes keep the
+  XPath 1.0 existence rule, so libxml2 parity is unchanged.
+  (PR #1522)
+
+- **fn:abs(()) is the empty sequence** under the XQuery surface;
+  **fn:sum((), $zero) returns a non-numeric zero verbatim**
+  (sum((), xs:dayTimeDuration("PT0S")) = PT0S); **fn:avg over
+  dayTimeDurations** divides the total seconds and formats
+  (fn-avg-4: PT5H30M); and the kept lexical zero in fn:sum is freed
+  on every result path (a Linux ASAN catch — macOS has no leak
+  sanitizer). (PR #1522)
 
 
 
