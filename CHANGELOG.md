@@ -4,7 +4,49 @@
 
 ### Added
 
-- numeric aggregate + HOF families adopted (QT3 #1182) (xquery)
+- **XQuery: 1078 QT3 cases adopted across fifteen fn families** —
+  the numeric aggregates and rounding set (abs, avg, ceiling, floor,
+  max, min, round, round-half-to-even, sum) plus the higher-order
+  combiners (apply, filter, for-each, for-each-pair, fold-left,
+  fold-right), vendored verbatim from the upstream QT3 mirror. The
+  named per-suite excludes document the typed-atom lane's remaining
+  levers (xs:float spelling through aggregates, int64-exact
+  multi-argument sums, instance-of results). (PR #1518)
+
+- **fn:sum#2** — the zero argument returns its value for the empty
+  sequence: fn:sum((1,2,3), 10) = 16, fn:sum((), 5) = 5.
+  (PR #1518)
+
+### Fixed
+
+- **Number spelling destroyed integral magnitudes** — the shared
+  trailing-zero trim ran on dot-free integer renderings, so 1e18
+  spelled "1"; it now runs only when a decimal point is present.
+  Negative zero also spells "-0" (fn:round(-0.01) = -0), and
+  fn:round preserves -0 for inputs in (-0.5, 0). (PR #1518)
+
+- **Value carriers overflowed at DBL_MAX** — the ext31 string
+  carrier used the libxml2-parity printer, which renders DBL_MAX
+  with 18 significant digits; strtod read-back of that string
+  overflows to infinity, so fn:avg((1.7976931348623157E308)) was
+  INF. Carriers now use the injective shortest-round-trip spelling.
+  (PR #1518)
+
+- **fn:sum rejected non-nodeset arguments** — single-item sequences
+  (passed as scalars by the XQuery adapter) errored out. (PR #1518)
+
+- **fn:round()/fn:round-half-to-even(()) now return the empty
+  sequence** under the XQuery surface; XPath 1.0 coercion stays NaN
+  (libxml2 parity unchanged). (PR #1518)
+
+- **fn:max/fn:min over non-numeric items** (xs:string, xs:anyURI)
+  compare in codepoint order and return the extreme item instead of
+  coercing to zero. (PR #1518)
+
+- **QT3 runner: the standard `emptydoc`/`empty` environments
+  resolve to the empty context** — cases carrying them were
+  silently skipped (the abs/ceiling/floor/fold-* families adopted
+  zero cases before this). (PR #1518)
 
 
 
