@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.301] - 2026-10-04
+
+### Fixed
+
+- free the lexical zero on every result path (LSan) (sum)
+- boolean carriers keep falsiness through bindings (xquery)
+
+
+
 ## [1.9.300] - 2026-10-04
 
 ### Added
