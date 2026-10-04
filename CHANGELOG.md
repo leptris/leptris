@@ -4,8 +4,57 @@
 
 ### Added
 
-- route the six string functions through UCA collation (xpath)
-- xslt command + registry-driven --help (SSOT) (cli)
+- **XPath/XQuery: the six remaining string functions honor UCA
+  collations (DUCET lane closed)** — starts-with, ends-with,
+  contains, substring-before, substring-after and deep-equal now
+  route `http://www.w3.org/2013/collation/UCA` URIs through the
+  collation module. Matching scans codepoint-aligned windows under
+  the collation compare (every collation-unit boundary falls
+  between codepoints, so the scan is exact across contractions and
+  normalization); substring-before/after slice the leftmost-shortest
+  occurrence. deep-equal threads the collation into plain string
+  atoms and map values, while \x03-marked carriers keep their
+  value-space equality. **QT3 adoption rises by 73 cases**:
+  contains 46→63, starts-with 43→56, ends-with 34→48,
+  substring-before 12→26, substring-after 16→29, deep-equal
+  221→223. (PR #1515)
+
+- **Collation: UCA 7.1.1 implicit weights** — codepoints with no
+  DUCET mapping sort by the two-CE algorithm: the registered
+  @implicitweights ranges (Tangut/Tangut-Supplement base FB00,
+  Khitan FB02, Nushu FB01) order ahead of the unassigned groups
+  (base 0xFB80 + 2*(cp>>15)), each codepoint emitting an
+  even/odd CE pair that orders within its group by codepoint.
+  (PR #1515)
+
+- **Collation: `alternate=blanked`** (fn-contains-35..38) — the
+  third W3C UCA variable-weighting value is accepted, and variable
+  collation elements now leave every ordinary level under
+  shifted/blanked weighting (shifted retains its quaternary
+  re-add; blanked drops them wholly — ICU variable semantics).
+  (PR #1515)
+
+- **CLI: `leptris xslt` command** — apply a stylesheet to a
+  document and print the serialized result tree:
+  `leptris xslt -s style.xsl input.xml`. Conventions match
+  xsltproc: INPUT is a file path, `-` or absent reads stdin. The
+  stylesheet compiles via leptris_xslt_parse_file, so
+  xsl:include/xsl:import resolve relative to the sheet. New
+  CLI_ERROR_XSLT exit code (7). (PR #1516)
+
+- **CLI: man pages for every command** — new leptris-xslt.1 plus
+  the missing leptris-xquery.1, leptris-diff.1 and
+  leptris-validate.1, all registered for generation. (PR #1516)
+
+### Fixed
+
+- **CLI: `--help` was missing registered commands** — the usage
+  text hand-maintained its own command list, so the registered
+  `diff` and `xquery` commands were invisible. The help listing
+  now iterates the command registry (the descriptors are the
+  single source of truth), and adding a command can no longer
+  leave help stale. xquery's private stream reader is promoted to
+  shared cli_read_stream/cli_read_file. (PR #1516)
 
 
 
