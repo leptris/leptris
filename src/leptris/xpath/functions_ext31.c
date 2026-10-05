@@ -1222,10 +1222,33 @@ static struct leptris_xpath_result* fn_math1(XPathContext* ctx,
         XPathASTNode** args, size_t n, double (*f)(double)) {
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
     if (!r) return NULL;
+    /* ceiling(()) is the empty sequence on the XQuery surface
+     * (K-CeilingFunc-3); XPath 1.0 coercion gives NaN. */
+    if (ctx->xquery_spelling &&
+        r->type == XPATH_RESULT_NODESET &&
+        (!r->value.nodeset_value ||
+         r->value.nodeset_value->count == 0)) {
+        leptris_xpath_result_free(r);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
+    int fl = xpath_result_is_float(r);
+    int xq = r->xq_spelling;
     double d = leptris_xpath_result_number(r);
     leptris_xpath_result_free(r);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
-    if (out && n) out->value.number_value = f(d);
+    if (out && n) {
+        /* F&O: ceiling/floor/round of an xs:float stays xs:float —
+         * compute in float32 and spell at float precision
+         * (fn-ceilingflt1args: the double spelling of the same
+         * value differs). */
+        if (fl) {
+            out->value.number_value = (double)(float)f(d);
+            out->atomic_type = "xs:float";
+        } else {
+            out->value.number_value = f(d);
+        }
+        out->xq_spelling = xq;
+    }
     return out;
 }
 
@@ -1296,20 +1319,61 @@ static struct leptris_xpath_result* fn_abs(XPathContext* ctx,
         return xpath_result_new(XPATH_RESULT_NODESET);
     }
     int fl = xpath_result_is_float(r);
+    int r_dec = r->atomic_type &&
+                strcmp(r->atomic_type, "xs:decimal") == 0;
+    int r_dbl = 0;
+    /* A FOR-bound argument is a single-item NODESET carrying the
+     * typed-scalar MARK (the scalar atomic_type is long gone):
+     * read D/O back off the mark (fn-abs-1). */
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value &&
+        r->value.nodeset_value->count == 1) {
+        void* nd = r->value.nodeset_value->nodes[0];
+        if ((int)XPATH_NODE_TYPE(nd) == LEPTRIS_NODE_TEXT) {
+            const char* mc = ((XPathTextNode*)nd)->content;
+            if (mc && mc[0] == '\x03') {
+                if (mc[1] == 'D') r_dec = 1;
+                else if (mc[1] == 'O') r_dbl = 1;
+            }
+        }
+    }
+    int xq = r->xq_spelling;
     int iv_int = r->is_int;
     long long iv = r->int_value;
     double d = leptris_xpath_result_number(r);
+    /* A bare-N synthetic (FLWOR-bound plain integer, fn-abs-1's
+     * walk over (1, xs:decimal(2), ...)) loses the is_int bit:
+     * an integer lexical on an UNLABELED number is an integer. */
+    if (!iv_int && !fl && !r_dec && !r->atomic_type && !r_dbl) {
+        char* ps = xpath_number_to_string_xq_typed(d, 0);
+        if (ps && num_int_lexical(ps)) {
+            iv_int = 1;
+            iv = (long long)d;
+        }
+        LEPTRIS_FREE(ps);
+    }
     leptris_xpath_result_free(r);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (out && n) {
+        out->xq_spelling = xq;
         if (iv_int) {
             out->value.number_value = fabs(d);
             out->is_int = 1;
             out->int_value = iv < 0 ? -iv : iv;
         } else {
+            if (fl) d = (double)(float)fabs(d);
             out->value.number_value = fabs(d);
         }
-        if (fl) out->atomic_type = "xs:float";
+        /* F&O: abs preserves the argument type (fn-abs-1 walks
+         * integer/decimal/float/double through instance-of). */
+        if (fl) {
+            out->atomic_type = "xs:float";
+        } else if (r_dec) {
+            out->atomic_type = "xs:decimal";
+        } else if (!iv_int) {
+            /* Unlabeled non-integers are doubles (XQuery literal
+             * typing also routes exponents here). */
+            out->atomic_type = r_dbl ? "xs:double" : "xs:double";
+        }
     }
     return out;
 }
@@ -1329,26 +1393,86 @@ static struct leptris_xpath_result* fn_round_half_even(XPathContext* ctx,
     }
     double v = leptris_xpath_result_number(r);
     int fl = xpath_result_is_float(r);
+    int xq = r->xq_spelling;
     leptris_xpath_result_free(r);
-    int prec = 0;
+    double prec = 0;
     if (n >= 2) {
         struct leptris_xpath_result* p = xpath_evaluate(ctx, args[1]);
-        prec = p ? (int)leptris_xpath_result_number(p) : 0;
+        /* The scale can exceed int range (cbcl-round-half-to-even:
+         * 4294967296) — keep it in double throughout; an (int) cast
+         * is UB past INT_MAX. */
+        prec = p ? leptris_xpath_result_number(p) : 0;
         if (p) leptris_xpath_result_free(p);
     }
-    double scale = pow(10.0, prec);
-    double x = v * scale;
+    if (prec > 0) {
+        /* Positive scale: round(x*10^p)/10^p, ties to even on the
+         * scaled integer via fmod (no long-long truncation). A
+         * scale beyond the double's precision leaves the value
+         * unchanged (pow overflows to INF — cbcl-round-half-to-even
+         * rounds at scale 2^32). */
+        double scale = pow(10.0, prec);
+        if (!(scale < INFINITY)) {
+            struct leptris_xpath_result* out =
+                xpath_result_new(XPATH_RESULT_NUMBER);
+            if (out) {
+                out->value.number_value = v;
+                if (fl) out->atomic_type = "xs:float";
+                out->xq_spelling = xq;
+            }
+            return out;
+        }
+        double x = v * scale;
+        double f = floor(x);
+        double diff = x - f;
+        double rounded;
+        if (diff == 0.5)
+            rounded = (fmod(f, 2.0) == 0) ? f : f + 1;
+        else
+            rounded = floor(x + 0.5);
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_NUMBER);
+        if (out) {
+            out->value.number_value = rounded / scale;
+            if (fl) out->atomic_type = "xs:float";
+            out->xq_spelling = xq;
+        }
+        return out;
+    }
+    if (prec < 0) {
+        /* Negative scale: round to a multiple of 10^-prec, ties to
+         * even on the quotient. */
+        double scale = pow(10.0, -prec);
+        double x = v / scale;
+        double f = floor(x);
+        double diff = x - f;
+        double rounded;
+        if (diff == 0.5)
+            rounded = (fmod(f, 2.0) == 0) ? f : f + 1;
+        else
+            rounded = floor(x + 0.5);
+        struct leptris_xpath_result* out =
+            xpath_result_new(XPATH_RESULT_NUMBER);
+        if (out) {
+            out->value.number_value = rounded * scale;
+            if (fl) out->atomic_type = "xs:float";
+            out->xq_spelling = xq;
+        }
+        return out;
+    }
+    /* prec == 0: plain round-half-to-even. */
+    double x = v;
     double f = floor(x);
     double diff = x - f;
     double rounded;
     if (diff == 0.5)
-        rounded = (((long)f) % 2 == 0) ? f : f + 1;   /* tie -> even */
+        rounded = (fmod(f, 2.0) == 0) ? f : f + 1;   /* tie -> even */
     else
         rounded = floor(x + 0.5);
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (out) {
-        out->value.number_value = rounded / scale;
+        out->value.number_value = rounded;
         if (fl) out->atomic_type = "xs:float";
+        out->xq_spelling = xq;
     }
     return out;
 }

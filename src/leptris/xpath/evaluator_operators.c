@@ -777,6 +777,7 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
                     ? ((XPathTextNode*)n)->content : NULL;
             int is_num_member = mc && mc[0] == '\x03' &&
                                 (mc[1] == 'N' || mc[1] == 'O' ||
+                                 mc[1] == 'D' ||
                                  (mc[1] == 'F' &&
                                   !((mc[2] == 'N' && mc[3] == '\x02') ||
                                     mc[2] == 'R')));
@@ -2912,6 +2913,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     int is_num_member = mc && mc[0] == '\x03' &&
                                         (mc[1] == 'N' ||
                                          mc[1] == 'O' ||
+                                         mc[1] == 'D' ||
                                          (mc[1] == 'F' &&
                                           !((mc[2] == 'N' &&
                                              mc[3] == '\x02') ||
@@ -2981,6 +2983,28 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 }
                 else if (is_num_ty) {
                     m = v->type == XPATH_RESULT_NUMBER;
+                    /* A labeled numeric result discriminates its
+                     * subtype (K2-ABSFunc/fn-abs-1: abs preserves
+                     * the argument type); unlabeled numbers keep
+                     * the any-numeric match. */
+                    if (m && v->atomic_type &&
+                        strncmp(v->atomic_type, "xs:", 3) == 0) {
+                        const char* at = v->atomic_type + 3;
+                        int at_num =
+                            strcmp(at, "integer") == 0 ||
+                            strcmp(at, "decimal") == 0 ||
+                            strcmp(at, "float") == 0 ||
+                            strcmp(at, "double") == 0;
+                        int b_num =
+                            strcmp(base, "xs:integer") == 0 ||
+                            strcmp(base, "xs:decimal") == 0 ||
+                            strcmp(base, "xs:float") == 0 ||
+                            strcmp(base, "xs:double") == 0;
+                        if (at_num && b_num)
+                            m = strcmp(at, base + 3) == 0 ||
+                                (strcmp(base, "xs:decimal") == 0 &&
+                                 strcmp(at, "integer") == 0);
+                    }
                     if (m && is_int_ty)
                         m = v->is_int ||
                             (v->value.number_value ==
