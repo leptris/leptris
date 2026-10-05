@@ -273,6 +273,35 @@ LeptrisElement leptris_element_create_child(LeptrisElement parent, const char* n
     return elem;
 }
 
+/* #1528: a node arriving from a DIFFERENT document is adopted by
+ * deep copy (the set_root precedent, #371). Splicing the raw
+ * pointer leaves the tree holding nodes — and text content — from
+ * the source document's pool; when the caller frees that source
+ * (Document.parse scratch docs in the cleanup pipelines), every
+ * adopted node dangles and the next native walk detonates.
+ * Same-document moves and nodes with no resolvable document
+ * (detached chains, #540) stay zero-copy. Returns the node to
+ * splice, or NULL on copy failure. */
+static LeptrisNode* adopt_for_splice(LeptrisNode* node,
+                                     struct leptris_document* target) {
+    if (!node || !target) return node;
+    /* Type-safe walk to the chain top: get_document reads
+     * element-form fields and misreads non-element structs. */
+    LeptrisNode* top = node;
+    for (;;) {
+        LeptrisElement p = leptris_node_parent(top);
+        if (!p) break;
+        top = (LeptrisNode*)p;
+    }
+    if (top->type != LEPTRIS_NODE_TYPE_ELEMENT) return node;
+    struct leptris_document* src =
+        leptris_element_get_document((LeptrisElement)top);
+    if (!src || src == target) return node;
+    LeptrisElement copy =
+        leptris_element_copy((LeptrisElement)node, target);
+    return copy ? (LeptrisNode*)copy : NULL;
+}
+
 LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
@@ -280,6 +309,11 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
      * root walk + map lookup was paid three times per append
      * (twice here, once inside the internal for the tail cache). */
     struct leptris_document* doc = leptris_element_get_document(parent);
+
+    /* #1528: a foreign document's node is adopted by copy, never
+     * spliced raw. */
+    child = (LeptrisElement)adopt_for_splice((LeptrisNode*)child, doc);
+    if (!child) return LEPTRIS_ERROR_MEMORY;
 
     /* Call internal void function, assume success */
     leptris_element_append_child_internal_doc(parent, (LeptrisNode*)child, doc);
@@ -301,6 +335,12 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
  */
 LeptrisStatus leptris_element_prepend_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
+
+    /* #1528: a foreign document's node is adopted by copy, never
+     * spliced raw. */
+    child = (LeptrisElement)adopt_for_splice(
+        (LeptrisNode*)child, leptris_element_get_document(parent));
+    if (!child) return LEPTRIS_ERROR_MEMORY;
 
     /* Call internal void function, assume success */
     leptris_element_prepend_child_internal(parent, (LeptrisNode*)child);
@@ -337,6 +377,17 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
      * sequence (libxml2 xmlAddPrevSibling semantics for unlinked
      * nodes; the flat next-sibling layout needs no extra state). */
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
+
+    /* #1528: a foreign document's node is adopted by copy, never
+     * spliced raw. The target document resolves from the attached
+     * parent (type-safe); a detached sibling stays zero-copy — the
+     * chain-link mode below keeps its contract. */
+    new_node_ptr = adopt_for_splice(
+        new_node_ptr,
+        parent ? leptris_element_get_document(parent) : NULL);
+    if (!new_node_ptr) return LEPTRIS_ERROR_MEMORY;
+    new_node = (LeptrisElement)new_node_ptr;
+
     if (!parent) {
         if (leptris_node_parent(new_node_ptr)) {
             leptris_node_unlink(new_node_ptr);
@@ -432,6 +483,17 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
     }
 
     LeptrisElement parent = leptris_node_parent(sibling_ptr);
+
+    /* #1528: a foreign document's node is adopted by copy, never
+     * spliced raw. The target document resolves from the attached
+     * parent (type-safe); a detached sibling stays zero-copy — the
+     * chain-link mode below keeps its contract. */
+    new_node_ptr = adopt_for_splice(
+        new_node_ptr,
+        parent ? leptris_element_get_document(parent) : NULL);
+    if (!new_node_ptr) return LEPTRIS_ERROR_MEMORY;
+    new_node = (LeptrisElement)new_node_ptr;
+
     if (!parent) {
         /* Issue #540: detached sibling — link-only append after it. */
         if (leptris_node_parent(new_node_ptr)) {
