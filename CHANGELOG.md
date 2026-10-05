@@ -4,7 +4,24 @@
 
 ### Fixed
 
-- adopt cross-document nodes by copy at the splice seams (#1528) (dom)
+- **DOM: nodes from a different document are adopted by copy, never
+  spliced raw (#1528)** — `leptris_element_append_child`,
+  `prepend_child`, `insert_before` and `insert_after` accepted a
+  pointer from ANY document and spliced it in as-is. A node parsed
+  into a scratch document (the cleanup pipelines' replacement
+  markup) left the live tree holding nodes and text content from
+  the scratch pool; freeing that scratch document dangled every
+  adopted node, and the next native walk crashed — the
+  `leptris_xpath_compiled_eval` segfault in the metanorma
+  sectioned-cleanup path, same family as #358/#362/#371. The four
+  seams now adopt foreign nodes through `leptris_element_copy`
+  (the `set_root` adoption contract since #371). Same-document
+  moves stay pointer-identical and zero-copy; detached chains keep
+  their link-only contract; the mutation hot path reuses its
+  existing document resolution. RED spec under ASAN
+  (`CrossDocumentAdoption` in the mutation suite: splice a parsed
+  scratch root, free the scratch document, then compiled-XPath and
+  serialize the live tree).
 
 
 
