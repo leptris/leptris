@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.304] - 2026-10-05
+
+### Fixed
+
+- adopt cross-document nodes by copy at the splice seams (#1528) (dom)
+
+
+
 ## [1.9.303] - 2026-10-05
 
 ### Added
