@@ -273,6 +273,17 @@ LeptrisElement leptris_element_create_child(LeptrisElement parent, const char* n
     return elem;
 }
 
+/* #1528 hot bail: the child was carved from THIS document's
+ * current mut block — the live extent [end - BLOCK_COUNT, cursor)
+ * is this doc's own malloc, so nothing foreign can alias into it.
+ * Two loads off the doc struct the create call just touched. */
+static int node_in_current_mut_block(struct leptris_document* doc,
+                                     LeptrisElement child) {
+    return doc && doc->mut_elem_cursor &&
+           child >= doc->mut_elem_end - MUT_ELEM_BLOCK_COUNT &&
+           child < doc->mut_elem_cursor;
+}
+
 /* #1528: a node arriving from a DIFFERENT document is adopted by
  * deep copy (the set_root precedent, #371). Splicing the raw
  * pointer leaves the tree holding nodes — and text content — from
@@ -285,7 +296,17 @@ LeptrisElement leptris_element_create_child(LeptrisElement parent, const char* n
 static LeptrisNode* adopt_for_splice(LeptrisNode* node,
                                      struct leptris_document* target) {
     if (!node || !target) return node;
-    /* Type-safe walk to the chain top: get_document reads
+    /* Hot bail (Lane 18 bar): an UNATTACHED namebp element is
+     * authoritatively stamped with its create-time document
+     * (#1189) — the freshly-created-then-appended shape. Two loads
+     * and a pointer compare, no name-slot resolution (get_document
+     * computes elem_name before its fast-out, which cost the
+     * append bench +40%). */
+    if (node->type == LEPTRIS_NODE_TYPE_ELEMENT &&
+        !leptris_elem_parent((LeptrisElement)node) &&
+        leptris_elem_has_namebp((LeptrisElement)node) &&
+        leptris_elem_namebp_doc((LeptrisElement)node) == target)
+        return node;    /* Type-safe walk to the chain top: get_document reads
      * element-form fields and misreads non-element structs. */
     LeptrisNode* top = node;
     for (;;) {
@@ -311,9 +332,17 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
     struct leptris_document* doc = leptris_element_get_document(parent);
 
     /* #1528: a foreign document's node is adopted by copy, never
-     * spliced raw. */
-    child = (LeptrisElement)adopt_for_splice((LeptrisNode*)child, doc);
-    if (!child) return LEPTRIS_ERROR_MEMORY;
+     * spliced raw. The freshly-created-then-appended shape proves
+     * same-doc in two hot loads: a child inside the CURRENT mut
+     * block extent [end - BLOCK_COUNT, cursor) was carved from
+     * THIS document's block by the create call just executed — no
+     * foreign allocation can live inside it. Everything else takes
+     * the full check (Lane 18 append bar). */
+    if (!(node_in_current_mut_block(doc, child))) {
+        child = (LeptrisElement)adopt_for_splice((LeptrisNode*)child,
+                                                 doc);
+        if (!child) return LEPTRIS_ERROR_MEMORY;
+    }
 
     /* Call internal void function, assume success */
     leptris_element_append_child_internal_doc(parent, (LeptrisNode*)child, doc);
