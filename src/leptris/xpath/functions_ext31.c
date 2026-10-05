@@ -1009,8 +1009,11 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                 long long v = strtoll(items[k], &e, 10);
                 if (errno || e == items[k] || *e)
                     ovf = 1;
-                else if (__builtin_add_overflow(isum, v, &isum))
+                else if ((v > 0 && isum > INT64_MAX - v) ||
+                         (v < 0 && isum < INT64_MIN - v))
                     ovf = 1;
+                else
+                    isum += v;
             }
             if (!ovf) {
                 long long c = (long long)cnt;
