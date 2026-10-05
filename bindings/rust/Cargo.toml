@@ -1,3 +1,6 @@
+[workspace]
+members = ["descriptor"]
+
 [package]
 name = "leptris"
 version = "1.4.1"
@@ -13,3 +16,4 @@ build = "build.rs"
 [dependencies]
 
 [dev-dependencies]
+leptris-descriptor = { path = "descriptor", features = ["link"] }

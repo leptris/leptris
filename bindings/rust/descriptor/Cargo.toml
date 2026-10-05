@@ -1,0 +1,16 @@
+[package]
+name = "leptris-descriptor"
+version = "0.1.0"
+edition = "2021"
+description = "Shared descriptor-plan ABI for the leptris engine family (leptris, yeptris, teptris) — repr(C) mirrors of the tree-shaped descriptor plan records"
+license = "MIT"
+repository = "https://github.com/leptris/leptris"
+homepage = "https://www.leptris.org"
+
+[features]
+# Declares the engine FFI (extern "C") for the descriptor surface.
+# Enable on exactly one binding crate in the dependency graph —
+# the declarations carry no symbols of their own.
+link = []
+
+[dependencies]

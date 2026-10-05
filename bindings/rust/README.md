@@ -59,3 +59,22 @@ Mirrors the Ruby (`leptris-ruby`) and Python (`pyleptris`) bindings:
 a hand-maintained FFI layer (`src/ffi.rs`) mirroring the public
 headers, with safe wrappers above it. The FFI drift gate keeps the
 mirror in sync with the C surface.
+
+## Workspace: the shared descriptor-ABI crate
+
+`bindings/rust` is a Cargo workspace. Besides the `leptris crate
+(unchanged name and shape — links-only, resolved via
+`LEPTRIS_LIB_PATH`), it contains the `descriptor` member, published
+as **`leptris-descriptor`**: the `no_std` `#[repr(C)]` mirror of the
+tree-shaped descriptor-plan ABI (`src/include/leptris/descriptor.h`).
+It is the one record layout the whole engine family targets — the
+per-engine crates (`leptris` XML, `yeptris` YAML, `teptris`
+TOML/JSON — topology decided 2026-10-03, leptris-ruby#294) — so
+hosts build plan rows once for every engine. The `link` feature
+declares the engine FFI for the descriptor surface; enable it on
+exactly one crate in the graph.
+
+The authoritative layout gate is `tests/descriptor_abi.rs` in the
+`leptris` crate: it compares Rust `size_of` against the engine's own
+`leptris_plan_*_struct_size` introspection and walks a plan built
+from the mirrored rows.
