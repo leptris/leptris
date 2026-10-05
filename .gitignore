@@ -39,6 +39,7 @@ bench_*
 !benchmarks/parse/bench_parse_ab.cpp
 !benchmarks/modification/
 !benchmarks/modification/bench_append_attr_pugixml.cpp
+!benchmarks/modification/bench_append_split.cpp
 profile_*
 element_layout
 

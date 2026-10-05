@@ -210,6 +210,8 @@ endif()
 # ----------------------------------------------------------------------------
 leptris_add_benchmark(bench_serialize        serialization/bench_leptris_serialize.c)
 leptris_add_benchmark(bench_modify_leptris    modification/bench_leptris_modify.c)
+# Lane 18 (#1179 tail): the create/append split behind the gate row.
+leptris_add_benchmark(bench_append_split      modification/bench_append_split.cpp)
 
 # Lane 18 (#1179): append + attr-parse vs pugixml (the lane bar is
 # <=1x on both shapes). Needs C++ (pugixml.hpp) and the pugixml

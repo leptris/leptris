@@ -20,6 +20,22 @@ int main(void) {
 
     /* ---- append: 200k element children on one root ---- */
     {
+        /* Warmup pass, untimed: the leptris row runs first in this
+         * bench, and its first-touch page faults (mut blocks + name
+         * blocks, ~9 MB at 200k children) landed in the timed row
+         * while pugixml's row ran second on a warm allocator — a
+         * systematic order bias. Both sides get the same warmup
+         * treatment; the timed rows below are steady-state. */
+        LeptrisDocument d = leptris_document_create();
+        LeptrisElement root = leptris_element_create(d, "root");
+        leptris_document_set_root(d, root);
+        for (int i = 0; i < N_APPEND; i++) {
+            LeptrisElement c = leptris_element_create(d, "c");
+            leptris_element_append_child(root, c);
+        }
+        leptris_document_free(d);
+    }
+    {
         double t0 = now_ns();
         LeptrisDocument d = leptris_document_create();
         LeptrisElement root = leptris_element_create(d, "root");
