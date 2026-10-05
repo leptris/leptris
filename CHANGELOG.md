@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.307] - 2026-10-05
+
+### Fixed
+
+- adopt foreign leaf splices by copy; type-safe remove_child (#1534) (dom)
+
+
+
 ## [1.9.306] - 2026-10-05
 
 <!-- Edit this section with the actual release notes. -->
