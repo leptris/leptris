@@ -2544,9 +2544,20 @@ static struct leptris_xpath_result* xpath_func_floor(XPathContext* context,
 
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
+    /* XQuery surface: floor(()) is the empty sequence
+     * (K-FloorFunc-3); XPath 1.0 coercion gives NaN. */
+    if (context->xquery_spelling &&
+        arg_result->type == XPATH_RESULT_NODESET &&
+        (!arg_result->value.nodeset_value ||
+         xpath_nodeset_count(arg_result->value.nodeset_value) == 0)) {
+        xpath_result_free(arg_result);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
 
     int iv_int = arg_result->is_int;
     long long iv = arg_result->int_value;
+    int fl = xpath_result_is_float(arg_result);
+    int xq = arg_result->xq_spelling;
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
@@ -2560,7 +2571,14 @@ static struct leptris_xpath_result* xpath_func_floor(XPathContext* context,
         result->int_value = iv;
         return result;
     }
+    if (fl) {
+        result->value.number_value = (double)(float)floor(num);
+        result->atomic_type = "xs:float";
+        result->xq_spelling = xq;
+        return result;
+    }
     result->value.number_value = floor(num);
+    result->xq_spelling = xq;
     return result;
 }
 
@@ -2577,9 +2595,20 @@ static struct leptris_xpath_result* xpath_func_ceiling(XPathContext* context,
 
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
+    /* XQuery surface: ceiling(()) is the empty sequence
+     * (K-CeilingFunc-3); XPath 1.0 coercion gives NaN. */
+    if (context->xquery_spelling &&
+        arg_result->type == XPATH_RESULT_NODESET &&
+        (!arg_result->value.nodeset_value ||
+         xpath_nodeset_count(arg_result->value.nodeset_value) == 0)) {
+        xpath_result_free(arg_result);
+        return xpath_result_new(XPATH_RESULT_NODESET);
+    }
 
     int iv_int = arg_result->is_int;
     long long iv = arg_result->int_value;
+    int fl = xpath_result_is_float(arg_result);
+    int xq = arg_result->xq_spelling;
     double num = result_to_number(arg_result);
     xpath_result_free(arg_result);
 
@@ -2591,7 +2620,16 @@ static struct leptris_xpath_result* xpath_func_ceiling(XPathContext* context,
         result->int_value = iv;
         return result;
     }
+    /* F&O: the result of an xs:float argument is xs:float —
+     * float32-computed and float-spelled (fn-ceilingflt1args). */
+    if (fl) {
+        result->value.number_value = (double)(float)ceil(num);
+        result->atomic_type = "xs:float";
+        result->xq_spelling = xq;
+        return result;
+    }
     result->value.number_value = ceil(num);
+    result->xq_spelling = xq;
     return result;
 }
 

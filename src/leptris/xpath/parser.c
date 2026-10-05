@@ -2815,6 +2815,16 @@ static XPathASTNode* parse_primary_expr(XPathParser* parser) {
         char* num_str = token_to_string(tok);
         if (num_str) {
             node->number_value = strtod(num_str, NULL);
+            /* XQuery literal typing (2.5.1): a '.' (no exponent) is
+             * xs:decimal, an exponent is xs:double, else
+             * xs:integer. The evaluator labels the result from
+             * this lexical kind (value is unused for NUMBER
+             * nodes); integers stay NULL so the hot path stays
+             * allocation-free. */
+            if (strchr(num_str, 'e') || strchr(num_str, 'E'))
+                node->value = leptris_strdup("xs:double");
+            else if (strchr(num_str, '.'))
+                node->value = leptris_strdup("xs:decimal");
             LEPTRIS_FREE(num_str);
         }
         advance_token(parser);

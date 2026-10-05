@@ -546,6 +546,15 @@ parse_number:
             if (isdigit((unsigned char)*probe)) {
                 lexer->pos++;
                 lexer->column++;
+                /* The SIGN is part of the literal (1E+1, 5.2E-3):
+                 * without consuming it the token truncates at 'E'
+                 * and the parser reads "1E + 1" as arithmetic
+                 * (1E+1 == 2). */
+                if (lexer->pos < lexer->end &&
+                    (*lexer->pos == '+' || *lexer->pos == '-')) {
+                    lexer->pos++;
+                    lexer->column++;
+                }
                 while (lexer->pos < lexer->end &&
                        isdigit((unsigned char)*lexer->pos)) {
                     lexer->pos++;

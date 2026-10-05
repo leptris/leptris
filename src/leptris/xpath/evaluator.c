@@ -973,6 +973,10 @@ static struct leptris_xpath_result* evaluate_literal(XPathContext* ctx,
             struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
             if (!result) return NULL;
             result->value.number_value = ast->number_value;
+            /* XQuery literal typing from the lexical (the parser
+             * stashed "xs:decimal"/"xs:double" in value; integers
+             * stay unlabeled). */
+            result->atomic_type = ast->value;
             return result;
         }
 
