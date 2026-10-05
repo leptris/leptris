@@ -2013,7 +2013,22 @@ static int xq_bind(XPathContext* ctx, const char* name,
                 char* marked = (char*)malloc(sl + 3);
                 if (marked) {
                     marked[0] = '\x03';
-                    marked[1] = 'N';
+                    /* Preserve the typed-scalar label through the
+                     * binding (same vocabulary as the sequence
+                     * fold): fn:min/max over `let $x := (...)`
+                     * classifies its items from these marks — a
+                     * bare 'N' demotes xs:double-spelled-"2" to
+                     * integer (fn-min/max-10). */
+                    marked[1] =
+                        (v->atomic_type &&
+                         strcmp(v->atomic_type, "xs:float") == 0)
+                            ? 'F'
+                        : (v->atomic_type &&
+                           strcmp(v->atomic_type, "xs:decimal") == 0)
+                            ? 'D'
+                        : (v->atomic_type &&
+                           strcmp(v->atomic_type, "xs:double") == 0)
+                            ? 'O' : 'N';
                     if (sl) memcpy(marked + 2, s, sl);
                     marked[2 + sl] = 0;
                     XPathTextNode* tn =
