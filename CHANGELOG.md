@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.309] - 2026-10-05
+
+### Added
+
+- typed fn:min/max results, labeled FLWOR bindings, fn/string-to-codepoints adoption (QT3 #1182 finalize) (xpath)
+
+### Fixed
+
+- typed numeric results end-to-end + exponent-literal lexer fix (QT3 #1182 finalize 2) (xpath)
+
+
+
 ## [1.9.308] - 2026-10-05
 
 ### Added
