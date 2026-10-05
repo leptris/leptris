@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.305] - 2026-10-05
+
+### Performance
+
+- mut-block fast bail for the #1528 adoption gate (dom)
+
+
+
 ## [1.9.304] - 2026-10-05
 
 ### Fixed
