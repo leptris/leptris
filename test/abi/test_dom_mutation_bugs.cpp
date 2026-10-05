@@ -208,3 +208,130 @@ TEST(InsertNonElement, InsertTextMiddle) {
     EXPECT_EQ(childNodeTypes(root), "E,T,E");
     leptris_document_free(doc);
 }
+
+// ============================================================================
+// #1528: a node arriving from a DIFFERENT document was spliced in as a
+// raw pointer. The splice target keeps nodes (and their text content)
+// from the source document's pool — when the caller frees that source
+// (Document.parse scratch docs), every adopted node dangles and the
+// next native walk detonates. The repro family: SAX-built tree, moxml
+// in-place cleanup (replace/move/insert), then compiled XPath eval.
+// The fix adopts cross-document nodes by deep copy (the set_root
+// precedent, #371); same-document moves stay zero-copy.
+// ============================================================================
+
+namespace {
+
+// Splice scratch_root into live per fn, free the scratch document,
+// then exercise the tree the way the cleanup phase does: a compiled
+// XPath evaluation followed by serialization.
+static void splice_free_eval(
+    void (*splice)(LeptrisDocument live, LeptrisElement target,
+                   LeptrisElement scratch_root),
+    const char* expected_xml) {
+    LeptrisDocument live = Parse("<r><a/><b/></r>");
+    ASSERT_NE(live, nullptr);
+    LeptrisDocument scratch = Parse("<x>replacement</x>");
+    ASSERT_NE(scratch, nullptr);
+
+    LeptrisElement target = leptris_document_root(live);
+    ASSERT_NE(target, nullptr);
+    LeptrisElement scratch_root = leptris_document_root(scratch);
+    ASSERT_NE(scratch_root, nullptr);
+
+    splice(live, target, scratch_root);
+
+    // The scratch document dies here — exactly the moxml lifecycle
+    // where the parsed fragment's document drops out of scope.
+    leptris_document_free(scratch);
+
+    // Detonation site from the issue: compiled XPath over the
+    // mutated tree.
+    LeptrisXPathCompiled c = leptris_xpath_compile("count(//x)");
+    ASSERT_NE(c, nullptr);
+    LeptrisXPathResult r = leptris_xpath_compiled_eval(c, live, nullptr);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(r), 1.0);
+    leptris_xpath_result_free(r);
+    leptris_xpath_compiled_free(c);
+
+    LeptrisXPathCompiled s = leptris_xpath_compile("string(//x)");
+    ASSERT_NE(s, nullptr);
+    LeptrisXPathResult sr = leptris_xpath_compiled_eval(s, live, nullptr);
+    ASSERT_NE(sr, nullptr);
+    char* text = leptris_xpath_result_string(sr);
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text, "replacement");
+    leptris_free_string(text);
+    leptris_xpath_result_free(sr);
+    leptris_xpath_compiled_free(s);
+
+    // Serialization walks the same spine the axes do.
+    char* xml = leptris_document_serialize(live, NULL);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, expected_xml);
+    leptris_free_string(xml);
+
+    leptris_document_free(live);
+}
+
+}  // namespace
+
+TEST(CrossDocumentAdoption, InsertAfterSurvivesScratchFree) {
+    splice_free_eval([](LeptrisDocument, LeptrisElement target,
+                        LeptrisElement scratch_root) {
+        LeptrisElement a = leptris_element_first_child_any(target);
+        ASSERT_NE(a, nullptr);
+        EXPECT_EQ(leptris_element_insert_after(a, scratch_root),
+                  LEPTRIS_OK);
+    },
+    "<r><a/><x>replacement</x><b/></r>");
+}
+
+TEST(CrossDocumentAdoption, InsertBeforeSurvivesScratchFree) {
+    splice_free_eval([](LeptrisDocument, LeptrisElement target,
+                        LeptrisElement scratch_root) {
+        LeptrisElement b = leptris_element_first_child_any(target);
+        ASSERT_NE(b, nullptr);
+        b = leptris_element_next_sibling_any(b);
+        ASSERT_NE(b, nullptr);
+        EXPECT_EQ(leptris_element_insert_before(b, scratch_root),
+                  LEPTRIS_OK);
+    },
+    "<r><a/><x>replacement</x><b/></r>");
+}
+
+TEST(CrossDocumentAdoption, AppendChildSurvivesScratchFree) {
+    splice_free_eval([](LeptrisDocument, LeptrisElement target,
+                        LeptrisElement scratch_root) {
+        EXPECT_EQ(leptris_element_append_child(target, scratch_root),
+                  LEPTRIS_OK);
+    },
+    "<r><a/><b/><x>replacement</x></r>");
+}
+
+TEST(CrossDocumentAdoption, PrependChildSurvivesScratchFree) {
+    splice_free_eval([](LeptrisDocument, LeptrisElement target,
+                        LeptrisElement scratch_root) {
+        EXPECT_EQ(leptris_element_prepend_child(target, scratch_root),
+                  LEPTRIS_OK);
+    },
+    "<r><x>replacement</x><a/><b/></r>");
+}
+
+TEST(CrossDocumentAdoption, ReplaceKeepsSameDocumentMoveZeroCopy) {
+    // A same-document move must stay the raw splice (identity and
+    // pointer preserved) — the adoption path is cross-document only.
+    LeptrisDocument doc = Parse("<r><a/><b/><c/></r>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    LeptrisElement b = leptris_element_next_sibling_any(a);
+
+    EXPECT_EQ(leptris_element_insert_after(a, b), LEPTRIS_OK);
+    char* xml = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, "<r><a/><b/><c/></r>");
+    leptris_free_string(xml);
+    leptris_document_free(doc);
+}
