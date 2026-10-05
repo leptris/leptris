@@ -4,7 +4,41 @@
 
 ### Fixed
 
-- adopt foreign leaf splices by copy; type-safe remove_child (#1534) (dom)
+- **DOM: cross-document leaf splices are adopted by copy (#1534,
+  follow-up to #1528).** The #1528 adoption gate covered ELEMENT
+  splice arguments only — a TEXT/CDATA/COMMENT/PI node arriving from
+  a different document was still spliced raw, so replacing an
+  element with a scratch-document leaf and then freeing the scratch
+  document (the `Document.parse` cleanup lifecycle) left the tree
+  pointing into freed memory; serialize → re-parse round trips
+  failed with "malformed input". `append_child` / `prepend_child` /
+  `insert_before` / `insert_after` now dispatch non-element
+  arguments through the #1320 owner-doc stamps and copy by kind;
+  same-document moves and unstamped detached chains keep their
+  zero-copy / link-only behavior, and the append fast path is
+  untouched (element arguments take the unchanged mut-block bail).
+
+- **DOM: `leptris_element_remove_child` walks and relinks the child
+  chain with type-safe accessors (#1534).** The element-filtered
+  getters it used skip non-element siblings, so removing `<a>` from
+  `[<a>, text]` read the next sibling as NULL and set `first_child`
+  to NULL — orphaning the leaf tail (the #1220 class; same-document
+  chains lose plain text too: `<r><a/>t</r>` minus `<a>` serialized
+  as `<r/>`). The walker now uses the node-form accessors, clears
+  the removed child's parent through the per-kind setter, and only
+  decrements `child_count` for element victims (issue #213
+  semantics: it counts element children only). Removing a
+  non-element child cast through the ABI-stable `LeptrisElement`
+  signature (same convention as `insert_before`) now works.
+
+### Tests
+
+- New `CrossDocumentLeafAdoption` suite: the exact issue pipeline —
+  scratch leaf splice → scratch free → serialize → RE-PARSE — for
+  text and the other leaf kinds, plus the append-only variant.
+- New `RemoveChildMixedChain` suite: every position of a removed
+  child against non-element siblings, direct text-child removal,
+  child_count semantics, and the non-child rejection.
 
 
 
