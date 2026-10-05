@@ -2340,7 +2340,10 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
                         else
                             stot += sv;
                     }
-                    free(am);
+                    if (am) {
+                        for (size_t j = 0; j < an; j++) free(am[j]);
+                        free(am);
+                    }
                     if (single) LEPTRIS_FREE(single);
                 }
                 if (all_ymd || all_dtd) {
