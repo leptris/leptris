@@ -5322,30 +5322,28 @@ static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
             char* v = apply_seq_carrier(vr);
             if (!v) v = xpath_to_string(vr);
             xpath_result_free(vr);
-            argv[i] = v;
-            conv[i] = v;
-            argc++;
-        }
-        /* XDM function conversion: node-valued arguments atomize
-         * (fn-apply-14/15). */
-        for (size_t i = 0; i < argc; i++) {
-            if (argv[i] && argv[i][0] == '<') {
+            /* XDM function conversion: node-valued arguments
+             * atomize to their string value (fn-apply-14/15). */
+            if (v && v[0] == '<') {
                 LeptrisStatus st = LEPTRIS_OK;
                 LeptrisDocument nd = leptris_parse_string(
-                    argv[i], strlen(argv[i]), &st);
+                    v, strlen(v), &st);
                 if (nd) {
                     LeptrisElement rt = leptris_document_root(nd);
                     if (rt) {
                         const char* sv = leptris_element_text(rt);
                         char* c = leptris_strdup(sv ? sv : "");
                         if (c) {
-                            argv[i] = c;
-                            conv[i] = c;
+                            free(v);
+                            v = c;
                         }
                     }
                     leptris_document_free(nd);
                 }
             }
+            argv[i] = v;
+            conv[i] = v;
+            argc++;
         }
     } else {
         map_entries_arg(ctx, args, 1, &e);
