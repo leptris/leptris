@@ -704,6 +704,10 @@ void run_test_set(const char* set_path,
     leptris_document_free(ts);
 }
 
+TEST(Qt3Subset, FnStringToCodepoints) {
+    run_test_set("fn/string-to-codepoints.xml", {}, 28);
+}
+
 TEST(Qt3Subset, FnSubstring) {
     run_test_set("fn/substring.xml",
                  {{"concepts", "fn/substring/concepts.xml"}},
@@ -964,12 +968,10 @@ TEST(Qt3Subset, FnFloor) {
                  "fn-floorflt1args-3"});
 }
 TEST(Qt3Subset, FnMax) {
-    run_test_set("fn/max.xml", {}, 176, {},
-                 {"fn-max-10"});
+    run_test_set("fn/max.xml", {}, 177, {}, {});
 }
 TEST(Qt3Subset, FnMin) {
-    run_test_set("fn/min.xml", {}, 175, {},
-                 {"fn-min-10"});
+    run_test_set("fn/min.xml", {}, 176, {}, {});
 }
 TEST(Qt3Subset, FnRound) { run_test_set("fn/round.xml", {}, 220); }
 TEST(Qt3Subset, FnRoundHalfToEven) {
@@ -999,9 +1001,12 @@ TEST(Qt3Subset, FnForEachPair) {
                  "fn-for-each-pair-027"});
 }
 TEST(Qt3Subset, FnFoldLeft) {
+    /* fold-left-016 re-pinned: it folds over a MAP and agrees only
+     * when the entry iteration order is favorable — nondeterministic
+     * across runs (the map-order lever). Re-adopt when the fold
+     * orders entries deterministically. */
     run_test_set("fn/fold-left.xml", {}, 7, {},
-                 {"fold-left-009",
-                 "fold-left-016",
+                 {"fold-left-009", "fold-left-016",
                  "fold-left-019",
                  "fold-left-020",
                  "fold-left-021",

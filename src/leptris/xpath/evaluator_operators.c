@@ -809,7 +809,32 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
     }
     if (is_string_ty) return v->type == XPATH_RESULT_STRING;
     if (is_bool_ty) return v->type == XPATH_RESULT_BOOLEAN;
-    if (is_num_ty) return v->type == XPATH_RESULT_NUMBER;
+    if (is_num_ty) {
+        if (v->type != XPATH_RESULT_NUMBER) return 0;
+        /* A labeled numeric result discriminates its subtype for
+         * typeswitch / instance of (fn-min/max-10). Unlabeled
+         * numbers keep the historical any-numeric match. XDM
+         * derivation: xs:integer matches a xs:decimal test. */
+        if (v->atomic_type &&
+            strncmp(v->atomic_type, "xs:", 3) == 0) {
+            const char* at = v->atomic_type + 3;
+            int at_num =
+                strcmp(at, "integer") == 0 ||
+                strcmp(at, "decimal") == 0 ||
+                strcmp(at, "float") == 0 ||
+                strcmp(at, "double") == 0;
+            int b_num =
+                strcmp(base, "xs:integer") == 0 ||
+                strcmp(base, "xs:decimal") == 0 ||
+                strcmp(base, "xs:float") == 0 ||
+                strcmp(base, "xs:double") == 0;
+            if (at_num && b_num)
+                return strcmp(at, base + 3) == 0 ||
+                       (strcmp(base, "xs:decimal") == 0 &&
+                        strcmp(at, "integer") == 0);
+        }
+        return 1;
+    }
     if (strcmp(base, "item()") == 0) return 1;
     return 0;   /* node kinds: a scalar is not a node */
 }

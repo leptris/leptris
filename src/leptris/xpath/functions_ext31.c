@@ -1066,7 +1066,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                     return out;
                 }
             }
-        } else if (!fallthrough && any_flt) {
+        } else if (!fallthrough && any_flt && !any_dbl) {
             /* F&O: when xs:float is the common type, EVERY item
              * converts to xs:float before summing (Saxon computes
              * the float32-converted addends in double, then the
@@ -1096,7 +1096,10 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         } else if (!fallthrough && any_dbl) {
             /* xs:double in the mix: label the result so typeswitch
              * sees it (cbcl-avg-008); value stays the generic
-             * double accumulation. */
+             * double accumulation. NOTE the guard order above: the
+             * float branch is gated on !any_dbl, so the ladder
+             * checks widest-first — float+double routes HERE, not
+             * to the float path. */
             out->atomic_type = "xs:double";
         }
         free(kinds);
@@ -1149,6 +1152,27 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
      * fn-*-flt1args battery). */
     if (all_float && out->type == XPATH_RESULT_NUMBER)
         out->atomic_type = "xs:float";
+    /* fn:min/max label the result with the promoted input type so
+     * typeswitch / instance of discriminate the numeric subtype
+     * (fn-min/max-10: integer -> decimal -> float -> double as the
+     * prefix grows). Widest-first, same ladder as fn:avg. */
+    if (which >= 2 && kinds && out->type == XPATH_RESULT_NUMBER &&
+        !out->atomic_type) {
+        int a_dbl = 0, a_flt = 0, a_dec = 0, a_int = 1;
+        for (size_t k = 0; k < cnt; k++) {
+            switch (kinds[k]) {
+                case AVG_KIND_INT: break;
+                case AVG_KIND_DBL: a_dbl = 1; a_int = 0; break;
+                case AVG_KIND_FLT: a_flt = 1; a_int = 0; break;
+                case AVG_KIND_DEC: a_dec = 1; a_int = 0; break;
+                default: a_int = 0; break;
+            }
+        }
+        if (a_int) out->atomic_type = "xs:integer";
+        else if (a_dbl) out->atomic_type = "xs:double";
+        else if (a_flt) out->atomic_type = "xs:float";
+        else if (a_dec) out->atomic_type = "xs:decimal";
+    }
     free_items(items, cnt);
     free(kinds);
     return out;
