@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 fn main() {
+    // The lib path changes the emitted link directives; without
+    // this the build script output is cached across LEPTRIS_LIB_PATH
+    // changes and tests link a stale library.
+    println!("cargo:rerun-if-env-changed=LEPTRIS_LIB_PATH");
     // Windows: the DLL is libleptris.dll, so the import library is
     // libleptris.lib — link.exe resolves `-l <name>` as <name>.lib.
     // (TODO.concurrency/05 renamed the DLL from leptris.dll.)
