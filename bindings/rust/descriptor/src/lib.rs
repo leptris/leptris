@@ -168,10 +168,7 @@ pub mod ffi {
         pub fn leptris_plan_attr_row_size() -> usize;
         pub fn leptris_plan_predicate_row_size() -> usize;
 
-        pub fn leptris_plan_build(
-            spec: *const PlanSpec,
-            status: StatusPtr,
-        ) -> Plan;
+        pub fn leptris_plan_build(spec: *const PlanSpec, status: StatusPtr) -> Plan;
         pub fn leptris_plan_free(plan: Plan);
 
         pub fn leptris_plan_walk(

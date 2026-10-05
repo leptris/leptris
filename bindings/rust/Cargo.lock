@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "leptris"
 version = "1.4.1"
+dependencies = [
+ "leptris-descriptor",
+]
+
+[[package]]
+name = "leptris-descriptor"
+version = "0.1.0"
