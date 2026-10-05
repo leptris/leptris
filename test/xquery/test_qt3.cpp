@@ -945,27 +945,19 @@ TEST(Qt3Subset, FnCount) {
  * assertions, mixed-type aggregates, HOF zero-arity apply) —
  * see the batch notes in #1182. */
 TEST(Qt3Subset, FnAbs) {
-    run_test_set("fn/abs.xml", {}, 38, {},
-                 {"K2-ABSFunc-27",
-                 "K2-ABSFunc-28",
-                 "K2-ABSFunc-29",
-                 "K2-ABSFunc-30",
-                 "fn-abs-1"});
+    run_test_set("fn/abs.xml", {}, 43, {},
+                 {});
 }
 TEST(Qt3Subset, FnAvg) {
     run_test_set("fn/avg.xml", {}, 182, {}, {});
 }
 TEST(Qt3Subset, FnCeiling) {
-    run_test_set("fn/ceiling.xml", {}, 39, {},
-                 {"K-CeilingFunc-3",
-                 "fn-ceilingflt1args-1",
-                 "fn-ceilingflt1args-3"});
+    run_test_set("fn/ceiling.xml", {}, 42, {},
+                 {});
 }
 TEST(Qt3Subset, FnFloor) {
-    run_test_set("fn/floor.xml", {}, 39, {},
-                 {"K-FloorFunc-3",
-                 "fn-floorflt1args-1",
-                 "fn-floorflt1args-3"});
+    run_test_set("fn/floor.xml", {}, 42, {},
+                 {});
 }
 TEST(Qt3Subset, FnMax) {
     run_test_set("fn/max.xml", {}, 177, {}, {});
@@ -975,13 +967,8 @@ TEST(Qt3Subset, FnMin) {
 }
 TEST(Qt3Subset, FnRound) { run_test_set("fn/round.xml", {}, 220); }
 TEST(Qt3Subset, FnRoundHalfToEven) {
-    run_test_set("fn/round-half-to-even.xml", {}, 76, {},
-                 {"K2-RoundEvenFunc-6",
-                 "K2-RoundEvenFunc-7",
-                 "cbcl-round-half-to-even-001",
-                 "cbcl-round-half-to-even-010",
-                 "cbcl-round-half-to-even-011",
-                 "cbcl-round-half-to-even-012"});
+    run_test_set("fn/round-half-to-even.xml", {}, 82, {},
+                 {});
 }
 TEST(Qt3Subset, FnSum) {
     run_test_set("fn/sum.xml", {}, 210, {}, {});
@@ -991,10 +978,20 @@ TEST(Qt3Subset, FnApply) {
 }
 TEST(Qt3Subset, FnFilter) { run_test_set("fn/filter.xml", {}, 1); }
 TEST(Qt3Subset, FnForEach) {
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/for-each.xml", {}, 0, {},
                  {"for-each-010"});
 }
 TEST(Qt3Subset, FnForEachPair) {
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/for-each-pair.xml", {}, 3, {},
                  {"fn-for-each-pair-024",
                  "fn-for-each-pair-026",
@@ -1005,24 +1002,28 @@ TEST(Qt3Subset, FnFoldLeft) {
      * when the entry iteration order is favorable — nondeterministic
      * across runs (the map-order lever). Re-adopt when the fold
      * orders entries deterministically. */
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/fold-left.xml", {}, 7, {},
                  {"fold-left-009", "fold-left-016",
-                 "fold-left-019",
-                 "fold-left-020",
-                 "fold-left-021",
-                 "fold-left-101",
-                 "fold-left-102",
-                 "fold-left-103",
+                 "fold-left-019", "fold-left-020",
+                 "fold-left-021", "fold-left-101",
+                 "fold-left-102", "fold-left-103",
                  "fold-left-104"});
 }
 TEST(Qt3Subset, FnFoldRight) {
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/fold-right.xml", {}, 9, {},
-                 {"fold-right-013",
-                 "fold-right-020",
-                 "fold-right-101",
-                 "fold-right-102",
-                 "fold-right-103",
-                 "fold-right-104"});
+                 {"fold-right-013", "fold-right-020",
+                 "fold-right-101", "fold-right-102",
+                 "fold-right-103", "fold-right-104"});
 }
 
 /* The regex trio (matches/replace/tokenize/analyze-string) compiles
@@ -1238,16 +1239,12 @@ TEST(Qt3Subset, FnStringJoin) {
 
 TEST(Qt3Subset, FnIndexOf) {
     run_test_set("fn/index-of.xml", {}, 44, {},
-                 {
-                 });
+                 {});
 }
 
 TEST(Qt3Subset, FnInsertBefore) {
-    run_test_set("fn/insert-before.xml", {}, 18, {},
-                 {
-                   "K-SeqInsertBeforeFunc-16", /* lazy error() semantics */
-
-                 });
+    run_test_set("fn/insert-before.xml", {}, 19, {},
+                 {});
 }
 
 TEST(Qt3Subset, FnRemove) {
@@ -1255,11 +1252,13 @@ TEST(Qt3Subset, FnRemove) {
 }
 
 TEST(Qt3Subset, FnReverse) {
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/reverse.xml", {}, 60, {},
-                 {
-                   "K2-SeqReverseFunc-1", /* assert-xml over direct ctors */
-
-                 });
+                 {"K2-SeqReverseFunc-1"});
 }
 
 TEST(Qt3Subset, FnSubsequence) {
@@ -1291,12 +1290,14 @@ TEST(Qt3Subset, FnDistinctValues) {
      * evaluate_predicate_for_node AND the single-item base path in
      * the XPATH_AST_PREDICATE handler — xs:dayTimeDuration("PT0S")[$p]
      * takes the latter). */
+    /* Re-pinned pending the HOF node-carrier lever: fold/for-each
+     * callbacks receive node arguments as synthesized strings, so
+     * node-identity shapes (intersect, union, deep-equal on
+     * elements) disagree. Re-adopt when the HOF call paths carry
+     * nodes by reference. */
     run_test_set("fn/distinct-values.xml", {}, 99, {},
-                 {
-                   "cbcl-distinct-values-002",
-                   "cbcl-distinct-values-002b",
-
-                 });
+                 {"cbcl-distinct-values-002",
+                 "cbcl-distinct-values-002b"});
 }
 
 TEST(Qt3Subset, FnDeepEqual) {

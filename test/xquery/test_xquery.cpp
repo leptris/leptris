@@ -215,7 +215,11 @@ TEST(XQueryCore, InstanceOfIntegerRequiresIntegrality) {
     EXPECT_EQ(seq_string(doc, "fn:abs(1.1) instance of xs:integer"), "false");
     EXPECT_EQ(seq_string(doc, "fn:abs(-3) instance of xs:integer"), "true");
     EXPECT_EQ(seq_string(doc, "xs:byte(4) instance of xs:integer"), "true");
-    EXPECT_EQ(seq_string(doc, "1.1 instance of xs:double"), "true");
+    /* XQuery literal typing (3.13.1): a '.' literal is xs:decimal
+     * (K2-ABSFunc-31: fn:abs(1.1) instance of xs:decimal) — NOT
+     * xs:double. */
+    EXPECT_EQ(seq_string(doc, "1.1 instance of xs:double"), "false");
+    EXPECT_EQ(seq_string(doc, "1.1e0 instance of xs:double"), "true");
     EXPECT_EQ(seq_string(doc, "1.5 instance of xs:decimal"), "true");
     leptris_document_free(doc);
 }
