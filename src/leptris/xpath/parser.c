@@ -1292,6 +1292,36 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                            t->value_len == 4 &&
                            memcmp(t->value, "case", 4) == 0) {
                     advance_token(parser);
+                    /* Optional `$var as` binding (the XQuery full
+                     * form — cbcl-avg-008): the arm entry is
+                     * encoded "VAR\x02TYPE"; the evaluator binds
+                     * the variable to the matched operand inside
+                     * the arm body. */
+                    char vn[96];
+                    size_t vnl = 0;
+                    vn[0] = 0;
+                    if (current_token_is(parser, TOK_DOLLAR)) {
+                        advance_token(parser);
+                        XPathToken* vt = current_token(parser);
+                        if (!vt || vt->type != TOK_NCNAME) {
+                            ast_node_free(ts);
+                            return NULL;
+                        }
+                        if (vt->value_len < sizeof(vn)) {
+                            memcpy(vn, vt->value, vt->value_len);
+                            vn[vt->value_len] = 0;
+                            vnl = vt->value_len;
+                        }
+                        advance_token(parser);
+                        XPathToken* at = current_token(parser);
+                        if (!at || at->type != TOK_NCNAME ||
+                            at->value_len != 2 ||
+                            memcmp(at->value, "as", 2) != 0) {
+                            ast_node_free(ts);
+                            return NULL;
+                        }
+                        advance_token(parser);
+                    }
                     /* SequenceType name (+ occurrence ignored) */
                     char tn[96];
                     size_t tnl = 0;
@@ -1337,7 +1367,12 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                     }
                     if (!tnl) { ast_node_free(ts); return NULL; }
                     if (ty) types[ty++] = '\x01';
-                    if (ty + tnl < sizeof(types)) {
+                    if (ty + vnl + tnl + 1 < sizeof(types)) {
+                        if (vnl) {
+                            memcpy(types + ty, vn, vnl);
+                            ty += vnl;
+                            types[ty++] = '\x02';
+                        }
                         memcpy(types + ty, tn, tnl);
                         ty += tnl;
                     }

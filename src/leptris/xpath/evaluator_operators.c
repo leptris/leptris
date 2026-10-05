@@ -634,13 +634,13 @@ static char xq_atomic_family_mark(const char* t) {
 }
 
 int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
-    int ka = (a[0] == '\x03' && a[1] == 'N') ? 'N'
+    int ka = (a[0] == '\x03' && (a[1] == 'N' || a[1] == 'O')) ? 'N'
              : (a[0] == '\x03' && a[1] == 'F') ? 'F'
              : (a[0] == '\x03' && a[1] == 'D') ? 'D'
              : (a[0] == '\x03' && a[1] == 'B') ? 'B'
              : (a[0] == '\x03' && a[1] && a[1] != 'A' && a[1] != 'M')
                    ? a[1] : 0;
-    int kb = (b[0] == '\x03' && b[1] == 'N') ? 'N'
+    int kb = (b[0] == '\x03' && (b[1] == 'N' || b[1] == 'O')) ? 'N'
              : (b[0] == '\x03' && b[1] == 'F') ? 'F'
              : (b[0] == '\x03' && b[1] == 'D') ? 'D'
              : (b[0] == '\x03' && b[1] == 'B') ? 'B'
@@ -776,7 +776,7 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
                 (tag == (int)LEPTRIS_NODE_TEXT && n)
                     ? ((XPathTextNode*)n)->content : NULL;
             int is_num_member = mc && mc[0] == '\x03' &&
-                                (mc[1] == 'N' ||
+                                (mc[1] == 'N' || mc[1] == 'O' ||
                                  (mc[1] == 'F' &&
                                   !((mc[2] == 'N' && mc[3] == '\x02') ||
                                     mc[2] == 'R')));
@@ -1826,11 +1826,95 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             const char* sep = strchr(p, '\x01');
             size_t tlen = sep ? (size_t)(sep - p) : strlen(p);
             if (*p == '\0' || tlen == 0) break;   /* default arm */
+            /* "VAR\x02TYPE" — the full XQuery case form binds the
+             * variable to the operand inside its arm (cbcl-avg-008). */
+            const char* vsep =
+                (const char*)memchr(p, '\x02', tlen);
+            const char* tstart = p;
+            size_t vlen = 0;
+            if (vsep) {
+                vlen = (size_t)(vsep - p);
+                tstart = vsep + 1;
+                tlen -= vlen + 1;
+            }
             char base[80];
             if (tlen >= sizeof(base)) tlen = sizeof(base) - 1;
-            memcpy(base, p, tlen);
+            memcpy(base, tstart, tlen);
             base[tlen] = 0;
             if (xpath_result_matches_type(v, base)) {
+                if (vlen && vlen < 96) {
+                    char vn[96];
+                    memcpy(vn, p, vlen);
+                    vn[vlen] = 0;
+                    XPathVariableSet* vs =
+                        (XPathVariableSet*)ctx->variable_set;
+                    int created_vs = 0;
+                    if (!vs) {
+                        vs = xpath_variable_set_new();
+                        if (!vs) { xpath_result_free(v); return NULL; }
+                        ctx->variable_set = vs;
+                        created_vs = 1;
+                    }
+                    /* Bind one marked synthetic item so the arm
+                     * body sees the operand's typed value. */
+                    char* vs_ = xpath_to_string(v);
+                    char* marked = NULL;
+                    if (v->type == XPATH_RESULT_NUMBER) {
+                        size_t vl = vs_ ? strlen(vs_) : 0;
+                        marked = (char*)malloc(vl + 3);
+                        if (marked) {
+                            marked[0] = '\x03';
+                            marked[1] =
+                                (v->atomic_type &&
+                                 strcmp(v->atomic_type, "xs:float") == 0)
+                                    ? 'F'
+                                : (v->atomic_type &&
+                                   strcmp(v->atomic_type, "xs:decimal") == 0)
+                                    ? 'D'
+                                : (v->atomic_type &&
+                                   strcmp(v->atomic_type, "xs:double") == 0)
+                                    ? 'O' : 'N';
+                            if (vl) memcpy(marked + 2, vs_, vl);
+                            marked[2 + vl] = 0;
+                        }
+                    } else if (v->type == XPATH_RESULT_BOOLEAN) {
+                        const char* bp =
+                            v->value.boolean_value ? "true" : "false";
+                        marked = (char*)malloc(strlen(bp) + 3);
+                        if (marked) {
+                            marked[0] = '\x03';
+                            marked[1] = 'B';
+                            strcpy(marked + 2, bp);
+                        }
+                    }
+                    XPathNodeSet* one = xpath_nodeset_new();
+                    if (one) {
+                        one->owns_synthetic_text = 1;
+                        const char* bindv =
+                            marked ? marked : (vs_ ? vs_ : "");
+                        XPathTextNode* tn = xpath_synth_text(
+                            bindv, strlen(bindv));
+                        if (tn) xpath_nodeset_add(one, tn);
+                        XPathVariable* var = xpath_variable_set_add(
+                            vs, vn, XPATH_VAR_TYPE_NODE_SET);
+                        if (var)
+                            xpath_variable_set_nodeset(var, one);
+                        else
+                            xpath_nodeset_free(one);
+                    }
+                    if (marked) free(marked);
+                    if (vs_) free(vs_);
+                    struct leptris_xpath_result* arm =
+                        evaluate_expr(ctx, ast->children[case_i]);
+                    xpath_variable_set_remove(
+                        (XPathVariableSet*)ctx->variable_set, vn);
+                    if (created_vs) {
+                        ctx->variable_set = NULL;
+                        xpath_variable_set_free(vs);
+                    }
+                    xpath_result_free(v);
+                    return arm;
+                }
                 xpath_result_free(v);
                 return evaluate_expr(ctx, ast->children[case_i]);
             }
@@ -2802,6 +2886,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                             ? ((XPathTextNode*)n)->content : NULL;
                     int is_num_member = mc && mc[0] == '\x03' &&
                                         (mc[1] == 'N' ||
+                                         mc[1] == 'O' ||
                                          (mc[1] == 'F' &&
                                           !((mc[2] == 'N' &&
                                              mc[3] == '\x02') ||
@@ -3147,7 +3232,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                      * type checks (instance of); get_node_text
                      * strips it for string consumers. "F" carries
                      * xs:float members (float32-exact values) so
-                     * eq-based functions apply float promotion. */
+                     * eq-based functions apply float promotion;
+                     * "O" carries xs:double so the fn:avg ladder
+                     * promotes float+double to xs:double
+                     * (cbcl-avg-008) — it reads as a number
+                     * everywhere 'N' does. */
                     size_t pl = piece ? strlen(piece) : 0;
                     char* marked = (char*)malloc(pl + 3);
                     if (marked) {
@@ -3159,7 +3248,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                     : (item->atomic_type &&
                                        strcmp(item->atomic_type,
                                               "xs:decimal") == 0)
-                                        ? 'D' : 'N';
+                                        ? 'D'
+                                    : (item->atomic_type &&
+                                       strcmp(item->atomic_type,
+                                              "xs:double") == 0)
+                                        ? 'O' : 'N';
                         if (pl) memcpy(marked + 2, piece, pl);
                         marked[2 + pl] = 0;
                         XPathTextNode* tn = synth_text(marked, pl + 2);
@@ -3914,6 +4007,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
  * go through here. cc = the synthetic "\x03FRname#arity" or
  * "\x03FN\x02params\x02hex" content; argv strings are borrowed for
  * the duration of the call. */
+extern int xpath_array_members_of(const char* content, char*** out,
+                                  size_t* out_n);
+
 struct leptris_xpath_result* xpath_call_function_item(
     XPathContext* ctx, const char* cc, char** argv, size_t argc) {
     if (!cc) return NULL;
@@ -3926,18 +4022,57 @@ struct leptris_xpath_result* xpath_call_function_item(
 
         /* String-literal argument nodes live on the stack and borrow
          * argv; evaluate() strdups ->value, so nothing outlives the
-         * call. */
+         * call. A dense sub-carrier member is a SEQUENCE argument
+         * (fn-apply-03/07): expand to an XPATH_OP_SEQUENCE of
+         * string literals — the tracked allocations free after the
+         * call returns. */
         XPathASTNode argn[16];
         XPathASTNode* child_arr[16];
+        char** seq_mem[16] = {0};
+        XPathASTNode* seq_kids[16] = {0};
+        XPathASTNode** seq_karr[16] = {0};
         size_t na = argc < 16 ? argc : 16;
         for (size_t i = 0; i < na; i++) {
             memset(&argn[i], 0, sizeof(argn[i]));
-            argn[i].type = XPATH_AST_STRING;
-            /* Marked booleans spell as literals for named calls. */
-            if (argv[i] && argv[i][0] == '\x03' && argv[i][1] == 'B')
-                argn[i].value = argv[i][2] == 't' ? "true" : "false";
-            else
-                argn[i].value = argv[i];
+            char** mem = NULL;
+            size_t mn = 0;
+            if (argv[i] && argv[i][0] == '\x03' && argv[i][1] == 'M' &&
+                xpath_array_members_of(argv[i], &mem, &mn) && mn) {
+                XPathASTNode* kids = (XPathASTNode*)calloc(
+                    mn, sizeof(XPathASTNode));
+                XPathASTNode** karr = (XPathASTNode**)calloc(
+                    mn, sizeof(XPathASTNode*));
+                if (kids && karr) {
+                    for (size_t j = 0; j < mn; j++) {
+                        memset(&kids[j], 0, sizeof(kids[j]));
+                        kids[j].type = XPATH_AST_STRING;
+                        kids[j].value = mem[j];
+                        karr[j] = &kids[j];
+                    }
+                    argn[i].type = XPATH_AST_OPERATOR;
+                    argn[i].number_value = (double)XPATH_OP_SEQUENCE;
+                    argn[i].children = karr;
+                    argn[i].child_count = mn;
+                    seq_mem[i] = mem;
+                    seq_kids[i] = kids;
+                    seq_karr[i] = karr;
+                    mem = NULL;
+                }
+            }
+            if (mem) {
+                for (size_t j = 0; j < mn; j++) free(mem[j]);
+                free(mem);
+            }
+            if (!seq_mem[i]) {
+                argn[i].type = XPATH_AST_STRING;
+                /* Marked booleans spell as literals for named calls. */
+                if (argv[i] && argv[i][0] == '\x03' &&
+                    argv[i][1] == 'B')
+                    argn[i].value =
+                        argv[i][2] == 't' ? "true" : "false";
+                else
+                    argn[i].value = argv[i];
+            }
             child_arr[i] = &argn[i];
         }
         XPathASTNode fc;
@@ -3946,7 +4081,17 @@ struct leptris_xpath_result* xpath_call_function_item(
         fc.value = name;
         fc.children = child_arr;
         fc.child_count = na;
-        return evaluate_function_call_inline(ctx, &fc);
+        struct leptris_xpath_result* r = evaluate_function_call_inline(ctx, &fc);
+        for (size_t i = 0; i < na; i++) {
+            if (seq_mem[i]) {
+                for (size_t j = 0; j < argn[i].child_count; j++)
+                    free(seq_mem[i][j]);
+                free(seq_mem[i]);
+                free(seq_kids[i]);
+                free(seq_karr[i]);
+            }
+        }
+        return r;
     }
 
     if (strncmp(cc, "\x03" "FN", 3) != 0) return NULL;
@@ -3981,8 +4126,22 @@ struct leptris_xpath_result* xpath_call_function_item(
          * owned (Linux LSan). */
         one->owns_synthetic_text = 1;
         if (ai < argc) {
-            XPathTextNode* tn = synth_text(argv[ai], strlen(argv[ai]));
-            if (tn) xpath_nodeset_add(one, tn);
+            char** mem = NULL;
+            size_t mn = 0;
+            if (argv[ai][0] == '\x03' && argv[ai][1] == 'M' &&
+                xpath_array_members_of(argv[ai], &mem, &mn) && mn) {
+                for (size_t j = 0; j < mn; j++) {
+                    XPathTextNode* tn =
+                        synth_text(mem[j], strlen(mem[j]));
+                    if (tn) xpath_nodeset_add(one, tn);
+                    free(mem[j]);
+                }
+                free(mem);
+            } else {
+                XPathTextNode* tn =
+                    synth_text(argv[ai], strlen(argv[ai]));
+                if (tn) xpath_nodeset_add(one, tn);
+            }
         }
         XPathVariable* var = xpath_variable_set_add(
             ctx->variable_set, pname, XPATH_VAR_TYPE_NODE_SET);

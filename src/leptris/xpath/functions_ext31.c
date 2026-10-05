@@ -124,9 +124,58 @@ int xpath_array_members_of(const char* content, char*** out, size_t* out_n);
  * atomize: xs:anyAtomicType*-typed callers (fn:avg/min/max) see
  * dense-array members in place of the carrier (fn:avg([1,2,3,4,5])
  * = 3); item()*-typed callers keep the array as one item. */
+static int num_int_lexical(const char* s) {
+    if (!s) return 0;
+    if (*s == '+' || *s == '-') s++;
+    if (*s < '0' || *s > '9') return 0;
+    while (*s >= '0' && *s <= '9') s++;
+    return *s == '\0';
+}
+
+/* Per-item numeric kind for the fn:avg promotion ladder (only
+ * collected when out_kinds is non-NULL):
+ *   0 = xs:integer (N mark + integer lexical)
+ *   1 = xs:double / untyped numeric (N mark non-integer, or
+ *       unmarked numeric node text — untyped atomics promote to
+ *       double per F&O)
+ *   2 = xs:float (F mark)
+ *   3 = xs:decimal (D mark)
+ *   4 = non-numeric for the ladder (fall back to the generic path)
+ */
+#define AVG_KIND_INT 0
+#define AVG_KIND_DBL 1
+#define AVG_KIND_FLT 2
+#define AVG_KIND_DEC 3
+#define AVG_KIND_NON 4
+
+static unsigned char avg_kind_of(const char* content, int is_text) {
+    if (!is_text || !content) return AVG_KIND_NON;
+    if (content[0] == '\x03') {
+        if (content[1] == 'F' &&
+            !(content[2] == 'R' ||
+              (content[2] == 'N' && content[3] == '\x02')))
+            return AVG_KIND_FLT;
+        if (content[1] == 'O') return AVG_KIND_DBL;
+        if (content[1] == 'D') return AVG_KIND_DEC;
+        if (content[1] == 'N') {
+            const char* body = content + 2;
+            if (body[0] == '\x02') body++;
+            return num_int_lexical(body) ? AVG_KIND_INT : AVG_KIND_DBL;
+        }
+        return AVG_KIND_NON;
+    }
+    /* Unmarked numeric text: untyped atomic -> double. */
+    char* end = NULL;
+    (void)strtod(content, &end);
+    if (end != content && *end == '\0' && content[0] != '\0')
+        return AVG_KIND_DBL;
+    return AVG_KIND_NON;
+}
+
 static char** collect_items(XPathContext* ctx, XPathASTNode** args,
                             size_t n, size_t i, size_t* out_n,
-                            int* out_all_float, int atomize) {
+                            int* out_all_float, int atomize,
+                            unsigned char** out_kinds) {
     *out_n = 0;
     if (out_all_float) *out_all_float = 0;
     struct leptris_xpath_result* r = xpath_evaluate(ctx, args[i]);
@@ -139,6 +188,16 @@ static char** collect_items(XPathContext* ctx, XPathASTNode** args,
         size_t cap = ns->count ? ns->count : 1;
         items = (char**)malloc(cap * sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
+        unsigned char* kinds = NULL;
+        if (out_kinds) {
+            *out_kinds = (unsigned char*)malloc(cap);
+            kinds = *out_kinds;
+            if (!kinds) {
+                free(items);
+                xpath_result_free(r);
+                return NULL;
+            }
+        }
         for (size_t k = 0; k < ns->count; k++) {
             void* nd = ns->nodes[k];
             const char* mc = NULL;
@@ -161,7 +220,23 @@ static char** collect_items(XPathContext* ctx, XPathASTNode** args,
                             return NULL;
                         }
                         items = grown;
+                        if (kinds) {
+                            unsigned char* kg =
+                                (unsigned char*)realloc(kinds, cap);
+                            if (!kg) {
+                                for (size_t q = j; q < an; q++)
+                                    free(am[q]);
+                                free(am);
+                                free_items(items, cnt);
+                                xpath_result_free(r);
+                                return NULL;
+                            }
+                            kinds = kg;
+                            *out_kinds = kg;
+                        }
                     }
+                    if (kinds) kinds[cnt] =
+                        avg_kind_of(am[j] ? am[j] : "", 1);
                     items[cnt++] = am[j] ? am[j] : leptris_strdup("");
                 }
                 free(am);
@@ -178,12 +253,45 @@ static char** collect_items(XPathContext* ctx, XPathASTNode** args,
             } else {
                 all_float = 0;
             }
+            if (kinds) kinds[cnt] = (mc || 1)
+                ? avg_kind_of(mc, 1)
+                : AVG_KIND_NON;
             char* t = get_node_text(nd);
             items[cnt++] = t ? t : leptris_strdup("");
         }
     } else {
         items = (char**)malloc(sizeof(char*));
         if (!items) { xpath_result_free(r); return NULL; }
+        if (out_kinds) {
+            *out_kinds = (unsigned char*)malloc(1);
+            if (!*out_kinds) {
+                free(items);
+                xpath_result_free(r);
+                return NULL;
+            }
+            if (r->atomic_type &&
+                strcmp(r->atomic_type, "xs:float") == 0)
+                **out_kinds = AVG_KIND_FLT;
+            else if (r->atomic_type &&
+                     strcmp(r->atomic_type, "xs:decimal") == 0)
+                **out_kinds = AVG_KIND_DEC;
+            else {
+                char* sc = scalar_str(r);
+                /* Integer kind needs a NUMBER carrier: a STRING
+                 * scalar with an integer lexical is untyped
+                 * (xs:untypedAtomic("3") promotes to double —
+                 * K-SeqAVGFunc-26), and a double 3.0 spells "3" —
+                 * is_int is the discriminator. */
+                int plain_int =
+                    r->type == XPATH_RESULT_NUMBER &&
+                    (r->is_int ||
+                     (r->atomic_type &&
+                      strcmp(r->atomic_type, "xs:integer") == 0)) &&
+                    num_int_lexical(sc);
+                **out_kinds = plain_int ? AVG_KIND_INT : AVG_KIND_DBL;
+                if (sc) free(sc);
+            }
+        }
         if (!(r->atomic_type &&
               strcmp(r->atomic_type, "xs:float") == 0))
             all_float = 0;
@@ -254,7 +362,10 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
                        ? 'F'
                    : (r->atomic_type &&
                       strcmp(r->atomic_type, "xs:decimal") == 0)
-                       ? 'D' : 'N';
+                       ? 'D'
+                   : (r->atomic_type &&
+                      strcmp(r->atomic_type, "xs:double") == 0)
+                       ? 'O' : 'N';
             if (sl) memcpy(m + 2, s, sl);
             m[2 + sl] = 0;
         }
@@ -322,7 +433,7 @@ static struct leptris_xpath_result* fn_empty(XPathContext* ctx,
 static struct leptris_xpath_result* fn_head(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out && cnt) seq_push_str(out, items[0]);
@@ -333,7 +444,7 @@ static struct leptris_xpath_result* fn_head(XPathContext* ctx,
 static struct leptris_xpath_result* fn_tail(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out) seq_from_items(out, items, cnt, 2, -1);
@@ -368,7 +479,7 @@ static struct leptris_xpath_result* fn_collection(XPathContext* ctx,
 static struct leptris_xpath_result* fn_unordered(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* out = seq_new();
     if (out) seq_from_items(out, items, cnt, 1, -1);
@@ -455,13 +566,13 @@ static struct leptris_xpath_result* fn_remove(XPathContext* ctx,
 static struct leptris_xpath_result* fn_insert_before(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
-    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     struct leptris_xpath_result* iv = xpath_evaluate(ctx, args[1]);
     long at = iv ? (long)leptris_xpath_result_number(iv) : 1;
     if (iv) leptris_xpath_result_free(iv);
     size_t icnt;
-    char** ins = collect_items(ctx, args, n, 2, &icnt, NULL, 0);
+    char** ins = collect_items(ctx, args, n, 2, &icnt, NULL, 0, NULL);
     struct leptris_xpath_result* out = seq_new();
     /* F&O: position < 1 inserts at 1; a position beyond the tail
      * inserts at the end (K-SeqInsertBeforeFunc-5/10/14/15). */
@@ -729,12 +840,15 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         XPathASTNode** args, size_t n, int which) {
     size_t cnt;
     int all_float = 0;
-    char** items = collect_items(ctx, args, n, 0, &cnt, &all_float, 1);
+    unsigned char* kinds = NULL;
+    char** items = collect_items(ctx, args, n, 0, &cnt, &all_float, 1,
+                                 &kinds);
     if (!items) return NULL;
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!out) { free_items(items, cnt); return NULL; }
     if (!cnt) {
         free_items(items, cnt);
+        free(kinds);
         xpath_result_free(out);
         if (ctx->xquery_spelling)
             return xpath_result_new(XPATH_RESULT_NODESET);
@@ -765,6 +879,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                 out->atomic_type = "xs:yearMonthDuration";
             }
             free_items(items, cnt);
+            free(kinds);
             return out;
         }
     }
@@ -793,6 +908,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                 out->atomic_type = "xs:yearMonthDuration";
             }
             free_items(items, cnt);
+            free(kinds);
             return out;
         }
     }
@@ -828,6 +944,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                     out->atomic_type = "xs:dayTimeDuration";
                 }
                 free_items(items, cnt);
+                free(kinds);
                 return out;
             }
             out = xpath_result_new(XPATH_RESULT_STRING);
@@ -836,6 +953,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                 out->atomic_type = "xs:dayTimeDuration";
             }
             free_items(items, cnt);
+            free(kinds);
             return out;
         }
     }
@@ -859,9 +977,125 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
             if (out) out->value.boolean_value =
                 (which == 3) ? any_true : all_true;
             free_items(items, cnt);
+            free(kinds);
             return out;
         }
     }
+    /* fn:avg numeric promotion ladder (F&O 15.2): compute in the
+     * widest type present. double/untyped -> plain double (existing
+     * behavior, no type label); float present (no double) ->
+     * xs:float result with float32-rounded float items; decimal
+     * present (no float) -> xs:decimal label; all-integer ->
+     * int64-exact sum with exact decimal division spelling (a
+     * double carrier loses digits past 2^53: fn-avgintg2args). */
+    if (which == 1 && kinds) {
+        int any_dbl = 0, any_flt = 0, any_dec = 0, all_int = 1;
+        int fallthrough = 0;
+        for (size_t k = 0; k < cnt; k++) {
+            switch (kinds[k]) {
+                case AVG_KIND_INT: break;
+                case AVG_KIND_DBL: any_dbl = 1; all_int = 0; break;
+                case AVG_KIND_FLT: any_flt = 1; all_int = 0; break;
+                case AVG_KIND_DEC: any_dec = 1; all_int = 0; break;
+                default: fallthrough = 1;
+            }
+        }
+        if (!fallthrough && all_int) {
+            long long isum = 0;
+            int ovf = 0;
+            for (size_t k = 0; k < cnt && !ovf; k++) {
+                errno = 0;
+                char* e = NULL;
+                long long v = strtoll(items[k], &e, 10);
+                if (errno || e == items[k] || *e)
+                    ovf = 1;
+                else if (__builtin_add_overflow(isum, v, &isum))
+                    ovf = 1;
+            }
+            if (!ovf) {
+                long long c = (long long)cnt;
+                long long q = isum / c, r = isum % c;
+                char buf[64];
+                int ok = 1;
+                if (r == 0) {
+                    snprintf(buf, sizeof buf, "%lld", q);
+                } else {
+                    /* Exact decimal division by long division on
+                     * the remainder; give up (fall back to double)
+                     * when the fraction does not terminate within
+                     * 18 digits. C truncation keeps q <= 0 for a
+                     * negative dividend, so the sign rides q —
+                     * except |sum| < count, where q == 0. */
+                    unsigned long long rem =
+                        (unsigned long long)(r < 0 ? -r : r);
+                    char frac[20];
+                    int nd = 0;
+                    while (rem && nd < 18) {
+                        rem *= 10;
+                        frac[nd++] =
+                            (char)('0' + rem / (unsigned long long)c);
+                        rem %= (unsigned long long)c;
+                    }
+                    if (rem) ok = 0;
+                    else {
+                        frac[nd] = 0;
+                        if (q == 0)
+                            snprintf(buf, sizeof buf, "%s0.%s",
+                                     isum < 0 ? "-" : "", frac);
+                        else
+                            snprintf(buf, sizeof buf, "%lld.%s",
+                                     q, frac);
+                    }
+                }
+                if (ok) {
+                    free_items(items, cnt);
+                    free(kinds);
+                    xpath_result_free(out);
+                    out = xpath_result_new(XPATH_RESULT_STRING);
+                    if (out) {
+                        out->value.string_value = leptris_strdup(buf);
+                        out->atomic_type = "xs:decimal";
+                    }
+                    return out;
+                }
+            }
+        } else if (!fallthrough && any_flt) {
+            /* F&O: when xs:float is the common type, EVERY item
+             * converts to xs:float before summing (Saxon computes
+             * the float32-converted addends in double, then the
+             * result is xs:float): the lexical of
+             * xs:float("-3.4028235E38") is NOT the float32's value
+             * (fn-avg-mix-args-012), and the decimal addend in
+             * fn-avg-mix-args-013/015 must round through float32
+             * too — summing the raw double -1e18 leaves the result
+             * outside the float32 lattice. */
+            double facc = 0;
+            for (size_t k = 0; k < cnt; k++) {
+                double d = strtod(items[k], NULL);
+                facc += (double)(float)d;
+            }
+            free_items(items, cnt);
+            free(kinds);
+            xpath_result_free(out);
+            out = xpath_result_new(XPATH_RESULT_NUMBER);
+            if (out) {
+                out->value.number_value = facc / (double)cnt;
+                out->atomic_type = "xs:float";
+            }
+            return out;
+        } else if (!fallthrough && any_dec && !any_dbl) {
+            /* value computed by the generic loop below */
+            out->atomic_type = "xs:decimal";
+        } else if (!fallthrough && any_dbl) {
+            /* xs:double in the mix: label the result so typeswitch
+             * sees it (cbcl-avg-008); value stays the generic
+             * double accumulation. */
+            out->atomic_type = "xs:double";
+        }
+        free(kinds);
+        kinds = NULL;
+    }
+
     double acc = 0, best = 0;
     size_t numeric = 0;
     int first = 1;
@@ -900,6 +1134,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         if (out)
             out->value.string_value = leptris_strdup(items[bi]);
         free_items(items, cnt);
+        free(kinds);
         return out;
     }
     out->value.number_value = (which == 1) ? acc / (double)numeric : best;
@@ -4739,7 +4974,7 @@ static struct leptris_xpath_result* fn_for_each(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 1);
     struct leptris_xpath_result* out = seq_new();
@@ -4766,7 +5001,7 @@ static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL, 0);
+    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL, 0, NULL);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 1);
     struct leptris_xpath_result* out = seq_new();
@@ -4891,7 +5126,7 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
 static struct leptris_xpath_result* fn_sort_seq(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t c = 0;
-    char** xs = collect_items(ctx, args, 1, 0, &c, NULL, 0);
+    char** xs = collect_items(ctx, args, 1, 0, &c, NULL, 0, NULL);
     struct leptris_xpath_result* out = seq_new();
     if (!xs || !out) {
         free_items(xs, c);
@@ -4976,9 +5211,9 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t c1, c2;
-    char** xs = collect_items(ctx, args, 1, 0, &c1, NULL, 0);
+    char** xs = collect_items(ctx, args, 1, 0, &c1, NULL, 0, NULL);
     if (!xs) return NULL;
-    char** ys = collect_items(ctx, args, 1, 1, &c2, NULL, 0);
+    char** ys = collect_items(ctx, args, 1, 1, &c2, NULL, 0, NULL);
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* out = seq_new();
     if (cc && out) {
@@ -5003,29 +5238,155 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
 
 /* fn:apply($f, array) — call with the array's members as the
  * argument list. */
+/* Encode one multi-item argument as a dense sub-carrier so the
+ * call paths pass it as a sequence (fn-apply-03/07). Text items
+ * only; returns NULL when the member holds non-text nodes. */
+static char* apply_seq_carrier(struct leptris_xpath_result* vr) {
+    if (!vr || vr->type != XPATH_RESULT_NODESET ||
+        !vr->value.nodeset_value ||
+        vr->value.nodeset_value->count < 2)
+        return NULL;
+    XPathNodeSet* mns = vr->value.nodeset_value;
+    void* b = NULL;
+    extern void* xpath_map_builder_new(void);
+    extern void xpath_map_builder_add(void* b, const char* k,
+                                      const char* v);
+    extern struct leptris_xpath_result* xpath_map_builder_finish(
+        void* b);
+    b = xpath_map_builder_new();
+    if (!b) return NULL;
+    for (size_t j = 0; j < mns->count; j++)
+        if ((int)XPATH_NODE_TYPE(mns->nodes[j]) !=
+            (int)LEPTRIS_NODE_TEXT) {
+            struct leptris_xpath_result* rel =
+                xpath_map_builder_finish(b);
+            if (rel) xpath_result_free(rel);
+            return NULL;
+        }
+    for (size_t j = 0; j < mns->count; j++) {
+        const char* mc = ((XPathTextNode*)mns->nodes[j])->content;
+        const char* body = (mc && mc[0] == '\x03') ? mc + 2 : mc;
+        char key[24];
+        snprintf(key, sizeof(key), "%zu", j + 1);
+        xpath_map_builder_add(b, key, body ? body : "");
+    }
+    struct leptris_xpath_result* subr = xpath_map_builder_finish(b);
+    char* out = NULL;
+    if (subr && subr->type == XPATH_RESULT_NODESET &&
+        subr->value.nodeset_value &&
+        subr->value.nodeset_value->count == 1) {
+        const char* rc = ((XPathTextNode*)
+            subr->value.nodeset_value->nodes[0])->content;
+        out = leptris_strdup(rc ? rc : "");
+    }
+    if (subr) xpath_result_free(subr);
+    return out;
+}
+
 static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     char* cc = fn_item_content(ctx, args, 0);
     if (!cc) return NULL;
-    MapEntries e = {0};
-    map_entries_arg(ctx, args, 1, &e);
     struct leptris_xpath_result* out = NULL;
-    if (e.n) {
-        char** argv = (char**)calloc(e.n, sizeof(char*));
-        if (argv) {
-            size_t argc = 0;
-            for (size_t i = 0; i < e.n; i++) {
-                long idx = strtol(e.k[i], NULL, 10);
-                if (idx >= 1 && (size_t)idx <= e.n)
-                    argv[idx - 1] = e.v[i];
+    char** argv = NULL;
+    char** conv = NULL;
+    size_t argc = 0;
+    size_t cap = 0;
+    MapEntries e = {0};
+    XPathASTNode* arr = args[1];
+    if (arr && arr->type == XPATH_AST_OPERATOR &&
+        (XPathOperatorType)arr->number_value ==
+            XPATH_OP_ARRAY_CONSTRUCTOR &&
+        arr->child_count >= 1) {
+        /* Literal square-array argument: evaluate each MEMBER
+         * expression directly so a multi-item member stays a
+         * SEQUENCE argument (a stored array flattens members to
+         * their first item — fn-apply-03/07). */
+        cap = arr->child_count;
+        argv = (char**)calloc(cap, sizeof(char*));
+        conv = (char**)calloc(cap, sizeof(char*));
+        if (!argv || !conv) goto done;
+        for (size_t i = 0; i < cap; i++) {
+            struct leptris_xpath_result* vr =
+                xpath_evaluate(ctx, arr->children[i]);
+            if (!vr) goto done;
+            char* v = apply_seq_carrier(vr);
+            if (!v) v = xpath_to_string(vr);
+            xpath_result_free(vr);
+            argv[i] = v;
+            conv[i] = v;
+            argc++;
+        }
+        /* XDM function conversion: node-valued arguments atomize
+         * (fn-apply-14/15). */
+        for (size_t i = 0; i < argc; i++) {
+            if (argv[i] && argv[i][0] == '<') {
+                LeptrisStatus st = LEPTRIS_OK;
+                LeptrisDocument nd = leptris_parse_string(
+                    argv[i], strlen(argv[i]), &st);
+                if (nd) {
+                    LeptrisElement rt = leptris_document_root(nd);
+                    if (rt) {
+                        const char* sv = leptris_element_text(rt);
+                        char* c = leptris_strdup(sv ? sv : "");
+                        if (c) {
+                            argv[i] = c;
+                            conv[i] = c;
+                        }
+                    }
+                    leptris_document_free(nd);
+                }
             }
-            for (size_t i = 0; i < e.n; i++)
-                if (argv[i]) argv[argc++] = argv[i];
-            out = xpath_call_function_item(ctx, cc, argv, argc);
-            free(argv);
+        }
+    } else {
+        map_entries_arg(ctx, args, 1, &e);
+        cap = e.n ? e.n : 1;
+        argv = (char**)calloc(cap, sizeof(char*));
+        conv = (char**)calloc(cap, sizeof(char*));
+        if (!argv || !conv) goto done;
+        for (size_t i = 0; i < e.n; i++) {
+            long idx = strtol(e.k[i], NULL, 10);
+            if (idx >= 1 && (size_t)idx <= e.n)
+                argv[idx - 1] = e.v[i];
+        }
+        for (size_t i = 0; i < e.n; i++)
+            if (argv[i]) argv[argc++] = argv[i];
+        /* XDM function conversion: a node-valued argument atomizes
+         * to its string value. Node members ride their
+         * serialization ("<a>ABC</a>" — the array stores lexical
+         * members); parse and take the string value so lower-case#1
+         * sees "ABC", not "<a>ABC</a>" (fn-apply-14/15). */
+        for (size_t i = 0; i < argc; i++) {
+            if (argv[i] && argv[i][0] == '<') {
+                LeptrisStatus st = LEPTRIS_OK;
+                LeptrisDocument nd = leptris_parse_string(
+                    argv[i], strlen(argv[i]), &st);
+                if (nd) {
+                    LeptrisElement rt = leptris_document_root(nd);
+                    if (rt) {
+                        const char* sv = leptris_element_text(rt);
+                        char* c = leptris_strdup(sv ? sv : "");
+                        if (c) {
+                            argv[i] = c;
+                            conv[i] = c;
+                        }
+                    }
+                    leptris_document_free(nd);
+                }
+            }
         }
     }
+    /* An empty array is a legal argument list: zero-arity callees
+     * must still run (fn-apply-02: apply(true#0, array {})). */
+    out = xpath_call_function_item(ctx, cc, argv, argc);
+done:
+    if (conv) {
+        for (size_t i = 0; i < cap; i++)
+            if (conv[i]) free(conv[i]);
+        free(conv);
+    }
+    free(argv);
     map_entries_free(&e);
     free(cc);
     return out;

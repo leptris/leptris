@@ -310,10 +310,10 @@ char* get_node_text(void* node) {
                 }
                 if (c[1] == 'B')
                     return leptris_strdup(c[2] == 't' ? "true" : "false");
-                if (c[1] == 'N' || c[1] == 'D' ||
+                if (c[1] == 'N' || c[1] == 'D' || c[1] == 'O' ||
                     (c[1] == 'F' &&
                      !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R')) ||
-                    (c[1] && strchr("ETtYJKQHXWZd", c[1])))
+                    (c[1] && strchr("ETtYJKQHXWZdO", c[1])))
                     c += 2;
             }
             return leptris_strdup(c);
@@ -348,7 +348,8 @@ int xpath_to_boolean(struct leptris_xpath_result* result) {
                     const char* c = ((XPathTextNode*)nd)->content;
                     if (c && c[0] == '\x03') {
                         if (c[1] == 'B') return c[2] == 't';
-                        if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D') {
+                        if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D' ||
+                            c[1] == 'O') {
                             double d = strtod(c + 2, NULL);
                             return d != 0.0 && !isnan(d);
                         }
@@ -368,7 +369,8 @@ int xpath_to_boolean(struct leptris_xpath_result* result) {
             if (!c) return 1;
             if (c[0] == '\x03') {
                 if (c[1] == 'B') return c[2] == 't';
-                if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D') {
+                if (c[1] == 'N' || c[1] == 'F' || c[1] == 'D' ||
+                            c[1] == 'O') {
                     double d = strtod(c + 2, NULL);
                     return d != 0.0 && !isnan(d);
                 }
