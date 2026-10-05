@@ -1124,7 +1124,7 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                     out[i].kind = 4;
                     out[i].borrow = c;
                 } else if (c[0] == '\x03' &&
-                    (c[1] == 'N' || c[1] == 'D' ||
+                    (c[1] == 'N' || c[1] == 'D' || c[1] == 'O' ||
                      (c[1] == 'F' &&
                       !((c[2] == 'N' && c[3] == '\x02') ||
                         c[2] == 'R')))) {
@@ -2243,6 +2243,7 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     long long isum_seed = 0;
     int zero_non_int = 0;
     char* zero_lex = NULL;  /* owned: the zero's lexical form */
+    char zero_type[40] = ""; /* local name of the zero's atomic type */
     if (arg_count == 2) {
         struct leptris_xpath_result* zr = xpath_evaluate(context, args[1]);
         if (!zr) return NULL;
@@ -2253,6 +2254,13 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
             xpath_result_free(zr);
         } else {
         char* zs = result_to_string(zr);
+        const char* zt = (zr->atomic_type &&
+                          zr->atomic_type[0] == 'x' &&
+                          zr->atomic_type[1] == 's' &&
+                          zr->atomic_type[2] == ':')
+                             ? zr->atomic_type + 3
+                             : "";
+        snprintf(zero_type, sizeof zero_type, "%s", zt);
         xpath_result_free(zr);
         if (!zs) return NULL;
         char* zend;
@@ -2477,8 +2485,34 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     } else if (count == 0 && zero_lex) {
         xpath_result_free(result);
         result = xpath_result_new(XPATH_RESULT_STRING);
-        if (result)
-            result->value.string_value = leptris_strdup(zero_lex);
+        if (result) {
+            /* XSD canonical duration: the zero duration spells
+             * PT0S whatever shape the $zero arrived in (fn-sum-8:
+             * xs:duration("P0M") -> PT0S). Nonzero durations keep
+             * their lexical. */
+            double zm = 0, zsec = 0;
+            const char* zlex = zero_lex;
+            if (zlex[0] == '\x03' && zlex[1] == 'd') zlex += 2;
+            /* Canonical zero spelling is per-TYPE: yearMonthDuration
+             * zero is P0M (fn-sum-5), plain/dayTime duration zero is
+             * PT0S (fn-sum-8). Zero in EITHER channel: the lexical
+             * forms are channel-pure ("P0M" months-only, "PT0S"
+             * seconds-only) — try_seconds("P0M") fails, so requiring
+             * both would miss the year-month zero (probe-verified). */
+            int z_ym = strcmp(zero_type, "yearMonthDuration") == 0;
+            int z_zero =
+                (leptris_dur_try_months(zlex, &zm) && zm == 0) ||
+                (leptris_dur_try_seconds(zlex, &zsec) && zsec == 0);
+            if (z_zero && z_ym)
+                result->value.string_value = leptris_strdup("P0M");
+            else if (z_zero)
+                result->value.string_value = leptris_strdup("PT0S");
+            else
+                result->value.string_value = leptris_strdup(zero_lex);
+            if (z_zero)
+                result->atomic_type =
+                    z_ym ? "xs:yearMonthDuration" : "xs:dayTimeDuration";
+        }
         LEPTRIS_FREE(zero_lex);
         return result;
     } else if (count == 0 && !has_zero) {

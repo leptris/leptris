@@ -949,8 +949,7 @@ TEST(Qt3Subset, FnAbs) {
                  "fn-abs-1"});
 }
 TEST(Qt3Subset, FnAvg) {
-    run_test_set("fn/avg.xml", {}, 175, {},
-                 {"cbcl-avg-008", "fn-avgintg2args-2", "fn-avgintg2args-4", "fn-avg-mix-args-012", "fn-avg-mix-args-013", "fn-avg-mix-args-014", "fn-avg-mix-args-015"});
+    run_test_set("fn/avg.xml", {}, 182, {}, {});
 }
 TEST(Qt3Subset, FnCeiling) {
     run_test_set("fn/ceiling.xml", {}, 39, {},
@@ -983,16 +982,10 @@ TEST(Qt3Subset, FnRoundHalfToEven) {
                  "cbcl-round-half-to-even-012"});
 }
 TEST(Qt3Subset, FnSum) {
-    run_test_set("fn/sum.xml", {}, 209, {},
-                 {"fn-sum-8"});
+    run_test_set("fn/sum.xml", {}, 210, {}, {});
 }
 TEST(Qt3Subset, FnApply) {
-    run_test_set("fn/apply.xml", {}, 5, {},
-                 {"fn-apply-02",
-                 "fn-apply-03",
-                 "fn-apply-07",
-                 "fn-apply-14",
-                 "fn-apply-15"});
+    run_test_set("fn/apply.xml", {}, 10, {}, {});
 }
 TEST(Qt3Subset, FnFilter) { run_test_set("fn/filter.xml", {}, 1); }
 TEST(Qt3Subset, FnForEach) {

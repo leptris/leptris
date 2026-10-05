@@ -404,7 +404,7 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
             }
             if (text->content[1] == 'B')
                 return text->content[2] == 't' ? "true" : "false";
-            if (text->content[1] == 'N' ||
+            if (text->content[1] == 'N' || text->content[1] == 'O' ||
                 text->content[1] == 'D' ||
                 (text->content[1] == 'F' &&
                  !((text->content[2] == 'N' &&
