@@ -118,6 +118,26 @@ int main(void) {
                (t1 - t0) / N_PARSE, xml.size());
     }
     {
+        /* Door A (leptris#1436, shipped v1.9.272): the opt-in fast
+         * path — duplicate detection and source positions off. The
+         * default row above carries full conformance work pugixml
+         * does none of; this row shows the speed callers can opt
+         * into when their pipeline guarantees uniqueness and skips
+         * position reporting. */
+        LeptrisParseFlags flags = static_cast<LeptrisParseFlags>(
+            LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+            LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS);
+        double t0 = now_ns();
+        for (int i = 0; i < N_PARSE; i++) {
+            LeptrisDocument d = leptris_parse_string_flags(
+                xml.data(), xml.size(), flags, NULL);
+            leptris_document_free(d);
+        }
+        double t1 = now_ns();
+        printf("attrparse leptris+flags: %7.1f ns/doc (Door A)\n",
+               (t1 - t0) / N_PARSE);
+    }
+    {
         double t0 = now_ns();
         for (int i = 0; i < N_PARSE; i++) {
             pugi::xml_document d;
