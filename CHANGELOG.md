@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.303] - 2026-10-05
+
+### Added
+
+- min/max NaN coercion, duration comparisons, boolean results; fn:sum#2 zero semantics (+24 QT3) (xquery)
+
+### Fixed
+
+- free the atomized members in fn:sum's duration prescan (xquery)
+
+
+
 ## [1.9.302] - 2026-10-04
 
 ### Added
