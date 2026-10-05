@@ -36,11 +36,7 @@ struct ElemH {
 }
 
 extern "C" {
-    fn leptris_parse_string(
-        src: *const c_char,
-        len: usize,
-        status: *mut i32,
-    ) -> *mut DocH;
+    fn leptris_parse_string(src: *const c_char, len: usize, status: *mut i32) -> *mut DocH;
     fn leptris_document_free(doc: *mut DocH);
     fn leptris_document_root(doc: *mut DocH) -> *mut ElemH;
 }
@@ -154,11 +150,7 @@ fn plan_build_and_walk_round_trip() {
         assert_eq!(status, 0, "plan_build status");
         assert!(!plan.is_null());
 
-        let doc = leptris_parse_string(
-            DOC.as_ptr() as *const c_char,
-            DOC.len(),
-            &mut status,
-        );
+        let doc = leptris_parse_string(DOC.as_ptr() as *const c_char, DOC.len(), &mut status);
         assert!(!doc.is_null());
         let root = leptris_document_root(doc);
 
@@ -187,8 +179,7 @@ fn plan_build_and_walk_round_trip() {
         let title_v = plan_ffi::leptris_plan_value_at(b1, 0);
         assert_eq!(plan_ffi::leptris_plan_value_type_tag(title_v), 9);
         assert_eq!(
-            CStr::from_ptr(plan_ffi::leptris_plan_value_string(title_v))
-                .to_bytes(),
+            CStr::from_ptr(plan_ffi::leptris_plan_value_string(title_v)).to_bytes(),
             b"Alpha"
         );
 
