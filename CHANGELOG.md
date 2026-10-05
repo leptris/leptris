@@ -4,11 +4,41 @@
 
 ### Added
 
-- min/max NaN coercion, duration comparisons, boolean results; fn:sum#2 zero semantics (+24 QT3) (xquery)
+- **XQuery: `fn:min`/`fn:max` coerce NaN** — any numeric NaN in the
+  input forces the NaN result; the comparison operators never select
+  it (`d > best` is false for NaN), so it is tracked explicitly
+  (K-SeqMAXFunc-16/27/28/31 and the MIN twins).
+- **XQuery: duration comparisons in `fn:min`/`fn:max`/`fn:sum`/
+  `fn:avg`** — `xs:yearMonthDuration` items compare by months,
+  `xs:dayTimeDuration` by seconds, through the shared duration
+  formatters (`max(1 to 10 months)` = `P10M`, `cbcl-max-015` =
+  `P1Y1M`). Duration results of the four aggregates carry their
+  atomic type, so `instance of xs:*Duration` now holds
+  (fn-sum-1/3/4/6, fn-max/min-4/6/7, K-SeqSUMFunc-30, fn-avg-3/5).
+- **XQuery: `fn:min`/`fn:max` over `xs:boolean`** — false < true,
+  and the result is a boolean, not a string (a string "false" would
+  read truthy at every assert-false site; cbcl-max-001, cbcl-min-002).
 
 ### Fixed
 
-- free the atomized members in fn:sum's duration prescan (xquery)
+- **XQuery: `fn:sum#2` zero semantics** — the zero is the
+  EMPTY-sequence answer only, never an addend:
+  `sum((1 to 3), 17)` is 6 (was 23, fn-sum-12); an empty zero
+  leaves the empty result empty (`sum((), ())`, K-SeqSUMFunc-5);
+  a non-integer numeric zero adds back only for the empty sequence.
+  The libxslt suite (221/221) pins the XPath 1.0 side unchanged.
+- **instance of the duration types** — the `'d'`-marked member check
+  recovers the flavor from the lexical shape (months-only is
+  yearMonth; dayTime never spells months) and the scalar check
+  requires the matching atomic type; both branches sit ahead of the
+  `is_num_ty` catch-all that would otherwise swallow every
+  non-string/boolean/node base name.
+- **fn:sum atomization leak** — the duration prescan freed the
+  flattened array-carrier members' container but not the member
+  strings (Linux ASAN caught it: 10 bytes per `sum([1,2,3,4,5])`).
+- QT3 re-pins from one verified run: fn/avg 173→175, fn/max
+  167→176, fn/min 167→175, fn/sum 204→209 (+24 adopted cases;
+  total pins 1148 → 1172; 61/61 suites green).
 
 
 
