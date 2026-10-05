@@ -2,14 +2,37 @@
 
 ## [1.9.309] - 2026-10-05
 
-### Added
-
-- typed fn:min/max results, labeled FLWOR bindings, fn/string-to-codepoints adoption (QT3 #1182 finalize) (xpath)
-
 ### Fixed
 
-- typed numeric results end-to-end + exponent-literal lexer fix (QT3 #1182 finalize 2) (xpath)
+- **XPath lexer: signed exponent literals truncated at the `E` —
+  `1E+1` evaluated to `2` and `3.567812E+3 eq 3567.812` was false.**
+  The number scanner consumed the exponent digits but not its sign,
+  so `1E+1` tokenized as `1E` followed by `+ 1`. The sign is now part
+  of the literal (also `5.2E-3` and friends).
 
+### Added
+
+- **XQuery numeric literal typing (XQuery 3.1 §3.13.1) with
+  end-to-end type discrimination — 17 more QT3 cases adopted
+  (abs +5, ceiling +3, floor +3, round-half-to-even +6), 32 with the
+  same-batch string-to-codepoints and min/max gates.**
+  - Exponent literals are `xs:double`, decimals with a point are
+    `xs:decimal`, plain integers `xs:integer`; `1.1 instance of
+    xs:double` is now `false` per spec.
+  - `instance of` / `typeswitch` match labeled numeric results by
+    XDM derivation (`xs:integer` <: `xs:decimal`); `case $v as TYPE`
+    arms bind their variable inside the arm. Unlabeled numerics keep
+    the historical any-numeric match — no XPath 1.0 surface change.
+  - `fn:abs` preserves its argument's numeric type (integer/decimal/
+    float/double, float through float32); `fn:ceiling`/`fn:floor`
+    label float results; `fn:round-half-to-even` computes its scale
+    in double (no `int` truncation UB at 2^32) and guards huge
+    scales; `fn:min`/`fn:max` label results by promoted input type;
+    FLWOR bindings preserve float/decimal/double marks.
+  - Vendor corpus: `fn/string-to-codepoints.xml` (+28), `fn/min`
+    and `fn/max` +1 each.
+- Remaining pinned QT3 reds are documented by lever in the test
+  harness (HOF node-carrier, map iteration order, typed grouping).
 
 
 ## [1.9.308] - 2026-10-05
