@@ -845,7 +845,11 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                                  &kinds);
     if (!items) return NULL;
     struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_NUMBER);
-    if (!out) { free_items(items, cnt); return NULL; }
+    if (!out) {
+        free_items(items, cnt);
+        free(kinds);
+        return NULL;
+    }
     if (!cnt) {
         free_items(items, cnt);
         free(kinds);
@@ -1146,6 +1150,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
     if (all_float && out->type == XPATH_RESULT_NUMBER)
         out->atomic_type = "xs:float";
     free_items(items, cnt);
+    free(kinds);
     return out;
 }
 
