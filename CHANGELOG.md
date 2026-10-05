@@ -4,14 +4,54 @@
 
 ### Added
 
-- shared descriptor-ABI crate (leptris-descriptor) — ruby#294 topology step 1 (rust)
-- fn:avg promotion ladder + int64-exact division; typeswitch $var arms; fn:apply conversions (QT3 #1182 tail) (xpath)
+- **XPath: `fn:avg` computes in the widest numeric type present
+  (F&O 15.2), 13 QT3 cases adopted (fn/avg 175→182, fn/sum 209→210,
+  fn/apply 5→10).** Every item converts to the common type before
+  summing: with `xs:float` present (no double) the result is
+  `xs:float` and every addend rounds through float32 — the lexical
+  of `xs:float("-3.4028235E38")` is *not* the float32's value
+  (fn-avg-mix-args-012..015); a new `O` typed-scalar mark
+  distinguishes `xs:double` from the N catch-all so float+double
+  promotes to `xs:double` (cbcl-avg-008); an all-integer sequence
+  sums exactly in int64 and divides by long division, spelling the
+  exact decimal where a double carrier loses digits past 2^53
+  (fn-avgintg2args-2/4: −84503251441487847.5). Untyped atomics
+  classify as double (K-SeqAVGFunc-26).
+
+- **XQuery: `typeswitch` accepts the full `case $v as TYPE` arm
+  form**, binding the variable to the operand inside its arm
+  (entries encode `VAR\x02TYPE`). Previously only the type-only
+  form parsed — the binding form was a parse failure.
+
+- **XQuery: `fn:apply` applies XDM function conversion.** An empty
+  array is a legal zero-arity argument list (`apply(true#0, array
+  {})`); node-valued members atomize to their string value
+  (`apply(lower-case#1, [<a>ABC</a>])` = `abc`, built-ins and
+  user-defined functions); a multi-item member of a literal square
+  array stays a SEQUENCE argument — fn:apply evaluates the member
+  expressions directly and the call paths expand the sub-carrier
+  (`fn-apply-03/07`).
+
+- **Rust: the shared descriptor-ABI crate `leptris-descriptor`
+  (ruby#294 topology step 1).** `bindings/rust` is now a Cargo
+  workspace: the `leptris` crate keeps its name and shape, and the
+  new `no_std` `#[repr(C)]` mirror of the descriptor-plan ABI
+  (descriptor.h) is the one record layout the per-engine crate
+  family targets (leptris XML, yeptris YAML, teptris TOML/JSON).
+  The `link` feature declares the engine FFI; the authoritative
+  layout gate compares Rust `size_of` against the engine's own
+  row-size introspection plus a build/walk round trip. `build.rs`
+  now re-runs on `LEPTRIS_LIB_PATH` changes (the link directives
+  were cached, silently linking a stale library).
 
 ### Fixed
 
-- fn:apply literal-array atomization frees the replaced spelling (LSan) (xpath)
-- free the avg kind array on every fn_avg_min_max exit (LSan) (xpath)
-- portable int64 overflow check in the fn:avg integer path (MSVC) (xpath)
+- `fn:sum`'s duration zero answers the empty sequence in the
+  TYPE's canonical spelling: `PT0S` for `xs:duration` (fn-sum-8),
+  `P0M` kept for `xs:yearMonthDuration` (fn-sum-5).
+- MSVC link failure from `__builtin_add_overflow` (portable
+  int64 range check), and two LSan leaks in the new avg/apply
+  paths — both caught by CI legs that have no local equivalent.
 
 
 
