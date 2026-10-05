@@ -4,7 +4,22 @@
 
 ### Performance
 
-- mut-block fast bail for the #1528 adoption gate (dom)
+- **DOM: the #1528 adoption gate no longer taxes the append hot
+  path** — the first cut called `get_document` per splice, whose
+  namebp fast-out resolves the name slot before the check: append
+  measured 21.5 → 30.3 ns/child (+40%, 1.5x pugixml) and the
+  document build/free cycle +51% on the Lane 18 bench. `append_child`
+  now proves same-document in two hot loads — a child inside the
+  document's CURRENT mut-block extent was carved from this
+  document's own malloc by the create call just executed, so
+  nothing foreign can alias into it. Rolled-over-block children and
+  every other shape take the full adoption check; `prepend`/
+  `insert` keep it unconditionally. Measured paired-interleaved on
+  fresh Release trees: append 21.5 → 22.4 ns/child median (+0.8 ns,
+  +4%, the floor for a sound O(1) check), mutcycle +0.4 ns,
+  attr-parse within run noise. `CrossDocumentAdoption` stays green
+  on normal and ASAN builds; the binding fast paths all forward to
+  these public seams, so every route is covered.
 
 
 
