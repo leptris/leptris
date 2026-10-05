@@ -293,6 +293,95 @@ static int node_in_current_mut_block(struct leptris_document* doc,
  * Same-document moves and nodes with no resolvable document
  * (detached chains, #540) stay zero-copy. Returns the node to
  * splice, or NULL on copy failure. */
+/* #1534: ownership evidence for a non-element splice argument.
+ * ATTACHED leaves resolve through their element walk (the parent
+ * chain tops out at a root element). UNATTACHED leaves carry the
+ * #1320-family doc stamps: text an int32 offset, cdata/comment/pi
+ * a direct pointer. Unstamped = the #540 same-doc detached-chain
+ * contract (public creators stamp; hand-built chains don't). */
+static struct leptris_document* leaf_owner_doc(LeptrisNode* n) {
+    switch (n->type) {
+        case LEPTRIS_NODE_TYPE_TEXT:
+            return leptris_textnode_owner_doc((LeptrisTextNode*)n);
+        case LEPTRIS_NODE_TYPE_CDATA:
+            return ((LeptrisCDATANode*)n)->owner_doc;
+        case LEPTRIS_NODE_TYPE_COMMENT:
+            return ((LeptrisCommentNode*)n)->owner_doc;
+        case LEPTRIS_NODE_TYPE_PI:
+            return ((LeptrisPINode*)n)->owner_doc;
+        default:
+            return NULL;
+    }
+}
+
+/* #1534: copy a non-element node (plus its linked tail — the #540
+ * chain shape) into the target document's pool. Same per-kind
+ * creation helpers the subtree copier uses. */
+static LeptrisNode* copy_leaf_chain(LeptrisNode* head,
+                                    struct leptris_document* target) {
+    LeptrisNode* copy_head = NULL;
+    LeptrisNode* copy_tail = NULL;
+    for (LeptrisNode* c = head; c;
+         c = leptris_node_get_next_sibling(c)) {
+        LeptrisNode* cc = NULL;
+        switch (c->type) {
+            case LEPTRIS_NODE_TYPE_TEXT: {
+                LeptrisTextNode* t = (LeptrisTextNode*)c;
+                const char* content = leptris_textnode_content(t);
+                cc = (LeptrisNode*)leptris_text_create(
+                    content, t->content_len, target->pool, target);
+                break;
+            }
+            case LEPTRIS_NODE_TYPE_CDATA: {
+                LeptrisCDATANode* cd = (LeptrisCDATANode*)c;
+                cc = (LeptrisNode*)leptris_cdata_create(
+                    cd->content, cd->content ? strlen(cd->content) : 0,
+                    target->pool);
+                break;
+            }
+            case LEPTRIS_NODE_TYPE_COMMENT: {
+                LeptrisCommentNode* cm = (LeptrisCommentNode*)c;
+                cc = (LeptrisNode*)leptris_comment_create(
+                    cm->content,
+                    cm->content ? strlen(cm->content) : 0,
+                    target->pool);
+                break;
+            }
+            case LEPTRIS_NODE_TYPE_PI: {
+                LeptrisPINode* pi = (LeptrisPINode*)c;
+                cc = (LeptrisNode*)leptris_pi_create(
+                    pi->target, pi->target ? strlen(pi->target) : 0,
+                    pi->data ? pi->data : "",
+                    pi->data ? strlen(pi->data) : 0, target->pool);
+                break;
+            }
+            case LEPTRIS_NODE_TYPE_ENTITY_REF: {
+                LeptrisEntityRefNode* er = (LeptrisEntityRefNode*)c;
+                cc = (LeptrisNode*)leptris_entity_ref_create(
+                    er->name, er->name ? strlen(er->name) : 0,
+                    target->pool);
+                break;
+            }
+            default:
+                cc = NULL;
+        }
+        if (!cc) {
+            /* OOM mid-chain: copies already made live only in the
+             * target pool — no caller-visible handle exists, and
+             * document free reclaims them (the same conservatism
+             * copy_subtree_detached uses on !cc). */
+            return NULL;
+        }
+        if (!copy_head) {
+            copy_head = cc;
+        } else {
+            leptris_node_set_next_sibling(copy_tail, cc);
+        }
+        copy_tail = cc;
+    }
+    return copy_head;
+}
+
 static LeptrisNode* adopt_for_splice(LeptrisNode* node,
                                      struct leptris_document* target) {
     if (!node || !target) return node;
@@ -306,7 +395,31 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
         !leptris_elem_parent((LeptrisElement)node) &&
         leptris_elem_has_namebp((LeptrisElement)node) &&
         leptris_elem_namebp_doc((LeptrisElement)node) == target)
-        return node;    /* Type-safe walk to the chain top: get_document reads
+        return node;
+    /* #1534: a non-element splice argument copies by kind —
+     * routing it through the element walk/copy would misread the
+     * struct. Foreign (stamped or attached elsewhere) adopts by
+     * copy; same-doc and unstamped detached chains (#540) stay
+     * zero-copy. */
+    if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) {
+        struct leptris_document* src;
+        LeptrisNode* top = node;
+        for (;;) {
+            LeptrisElement p = leptris_node_parent(top);
+            if (!p) break;
+            top = (LeptrisNode*)p;
+        }
+        if (top->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            src = leptris_element_get_document(
+                (LeptrisElement)top);
+        } else {
+            src = leaf_owner_doc(top);
+        }
+        if (!src || src == target) return node;
+        LeptrisNode* copy = copy_leaf_chain(node, target);
+        return copy;
+    }
+    /* Type-safe walk to the chain top: get_document reads
      * element-form fields and misreads non-element structs. */
     LeptrisNode* top = node;
     for (;;) {
@@ -314,7 +427,6 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
         if (!p) break;
         top = (LeptrisNode*)p;
     }
-    if (top->type != LEPTRIS_NODE_TYPE_ELEMENT) return node;
     struct leptris_document* src =
         leptris_element_get_document((LeptrisElement)top);
     if (!src || src == target) return node;
@@ -600,43 +712,37 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
 LeptrisStatus leptris_element_remove_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
-    /* Verify child is actually a child of parent */
-    LeptrisElement found = NULL;
-    LeptrisElement current = leptris_element_get_first_child(parent);
-    while (current) {
-        if (current == child) {
-            found = current;
-            break;
-        }
-        current = leptris_element_get_next_sibling(current);
+    /* Walk and relink with TYPE-SAFE accessors. The element-filtered
+     * getters skip non-element siblings, so with a chain like
+     * [<a>, text] the removal of <a> resolved next(<a>) to NULL and
+     * set first_child to NULL — orphaning the leaf tail (#1534, the
+     * #1220 class; remove_all_children walks type-safely for the same
+     * reason). `child` itself may be any node type: the LeptrisElement
+     * signature is ABI-stable only (same convention as insert_before). */
+    LeptrisNode* prev = NULL;
+    LeptrisNode* cur = leptris_node_first_child_internal((LeptrisNode*)parent);
+    while (cur && cur != (LeptrisNode*)child) {
+        prev = cur;
+        cur = leptris_node_get_next_sibling(cur);
     }
-
-    if (!found) {
+    if (!cur) {
         return LEPTRIS_ERROR_INVALID_ARG;
     }
 
-    /* Find the node before child in the list */
-    LeptrisElement prev_child = NULL;
-    current = leptris_element_get_first_child(parent);
-    while (current && current != child) {
-        prev_child = current;
-        current = leptris_element_get_next_sibling(current);
-    }
-
-    LeptrisElement next_child = leptris_element_get_next_sibling(child);
+    LeptrisNode* next = leptris_node_get_next_sibling(cur);
 
     /* Unlink child from the list */
-    if (prev_child) {
-        leptris_elem_set_next_sibling(prev_child, (LeptrisNode*)next_child);
+    if (prev) {
+        leptris_node_set_next_sibling(prev, next);
     } else {
         /* Child was first child */
-        leptris_elem_set_first_child(parent, (LeptrisNode*)next_child);
+        leptris_elem_set_first_child(parent, next);
     }
 
     /* Update last_child pointer - directly check instead of using get_last_child */
     if (leptris_elem_last_child(parent) == (LeptrisNode*)child) {
         /* Child was last child */
-        leptris_elem_set_last_child(parent, (LeptrisNode*)prev_child);
+        leptris_elem_set_last_child(parent, prev);
     }
 
     /* Clear parent and decrement count. The unlinked child must also
@@ -644,9 +750,33 @@ LeptrisStatus leptris_element_remove_child(LeptrisElement parent, LeptrisElement
      * chain remover both clear it, and a surviving link splices the
      * former following siblings into whichever parent later adopts
      * the child — up to self-containing cycles (leptris-ruby #370). */
-    leptris_elem_set_next_sibling(child, NULL);
-    leptris_elem_set_parent(child, NULL);
-    parent->child_count--;
+    leptris_node_set_next_sibling((LeptrisNode*)child, NULL);
+    switch (((LeptrisNode*)child)->type) {
+        case LEPTRIS_NODE_TYPE_ELEMENT:
+            leptris_elem_set_parent((LeptrisElement)child, NULL);
+            /* Issue #213 semantics: child_count counts ELEMENT
+             * children only — removing a leaf must not decrement. */
+            parent->child_count--;
+            break;
+        case LEPTRIS_NODE_TYPE_TEXT:
+            leptris_textnode_set_parent((LeptrisTextNode*)child, NULL);
+            break;
+        case LEPTRIS_NODE_TYPE_COMMENT:
+            leptris_comment_set_parent((LeptrisCommentNode*)child, NULL);
+            break;
+        case LEPTRIS_NODE_TYPE_CDATA:
+            leptris_cdata_set_parent((LeptrisCDATANode*)child, NULL);
+            break;
+        case LEPTRIS_NODE_TYPE_PI:
+            leptris_pi_set_parent((LeptrisPINode*)child, NULL);
+            break;
+        case LEPTRIS_NODE_TYPE_ENTITY_REF:
+            leptris_entity_ref_set_parent(
+                (LeptrisEntityRefNode*)child, NULL);
+            break;
+        default:
+            break;
+    }
 
     /* COW: Increment version */
     leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(parent));

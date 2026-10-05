@@ -335,3 +335,256 @@ TEST(CrossDocumentAdoption, ReplaceKeepsSameDocumentMoveZeroCopy) {
     leptris_free_string(xml);
     leptris_document_free(doc);
 }
+
+// ============================================================================
+// #1534 — mutate → free-scratch → serialize → RE-PARSE round trips.
+// Two holes behind one symptom ("malformed input" re-parsing generated
+// documents after moxml-style cleanup):
+//   (1) the #1528 adoption gate covered ELEMENT splices only — a
+//       TEXT/CDATA/COMMENT/PI node arriving from a scratch document
+//       was still spliced raw, so it dangled the moment the scratch
+//       document was freed;
+//   (2) leptris_element_remove_child walked and relinked the child
+//       chain with the ELEMENT-FILTERED accessors, which skip
+//       non-element siblings — removing <a> from [<a>, text] read
+//       next(<a>) as NULL and set first_child to NULL, orphaning the
+//       leaf tail (the #1220 class; remove_all_children already
+//       walked type-safely).
+// ============================================================================
+
+namespace {
+
+// First child of ANY node type — the element-form first_child_any is
+// element-filtered by contract, so leaves must come from the
+// node-form walk.
+static LeptrisElement FirstChildNode(LeptrisElement elem) {
+    return (LeptrisElement)leptris_node_first_child(
+        leptris_element_as_node(elem));
+}
+
+// Serialize `doc`, free it, re-parse the serialization, and return the
+// fresh document. The re-parse is the #1534 gate: a dangling or
+// orphaned leaf surfaces as corrupted bytes or as a parse error.
+// `expected_xml` may be null when the serializer spelling is not
+// pinned; content assertions belong to the caller then.
+static LeptrisDocument SerializeReparse(LeptrisDocument doc,
+                                        const char* expected_xml) {
+    char* xml = leptris_document_serialize(doc, NULL);
+    EXPECT_NE(xml, nullptr);
+    LeptrisDocument out = nullptr;
+    if (xml) {
+        if (expected_xml) EXPECT_STREQ(xml, expected_xml);
+        LeptrisStatus st = LEPTRIS_OK;
+        out = leptris_parse_string(xml, std::strlen(xml), &st);
+        EXPECT_EQ(st, LEPTRIS_OK);
+        leptris_free_string(xml);
+    }
+    leptris_document_free(doc);
+    return out;
+}
+
+static std::string XPathString(LeptrisDocument doc, const char* expr) {
+    std::string out;
+    LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+    if (!c) return out;
+    LeptrisXPathResult r = leptris_xpath_compiled_eval(c, doc, nullptr);
+    if (r) {
+        char* s = leptris_xpath_result_string(r);
+        if (s) {
+            out = s;
+            leptris_free_string(s);
+        }
+        leptris_xpath_result_free(r);
+    }
+    leptris_xpath_compiled_free(c);
+    return out;
+}
+
+}  // namespace
+
+// The exact #1534 pipeline: a scratch-document TEXT node replaces <a>
+// (insert_after + remove_child), the scratch document dies, the result
+// must serialize AND re-parse with the text intact.
+TEST(CrossDocumentLeafAdoption, TextSpliceRemoveRoundTrips) {
+    LeptrisDocument live =
+        Parse("<html><body><div><a>old</a></div></body></html>");
+    ASSERT_NE(live, nullptr);
+    LeptrisDocument scratch = Parse("<z>replaced &lt;tag&gt; text</z>");
+    ASSERT_NE(scratch, nullptr);
+
+    LeptrisElement html = leptris_document_root(live);
+    ASSERT_NE(html, nullptr);
+    LeptrisElement body = leptris_element_first_child_any(html);
+    ASSERT_NE(body, nullptr);
+    LeptrisElement div = leptris_element_first_child_any(body);
+    ASSERT_NE(div, nullptr);
+    LeptrisElement a = leptris_element_first_child_any(div);
+    ASSERT_NE(a, nullptr);
+
+    LeptrisElement zroot = leptris_document_root(scratch);
+    ASSERT_NE(zroot, nullptr);
+    LeptrisElement ztext = FirstChildNode(zroot);
+    ASSERT_NE(ztext, nullptr);
+    ASSERT_EQ(leptris_node_get_type(leptris_element_as_node(ztext)), kText);
+
+    EXPECT_EQ(leptris_element_insert_after(a, ztext), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_remove_child(div, a), LEPTRIS_OK);
+    leptris_document_free(scratch);
+
+    LeptrisDocument rt = SerializeReparse(
+        live,
+        "<html><body><div>replaced &lt;tag&gt; text</div></body></html>");
+    ASSERT_NE(rt, nullptr);
+    EXPECT_EQ(XPathString(rt, "string(//div)"), "replaced <tag> text");
+    leptris_document_free(rt);
+}
+
+// Same pipeline for the other leaf kinds. CDATA's serialized spelling
+// is not pinned (CDATA or escaped text are both conformant); its
+// content must survive the round trip either way.
+TEST(CrossDocumentLeafAdoption, OtherLeafKindsRoundTrip) {
+    const struct {
+        const char* scratch_xml;
+        const char* expected_xml;  // null = don't pin spelling
+        const char* div_text;      // string(//div) on the re-parse
+    } cases[] = {
+        {"<z><!--note--></z>",
+         "<html><body><div><!--note--></div></body></html>", ""},
+        {"<z><![CDATA[cd-data]]></z>", nullptr, "cd-data"},
+        {"<z><?tgt data?></z>",
+         "<html><body><div><?tgt data?></div></body></html>", ""},
+    };
+    for (const auto& tc : cases) {
+        LeptrisDocument live =
+            Parse("<html><body><div><a/></div></body></html>");
+        ASSERT_NE(live, nullptr);
+        LeptrisDocument scratch = Parse(tc.scratch_xml);
+        ASSERT_NE(scratch, nullptr);
+
+        LeptrisElement html = leptris_document_root(live);
+        ASSERT_NE(html, nullptr);
+        LeptrisElement body = leptris_element_first_child_any(html);
+        ASSERT_NE(body, nullptr);
+        LeptrisElement div = leptris_element_first_child_any(body);
+        ASSERT_NE(div, nullptr);
+        LeptrisElement a = leptris_element_first_child_any(div);
+        ASSERT_NE(a, nullptr);
+
+        LeptrisElement zroot = leptris_document_root(scratch);
+        ASSERT_NE(zroot, nullptr);
+        LeptrisElement leaf = FirstChildNode(zroot);
+        ASSERT_NE(leaf, nullptr);
+
+        EXPECT_EQ(leptris_element_insert_after(a, leaf), LEPTRIS_OK);
+        EXPECT_EQ(leptris_element_remove_child(div, a), LEPTRIS_OK);
+        leptris_document_free(scratch);
+
+        LeptrisDocument rt = SerializeReparse(live, tc.expected_xml);
+        ASSERT_NE(rt, nullptr);
+        EXPECT_EQ(XPathString(rt, "string(//div)"), tc.div_text);
+        leptris_document_free(rt);
+    }
+}
+
+// Hole (1) in isolation: a scratch leaf APPENDED to a live element
+// must survive the scratch document being freed.
+TEST(CrossDocumentLeafAdoption, TextAppendSurvivesScratchFree) {
+    LeptrisDocument live = Parse("<r><a/></r>");
+    ASSERT_NE(live, nullptr);
+    LeptrisDocument scratch = Parse("<z>replacement</z>");
+    ASSERT_NE(scratch, nullptr);
+
+    LeptrisElement root = leptris_document_root(live);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement zroot = leptris_document_root(scratch);
+    ASSERT_NE(zroot, nullptr);
+    LeptrisElement ztext = FirstChildNode(zroot);
+    ASSERT_NE(ztext, nullptr);
+
+    EXPECT_EQ(leptris_element_append_child(root, ztext), LEPTRIS_OK);
+    leptris_document_free(scratch);
+
+    LeptrisDocument rt = SerializeReparse(live, "<r><a/>replacement</r>");
+    ASSERT_NE(rt, nullptr);
+    EXPECT_EQ(XPathString(rt, "string(/r)"), "replacement");
+    leptris_document_free(rt);
+}
+
+// Hole (2) in isolation: same-document mixed chains. The removed
+// child sits in every position against non-element siblings; the
+// leaves around it must all survive.
+TEST(RemoveChildMixedChain, EveryPositionKeepsLeafSiblings) {
+    const struct {
+        const char* doc_xml;
+        const char* remove_name;  // element to remove ("#text" = the
+                                  // first text child, cast per the
+                                  // ABI-stable convention)
+        const char* expected_xml;
+    } cases[] = {
+        {"<r><a/>t<b/></r>", "a", "<r>t<b/></r>"},
+        {"<r><a/>t</r>", "a", "<r>t</r>"},
+        {"<r>t<a/></r>", "a", "<r>t</r>"},
+        {"<r><a/>t<b/></r>", "b", "<r><a/>t</r>"},
+        {"<r>t0<a/>t1<b/></r>", "a", "<r>t0t1<b/></r>"},
+        {"<r><a/>t</r>", "#text", "<r><a/></r>"},
+    };
+    for (const auto& tc : cases) {
+        SCOPED_TRACE(tc.doc_xml);
+        LeptrisDocument doc = Parse(tc.doc_xml);
+        ASSERT_NE(doc, nullptr);
+        LeptrisElement root = leptris_document_root(doc);
+        ASSERT_NE(root, nullptr);
+
+        LeptrisElement victim;
+        if (std::strcmp(tc.remove_name, "#text") == 0) {
+            // First text child of the root, via the node-form walk.
+            victim = FirstChildNode(root);
+            while (victim && leptris_node_get_type(
+                                 leptris_element_as_node(victim)) != kText) {
+                victim = (LeptrisElement)leptris_node_next_sibling(
+                    leptris_element_as_node(victim));
+            }
+            ASSERT_NE(victim, nullptr);
+            ASSERT_EQ(
+                leptris_node_get_type(leptris_element_as_node(victim)),
+                kText);
+        } else {
+            victim = leptris_element_first_child_any(root);
+            while (victim && std::strcmp(leptris_element_name(victim),
+                                         tc.remove_name) != 0) {
+                victim = leptris_element_next_sibling_any(victim);
+            }
+            ASSERT_NE(victim, nullptr);
+        }
+
+        size_t elem_count_before = leptris_element_child_count(root);
+        EXPECT_EQ(leptris_element_remove_child(root, victim), LEPTRIS_OK);
+        if (std::strcmp(tc.remove_name, "#text") != 0) {
+            // Issue #213 semantics: child_count counts ELEMENT
+            // children only — removing a leaf must not decrement it.
+            EXPECT_EQ(leptris_element_child_count(root),
+                      elem_count_before - 1);
+        } else {
+            EXPECT_EQ(leptris_element_child_count(root),
+                      elem_count_before);
+        }
+
+        char* xml = leptris_document_serialize(doc, NULL);
+        ASSERT_NE(xml, nullptr);
+        EXPECT_STREQ(xml, tc.expected_xml);
+        leptris_free_string(xml);
+        leptris_document_free(doc);
+    }
+}
+
+// A child that is not actually a child must still be rejected.
+TEST(RemoveChildMixedChain, NonChildStillInvalid) {
+    LeptrisDocument doc = Parse("<r><a/></r>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement detached = leptris_element_create(doc, "z");
+    ASSERT_NE(detached, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    EXPECT_EQ(leptris_element_remove_child(root, detached),
+              LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(doc);
+}
