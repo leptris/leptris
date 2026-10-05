@@ -2825,6 +2825,24 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         m = tag == (int)LEPTRIS_NODE_TEXT && !is_num_member;
                     } else if (is_bool_ty) {
                         m = 0;
+                    } else if (strcmp(base, "xs:yearMonthDuration") == 0 ||
+                               strcmp(base, "xs:dayTimeDuration") == 0) {
+                        /* duration members ride the 'd' marker; a
+                         * months-only lexical is yearMonth (dayTime
+                         * never spells months) — kept ahead of the
+                         * is_num_ty catch-all, which would swallow
+                         * them */
+                        m = mc && mc[0] == '\x03' && mc[1] == 'd';
+                        if (m) {
+                            double mv, sv;
+                            int months_only =
+                                leptris_dur_try_months(mc + 2, &mv);
+                            m = base[3] == 'y'
+                                    ? months_only
+                                    : (!months_only &&
+                                       leptris_dur_try_seconds(mc + 2,
+                                                               &sv));
+                        }
                     } else if (is_num_ty) {
                         m = is_num_member;
                         if (m && is_int_ty && mc) {
@@ -2840,6 +2858,17 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                  * occurrence indicator admits it. */
                 if (is_string_ty) m = v->type == XPATH_RESULT_STRING;
                 else if (is_bool_ty) m = v->type == XPATH_RESULT_BOOLEAN;
+                else if (strcmp(base, "xs:yearMonthDuration") == 0 ||
+                         strcmp(base, "xs:dayTimeDuration") == 0) {
+                    /* duration-typed results carry their atomic
+                     * type from the constructor/aggregator; a plain
+                     * string is not a duration (fn-avg-3/5,
+                     * fn-max/min-4/6) — kept ahead of the is_num_ty
+                     * catch-all, which would swallow them */
+                    m = v->type == XPATH_RESULT_STRING &&
+                        v->atomic_type &&
+                        strcmp(v->atomic_type, base) == 0;
+                }
                 else if (is_num_ty) {
                     m = v->type == XPATH_RESULT_NUMBER;
                     if (m && is_int_ty)

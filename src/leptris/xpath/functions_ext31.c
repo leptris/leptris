@@ -762,6 +762,35 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                 leptris_dur_format_months(tot / (double)cnt, mbuf,
                                           sizeof mbuf);
                 out->value.string_value = leptris_strdup(mbuf);
+                out->atomic_type = "xs:yearMonthDuration";
+            }
+            free_items(items, cnt);
+            return out;
+        }
+    }
+    /* min/max over yearMonthDuration items compare months and spell
+     * canonically through the months formatter; the result is
+     * duration-typed (fn-max-6/7, fn-min-6/7, cbcl-max-015). */
+    if (which >= 2) {
+        double m0;
+        int all_ymd = 1;
+        for (size_t k = 0; k < cnt && all_ymd; k++)
+            if (!leptris_dur_try_months(items[k], &m0)) all_ymd = 0;
+        if (all_ymd && cnt > 0) {
+            double bm = 0;
+            for (size_t k = 0; k < cnt; k++) {
+                double mk;
+                leptris_dur_try_months(items[k], &mk);
+                if (k == 0 || (which == 2 && mk < bm) ||
+                    (which == 3 && mk > bm)) bm = mk;
+            }
+            char mbuf[64];
+            xpath_result_free(out);
+            out = xpath_result_new(XPATH_RESULT_STRING);
+            if (out) {
+                leptris_dur_format_months(bm, mbuf, sizeof mbuf);
+                out->value.string_value = leptris_strdup(mbuf);
+                out->atomic_type = "xs:yearMonthDuration";
             }
             free_items(items, cnt);
             return out;
@@ -796,13 +825,39 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
                     leptris_dur_format(tot / (double)cnt, dbuf,
                                        sizeof dbuf);
                     out->value.string_value = leptris_strdup(dbuf);
+                    out->atomic_type = "xs:dayTimeDuration";
                 }
                 free_items(items, cnt);
                 return out;
             }
             out = xpath_result_new(XPATH_RESULT_STRING);
-            if (out)
+            if (out) {
                 out->value.string_value = leptris_strdup(items[bi]);
+                out->atomic_type = "xs:dayTimeDuration";
+            }
+            free_items(items, cnt);
+            return out;
+        }
+    }
+    /* min/max over xs:boolean: false < true, and the result is a
+     * boolean — a string "false" would EBV truthy at every
+     * assert-false site (cbcl-max-001, cbcl-min-002). */
+    if (which >= 2) {
+        int all_bool = 1, any_true = 0, all_true = 1;
+        for (size_t k = 0; k < cnt && all_bool; k++) {
+            if (strcmp(items[k], "true") == 0) {
+                any_true = 1;
+            } else if (strcmp(items[k], "false") != 0) {
+                all_bool = 0;
+            } else {
+                all_true = 0;
+            }
+        }
+        if (all_bool && cnt > 0) {
+            xpath_result_free(out);
+            out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+            if (out) out->value.boolean_value =
+                (which == 3) ? any_true : all_true;
             free_items(items, cnt);
             return out;
         }
@@ -813,12 +868,19 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
     /* F&O: max/min over non-numeric items (xs:string, xs:anyURI)
      * compare in codepoint order and return the extreme ITEM. */
     int all_str = (cnt > 0);
+    /* Any numeric NaN in the input forces the NaN result — the
+     * comparison operators never select it (d > best is false for
+     * NaN), so it is tracked explicitly (K-SeqMAXFunc-27). */
+    int has_nan = 0;
     for (size_t k = 0; k < cnt; k++) {
         char* end = NULL;
         double d = strtod(items[k], &end);
         int is_num = items[k][0] != '\0' && end != items[k] &&
                      *end == '\0';
-        if (is_num) all_str = 0;
+        if (is_num) {
+            all_str = 0;
+            if (isnan(d)) has_nan = 1;
+        }
         if (items[k][0] == '\0') d = 0;   /* empty string -> NaN in spec; treat 0 */
         acc += d;
         if (first) { best = d; first = 0; }
@@ -826,6 +888,7 @@ static struct leptris_xpath_result* fn_avg_min_max(XPathContext* ctx,
         else if (which == 3 && d > best) best = d;   /* max */
         numeric++;
     }
+    if (which >= 2 && has_nan) best = NAN;
     if (which >= 2 && all_str) {
         size_t bi = 0;
         for (size_t k = 1; k < cnt; k++) {

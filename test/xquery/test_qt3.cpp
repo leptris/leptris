@@ -949,16 +949,8 @@ TEST(Qt3Subset, FnAbs) {
                  "fn-abs-1"});
 }
 TEST(Qt3Subset, FnAvg) {
-    run_test_set("fn/avg.xml", {}, 173, {},
-                 {"cbcl-avg-008",
-                 "fn-avg-3",
-                 "fn-avg-5",
-                 "fn-avg-mix-args-012",
-                 "fn-avg-mix-args-013",
-                 "fn-avg-mix-args-014",
-                 "fn-avg-mix-args-015",
-                 "fn-avgintg2args-2",
-                 "fn-avgintg2args-4"});
+    run_test_set("fn/avg.xml", {}, 175, {},
+                 {"cbcl-avg-008", "fn-avgintg2args-2", "fn-avgintg2args-4", "fn-avg-mix-args-012", "fn-avg-mix-args-013", "fn-avg-mix-args-014", "fn-avg-mix-args-015"});
 }
 TEST(Qt3Subset, FnCeiling) {
     run_test_set("fn/ceiling.xml", {}, 39, {},
@@ -973,29 +965,12 @@ TEST(Qt3Subset, FnFloor) {
                  "fn-floorflt1args-3"});
 }
 TEST(Qt3Subset, FnMax) {
-    run_test_set("fn/max.xml", {}, 167, {},
-                 {"K-SeqMAXFunc-16",
-                 "K-SeqMAXFunc-27",
-                 "K-SeqMAXFunc-28",
-                 "K-SeqMAXFunc-31",
-                 "cbcl-max-001",
-                 "cbcl-max-015",
-                 "fn-max-10",
-                 "fn-max-4",
-                 "fn-max-6",
-                 "fn-max-7"});
+    run_test_set("fn/max.xml", {}, 176, {},
+                 {"fn-max-10"});
 }
 TEST(Qt3Subset, FnMin) {
-    run_test_set("fn/min.xml", {}, 167, {},
-                 {"K-SeqMINFunc-16",
-                 "K-SeqMINFunc-27",
-                 "K-SeqMINFunc-28",
-                 "K-SeqMINFunc-31",
-                 "cbcl-min-002",
-                 "fn-min-10",
-                 "fn-min-4",
-                 "fn-min-6",
-                 "fn-min-7"});
+    run_test_set("fn/min.xml", {}, 175, {},
+                 {"fn-min-10"});
 }
 TEST(Qt3Subset, FnRound) { run_test_set("fn/round.xml", {}, 220); }
 TEST(Qt3Subset, FnRoundHalfToEven) {
@@ -1008,13 +983,8 @@ TEST(Qt3Subset, FnRoundHalfToEven) {
                  "cbcl-round-half-to-even-012"});
 }
 TEST(Qt3Subset, FnSum) {
-    run_test_set("fn/sum.xml", {}, 204, {},
-                 {"K-SeqSUMFunc-30",
-                 "K-SeqSUMFunc-5",
-                 "fn-sum-12",
-                 "fn-sum-3",
-                 "fn-sum-6",
-                 "fn-sum-8"});
+    run_test_set("fn/sum.xml", {}, 209, {},
+                 {"fn-sum-8"});
 }
 TEST(Qt3Subset, FnApply) {
     run_test_set("fn/apply.xml", {}, 5, {},

@@ -2234,17 +2234,24 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         return NULL;
     }
 
-    /* fn:sum#2 zero: the value returned for the empty sequence.
-     * XQuery-only surface; the numeric zero is the supported form
-     * (duration zeros need duration algebra). */
+    /* fn:sum#2 zero: the value returned for the empty sequence —
+     * never an addend (fn-sum-12: sum((1 to 3), 17) = 6). An EMPTY
+     * zero leaves the empty result empty (K-SeqSUMFunc-5). */
     double zero = 0.0;
     int has_zero = 0;
+    int zero_is_empty = 0;
     long long isum_seed = 0;
     int zero_non_int = 0;
     char* zero_lex = NULL;  /* owned: the zero's lexical form */
     if (arg_count == 2) {
         struct leptris_xpath_result* zr = xpath_evaluate(context, args[1]);
         if (!zr) return NULL;
+        if (zr->type == XPATH_RESULT_NODESET &&
+            (!zr->value.nodeset_value ||
+             xpath_nodeset_count(zr->value.nodeset_value) == 0)) {
+            zero_is_empty = 1;
+            xpath_result_free(zr);
+        } else {
         char* zs = result_to_string(zr);
         xpath_result_free(zr);
         if (!zs) return NULL;
@@ -2271,12 +2278,13 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
             if (!zero_lex) LEPTRIS_FREE(zs);
             has_zero = 1;
         }
+        }
     }
 
     struct leptris_xpath_result* arg_result = xpath_evaluate(context, args[0]);
     if (!arg_result) return NULL;
 
-    double sum = zero;
+    double sum = 0;
     int has_nan = 0;
     size_t count = 0;
     /* int64-exact accumulation: integer sums past 2^53 lose digits
@@ -2293,6 +2301,71 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
         XPathNodeSet* nodeset = arg_result->value.nodeset_value;
         if (nodeset) {
             count = xpath_nodeset_count(nodeset);
+            /* Duration sums take their own channels: all-months or
+             * all-seconds items total through the shared duration
+             * formatters (fn-sum-3, fn-sum-6). This must precede
+             * the numeric accumulation — a "P1D" item is not a
+             * number, and the numeric path would force NaN. */
+            if (count > 0) {
+                int all_ymd = 1, all_dtd = 1;
+                double mtot = 0, stot = 0;
+                for (size_t i = 0;
+                     i < count && (all_ymd || all_dtd); i++) {
+                    void* node = xpath_nodeset_get(nodeset, i);
+                    const char* mc = NULL;
+                    if ((int)XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT)
+                        mc = ((XPathTextNode*)node)->content;
+                    char** am = NULL;
+                    size_t an = 0;
+                    char* single = NULL;
+                    char** vals = NULL;
+                    size_t nv = 0;
+                    if (mc && mc[0] == '\x03' && mc[1] == 'M' &&
+                        xpath_array_members_of(mc, &am, &an)) {
+                        vals = am;
+                        nv = an;
+                    } else {
+                        single = get_node_text(node);
+                        vals = &single;
+                        nv = single ? 1 : 0;
+                    }
+                    for (size_t j = 0; j < nv; j++) {
+                        double mv, sv;
+                        if (!leptris_dur_try_months(vals[j], &mv))
+                            all_ymd = 0;
+                        else
+                            mtot += mv;
+                        if (!leptris_dur_try_seconds(vals[j], &sv))
+                            all_dtd = 0;
+                        else
+                            stot += sv;
+                    }
+                    free(am);
+                    if (single) LEPTRIS_FREE(single);
+                }
+                if (all_ymd || all_dtd) {
+                    char dbuf[64];
+                    struct leptris_xpath_result* dr =
+                        xpath_result_new(XPATH_RESULT_STRING);
+                    if (dr) {
+                        if (all_ymd)
+                            leptris_dur_format_months(mtot, dbuf,
+                                                      sizeof dbuf);
+                        else
+                            leptris_dur_format(stot, dbuf,
+                                               sizeof dbuf);
+                        dr->value.string_value = leptris_strdup(dbuf);
+                        /* the result is a duration: typed for
+                         * instance of (fn-sum-1/4) */
+                        dr->atomic_type = all_ymd
+                            ? "xs:yearMonthDuration"
+                            : "xs:dayTimeDuration";
+                    }
+                    xpath_result_free(arg_result);
+                    LEPTRIS_FREE(zero_lex);
+                    return dr;
+                }
+            }
             for (size_t i = 0; i < count; i++) {
                 void* node = xpath_nodeset_get(nodeset, i);
                 const char* mc = NULL;
@@ -2373,12 +2446,31 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
     if (has_nan) {
         LEPTRIS_FREE(zero_lex);
         result->value.number_value = NAN;
-    } else if (all_int && !zero_non_int && !iovf && (count > 0 || has_zero)) {
+    } else if (count == 0 && zero_is_empty) {
+        /* sum($s, ()) keeps the empty result empty */
+        LEPTRIS_FREE(zero_lex);
+        xpath_result_free(result);
+        result = xpath_result_new(XPATH_RESULT_NODESET);
+        if (result) {
+            result->value.nodeset_value = xpath_nodeset_new();
+            if (!result->value.nodeset_value) {
+                xpath_result_free(result);
+                result = NULL;
+            }
+        }
+        return result;
+    } else if (all_int && !zero_non_int && !iovf && count > 0) {
+        /* the zero is the empty-sequence answer only — a non-empty
+         * sum never includes it (fn-sum-12: sum((1 to 3), 17)=6) */
         result->is_int = 1;
-        result->int_value = isum + isum_seed;
+        result->int_value = isum;
         /* eq/boolean compare through the double field even when the
          * int64 channel carries the exact value. */
-        result->value.number_value = (double)(isum + isum_seed);
+        result->value.number_value = (double)isum;
+    } else if (count == 0 && has_zero && all_int && !zero_non_int) {
+        result->is_int = 1;
+        result->int_value = isum_seed;
+        result->value.number_value = (double)isum_seed;
     } else if (count == 0 && zero_lex) {
         xpath_result_free(result);
         result = xpath_result_new(XPATH_RESULT_STRING);
@@ -2392,7 +2484,10 @@ static struct leptris_xpath_result* xpath_func_sum(XPathContext* context,
          * the adapter, not here). */
         result->value.number_value = 0;
     } else {
-        result->value.number_value = sum;
+        /* the zero only answers the empty sequence; add it back
+         * just there (sum((), 3.5) = 3.5) */
+        result->value.number_value =
+            sum + ((count == 0 && has_zero) ? zero : 0.0);
         if (all_float && count > 0) result->atomic_type = "xs:float";
     }
     LEPTRIS_FREE(zero_lex);

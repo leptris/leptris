@@ -244,6 +244,91 @@ TEST(XQueryCore, ArrayAtomizedAggregates) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, MinMaxNaNCoercion) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc, "string(max((1, xs:double(\"NaN\"))))"),
+              "NaN");
+    EXPECT_EQ(seq_string(doc, "string(max((3, xs:float(\"NaN\"))))"),
+              "NaN");
+    EXPECT_EQ(seq_string(doc,
+        "string(max((xs:float(-3), xs:untypedAtomic(\"3\"),"
+        " xs:double(\"NaN\"))))"), "NaN");
+    EXPECT_EQ(seq_string(doc, "string(min((2, xs:double(\"NaN\"))))"),
+              "NaN");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, MinMaxDurationTyping) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "max((xs:yearMonthDuration(\"P1Y\"),"
+        " xs:yearMonthDuration(\"P1M\")))"
+        " instance of xs:yearMonthDuration"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "max(for $x in 1 to 10 return"
+        " xs:yearMonthDuration(concat(\"P\",$x,\"M\")))"), "P10M");
+    EXPECT_EQ(seq_string(doc,
+        "min(for $x in 1 to 10 return"
+        " xs:yearMonthDuration(concat(\"P\",$x,\"M\")))"), "P1M");
+    EXPECT_EQ(seq_string(doc,
+        "max((xs:dayTimeDuration(\"P1D\"),"
+        " xs:dayTimeDuration(\"PT2H\"))) instance of xs:dayTimeDuration"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "min((xs:dayTimeDuration(\"P1D\"),"
+        " xs:dayTimeDuration(\"PT2H\"))) instance of xs:dayTimeDuration"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "avg((xs:dayTimeDuration(\"P1D\"),"
+        " xs:dayTimeDuration(\"PT2H\"))) instance of xs:dayTimeDuration"),
+        "true");
+    EXPECT_EQ(seq_string(doc,
+        "avg((xs:yearMonthDuration(\"P1Y\"),"
+        " xs:yearMonthDuration(\"P1M\"))) instance of xs:yearMonthDuration"),
+        "true");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, MinMaxBooleans) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* the result is a BOOLEAN: assert-false EBVs it, and a string
+     * "false" would EBV truthy (cbcl-max-001) */
+    EXPECT_EQ(seq_string(doc,
+        "max((false(), false(), false())) instance of xs:boolean"),
+        "true");
+    EXPECT_EQ(seq_string(doc, "max((false(), false(), false()))"),
+              "false");
+    EXPECT_EQ(seq_string(doc, "max((true(), false()))"), "true");
+    EXPECT_EQ(seq_string(doc, "min((true(), false(), true()))"), "false");
+    EXPECT_EQ(seq_string(doc, "min((true(), true()))"), "true");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryCore, SumZeroAndDurations) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* fn:sum#2: the zero is the EMPTY-sequence answer only, never
+     * an addend (fn-sum-12) */
+    EXPECT_EQ(seq_string(doc, "sum((1 to 3), 17)"), "6");
+    EXPECT_EQ(seq_string(doc, "sum((), 17)"), "17");
+    /* an empty zero leaves the empty result empty (K-SeqSUMFunc-5) */
+    EXPECT_EQ(seq_string(doc, "empty(sum((), ()))"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "sum(for $x in 1 to 10 return"
+        " xs:yearMonthDuration(concat(\"P\",$x,\"M\")))"), "P4Y7M");
+    EXPECT_EQ(seq_string(doc,
+        "sum(for $x in 1 to 10 return"
+        " xs:dayTimeDuration(concat(\"PT\",$x,\"H\")))"), "P2DT7H");
+    EXPECT_EQ(seq_string(doc,
+        "sum((xs:yearMonthDuration(\"P20Y\"),"
+        " xs:yearMonthDuration(\"P10M\")))"
+        " eq xs:yearMonthDuration(\"P250M\")"), "true");
+    leptris_document_free(doc);
+}
+
 TEST(XQueryCore, OrderByDescending) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
                                                nullptr);
