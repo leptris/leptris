@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.308] - 2026-10-05
+
+### Added
+
+- shared descriptor-ABI crate (leptris-descriptor) — ruby#294 topology step 1 (rust)
+- fn:avg promotion ladder + int64-exact division; typeswitch $var arms; fn:apply conversions (QT3 #1182 tail) (xpath)
+
+### Fixed
+
+- fn:apply literal-array atomization frees the replaced spelling (LSan) (xpath)
+- free the avg kind array on every fn_avg_min_max exit (LSan) (xpath)
+- portable int64 overflow check in the fn:avg integer path (MSVC) (xpath)
+
+
+
 ## [1.9.307] - 2026-10-05
 
 ### Fixed
