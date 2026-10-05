@@ -54,6 +54,16 @@
 
 ## [1.9.305] - 2026-10-05
 
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
+## [1.9.305] - 2026-10-05
+
 ### Performance
 
 - **DOM: the #1528 adoption gate no longer taxes the append hot
