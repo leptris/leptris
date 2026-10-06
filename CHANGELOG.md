@@ -4,7 +4,21 @@
 
 ### Added
 
-- leptris_document_absorb — move semantics for doomed splice sources (#1548) (dom)
+- **`leptris_document_absorb(dst, src)` — move semantics for doomed
+  splice sources (#1548).** The #1528 cross-document adoption gate
+  deep-copies every foreign splice, doubling the live set; the
+  sectioned-semantic cleanup flow (scratch-document splices) pushed
+  the cg3 corpus past a 7GB budget (fatal alloc ~396s; completes at
+  16GB). One call before the splices transfers a doomed source
+  document's lifetime into the destination (riding the existing
+  xi:include ownership chain): the adoption gate then moves nodes by
+  reference — O(1) per seam, no copy, no live-set doubling, and
+  existing splice code is unchanged. The caller's later
+  `leptris_document_free(src)` releases only the handle; the
+  destination's free performs the real release. Splicing an absorbed
+  document's nodes into any OTHER document still deep-copies, and
+  the no-absorb copy contract is unchanged. No chaining: an
+  absorbed document cannot absorb or be absorbed again.
 
 
 
