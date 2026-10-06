@@ -961,3 +961,339 @@ TEST(Plan1269b, MaterializeParsePlusWalkEqualsWalk) {
     leptris_plan_free(plan);
     leptris_document_free(doc);
 }
+
+// ---- #1552: wildcard (catch-all) child rows -----------------------
+// A WILDCARD row binds every element child that no named sibling row
+// bound, regardless of row-list position: named rows always win. The
+// row emits one COLLECTION echoing its wire_name/type_tag; members
+// keep document order and each echoes the row type_tag for hydrator
+// routing. Row-level ns_form filters the captured remainder; an unset
+// form means ANY namespace (catch-all), unlike named rows' NONE.
+// child_plan_index >= 0 walks each member through that plan (ELEMENT
+// members); otherwise members are RAW serialized subtrees.
+
+TEST(Plan1552, WildcardRowCatchesRemainderAfterNamedRows) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<root><a>1</a><m:x xmlns:m='urn:m'>2</m:x><b>3</b>"
+        "<other>4</other><a>5</a></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan kids[3] = {};
+    kids[0].wire_name = "a";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[1].wire_name = "b";
+    kids[1].kind = LEPTRIS_PLAN_KIND_COLLECTION;
+    kids[1].type_tag = 2;
+    kids[1].child_plan_index = -1;
+    kids[2].wire_name = "*";
+    kids[2].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    kids[2].type_tag = 9;
+    kids[2].child_plan_index = -1;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 3;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* Named rows capture exactly as before: two a-scalars, one
+     * b-collection — then the wildcard bucket. */
+    ASSERT_EQ(leptris_plan_value_count(r), 4u);
+    EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(r, 0)), "1");
+    EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(r, 1)), "5");
+
+    LeptrisPlanResult bcol = leptris_plan_value_at(r, 2);
+    ASSERT_NE(bcol, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(bcol), 1u);
+    EXPECT_STREQ(leptris_plan_value_string(
+                     leptris_plan_value_at(bcol, 0)), "3");
+
+    LeptrisPlanResult wcol = leptris_plan_value_at(r, 3);
+    ASSERT_NE(wcol, nullptr);
+    EXPECT_EQ(leptris_plan_value_kind(wcol),
+              LEPTRIS_PLAN_VALUE_COLLECTION);
+    EXPECT_STREQ(leptris_plan_value_name(wcol), "*");
+    EXPECT_EQ(leptris_plan_value_type_tag(wcol), 9);
+    /* Remainder in document order: m:x (2nd child) then other
+     * (4th). Both members echo the row type_tag. */
+    ASSERT_EQ(leptris_plan_value_count(wcol), 2u);
+    LeptrisPlanResult m0 = leptris_plan_value_at(wcol, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_EQ(leptris_plan_value_kind(m0), LEPTRIS_PLAN_VALUE_RAW);
+    EXPECT_EQ(leptris_plan_value_type_tag(m0), 9);
+    EXPECT_NE(strstr(leptris_plan_value_string(m0), "m:x"), nullptr);
+    LeptrisPlanResult m1 = leptris_plan_value_at(wcol, 1);
+    ASSERT_NE(m1, nullptr);
+    EXPECT_NE(strstr(leptris_plan_value_string(m1), "other"), nullptr);
+    EXPECT_LT(leptris_plan_value_order_index(m0),
+              leptris_plan_value_order_index(m1));
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1552, NamedRowsTakePrecedenceRegardlessOfRowOrder) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<root><a>1</a><m:x xmlns:m='urn:m'>2</m:x><b>3</b>"
+        "<other>4</other><a>5</a></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    /* Wildcard listed FIRST — it must still lose every child that
+     * a named row binds. */
+    leptris_child_plan kids[3] = {};
+    kids[0].wire_name = "*";
+    kids[0].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    kids[0].type_tag = 9;
+    kids[0].child_plan_index = -1;
+    kids[1].wire_name = "a";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[1].type_tag = 1;
+    kids[1].child_plan_index = -1;
+    kids[2].wire_name = "b";
+    kids[2].kind = LEPTRIS_PLAN_KIND_COLLECTION;
+    kids[2].type_tag = 2;
+    kids[2].child_plan_index = -1;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 3;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* Same remainder as the wildcard-last case: only m:x and
+     * other. The named a/b rows keep their captures. */
+    ASSERT_EQ(leptris_plan_value_count(r), 4u);
+    LeptrisPlanResult wcol = leptris_plan_value_at(r, 3);
+    ASSERT_NE(wcol, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(wcol), 2u);
+    EXPECT_NE(strstr(leptris_plan_value_string(
+                         leptris_plan_value_at(wcol, 0)), "m:x"),
+              nullptr);
+    EXPECT_NE(strstr(leptris_plan_value_string(
+                         leptris_plan_value_at(wcol, 1)), "other"),
+              nullptr);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1552, WildcardNsFormFiltersTheCapturedRemainder) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<root><a>1</a><m:x xmlns:m='urn:m'>2</m:x><other>4</other></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "a";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[1].wire_name = "*";
+    kids[1].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    kids[1].type_tag = 9;
+    kids[1].child_plan_index = -1;
+    kids[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[1].ns_uri = "urn:m";
+    kids[1].pad0 = 1; /* explicit form */
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+    LeptrisPlanResult wcol = leptris_plan_value_at(r, 1);
+    ASSERT_NE(wcol, nullptr);
+    /* EXACT(urn:m) keeps only the namespaced member. */
+    ASSERT_EQ(leptris_plan_value_count(wcol), 1u);
+    EXPECT_NE(strstr(leptris_plan_value_string(
+                         leptris_plan_value_at(wcol, 0)), "m:x"),
+              nullptr);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+
+    /* NONE keeps only the no-namespace remainder. */
+    kids[1].ns_form = LEPTRIS_PLAN_NS_NONE;
+    kids[1].ns_uri = NULL;
+    /* pad0 stays 1 from the first scenario: NONE is explicit. */
+    plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    wcol = leptris_plan_value_at(r, 1);
+    ASSERT_NE(wcol, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(wcol), 1u);
+    EXPECT_NE(strstr(leptris_plan_value_string(
+                         leptris_plan_value_at(wcol, 0)), "other"),
+              nullptr);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1552, WildcardRowWalksMembersThroughChildPlan) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<root><a>1</a><wrap><z>deep</z></wrap></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan root_kids[2] = {};
+    root_kids[0].wire_name = "a";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    root_kids[0].type_tag = 1;
+    root_kids[0].child_plan_index = -1;
+    root_kids[1].wire_name = "*";
+    root_kids[1].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    root_kids[1].type_tag = 9;
+    root_kids[1].child_plan_index = 1;
+
+    leptris_child_plan wrap_kids[1] = {};
+    wrap_kids[0].wire_name = "z";
+    wrap_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    wrap_kids[0].type_tag = 7;
+    wrap_kids[0].child_plan_index = -1;
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 2;
+    plans[0].child_plans = root_kids;
+    plans[1].element_name = "wrap";
+    plans[1].child_count = 1;
+    plans[1].child_plans = wrap_kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+    LeptrisPlanResult wcol = leptris_plan_value_at(r, 1);
+    ASSERT_NE(wcol, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(wcol), 1u);
+    /* The member is an ELEMENT value walked through plans[1]:
+     * named after the child, tagged by the wildcard row, with the
+     * nested z-scalar inside. */
+    LeptrisPlanResult member = leptris_plan_value_at(wcol, 0);
+    ASSERT_NE(member, nullptr);
+    EXPECT_EQ(leptris_plan_value_kind(member), LEPTRIS_PLAN_VALUE_ELEMENT);
+    EXPECT_STREQ(leptris_plan_value_name(member), "wrap");
+    EXPECT_EQ(leptris_plan_value_type_tag(member), 9);
+    ASSERT_EQ(leptris_plan_value_count(member), 1u);
+    EXPECT_STREQ(leptris_plan_value_string(
+                     leptris_plan_value_at(member, 0)), "deep");
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1552, EmptyRemainderStillEmitsTheBucket) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<root><a>1</a></root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "a";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[1].wire_name = "*";
+    kids[1].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    kids[1].type_tag = 9;
+    kids[1].child_plan_index = -1;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* The bucket exists and is empty — presence vs absence is the
+     * routing signal for the hydrator. */
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+    LeptrisPlanResult wcol = leptris_plan_value_at(r, 1);
+    ASSERT_NE(wcol, nullptr);
+    EXPECT_EQ(leptris_plan_value_kind(wcol),
+              LEPTRIS_PLAN_VALUE_COLLECTION);
+    EXPECT_EQ(leptris_plan_value_count(wcol), 0u);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1552, WildcardChildPlanIndexIsValidated) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "*";
+    kids[0].kind = LEPTRIS_PLAN_KIND_WILDCARD;
+    kids[0].type_tag = 9;
+    kids[0].child_plan_index = 3; /* past spec.plan_count == 1 */
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    EXPECT_EQ(plan, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+    leptris_plan_free(plan);
+}

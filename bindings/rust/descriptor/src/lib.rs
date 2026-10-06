@@ -31,6 +31,11 @@ pub const PLAN_KIND_NESTED: PlanKind = 3;
 pub const PLAN_KIND_RAW: PlanKind = 4;
 pub const PLAN_KIND_CONTENT: PlanKind = 5;
 pub const PLAN_KIND_CALLBACK: PlanKind = 6;
+/// #1552: catch-all row — binds every element child no named
+/// sibling row bound; emits one COLLECTION echoing the row
+/// wire_name/type_tag; `child_plan_index >= 0` walks members
+/// through that plan, else members are RAW serialized subtrees.
+pub const PLAN_KIND_WILDCARD: PlanKind = 7;
 
 /// Element plan flags.
 pub const PLAN_FLAG_MIXED_CONTENT: u32 = 0x1;

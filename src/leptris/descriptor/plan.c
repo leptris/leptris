@@ -424,7 +424,12 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                 const leptris_child_plan* sc = &s->child_plans[c];
                 if ((sc->kind == LEPTRIS_PLAN_KIND_NESTED &&
                      (sc->child_plan_index < 0 ||
-                      (uint32_t)sc->child_plan_index >= spec->plan_count))) {
+                      (uint32_t)sc->child_plan_index >= spec->plan_count)) ||
+                    (sc->kind == LEPTRIS_PLAN_KIND_WILDCARD &&
+                     (sc->child_plan_index < -1 ||
+                      (sc->child_plan_index >= 0 &&
+                       (uint32_t)sc->child_plan_index >=
+                           spec->plan_count)))) {
                     if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                     dp_plan_free(p);
                     return NULL;
@@ -647,17 +652,24 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             element_count++;
     }
     unsigned char* claimed = NULL;
+    /* #1552: bound[] marks every element a named row actually
+     * bound (claimed[] is the #1272 predicate-partition subset).
+     * Wildcard rows consult it after all named rows ran. */
+    unsigned char* bound = NULL;
     if (element_count > 0 && (plan->child_count > 0)) {
         claimed = (unsigned char*)calloc(
             element_count, 1);
         if (!claimed) return 0;
+        bound = (unsigned char*)calloc(
+            element_count, 1);
+        if (!bound) { free(claimed); return 0; }
     }
     /* Map from sibling node → element-rank index (0-based) so we
      * can flip the right bit. */
     int* elem_rank = NULL;
     if (element_count > 0) {
         elem_rank = (int*)malloc(element_count * sizeof(int));
-        if (!elem_rank) { free(claimed); return 0; }
+        if (!elem_rank) { free(bound); free(claimed); return 0; }
         int rank = 0;
         for (LeptrisNodeRef probe = leptris_node_first_child(
                  leptris_element_as_node(elem));
@@ -675,13 +687,16 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
     for (uint32_t c = 0; c < plan->child_count; c++) {
         const leptris_child_plan* row = &plan->child_plans[c];
         if (!row->wire_name) continue;
+        /* #1552: wildcard rows run in a second pass, after every
+         * named row has bound — named rows take precedence. */
+        if (row->kind == LEPTRIS_PLAN_KIND_WILDCARD) continue;
 
         if (row->kind == LEPTRIS_PLAN_KIND_CONTENT) {
             /* Mixed-content text runs, document order. */
             if (!(plan->flags & LEPTRIS_PLAN_FLAG_MIXED_CONTENT)) continue;
             struct leptris_plan_result* coll =
                 dp_value_new(LEPTRIS_PLAN_VALUE_COLLECTION);
-            if (!coll) { free(claimed); free(elem_rank); return 0; }
+            if (!coll) { free(bound); free(claimed); free(elem_rank); return 0; }
             int want_cdata = (plan->flags & LEPTRIS_PLAN_FLAG_CDATA) != 0;
             /* order comes from outer walk_order */
             for (LeptrisNodeRef n = leptris_node_first_child(
@@ -697,24 +712,24 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     dp_value_new(LEPTRIS_PLAN_VALUE_SCALAR);
                 if (!run) {
                     dp_result_free_rec(coll);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 if (!dp_value_set_str(run, text, strlen(text))) {
                     dp_result_free_rec(run);
                     dp_result_free_rec(coll);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 dp_value_stamp(run, n);
                 run->order_index = walk_order++;
                 if (!dp_value_push(coll, run)) {
                     dp_result_free_rec(run);
                     dp_result_free_rec(coll);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
             }
             if (!dp_value_push(out, coll)) {
                 dp_result_free_rec(coll);
-                free(claimed); free(elem_rank); return 0;
+                free(bound); free(claimed); free(elem_rank); return 0;
             }
             continue;
         }
@@ -746,7 +761,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 struct leptris_plan_result* v =
                     dp_walk_element(child, target, pool);
                 if (!v) {
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 v->name = dp_strdup(row->wire_name);
                 v->type_tag = row->type_tag;
@@ -754,7 +769,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 v->order_index = walk_order++;
                 if (!v->name || !dp_value_push(out, v)) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 /* Predicate-partitioning exclusive claim (#1272):
                  * only rows WITH predicates reserve the element;
@@ -762,6 +777,11 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                  * lock each other out. */
                 if (row->predicate_count > 0 && rank >= 0 && claimed)
                     claimed[rank] = 1;
+                /* #1552: named-row bind — invisible to later
+                 * same-wire rows (unchanged #1272 semantics) but
+                 * claimed against the wildcard remainder. */
+                if (rank >= 0 && bound)
+                    bound[rank] = 1;
             }
             continue;
         }
@@ -809,13 +829,13 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             if (row->kind == LEPTRIS_PLAN_KIND_RAW) {
                 char* ser = leptris_element_serialize(child, NULL);
                 if (!ser) {
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 v = dp_value_new(LEPTRIS_PLAN_VALUE_RAW);
                 if (!v || !dp_value_set_str(v, ser, strlen(ser))) {
                     leptris_free_string(ser);
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 leptris_free_string(ser);
             } else if (row->kind == LEPTRIS_PLAN_KIND_CALLBACK) {
@@ -825,7 +845,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     !dp_value_set_str(v, text ? text : "",
                                       text ? strlen(text) : 0)) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
             } else {
                 /* SCALAR item or COLLECTION item: text content. */
@@ -835,14 +855,14 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     !dp_value_set_str(v, text ? text : "",
                                       text ? strlen(text) : 0)) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
             }
             v->name = dp_strdup(row->wire_name);
             v->type_tag = row->type_tag;
             if (!v->name) {
                 dp_result_free_rec(v);
-                free(claimed); free(elem_rank); return 0;
+                free(bound); free(claimed); free(elem_rank); return 0;
             }
             /* #1269a: in-pass type execution. Strings stay populated;
              * `typed_ok` is the failure soft-fallback gate. */
@@ -860,7 +880,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     if (!coll || !dp_value_push(out, coll)) {
                         dp_result_free_rec(coll);
                         dp_result_free_rec(v);
-                        free(claimed); free(elem_rank); return 0;
+                        free(bound); free(claimed); free(elem_rank); return 0;
                     }
                     /* #1113: the collection echoes its producing
                      * row's wire_name/type_tag — the documented
@@ -878,17 +898,103 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     out->kids[out->kid_count - 1];
                 if (!dp_value_push(coll, v)) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
             } else if (!dp_value_push(out, v)) {
                 dp_result_free_rec(v);
-                free(claimed); free(elem_rank); return 0;
+                free(bound); free(claimed); free(elem_rank); return 0;
             }
             /* Predicate-partitioning exclusive claim (#1272): only
              * rows with predicates reserve; the #1115 multi-ns
              * sibling case stays independent. */
             if (row->predicate_count > 0 && rank >= 0 && claimed)
                 claimed[rank] = 1;
+            /* #1552: named-row bind — claimed against the
+             * wildcard remainder. */
+            if (rank >= 0 && bound)
+                bound[rank] = 1;
+        }
+    }
+
+    /* #1552 pass 2: WILDCARD rows. bound[] is complete — every
+     * element a named row bound is marked, so the catch-all sees
+     * exactly the remainder (elements a named row rejected by
+     * ns form or predicate are still remainder). One COLLECTION
+     * per row, always emitted (empty bucket = routing signal),
+     * members in document order, each echoing the row type_tag. */
+    for (uint32_t c = 0; c < plan->child_count; c++) {
+        const leptris_child_plan* row = &plan->child_plans[c];
+        if (!row->wire_name) continue;
+        if (row->kind != LEPTRIS_PLAN_KIND_WILDCARD) continue;
+
+        struct leptris_plan_result* coll =
+            dp_value_new(LEPTRIS_PLAN_VALUE_COLLECTION);
+        if (!coll) {
+            free(bound); free(bound); free(claimed); free(elem_rank); return 0;
+        }
+        coll->name = dp_strdup(row->wire_name);
+        coll->type_tag = row->type_tag;
+        coll->node_kind = LEPTRIS_NODE_TYPE_ELEMENT;
+        if (!coll->name || !dp_value_push(out, coll)) {
+            dp_result_free_rec(coll);
+            free(bound); free(bound); free(claimed); free(elem_rank); return 0;
+        }
+        for (LeptrisNodeRef n = leptris_node_first_child(
+                 leptris_element_as_node(elem));
+             n; n = leptris_node_next_sibling(n)) {
+            if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement child = (LeptrisElement)n;
+            int rank = -1;
+            if (elem_rank)
+                for (int i = 0; i < element_count; i++)
+                    if (elem_rank[i] == (int)(intptr_t)n) {
+                        rank = i; break;
+                    }
+            if (rank >= 0 && bound && bound[rank]) continue;
+            /* pad0 set = explicit form; unset = ANY namespace, the
+             * catch-all default (ns_form 0 alone can't distinguish
+             * explicit NONE from unset). */
+            if (row->pad0 &&
+                !dp_ns_binds(child, row->ns_form, row->ns_uri, 0))
+                continue;
+            if (!dp_predicates_satisfied(child, row->predicates,
+                                          row->predicate_count))
+                continue;
+
+            struct leptris_plan_result* v;
+            if (row->child_plan_index >= 0) {
+                const dp_plan* target =
+                    &pool->plans[(uint32_t)row->child_plan_index];
+                v = dp_walk_element(child, target, pool);
+            } else {
+                char* ser = leptris_element_serialize(child, NULL);
+                if (!ser) {
+                    free(bound); free(claimed); free(elem_rank);
+                    return 0;
+                }
+                v = dp_value_new(LEPTRIS_PLAN_VALUE_RAW);
+                if (!v || !dp_value_set_str(v, ser, strlen(ser))) {
+                    leptris_free_string(ser);
+                    dp_result_free_rec(v);
+                    free(bound); free(claimed); free(elem_rank);
+                    return 0;
+                }
+                leptris_free_string(ser);
+            }
+            if (!v) {
+                free(bound); free(bound); free(claimed); free(elem_rank); return 0;
+            }
+            const char* local = NULL;
+            leptris_element_expanded_name(child, &local, NULL, NULL);
+            v->name = local ? dp_strdup(local) : NULL;
+            v->type_tag = row->type_tag;
+            dp_value_stamp(v, n);
+            v->order_index = walk_order++;
+            if (!dp_value_push(coll, v)) {
+                dp_result_free_rec(v);
+                free(bound); free(bound); free(claimed); free(elem_rank); return 0;
+            }
         }
     }
 
@@ -915,13 +1021,13 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     dp_value_new(LEPTRIS_PLAN_VALUE_SCALAR);
                 if (!v || !dp_value_set_str(v, text, strlen(text))) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
                 dp_value_stamp(v, n);
                 v->order_index = walk_order++;
                 if (!dp_value_push(out, v)) {
                     dp_result_free_rec(v);
-                    free(claimed); free(elem_rank); return 0;
+                    free(bound); free(claimed); free(elem_rank); return 0;
                 }
             }
             /* comment / PI: not currently emitted as values (no
@@ -930,6 +1036,7 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
         }
     }
 
+    free(bound);
     free(claimed);
     free(elem_rank);
     return 1;
