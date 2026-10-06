@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.311] - 2026-10-06
+
+### Added
+
+- leptris_document_absorb — move semantics for doomed splice sources (#1548) (dom)
+
+
+
 ## [1.9.310] - 2026-10-06
 
 ### Fixed
