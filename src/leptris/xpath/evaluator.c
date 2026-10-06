@@ -650,7 +650,7 @@ void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
 
     /* SAFETY: Validate nodeset structure before reallocation
      * Corruption in count/capacity can cause heap corruption during realloc */
-    if (nodeset->count > nodeset->capacity || nodeset->capacity > 1000000) {
+    if (nodeset->count > nodeset->capacity || nodeset->capacity > 4000000) {
         /* Corrupted structure - skip this addition */
         return;
     }
@@ -659,8 +659,11 @@ void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
     if (nodeset->count >= nodeset->capacity) {
         size_t new_capacity = nodeset->capacity == 0 ? 4 : nodeset->capacity * 2;
 
-        /* SAFETY: Check for overflow */
-        if (new_capacity > 1000000) {
+        /* SAFETY: Check for overflow. 4M admits the corpus's
+         * million-item range folds (`1 to 1000000` needs a
+         * power-of-two capacity ABOVE 1M — the old 1M bound
+         * truncated the sequence at exactly 524288). */
+        if (new_capacity > 4000000) {
             return;
         }
 

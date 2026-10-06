@@ -622,6 +622,11 @@ static const struct { const char* type; char mark; } xq_family_table[] = {
     { "xs:hexBinary", 'X' }, { "xs:base64Binary", 'W' }, { "xs:QName", 'Z' },
     { "xs:duration", 'd' }, { "xs:yearMonthDuration", 'd' },
     { "xs:dayTimeDuration", 'd' },
+    /* untypedAtomic rides its own family mark: F&O casts it to
+     * the OTHER operand's type under eq (distinct-values dedups
+     * untyped+typed pairs, cbcl-002), while a plain xs:string
+     * never merges with a typed value (mixed-args-011/014). */
+    { "xs:untypedAtomic", 'U' },
 };
 
 static char xq_atomic_family_mark(const char* t) {
@@ -656,16 +661,13 @@ int leptris_atom_seq_eq_n(const char* a, const char* b, int nan_equal) {
         int nb_num = (kb == 'N' || kb == 'F' || kb == 'D');
         if (!(na_num && nb_num)) return 0;
     }
-    if (ka && ka == kb && strchr("ETtYJKQHXWZd", ka)) {
+    if (ka && ka == kb && strchr("ETtYJKQHXWZdU", ka)) {
         if (ka == 'Z') {
             /* QName eq is namespace+local; the carrier holds the
-             * lexical — compare the local part so the prefixed
-             * spelling merges with the unprefixed twin. */
-            const char* la = strrchr(a + 2, ':');
-            const char* lb = strrchr(b + 2, ':');
-            la = la ? la + 1 : a + 2;
-            lb = lb ? lb + 1 : b + 2;
-            return strcmp(la, lb) == 0;
+             * lexical. The prefixed and unprefixed spellings of
+             * DIFFERENT inputs stay distinct (cbcl-002's ht:person
+             * and person), so compare the full lexical. */
+            return strcmp(a + 2, b + 2) == 0;
         }
         if (ka == 't') {
             /* xs:time eq is cyclic across timezones */
@@ -1728,6 +1730,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         r->value.nodeset_value = out;
         return r;
     }
+    extern int xpath_array_members_of(const char* content, char*** out,
+                                      size_t* out_n);
     if (op == XPATH_OP_DYN_CALL) {
         struct leptris_xpath_result* callee =
             evaluate_expr(ctx, ast->children[0]);
@@ -1738,7 +1742,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             callee->value.nodeset_value->count > 0)
             cc = ((XPathTextNode*)
                       callee->value.nodeset_value->nodes[0])->content;
-        if (!cc) { xpath_result_free(callee); return NULL; }
+        if (!cc) {
+            xpath_result_free(callee);
+            return NULL;
+        }
         if (strncmp(cc, "\x03" "FR", 3) == 0) {
             /* Named reference: synthesize a function-call AST over
              * the borrowed arg ASTs and dispatch through the
@@ -1779,6 +1786,13 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         const char* param = p;
         size_t ai = 1;
         size_t bound = 0;
+        /* Nested same-name closures (recursive fold-right:
+         * $f(head, local:fr(tail, ...)) evaluates the recursive
+         * call WHILE $a is bound) must not destroy the outer
+         * frame's binding — save prior nodesets and restore them
+         * instead of removing the variable. */
+        char saved_names[16][128];
+        XPathNodeSet* saved_prev[16] = {0};
         while (param < pe) {
             const char* ne = strchr(param, '\x01');
             if (!ne || ne > pe) ne = pe;
@@ -1795,19 +1809,57 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 if (ai < (size_t)ast->child_count) {
                     struct leptris_xpath_result* ar =
                         evaluate_expr(ctx, ast->children[ai]);
-                    char* sv = ar ? xpath_to_string(ar) : NULL;
+                    /* Carrier discipline (booleans keep falsiness,
+                     * empty sequences bind empty, multi-item
+                     * sequences ride the member carrier) — the
+                     * recursive declared folds pass $zero through
+                     * here (fold-left/right-103/104). */
+                    extern char* xpath_item_arg_string(
+                        struct leptris_xpath_result*);
+                    char* sv = ar ? xpath_item_arg_string(ar) : NULL;
                     if (ar) xpath_result_free(ar);
-                    XPathTextNode* tn =
-                        synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
-                    free(sv);
-                    if (tn) xpath_nodeset_add(one, tn);
+                    char** mem = NULL;
+                    size_t mn = 0;
+                    if (sv && sv[0] == '\x03' && sv[1] == 'M' &&
+                        xpath_array_members_of(sv, &mem, &mn) && mn) {
+                        for (size_t j = 0; j < mn; j++) {
+                            XPathTextNode* tn = synth_text(
+                                mem[j], strlen(mem[j]));
+                            if (tn) xpath_nodeset_add(one, tn);
+                            free(mem[j]);
+                        }
+                        free(mem);
+                        free(sv);
+                    } else if (sv && sv[0] == '\x03' &&
+                               sv[1] == 'E') {
+                        free(sv);
+                    } else {
+                        XPathTextNode* tn =
+                            synth_text(sv ? sv : "",
+                                       sv ? strlen(sv) : 0);
+                        free(sv);
+                        if (tn) xpath_nodeset_add(one, tn);
+                    }
+                }
+                XPathVariable* ex = xpath_variable_set_get(
+                    ctx->variable_set, pname);
+                XPathNodeSet* prev = NULL;
+                if (ex && ex->value.type == XPATH_VAR_TYPE_NODE_SET) {
+                    prev = ex->value.v.nodeset_value;
+                    ex->value.v.nodeset_value = NULL;
                 }
                 XPathVariable* var = xpath_variable_set_add(
                     ctx->variable_set, pname, XPATH_VAR_TYPE_NODE_SET);
                 if (var) {
                     xpath_variable_set_nodeset(var, one);
                     bound++;
+                    if (bound <= 16) {
+                        snprintf(saved_names[bound - 1],
+                                 sizeof(saved_names[0]), "%s", pname);
+                        saved_prev[bound - 1] = prev;
+                    }
                 } else {
+                    if (ex) ex->value.v.nodeset_value = prev;
                     xpath_nodeset_free(one);
                 }
             }
@@ -1818,7 +1870,8 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         struct leptris_xpath_result* out =
             body ? evaluate_expr(ctx, body) : NULL;
         param = p;
-        while (bound--) {
+        size_t bi = 0;
+        while (bi < bound) {
             const char* ne = strchr(param, '\x01');
             if (!ne || ne > pe) ne = pe;
             char pname[128];
@@ -1826,9 +1879,19 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
             memcpy(pname, param, pn);
             pname[pn] = 0;
-            xpath_variable_set_remove(ctx->variable_set, pname);
+            if (bi < 16 && saved_prev[bi]) {
+                XPathVariable* v = xpath_variable_set_get(
+                    ctx->variable_set, pname);
+                if (v)
+                    xpath_variable_set_nodeset(v, saved_prev[bi]);
+                else
+                    xpath_nodeset_free(saved_prev[bi]);
+            } else {
+                xpath_variable_set_remove(ctx->variable_set, pname);
+            }
             if (*ne != '\x01') break;
             param = ne + 1;
+            bi++;
         }
         if (scratch) {
             ctx->variable_set = NULL;
@@ -2823,7 +2886,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             long hi = hid > 9.0e18 ? LONG_MAX
                     : hid < -9.0e18 ? LONG_MIN
                     : (long)hid;
-            for (long v = lo; v <= hi && v - lo < 100000; v++) {
+            /* Item cap: bounds runaway ranges (hostile `1 to
+             * 1e18`); 1,000,000 admits the corpus's full
+             * million-item folds (fold-left-020, fold-right-013). */
+            for (long v = lo; v <= hi && v - lo < 1000000; v++) {
                 char buf[28];
                 int l = snprintf(buf, sizeof buf, "\x03N%ld", v);
                 XPathTextNode* tn = synth_text(buf, (size_t)l);
@@ -3064,8 +3130,28 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                            strcmp(s, "1") == 0 || strcmp(s, "0") == 0);
                 free(s);
             } else if (strcmp(base, "xs:QName") == 0) {
-                /* XQ10: no cast from a string to xs:QName */
-                ok = 0;
+                /* XQ10 casts only prefixed lexical QNames
+                 * (prefix:local); Saxon keeps the lexical
+                 * (cbcl-distinct-values-002's ht:person twin). */
+                char* s = xpath_to_string(v);
+                if (s) {
+                    const char* c1 = strchr(s, ':');
+                    ok = c1 && c1 != s &&
+                         (strchr(c1 + 1, ':') == NULL);
+                    if (ok) {
+                        /* prefix AND local must be NCNames — a URI
+                         * like http://... has a '/' local part. */
+                        for (const char* q = s; ok && q < c1; q++)
+                            if (!isalnum((unsigned char)*q) &&
+                                *q != '_' && *q != '-' && *q != '.')
+                                ok = 0;
+                        for (const char* q = c1 + 1; ok && *q; q++)
+                            if (!isalnum((unsigned char)*q) &&
+                                *q != '_' && *q != '-' && *q != '.')
+                                ok = 0;
+                    }
+                    free(s);
+                }
             } else if (strcmp(base, "xs:gYear") == 0) {
                 char* s = xpath_to_string(v);
                 ok = s && xq_valid_gyear(s);
@@ -3152,7 +3238,13 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     us = us2;
                 }
                 out = xpath_result_new(XPATH_RESULT_STRING);
-                if (out) out->value.string_value = us;
+                if (out) {
+                    out->value.string_value = us;
+                    /* The U family mark rides sequence members so
+                     * eq/distinct-values can cast this operand
+                     * (cbcl-distinct-values-002). */
+                    out->atomic_type = "xs:untypedAtomic";
+                }
             } else if (xq_atomic_family_mark(base) ||
                        strcmp(base, "xs:normalizedString") == 0 ||
                        strcmp(base, "xs:token") == 0 ||
@@ -4095,7 +4187,14 @@ struct leptris_xpath_result* xpath_call_function_item(
                     for (size_t j = 0; j < mn; j++) {
                         memset(&kids[j], 0, sizeof(kids[j]));
                         kids[j].type = XPATH_AST_STRING;
-                        kids[j].value = mem[j];
+                        /* Named-call string literals: strip the
+                         * typed/untyped carrier marks the M members
+                         * now carry. */
+                        const char* mv = mem[j];
+                        if (mv && mv[0] == '\x03' && mv[1] &&
+                            mv[1] != 'A' && mv[1] != 'M')
+                            mv += 2;
+                        kids[j].value = (char*)mv;
                         karr[j] = &kids[j];
                     }
                     argn[i].type = XPATH_AST_OPERATOR;
@@ -4114,11 +4213,15 @@ struct leptris_xpath_result* xpath_call_function_item(
             }
             if (!seq_mem[i]) {
                 argn[i].type = XPATH_AST_STRING;
-                /* Marked booleans spell as literals for named calls. */
+                /* Marked booleans spell as literals for named calls;
+                 * the empty-sequence carrier is no literal. */
                 if (argv[i] && argv[i][0] == '\x03' &&
                     argv[i][1] == 'B')
                     argn[i].value =
                         argv[i][2] == 't' ? "true" : "false";
+                else if (argv[i] && argv[i][0] == '\x03' &&
+                         argv[i][1] == 'E')
+                    argn[i].value = "";
                 else
                     argn[i].value = argv[i];
             }
@@ -4147,7 +4250,9 @@ struct leptris_xpath_result* xpath_call_function_item(
 
     const char* p = cc + 4;
     const char* pe = strchr(p, '\x02');
-    if (!pe || pe[1] == 0) return NULL;
+    if (!pe || pe[1] == 0) {
+        return NULL;
+    }
     XPathASTNode* body =
         (XPathASTNode*)(uintptr_t)strtoull(pe + 1, NULL, 16);
 
@@ -4160,6 +4265,11 @@ struct leptris_xpath_result* xpath_call_function_item(
     const char* param = p;
     size_t ai = 0;
     size_t bound = 0;
+    /* Same save/restore as the DYN_CALL path: a nested closure
+     * with the same param names (recursive declared folds called
+     * with $f) must restore, not remove, the outer binding. */
+    char saved_names[16][128];
+    XPathNodeSet* saved_prev[16] = {0};
     while (param < pe) {
         const char* ne = strchr(param, '\x01');
         if (!ne || ne > pe) ne = pe;
@@ -4186,18 +4296,34 @@ struct leptris_xpath_result* xpath_call_function_item(
                     free(mem[j]);
                 }
                 free(mem);
-            } else {
+            } else if (!(argv[ai][0] == '\x03' &&
+                         argv[ai][1] == 'E')) {
                 XPathTextNode* tn =
                     synth_text(argv[ai], strlen(argv[ai]));
                 if (tn) xpath_nodeset_add(one, tn);
             }
+            /* "\x03E": the empty sequence binds NO nodes, so
+             * empty($p) is true (fold zero accumulators). */
+        }
+        XPathVariable* ex = xpath_variable_set_get(
+            ctx->variable_set, pname);
+        XPathNodeSet* prev = NULL;
+        if (ex && ex->value.type == XPATH_VAR_TYPE_NODE_SET) {
+            prev = ex->value.v.nodeset_value;
+            ex->value.v.nodeset_value = NULL;
         }
         XPathVariable* var = xpath_variable_set_add(
             ctx->variable_set, pname, XPATH_VAR_TYPE_NODE_SET);
         if (var) {
             xpath_variable_set_nodeset(var, one);
             bound++;
+            if (bound <= 16) {
+                snprintf(saved_names[bound - 1],
+                         sizeof(saved_names[0]), "%s", pname);
+                saved_prev[bound - 1] = prev;
+            }
         } else {
+            if (ex) ex->value.v.nodeset_value = prev;
             xpath_nodeset_free(one);
         }
         if (*ne != '\x01') break;
@@ -4209,7 +4335,8 @@ struct leptris_xpath_result* xpath_call_function_item(
                                             : NULL;
 
     param = p;
-    while (bound--) {
+    size_t bi = 0;
+    while (bi < bound) {
         const char* ne = strchr(param, '\x01');
         if (!ne || ne > pe) ne = pe;
         char pname[128];
@@ -4217,9 +4344,19 @@ struct leptris_xpath_result* xpath_call_function_item(
         if (pn >= sizeof(pname)) pn = sizeof(pname) - 1;
         memcpy(pname, param, pn);
         pname[pn] = 0;
-        xpath_variable_set_remove(ctx->variable_set, pname);
+        if (bi < 16 && saved_prev[bi]) {
+            XPathVariable* v = xpath_variable_set_get(
+                ctx->variable_set, pname);
+            if (v)
+                xpath_variable_set_nodeset(v, saved_prev[bi]);
+            else
+                xpath_nodeset_free(saved_prev[bi]);
+        } else {
+            xpath_variable_set_remove(ctx->variable_set, pname);
+        }
         if (*ne != '\x01') break;
         param = ne + 1;
+        bi++;
     }
     if (scratch) {
         ctx->variable_set = NULL;

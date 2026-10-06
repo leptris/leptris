@@ -411,7 +411,7 @@ LEPTRIS_API const char* leptris_xpath_result_node_value(
                     text->content[3] == '\x02') ||
                    text->content[2] == 'R')) ||
                 (text->content[1] &&
-                 strchr("ETtYJKQHXWZd", text->content[1])))
+                 strchr("ETtYJKQHXWZdU", text->content[1])))
                 return text->content + 2;
         }
         return text->content;

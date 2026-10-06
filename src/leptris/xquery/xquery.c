@@ -998,8 +998,30 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
             params[plen] = 0;
             free(pn);
             scan_ws(s);
-            /* optional `as SequenceType` — skip to , or ) */
-            while (s->p < s->end && *s->p != ',' && *s->p != ')') s->p++;
+            /* optional `as SequenceType` — skip to a depth-0 ',' or
+             * ')'. Function-test types carry their own commas
+             * (`$f as function(item()*, item()) as item()*`,
+             * fold-left-101..104) — a raw walk stops inside them
+             * and breaks the parameter list. */
+            {
+                int ty_depth = 0;
+                while (s->p < s->end) {
+                    char c = *s->p;
+                    if (c == '\'' || c == '"') {
+                        scan_string(s);
+                        continue;
+                    }
+                    if (c == '(' || c == '[' || c == '{') {
+                        ty_depth++;
+                    } else if (c == ')' || c == ']' || c == '}') {
+                        if (ty_depth == 0 && c == ')') break;
+                        ty_depth--;
+                    } else if (c == ',' && ty_depth == 0) {
+                        break;
+                    }
+                    s->p++;
+                }
+            }
             if (s->p < s->end && *s->p == ',') s->p++;
         }
         /* optional `as SequenceType` — skip to '{' */
@@ -1981,6 +2003,42 @@ static struct leptris_xpath_result* xq_fn_thunk(XPathContext* ctx,
                 v[1] = 'B';
                 v[2] = r->value.boolean_value ? 't' : 'f';
                 v[3] = 0;
+            }
+        } else if (r && r->type == XPATH_RESULT_NODESET) {
+            /* Sequence arguments must bind one node per member —
+             * a raw stringification collapses them (declared
+             * local:fold-left recursion: tail($seq) went empty,
+             * fold-left-101..104 summed to one item). Empty
+             * sequences ride the explicit \x03E carrier. */
+            if (!r->value.nodeset_value ||
+                r->value.nodeset_value->count == 0) {
+                v = (char*)malloc(3);
+                if (v) {
+                    v[0] = '\x03';
+                    v[1] = 'E';
+                    v[2] = 0;
+                }
+            } else {
+                extern char* xpath_seq_carrier_of(
+                    struct leptris_xpath_result*);
+                v = xpath_seq_carrier_of(r);
+                if (!v) {
+                    /* Single marked member: keep the RAW content —
+                     * the mark survives into the binding (boolean
+                     * accumulators through recursion, fold-*-104). */
+                    if (r->value.nodeset_value->count == 1 &&
+                        (int)XPATH_NODE_TYPE(
+                            r->value.nodeset_value->nodes[0]) ==
+                            (int)LEPTRIS_NODE_TEXT) {
+                        const char* mc =
+                            ((XPathTextNode*)
+                                 r->value.nodeset_value->nodes[0])
+                                ->content;
+                        v = (mc && mc[0] == '\x03')
+                                ? leptris_strdup(mc) : NULL;
+                    }
+                    if (!v) v = xpath_to_string(r);
+                }
             }
         } else {
             v = r ? xpath_to_string(r) : NULL;

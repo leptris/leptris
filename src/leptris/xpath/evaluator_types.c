@@ -313,7 +313,7 @@ char* get_node_text(void* node) {
                 if (c[1] == 'N' || c[1] == 'D' || c[1] == 'O' ||
                     (c[1] == 'F' &&
                      !((c[2] == 'N' && c[3] == '\x02') || c[2] == 'R')) ||
-                    (c[1] && strchr("ETtYJKQHXWZdO", c[1])))
+                    (c[1] && strchr("ETtYJKQHXWZdOU", c[1])))
                     c += 2;
             }
             return leptris_strdup(c);
