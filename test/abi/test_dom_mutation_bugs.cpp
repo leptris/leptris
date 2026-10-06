@@ -603,6 +603,72 @@ static LeptrisElement FirstChildElem(LeptrisElement e) {
     return leptris_element_first_child_any(e);
 }
 
+// #1539: a leaf argument whose chain top is the source ROOT (a
+// comment/cdata/PI/text directly under it) must adopt by kind —
+// routing it through the element copier returned NULL and the seam
+// reported LEPTRIS_ERROR_MEMORY.
+TEST(CrossDocumentLeafAdoption, RootLevelLeafArgumentAdoptsByKind) {
+    const struct {
+        const char* scratch_xml;
+        const char* expected;
+        bool doc_level;
+        bool epilog;
+    } cases[] = {
+        {"<s><!-- note --></s>", "<r><!-- note --></r>", false, false},
+        {"<s><![CDATA[cd]]></s>", "<r><![CDATA[cd]]></r>", false,
+         false},
+        {"<s><?tgt d?></s>", "<r><?tgt d?></r>", false, false},
+        {"<s>text</s>", "<r>text</r>", false, false},
+        /* #580 doc-level leaves: prolog/epilog comments and PIs
+         * ride the document-children chain (parent walk tops out
+         * at the leaf itself — leaf_owner_doc resolves the doc;
+         * #1539: the chain's siblings include the root element,
+         * so adoption must copy the argument single-node). */
+        {"<!-- pro --><s/>", "<r><!-- pro --></r>", true, false},
+        {"<s/><?ep e?>", "<r><?ep e?></r>", true, true},
+    };
+    for (const auto& tc : cases) {
+        LeptrisDocument live = Parse("<r/>");
+        ASSERT_NE(live, nullptr);
+        LeptrisDocument scratch = Parse(tc.scratch_xml);
+        ASSERT_NE(scratch, nullptr);
+        /* Doc-level leaves ride the #580 children chain (prolog
+         * = first, epilog = last); in-root leaves are the root
+         * element's first child. */
+        LeptrisNodeRef leaf;
+        if (!tc.doc_level) {
+            leaf = leptris_node_first_child(
+                leptris_element_as_node(
+                    leptris_document_root(scratch)));
+        } else if (tc.epilog) {
+            /* Walk the #580 children chain to its tail. */
+            leaf = leptris_document_first_child(scratch);
+            ASSERT_NE(leaf, nullptr);
+            for (LeptrisNodeRef n =
+                     leptris_node_next_sibling(leaf);
+                 n; n = leptris_node_next_sibling(n))
+                leaf = n;
+        } else {
+            leaf = leptris_document_first_child(scratch);
+        }
+        ASSERT_NE(leaf, nullptr);
+        LeptrisElement leaf_el = (LeptrisElement)leaf;
+        EXPECT_NE(leptris_node_get_type(leaf),
+                  kElem);
+
+        EXPECT_EQ(leptris_element_append_child(
+                      leptris_document_root(live), leaf_el),
+                  LEPTRIS_OK)
+            << "scratch: " << tc.scratch_xml;
+
+        LeptrisDocument rt = SerializeReparse(live, tc.expected);
+        ASSERT_NE(rt, nullptr) << "scratch: " << tc.scratch_xml;
+        leptris_document_free(rt);
+        leptris_document_free(scratch);
+        leptris_document_free(live);
+    }
+}
+
 TEST(AbsorbAdoption, SpliceAfterAbsorbIsZeroCopy) {
     LeptrisDocument dst = Parse("<main><keep/></main>");
     ASSERT_NE(dst, nullptr);
