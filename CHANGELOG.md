@@ -1,10 +1,24 @@
 ## [Unreleased]
 
-## [1.9.313] - 2026-10-06
+## [1.9.313] - 2026-10-07
 
 ### Fixed
 
-- absorbed sources defer their release to outstanding handles (#1557) (dom)
+- **Absorbed sources defer their release to outstanding handles
+  (#1557, PR #1566).** Follow-up to #1548's
+  `leptris_document_absorb`: the absorber's free cleared the
+  absorbed state before recursing, so a source handle that
+  OUTLIVED the absorber read the cleared flag and re-released the
+  already-destroyed pool — heap corruption (glibc abort /
+  `malloc_zone_error`), deterministic under exit-time finalizers
+  (leptris-ruby#386, 50-iteration repro). When the anchor dies
+  while `absorbed_handle > 0` it now detaches the source and marks
+  `absorbed_deferred`: the holder's `leptris_document_free`
+  performs the FULL release; handles released before the anchor
+  keep the #1548 handle-only no-op. Consumers no longer need to
+  mirror the absorbed flag at their own release sites. Gates: the
+  repro red under ASAN at leptris.c:937, green after; mutation
+  suite 27/27 ASAN + Release; full ctest 1866/1866; leaks 0.
 
 
 
