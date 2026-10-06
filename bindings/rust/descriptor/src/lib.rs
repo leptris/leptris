@@ -88,6 +88,9 @@ pub struct AttrPlan {
     pub pad_ns: u8,
     /// `PLAN_NS_EXACT` only.
     pub ns_uri: *const c_char,
+    /// #1551: intended wire prefix for serialized output
+    /// (`leptris_plan_serialize`); meaningful with EXACT.
+    pub ns_prefix: *const c_char,
 }
 
 /// Child binding row.
@@ -112,6 +115,9 @@ pub struct ChildPlan {
     pub predicate_count: u16,
     pub pad_pred: u16,
     pub predicates: *const AttrPredicate,
+    /// #1551: intended wire prefix for serialized output
+    /// (`leptris_plan_serialize`); meaningful with EXACT.
+    pub ns_prefix: *const c_char,
 }
 
 /// One element plan: the attribute and child rows bound to a name.
@@ -132,6 +138,9 @@ pub struct ElementPlan {
     /// `PLAN_FLAG_*`.
     pub flags: u16,
     pub pad1: u16,
+    /// #1551: the root plan's intended wire prefix for serialized
+    /// output (`leptris_plan_serialize`); meaningful with EXACT.
+    pub ns_prefix: *const c_char,
 }
 
 /// Top-level plan specification handed to the engine.

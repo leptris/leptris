@@ -49,6 +49,19 @@ struct leptris_plan_result {
     int64_t typed_i;
     double typed_f;
     uint8_t typed_b;
+    /* #1551 emission routing: which plan row produced this value
+     * (row_index == UINT32_MAX = no row: the walk root itself, or
+     * an unmatched spine run), plus the row's ns binding, so the
+     * serializer can rebuild element wrappers and prefixed
+     * names deterministically. */
+    uint32_t container_plan;
+    uint32_t row_index;
+    char* ns_prefix;
+    char* ns_uri;
+    /* attr-channel bindings, parallel to attr_names (entries or
+     * NULL; arrays NULL when the element has no attribute plan). */
+    char** attr_ns_prefixes;
+    char** attr_ns_uris;
 };
 
 /* ---- string + node helpers ------------------------------------- */
@@ -100,13 +113,24 @@ static void dp_result_free_rec(struct leptris_plan_result* v) {
         free(v->attr_names[i]);
         free(v->attr_values[i]);
     }
+    if (v->attr_ns_prefixes) {
+        for (size_t i = 0; i < v->attr_count; i++)
+            free(v->attr_ns_prefixes[i]);
+        free(v->attr_ns_prefixes);
+    }
+    if (v->attr_ns_uris) {
+        for (size_t i = 0; i < v->attr_count; i++)
+            free(v->attr_ns_uris[i]);
+        free(v->attr_ns_uris);
+    }
     free(v->attr_names);
     free(v->attr_values);
     free(v->name);
     free(v->str);
+    free(v->ns_prefix);
+    free(v->ns_uri);
     free(v);
 }
-
 /* ---- predicate + type-exec helpers (#1272, #1269a) -------------- */
 
 /* AND across every (attr_name, expected_value) pair. Empty list
@@ -229,6 +253,7 @@ typedef struct {
     char* element_name;
     uint8_t ns_form;
     char* ns_uri;
+    char* ns_prefix; /* #1551 emission binding */
     uint32_t attribute_count;
     leptris_attr_plan* attribute_plans;  /* wire_name copied in place */
     uint32_t child_count;
@@ -259,6 +284,7 @@ static void dp_plan_free(LeptrisPlan p) {
         }
         for (uint32_t c = 0; c < d->child_count; c++) {
             free((char *)d->child_plans[c].wire_name);
+            free((char *)d->child_plans[c].ns_prefix);
             for (uint16_t pi = 0;
                  pi < d->child_plans[c].predicate_count; pi++) {
                 free((char*)d->child_plans[c]
@@ -272,6 +298,7 @@ static void dp_plan_free(LeptrisPlan p) {
         free(d->child_plans);
         free(d->element_name);
         free(d->ns_uri);
+        free(d->ns_prefix);
     }
     free(p);
 }
@@ -324,6 +351,8 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
         if (s->ns_uri) {
             d->ns_uri = dp_strdup(s->ns_uri);
             if (!d->ns_uri) goto oom;
+        d->ns_prefix = s->ns_prefix ? dp_strdup(s->ns_prefix) : NULL;
+        if (s->ns_prefix && !d->ns_prefix) goto oom;
         }
         d->flags = s->flags;
 
@@ -448,6 +477,10 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                     d->child_plans[c].wire_name = dp_strdup(sc->wire_name);
                     if (!d->child_plans[c].wire_name) goto oom;
                 }
+                d->child_plans[c].ns_prefix =
+                    sc->ns_prefix ? dp_strdup(sc->ns_prefix) : NULL;
+                if (sc->ns_prefix && !d->child_plans[c].ns_prefix)
+                    goto oom;
                 uint16_t pc = sc->predicate_count;
                 if (pc) {
                     if (!sc->predicates) goto oom;
@@ -532,6 +565,17 @@ static int dp_ns_binds(LeptrisElement elem, uint8_t ns_form,
     }
 }
 
+/* #1551: "prefix:local" join for emission spellings. */
+static char* dp_join_colon(const char* pfx, const char* local) {
+    size_t pl = strlen(pfx), ll = strlen(local);
+    char* j = (char*)malloc(pl + 1 + ll + 1);
+    if (!j) return NULL;
+    memcpy(j, pfx, pl);
+    j[pl] = ':';
+    memcpy(j + pl + 1, local, ll + 1);
+    return j;
+}
+
 static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
                                                    const dp_plan* plan,
                                                    const LeptrisPlan pool);
@@ -596,7 +640,12 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
                                        sizeof(char*));
         v->attr_values = (char**)calloc(plan->attribute_count,
                                         sizeof(char*));
-        if (!v->attr_names || !v->attr_values) {
+        v->attr_ns_prefixes = (char**)calloc(plan->attribute_count,
+                                             sizeof(char*));
+        v->attr_ns_uris = (char**)calloc(plan->attribute_count,
+                                         sizeof(char*));
+        if (!v->attr_names || !v->attr_values || !v->attr_ns_prefixes ||
+            !v->attr_ns_uris) {
             dp_result_free_rec(v);
             return NULL;
         }
@@ -605,14 +654,41 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
             if (!ap->wire_name) continue;
             const char* val = dp_attr_value(elem, ap);
             if (!val) continue;
-            v->attr_names[v->attr_count] = dp_strdup(ap->wire_name);
+            /* #1551: a prefixed attr row emits "prefix:local" —
+             * the plan-chosen spelling, not the wire's. */
+            if (ap->ns_prefix)
+                v->attr_names[v->attr_count] =
+                    dp_join_colon(ap->ns_prefix, ap->wire_name);
+            else
+                v->attr_names[v->attr_count] = dp_strdup(ap->wire_name);
             v->attr_values[v->attr_count] = dp_strdup(val);
+            if (ap->ns_prefix) {
+                v->attr_ns_prefixes[v->attr_count] =
+                    dp_strdup(ap->ns_prefix);
+                v->attr_ns_uris[v->attr_count] =
+                    ap->ns_uri ? dp_strdup(ap->ns_uri) : NULL;
+            }
             if (!v->attr_names[v->attr_count] ||
-                !v->attr_values[v->attr_count]) {
+                !v->attr_values[v->attr_count] ||
+                (ap->ns_prefix && (!v->attr_ns_prefixes[v->attr_count] ||
+                                   !v->attr_ns_uris[v->attr_count]))) {
                 dp_result_free_rec(v);
                 return NULL;
             }
             v->attr_count++;
+        }
+    }
+
+    /* #1551: the element's own binding (root plan or nested /
+     * wildcard walk member) — prefixed emission + declaration. */
+    if (plan->ns_prefix && plan->ns_form == LEPTRIS_PLAN_NS_EXACT) {
+        v->container_plan = (uint32_t)(plan - pool->plans);
+        v->row_index = UINT32_MAX;
+        v->ns_prefix = dp_strdup(plan->ns_prefix);
+        v->ns_uri = dp_strdup(plan->ns_uri);
+        if (!v->ns_prefix || !v->ns_uri) {
+            dp_result_free_rec(v);
+            return NULL;
         }
     }
 
@@ -628,6 +704,9 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                             struct leptris_plan_result* out) {
     int lenient = (plan->flags & LEPTRIS_PLAN_FLAG_NS_LENIENT) != 0;
     int spine = (plan->flags & LEPTRIS_PLAN_FLAG_EMIT_ORDER_SPINE) != 0;
+    /* #1551: rows stamp their producer so the serializer can
+     * rebuild wrappers (container plan + row index). */
+    uint32_t self_plan = (uint32_t)(plan - pool->plans);
 
     /* #1272 same-wire-name partition claim: when a child element
      * is consumed by a row with predicates, no later same-wire-name
@@ -697,6 +776,8 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             struct leptris_plan_result* coll =
                 dp_value_new(LEPTRIS_PLAN_VALUE_COLLECTION);
             if (!coll) { free(bound); free(claimed); free(elem_rank); return 0; }
+            coll->container_plan = self_plan;
+            coll->row_index = c;
             int want_cdata = (plan->flags & LEPTRIS_PLAN_FLAG_CDATA) != 0;
             /* order comes from outer walk_order */
             for (LeptrisNodeRef n = leptris_node_first_child(
@@ -765,6 +846,21 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 }
                 v->name = dp_strdup(row->wire_name);
                 v->type_tag = row->type_tag;
+                v->container_plan = self_plan;
+                v->row_index = c;
+                /* #1551: the row's emission binding; the URI falls
+                 * back to the target plan's (NESTED matches with
+                 * the target's form, #1115). */
+                if (row->ns_prefix) {
+                    v->ns_prefix = dp_strdup(row->ns_prefix);
+                    v->ns_uri = dp_strdup(row->ns_uri ? row->ns_uri
+                                                      : target->ns_uri);
+                    if (!v->ns_prefix || !v->ns_uri) {
+                        dp_result_free_rec(v);
+				free(claimed); free(elem_rank); return 0;
+                        return 0;
+                    }
+                }
                 dp_value_stamp(v, n);
                 v->order_index = walk_order++;
                 if (!v->name || !dp_value_push(out, v)) {
@@ -860,6 +956,18 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
             }
             v->name = dp_strdup(row->wire_name);
             v->type_tag = row->type_tag;
+            v->container_plan = self_plan;
+            v->row_index = c;
+            /* #1551: scalar/collection rows still serialize as
+             * ELEMENTS — the row is the wrapper. */
+            if (row->ns_prefix) {
+                v->ns_prefix = dp_strdup(row->ns_prefix);
+                v->ns_uri = dp_strdup(row->ns_uri);
+                if (!v->ns_prefix || !v->ns_uri) {
+                    dp_result_free_rec(v);
+			free(claimed); free(elem_rank); return 0;
+                }
+            }
             if (!v->name) {
                 dp_result_free_rec(v);
                 free(bound); free(claimed); free(elem_rank); return 0;
@@ -892,6 +1000,12 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     coll->type_tag = row->type_tag;
                     coll->position = node_off;
                     coll->node_kind = LEPTRIS_NODE_TYPE_ELEMENT;
+                    coll->container_plan = self_plan;
+                    coll->row_index = c;
+                    if (row->ns_prefix) {
+                        coll->ns_prefix = dp_strdup(row->ns_prefix);
+                        coll->ns_uri = dp_strdup(row->ns_uri);
+                    }
                     emitted = 1;
                 }
                 struct leptris_plan_result* coll =
@@ -1023,6 +1137,8 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                     dp_result_free_rec(v);
                     free(bound); free(claimed); free(elem_rank); return 0;
                 }
+                v->container_plan = self_plan;
+                v->row_index = UINT32_MAX; /* spine: bare text */
                 dp_value_stamp(v, n);
                 v->order_index = walk_order++;
                 if (!dp_value_push(out, v)) {
@@ -1056,6 +1172,289 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, LeptrisElem
         return NULL;
     }
     return r;
+}
+
+/* ---- #1551: result -> XML serialization ------------------------- */
+typedef struct {
+    char* s;
+    size_t len, cap;
+} dp_sb;
+
+static int dp_sb_putn(dp_sb* b, const char* s, size_t n) {
+    if (!n) return 1;
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap : 256;
+        while (b->len + n + 1 > nc) nc *= 2;
+        char* g = (char*)realloc(b->s, nc);
+        if (!g) return 0;
+        b->s = g;
+        b->cap = nc;
+    }
+    memcpy(b->s + b->len, s, n);
+    b->len += n;
+    b->s[b->len] = 0;
+    return 1;
+}
+
+static int dp_sb_puts(dp_sb* b, const char* s) {
+    return dp_sb_putn(b, s, strlen(s));
+}
+
+static int dp_sb_escape(dp_sb* b, const char* s, int is_attr) {
+    for (; s && *s; s++) {
+        if (*s == '&') {
+            if (!dp_sb_puts(b, "&amp;")) return 0;
+        } else if (*s == '<') {
+            if (!dp_sb_puts(b, "&lt;")) return 0;
+        } else if (*s == '>') {
+            if (!dp_sb_puts(b, "&gt;")) return 0;
+        } else if (is_attr && *s == '"') {
+            if (!dp_sb_puts(b, "&quot;")) return 0;
+        } else if (!dp_sb_putn(b, s, 1)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Distinct prefix bindings, first-encounter order; same prefix
+ * keeps its first URI (deterministic). */
+typedef struct {
+    char** p;
+    char** u;
+    size_t n, cap;
+} dp_decls;
+
+static int dp_decls_seen(dp_decls* d, const char* p, const char* u) {
+    for (size_t i = 0; i < d->n; i++)
+        if (strcmp(d->p[i], p) == 0) return 1;
+    if (d->n == d->cap) {
+        size_t nc = d->cap ? d->cap * 2 : 8;
+        char** gp = (char**)realloc(d->p, nc * sizeof(char*));
+        if (!gp) return 0;
+        d->p = gp;
+        char** gu = (char**)realloc(d->u, nc * sizeof(char*));
+        if (!gu) return 0;
+        d->u = gu;
+        d->cap = nc;
+    }
+    d->p[d->n] = dp_strdup(p);
+    d->u[d->n] = dp_strdup(u);
+    if (!d->p[d->n] || !d->u[d->n]) return 0;
+    d->n++;
+    return 1;
+}
+
+static void dp_decls_free(dp_decls* d) {
+    for (size_t i = 0; i < d->n; i++) {
+        free(d->p[i]);
+        free(d->u[i]);
+    }
+    free(d->p);
+    free(d->u);
+}
+
+static int dp_collect_decls(const struct leptris_plan_result* v,
+                            dp_decls* d) {
+    if (v->ns_prefix && v->ns_uri &&
+        !dp_decls_seen(d, v->ns_prefix, v->ns_uri))
+        return 0;
+    for (size_t a = 0; a < v->attr_count; a++)
+        if (v->attr_ns_prefixes && v->attr_ns_prefixes[a] &&
+            v->attr_ns_uris && v->attr_ns_uris[a] &&
+            !dp_decls_seen(d, v->attr_ns_prefixes[a],
+                           v->attr_ns_uris[a]))
+            return 0;
+    for (size_t i = 0; i < v->kid_count; i++)
+        if (!dp_collect_decls(v->kids[i], d)) return 0;
+    return 1;
+}
+
+/* Flatten one element's children: COLLECTION rows are transparent
+ * (members are the siblings). */
+static int dp_flatten_kids(const struct leptris_plan_result* v,
+                           const struct leptris_plan_result*** arr,
+                           size_t* n, size_t* cap) {
+    for (size_t i = 0; i < v->kid_count; i++) {
+        const struct leptris_plan_result* k = v->kids[i];
+        if (k->kind == LEPTRIS_PLAN_VALUE_COLLECTION) {
+            if (!dp_flatten_kids(k, arr, n, cap)) return 0;
+            continue;
+        }
+        if (*n == *cap) {
+            size_t nc = *cap ? *cap * 2 : 16;
+            const struct leptris_plan_result** g =
+                (const struct leptris_plan_result**)realloc(
+                    (void*)*arr, nc * sizeof(*g));
+            if (!g) return 0;
+            *arr = g;
+            *cap = nc;
+        }
+        (*arr)[(*n)++] = k;
+    }
+    return 1;
+}
+
+static int dp_kid_pos_cmp(const void* a, const void* b) {
+    const struct leptris_plan_result* const* ka =
+        (const struct leptris_plan_result* const*)a;
+    const struct leptris_plan_result* const* kb =
+        (const struct leptris_plan_result* const*)b;
+    if ((*ka)->position < (*kb)->position) return -1;
+    if ((*ka)->position > (*kb)->position) return 1;
+    return 0;
+}
+
+/* The wrapper spelling for a routed value: the row's wire_name,
+ * prefixed by the row binding when present. */
+static char* dp_wrapper_name(const struct leptris_plan_result* v) {
+    const char* local = v->name;
+    const char* colon = local ? strchr(local, ':') : NULL;
+    if (colon) local = colon + 1;
+    if (v->ns_prefix) return dp_join_colon(v->ns_prefix, local ? local : "");
+    return dp_strdup(local ? local : "");
+}
+
+static int dp_emit_element_open(const struct leptris_plan_result* v,
+                                const char* name, dp_sb* b,
+                                const dp_decls* decls, int is_root) {
+    if (!dp_sb_putn(b, "<", 1) || !dp_sb_puts(b, name)) return 0;
+    if (is_root && decls) {
+        for (size_t i = 0; i < decls->n; i++) {
+            if (!dp_sb_puts(b, " xmlns:") || !dp_sb_puts(b, decls->p[i]) ||
+                !dp_sb_puts(b, "=\"") || !dp_sb_puts(b, decls->u[i]) ||
+                !dp_sb_putn(b, "\"", 1))
+                return 0;
+        }
+    }
+    for (size_t a = 0; a < v->attr_count; a++) {
+        if (!dp_sb_putn(b, " ", 1) || !dp_sb_puts(b, v->attr_names[a]) ||
+            !dp_sb_puts(b, "=\"") ||
+            !dp_sb_escape(b, v->attr_values[a], 1) ||
+            !dp_sb_putn(b, "\"", 1))
+            return 0;
+    }
+    return 1;
+}
+
+static int dp_emit_value(const struct leptris_plan_result* v,
+                         const dp_plan* container, const LeptrisPlan pool,
+                         dp_sb* b, const dp_decls* decls, int is_root);
+
+static int dp_emit_element(const struct leptris_plan_result* v,
+                           const char* name, const LeptrisPlan pool,
+                           dp_sb* b, const dp_decls* decls, int is_root) {
+    if (!dp_emit_element_open(v, name, b, decls, is_root)) return 0;
+    const struct leptris_plan_result** kids = NULL;
+    size_t nk = 0, cap = 0;
+    if (!dp_flatten_kids(v, &kids, &nk, &cap)) {
+        free((void*)kids);
+        return 0;
+    }
+    if (!nk) {
+        free((void*)kids);
+        return dp_sb_puts(b, "/>");
+    }
+    if (!dp_sb_putn(b, ">", 1)) {
+        free((void*)kids);
+        return 0;
+    }
+    qsort((void*)kids, nk, sizeof(*kids), dp_kid_pos_cmp);
+    const dp_plan* container =
+        &((const struct leptris_plan*)pool)->plans[v->container_plan];
+    int ok = 1;
+    for (size_t i = 0; i < nk && ok; i++)
+        ok = dp_emit_value(kids[i], container, pool, b, NULL, 0);
+    free((void*)kids);
+    if (!ok) return 0;
+    return dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
+           dp_sb_putn(b, ">", 1);
+}
+
+static int dp_emit_value(const struct leptris_plan_result* v,
+                         const dp_plan* container, const LeptrisPlan pool,
+                         dp_sb* b, const dp_decls* decls, int is_root) {
+    if (v->kind == LEPTRIS_PLAN_VALUE_RAW)
+        return dp_sb_puts(b, v->str ? v->str : "");
+    if (v->kind == LEPTRIS_PLAN_VALUE_ELEMENT) {
+        /* The element's own binding was stamped at walk time; a
+         * walk member without one falls back to its plan's. */
+        char* name = NULL;
+        const dp_plan* self =
+            &((const struct leptris_plan*)pool)
+                ->plans[v->container_plan];
+        /* Local name: the value's echoed wire name, or the plan's
+         * element_name for a walk root (which carries no name). */
+        const char* local = NULL;
+        if (v->name) {
+            const char* colon = strchr(v->name, ':');
+            local = colon ? colon + 1 : v->name;
+        } else {
+            local = self->element_name;
+        }
+        if (v->ns_prefix)
+            name = dp_join_colon(v->ns_prefix, local ? local : "");
+        else
+            name = dp_strdup(local ? local : "");
+        if (!name) return 0;
+        int ok = dp_emit_element(v, name, pool, b, decls, is_root);
+        free(name);
+        return ok;
+    }
+    /* SCALAR / CALLBACK / CONTENT runs. */
+    const leptris_child_plan* row = NULL;
+    if (container && v->row_index != UINT32_MAX &&
+        v->row_index < container->child_count)
+        row = &container->child_plans[v->row_index];
+    const char* text = v->str ? v->str : "";
+    if (row && row->kind != LEPTRIS_PLAN_KIND_CONTENT) {
+        /* The row is the wrapper element around this text. */
+        char* name = dp_wrapper_name(v);
+        if (!name) return 0;
+        int ok = dp_sb_putn(b, "<", 1) && dp_sb_puts(b, name) &&
+                 dp_sb_putn(b, ">", 1) && dp_sb_escape(b, text, 0) &&
+                 dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
+                 dp_sb_putn(b, ">", 1);
+        free(name);
+        return ok;
+    }
+    /* Spine runs and CONTENT rows: bare text. */
+    return dp_sb_escape(b, text, 0);
+}
+
+LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
+                                         const LeptrisPlanResult result,
+                                         LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!plan || !result) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    const struct leptris_plan_result* rv =
+        (const struct leptris_plan_result*)result;
+    dp_decls decls = {0};
+    if (!dp_collect_decls(rv, &decls)) {
+        dp_decls_free(&decls);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    dp_sb b = {0};
+    int ok = dp_emit_value(rv, NULL, (const LeptrisPlan)plan, &b,
+                           &decls, 1);
+    dp_decls_free(&decls);
+    if (!ok) {
+        free(b.s);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    if (!b.s) {
+        b.s = (char*)calloc(1, 1);
+        if (!b.s) {
+            if (status) *status = LEPTRIS_ERROR_MEMORY;
+            return NULL;
+        }
+    }
+    return b.s;
 }
 
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result) {

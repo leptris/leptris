@@ -86,6 +86,7 @@ fn plan_build_and_walk_round_trip() {
         ns_form: descriptor::PLAN_NS_NONE,
         pad_ns: 0,
         ns_uri: ptr::null(),
+        ns_prefix: ptr::null(),
     };
     let child_row = descriptor::ChildPlan {
         wire_name: title.as_ptr(),
@@ -98,6 +99,7 @@ fn plan_build_and_walk_round_trip() {
         predicate_count: 0,
         pad_pred: 0,
         predicates: ptr::null(),
+        ns_prefix: ptr::null(),
     };
     let book_plan = descriptor::ElementPlan {
         element_name: book.as_ptr(),
@@ -110,6 +112,7 @@ fn plan_build_and_walk_round_trip() {
         child_plans: &child_row,
         flags: 0,
         pad1: 0,
+        ns_prefix: ptr::null(),
     };
     let root_child = descriptor::ChildPlan {
         wire_name: book.as_ptr(),
@@ -124,6 +127,7 @@ fn plan_build_and_walk_round_trip() {
         predicate_count: 0,
         pad_pred: 0,
         predicates: ptr::null(),
+        ns_prefix: ptr::null(),
     };
     let root_plan = descriptor::ElementPlan {
         element_name: catalog.as_ptr(),
@@ -136,6 +140,7 @@ fn plan_build_and_walk_round_trip() {
         child_plans: &root_child,
         flags: 0,
         pad1: 0,
+        ns_prefix: ptr::null(),
     };
     let plans = [root_plan, book_plan];
     let spec = descriptor::PlanSpec {
