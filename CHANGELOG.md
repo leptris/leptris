@@ -4,14 +4,44 @@
 
 ### Added
 
-- plan-path serialization emits ns declarations (#1551) (descriptor)
-- wildcard (catch-all) child rows (#1552) (descriptor)
+- **Plan-path serialization emits namespace declarations (#1551,
+  PR #1558).** New `leptris_plan_serialize(plan, result)`: the plan
+  supplies element wrappers, the result the content — children emit
+  in document order, collections are transparent, RAW members
+  verbatim, text and attributes escaped. Rows carrying
+  `ns_form = EXACT` plus the new trailing `ns_prefix` field emit
+  prefixed wire names, and every distinct (prefix, uri) pair is
+  declared exactly once on the output root in first-encounter
+  order. `leptris_attr_plan` takes the same field, so #1486-matched
+  attributes emit the plan-chosen spelling. Byte-parity gates on a
+  `w:document` corpus; additive trailing fields keep
+  `PLAN_ABI_VERSION` at 1 (64-bit attr row 40 -> 48 bytes). Rust
+  mirror (`leptris-descriptor`) updated in lockstep.
+- **Wildcard (catch-all) child rows (#1552, PR #1555).**
+  `LEPTRIS_PLAN_KIND_WILDCARD` binds every element child no named
+  sibling row bound — named rows take precedence regardless of row
+  order (a two-pass walk over a completed `bound[]` map; a named
+  row that rejected a child does not reserve it). Namespace-form
+  aware (`pad0` marks the form explicit so `NS_NONE` is
+  expressible; unset keeps the catch-all ANY default), emits one
+  COLLECTION echoing the row wire_name/type_tag even when empty,
+  members in document order; `child_plan_index >= 0` walks members
+  through that plan. Rust mirror gains `PLAN_KIND_WILDCARD = 7`.
 
 ### Fixed
 
-- widen the indexed-child-access shape budget 6x -> 7.5x (test)
-- SerializeReparse consumes the doc it serializes (test)
-- root-level leaf splice arguments adopt single-node (#1539) (dom)
+- **Root-level leaf splice arguments adopt single-node (#1539,
+  PR #1554).** A leaf directly on a scratch document's children
+  chain (prolog/epilog comment or PI) reported
+  `LEPTRIS_ERROR_MEMORY` on cross-document append: the chain
+  copier hit the root element and misread it as OOM. The seam now
+  copies exactly the argument for the doc-level shape; in-element
+  leaves keep the #540 chain shape.
+- **Emulated-i386 perf-gate stability (PR #1561).** The
+  indexed-child-access shape budget widens 6x -> 7.5x: the qemu
+  timer noise of the ILP32 leg flaked past 6x three times in one
+  day while every native leg measured ~3x. Linear ~3x, quadratic
+  ~9x, O(N^3) ~27x — the gate keeps its discrimination.
 
 
 
