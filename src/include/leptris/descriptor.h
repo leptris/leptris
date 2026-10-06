@@ -65,7 +65,18 @@ typedef enum {
     LEPTRIS_PLAN_KIND_NESTED = 3,     /* recurse into plans[child_plan_index] */
     LEPTRIS_PLAN_KIND_RAW = 4,        /* verbatim serialized subtree */
     LEPTRIS_PLAN_KIND_CONTENT = 5,    /* mixed-content text runs, doc order */
-    LEPTRIS_PLAN_KIND_CALLBACK = 6    /* escape hatch: raw value + position */
+    LEPTRIS_PLAN_KIND_CALLBACK = 6,   /* escape hatch: raw value + position */
+    /* #1552: catch-all row. Binds every element child that no
+     * named sibling row bound — named rows take precedence
+     * regardless of row-list position. Emits exactly one
+     * COLLECTION echoing the row's wire_name/type_tag (even when
+     * the remainder is empty). Members keep document order and
+     * echo the row type_tag. The row's ns_form filters members;
+     * an unset form means ANY namespace (catch-all), unlike
+     * named rows' historical NONE. child_plan_index >= 0 walks
+     * each member through that plan (ELEMENT members); -1 emits
+     * RAW serialized subtrees. */
+    LEPTRIS_PLAN_KIND_WILDCARD = 7    /* remainder bucket, named rows win */
 } LeptrisPlanKind;
 
 /* Element plan flags. */
@@ -137,6 +148,10 @@ typedef struct {
      * zero value) keeps the historical no-namespace+NS_LENIENT
      * behavior — the fields are consulted only when set. */
     uint8_t ns_form;       /* LeptrisPlanNsForm */
+    /* #1552 WILDCARD rows only: nonzero marks ns_form as
+     * explicitly set — ns_form 0 then binds no-namespace
+     * remainder alone. Unset (0), the row is the catch-all ANY
+     * default. Ignored by named rows. */
     uint8_t pad0;
     const char* ns_uri;    /* LEPTRIS_PLAN_NS_EXACT only */
     /* #1272: element-side predicates. Same semantics as attr_predicate
