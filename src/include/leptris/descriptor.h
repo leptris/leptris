@@ -129,6 +129,12 @@ typedef struct {
     uint8_t ns_form;       /* LeptrisPlanNsForm */
     uint8_t pad_ns;
     const char* ns_uri;    /* LEPTRIS_PLAN_NS_EXACT only */
+    /* #1551 (additive trailing field, the #1115 pattern): the
+     * intended wire prefix for serialized output. With ns_form
+     * EXACT, plan-path serialization emits the attribute as
+     * "ns_prefix:wire_name" (wire_name is the LOCAL name). NULL
+     * keeps matching-only behavior. */
+    const char* ns_prefix;
 } leptris_attr_plan;
 
 typedef struct {
@@ -159,6 +165,12 @@ typedef struct {
     uint16_t predicate_count;
     uint16_t pad_pred;
     const leptris_attr_predicate* predicates;
+    /* #1551 (additive trailing field): the intended wire prefix
+     * for serialized output. With ns_form EXACT, the walk stamps
+     * the binding on values and plan-path serialization emits
+     * "ns_prefix:local" and the xmlns declaration (once, on the
+     * output root). NULL keeps matching-only behavior. */
+    const char* ns_prefix;
 } leptris_child_plan;
 
 typedef struct {
@@ -174,6 +186,9 @@ typedef struct {
     const leptris_child_plan* child_plans;
     uint16_t flags; /* LEPTRIS_PLAN_FLAG_* */
     uint16_t pad1;
+    /* #1551 (additive trailing field): the root plan's intended
+     * wire prefix, same contract as the child-row field. */
+    const char* ns_prefix;
 } leptris_element_plan;
 
 typedef struct {
@@ -236,6 +251,20 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc,
                                                 LeptrisPlan plan,
                                                 LeptrisStatus* status);
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result);
+
+/* #1551: serialize a walk result back to XML, guided by its plan.
+ * The plan supplies element wrappers (row wire_name + ns_prefix)
+ * and the result supplies content; children emit in document order
+ * (the walk's order_index). Rows carrying ns_form EXACT +
+ * ns_prefix emit prefixed names, and every distinct (prefix, uri)
+ * pair used anywhere in the tree is declared exactly once, on the
+ * output root element, in first-encounter order. Attribute rows
+ * with ns_prefix emit "prefix:local". Text and attribute values
+ * are escaped; RAW members are verbatim. Returns a caller-freed
+ * string (leptris_free_string); NULL + status on failure. */
+LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
+                                         const LeptrisPlanResult result,
+                                         LeptrisStatus* status);
 
 /* ---- Result accessors (NULL-tolerant: NULL in, 0/NULL out) ------- */
 

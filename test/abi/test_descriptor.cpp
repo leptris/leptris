@@ -256,7 +256,7 @@ TEST(Plan1490, StructSizeAccessorsLetBindingsDetectSkew) {
      * the width-independent accessor-vs-sizeof checks above carry
      * the skew-detection contract. */
     if (sizeof(void*) == 8)
-        EXPECT_EQ(leptris_plan_attr_row_size(), 40u);
+        EXPECT_EQ(leptris_plan_attr_row_size(), 48u); /* #1551 ns_prefix */
 }
 
 TEST(Plan1115, EveryValueKindCarriesPosition) {
@@ -1296,4 +1296,403 @@ TEST(Plan1552, WildcardChildPlanIndexIsValidated) {
     EXPECT_EQ(plan, nullptr);
     EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
     leptris_plan_free(plan);
+}
+
+// ---- #1551: plan-path serialization emits namespace declarations --
+// Rows carrying ns_form EXACT + ns_prefix serialize as prefixed
+// names; every (prefix, uri) pair used in the tree is declared
+// exactly once on the output root, in first-encounter order. The
+// plan supplies wrappers, the result supplies content, children
+// emit in document order (walk order_index).
+
+TEST(Plan1551, SerializeEmitsPrefixedNamesAndRootDeclarationOnce) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<w:document xmlns:w=\"urn:w\"><w:body><w:p><w:t>x</w:t>"
+        "</w:p></w:body></w:document>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan p_kids[1] = {};
+    p_kids[0].wire_name = "t";
+    p_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    p_kids[0].type_tag = 3;
+    p_kids[0].child_plan_index = -1;
+    p_kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    p_kids[0].ns_uri = "urn:w";
+    p_kids[0].ns_prefix = "w";
+
+    leptris_child_plan body_kids[1] = {};
+    body_kids[0].wire_name = "p";
+    body_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    body_kids[0].type_tag = 2;
+    body_kids[0].child_plan_index = 2;
+    body_kids[0].ns_prefix = "w";
+
+    leptris_child_plan doc_kids[1] = {};
+    doc_kids[0].wire_name = "body";
+    doc_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    doc_kids[0].type_tag = 1;
+    doc_kids[0].child_plan_index = 1;
+    doc_kids[0].ns_prefix = "w";
+
+    leptris_element_plan plans[3] = {};
+    plans[0].element_name = "document";
+    plans[0].child_count = 1;
+    plans[0].child_plans = doc_kids;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+    plans[1].element_name = "body";
+    plans[1].child_count = 1;
+    plans[1].child_plans = body_kids;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:w";
+    plans[2].element_name = "p";
+    plans[2].child_count = 1;
+    plans[2].child_plans = p_kids;
+    plans[2].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[2].ns_uri = "urn:w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 3;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    /* Byte parity: prefixed names, declaration exactly once (on
+     * the root, even though four elements share the prefix). */
+    EXPECT_STREQ(out, xml);
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1551, TwoPrefixesDeclareInFirstEncounterOrder) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<a:root xmlns:a=\"urn:a\"><a:x><b:y xmlns:b=\"urn:b\">1</b:y>"
+        "</a:x></a:root>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan x_kids[1] = {};
+    x_kids[0].wire_name = "y";
+    x_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    x_kids[0].type_tag = 2;
+    x_kids[0].child_plan_index = -1;
+    x_kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    x_kids[0].ns_uri = "urn:b";
+    x_kids[0].ns_prefix = "b";
+
+    leptris_child_plan root_kids[1] = {};
+    root_kids[0].wire_name = "x";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[0].type_tag = 1;
+    root_kids[0].child_plan_index = 1;
+    root_kids[0].ns_prefix = "a";
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "root";
+    plans[0].child_count = 1;
+    plans[0].child_plans = root_kids;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:a";
+    plans[0].ns_prefix = "a";
+    plans[1].element_name = "x";
+    plans[1].child_count = 1;
+    plans[1].child_plans = x_kids;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:a";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    /* Both declarations hoisted to the root, a (first encounter)
+     * before b; inner xmlns:b duplicated NOT emitted. */
+    EXPECT_STREQ(out,
+                 "<a:root xmlns:a=\"urn:a\" xmlns:b=\"urn:b\">"
+                 "<a:x><b:y>1</b:y></a:x></a:root>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1551, AttrRowsEmitPrefixedWireNames) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<w:p xmlns:w=\"urn:w\" w:val=\"1\"/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_attr_plan attrs[1] = {};
+    attrs[0].wire_name = "val";
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].type_tag = 9;
+    attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    attrs[0].ns_uri = "urn:w";
+    attrs[0].ns_prefix = "w";
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "p";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = attrs;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    /* The #1486 row matched by (URI, local); serialization emits
+     * the plan-chosen prefix spelling. */
+    EXPECT_STREQ(out, "<w:p xmlns:w=\"urn:w\" w:val=\"1\"/>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1551, UnprefixedPlanSerializesBare) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<document><body>plain</body></document>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "body";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "document";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, xml);
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1551, SerializeRoundTripsThroughTheWalk) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<w:document xmlns:w=\"urn:w\"><w:body><w:p><w:t>x</w:t>"
+        "</w:p></w:body></w:document>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan p_kids[1] = {};
+    p_kids[0].wire_name = "t";
+    p_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    p_kids[0].type_tag = 3;
+    p_kids[0].child_plan_index = -1;
+    p_kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    p_kids[0].ns_uri = "urn:w";
+    p_kids[0].ns_prefix = "w";
+
+    leptris_child_plan body_kids[1] = {};
+    body_kids[0].wire_name = "p";
+    body_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    body_kids[0].type_tag = 2;
+    body_kids[0].child_plan_index = 2;
+    body_kids[0].ns_prefix = "w";
+
+    leptris_child_plan doc_kids[1] = {};
+    doc_kids[0].wire_name = "body";
+    doc_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    doc_kids[0].type_tag = 1;
+    doc_kids[0].child_plan_index = 1;
+    doc_kids[0].ns_prefix = "w";
+
+    leptris_element_plan plans[3] = {};
+    plans[0].element_name = "document";
+    plans[0].child_count = 1;
+    plans[0].child_plans = doc_kids;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+    plans[1].element_name = "body";
+    plans[1].child_count = 1;
+    plans[1].child_plans = body_kids;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:w";
+    plans[2].element_name = "p";
+    plans[2].child_count = 1;
+    plans[2].child_plans = p_kids;
+    plans[2].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[2].ns_uri = "urn:w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 3;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    leptris_plan_result_free(r);
+    leptris_document_free(doc);
+
+    /* Re-parse the serialization and re-walk: the plan's EXACT
+     * forms read the prefixed wire, values survive. */
+    LeptrisDocument doc2 = leptris_parse_string(out, strlen(out), &st);
+    leptris_free_string(out);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisPlanResult r2 = leptris_plan_walk(doc2, leptris_document_root(doc2), plan, &st);
+    ASSERT_NE(r2, nullptr);
+    LeptrisPlanResult body = leptris_plan_value_at(r2, 0);
+    ASSERT_NE(body, nullptr);
+    LeptrisPlanResult p = leptris_plan_value_at(body, 0);
+    ASSERT_NE(p, nullptr);
+    EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(p, 0)), "x");
+    leptris_plan_result_free(r2);
+    leptris_plan_free(plan);
+    leptris_document_free(doc2);
+}
+
+TEST(Plan1551, TextAndAttributeValuesAreEscaped) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<w:t xmlns:w=\"urn:w\" w:k=\"a&lt;b\">1&lt;2&amp;3</w:t>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_attr_plan attrs[1] = {};
+    attrs[0].wire_name = "k";
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].type_tag = 1;
+    attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    attrs[0].ns_uri = "urn:w";
+    attrs[0].ns_prefix = "w";
+
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "#text";
+    kids[0].kind = LEPTRIS_PLAN_KIND_CONTENT;
+    kids[0].type_tag = 2;
+    kids[0].child_plan_index = -1;
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "t";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = attrs;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    plans[0].flags = LEPTRIS_PLAN_FLAG_MIXED_CONTENT;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<w:t xmlns:w=\"urn:w\" w:k=\"a&lt;b\">1&lt;2&amp;3</w:t>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+TEST(Plan1551, ChildrenEmitInDocumentOrderAcrossRows) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<w:b xmlns:w=\"urn:w\"><w:p>first</w:p>"
+                      "<w:q>second</w:q></w:b>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Row order deliberately reversed vs document order. */
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "q";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 2;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[0].ns_uri = "urn:w";
+    kids[0].ns_prefix = "w";
+    kids[1].wire_name = "p";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[1].type_tag = 1;
+    kids[1].child_plan_index = -1;
+    kids[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[1].ns_uri = "urn:w";
+    kids[1].ns_prefix = "w";
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "b";
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<w:b xmlns:w=\"urn:w\"><w:p>first</w:p>"
+                 "<w:q>second</w:q></w:b>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
 }
