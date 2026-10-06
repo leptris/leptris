@@ -317,9 +317,13 @@ TEST(PerfRegression, IndexedChildAccessDoesNotRegress) {
      * sequential indexed read O(1) per step; round 15 extends it to
      * attr-free parents, whose cache child() materializes lazily)
      * measures large/small ~ 3x. The old quadratic walk measures
-     * ~9x; an O(N^3) regression reaches ~27x. Budget 6x separates
-     * linear from quadratic with margin on loaded runners. */
-    EXPECT_LT(large, 6.0 * small)
+     * ~9x; an O(N^3) regression reaches ~27x. Budget 7.5x separates
+     * linear from quadratic with margin on loaded runners — and on
+     * the qemu-timer noise of the emulated i386 leg, which flaked
+     * past 6x three times in one day (2026-10-06) while every
+     * native leg and the reruns stayed ~3x. Quadratic at 9x still
+     * trips the gate with room. */
+    EXPECT_LT(large, 7.5 * small)
         << "Indexed child access lost the O(1)-per-step resume "
         << "(quadratic walk back?): 75-child sweep " << large
         << " us vs 25-child sweep " << small << " us";
