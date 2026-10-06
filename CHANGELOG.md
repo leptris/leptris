@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.310] - 2026-10-06
+
+### Fixed
+
+- atomic_type is a borrowed channel — cast targets assign lifetime-stable labels (xpath)
+- closure carriers end-to-end + recursive fold semantics (QT3 #1182 finalize 3) (xquery)
+
+
+
 ## [1.9.309] - 2026-10-05
 
 ### Fixed
