@@ -670,6 +670,32 @@ TEST(CrossDocumentLeafAdoption, RootLevelLeafArgumentAdoptsByKind) {
     }
 }
 
+// #1557: an absorbed source's handle may OUTLIVE the absorber. The
+// anchor's free used to clear the absorbed state, so the holder's
+// later free re-released the same pool — heap corruption. The anchor
+// now defers the release to the outstanding handle.
+TEST(AbsorbAdoption, SourceHandleMayOutliveAnchor) {
+    for (int i = 0; i < 50; i++) {
+        LeptrisDocument dest = Parse("<main><keep/></main>");
+        ASSERT_NE(dest, nullptr);
+        LeptrisDocument src = Parse("<scratch><a/></scratch>");
+        ASSERT_NE(src, nullptr);
+        ASSERT_EQ(leptris_document_absorb(dest, src), LEPTRIS_OK);
+        leptris_document_free(dest);   /* anchor dies first */
+        leptris_document_free(src);    /* holder releases after */
+    }
+}
+
+TEST(AbsorbAdoption, SourceHandleFreedBeforeAnchorStillNoOp) {
+    LeptrisDocument dest = Parse("<main><keep/></main>");
+    ASSERT_NE(dest, nullptr);
+    LeptrisDocument src = Parse("<scratch><a/></scratch>");
+    ASSERT_NE(src, nullptr);
+    ASSERT_EQ(leptris_document_absorb(dest, src), LEPTRIS_OK);
+    leptris_document_free(src);    /* handle-only: memory stays with anchor */
+    leptris_document_free(dest);   /* releases everything incl. the source */
+}
+
 TEST(AbsorbAdoption, SpliceAfterAbsorbIsZeroCopy) {
     LeptrisDocument dst = Parse("<main><keep/></main>");
     ASSERT_NE(dst, nullptr);

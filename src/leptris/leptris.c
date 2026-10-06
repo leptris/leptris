@@ -933,9 +933,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
 
     /* #1548: an absorbed document's MEMORY belongs to its absorber
      * (it rides the absorber's child_docs chain). A caller free
-     * releases only the outstanding handle. */
-    if (doc->absorbed_by) {
-        doc->absorbed_handle = 0;
+     * releases only the outstanding handle. #1557: unless the
+     * anchor died first and DEFERRED the release to this holder —
+     * then this free is the real one. */
+    if (doc->absorbed_by && !doc->absorbed_deferred) {
+        if (doc->absorbed_handle > 0) doc->absorbed_handle--;
         return;
     }
 
@@ -1021,12 +1023,24 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
                                        * doesn't try to walk the
                                        * adopted subtree. */
             ch->root = NULL;
-            /* #1548: the anchor's free is the REAL one — clear the
-             * absorbed state so the early handle-return above does
-             * not swallow it. */
-            ch->absorbed_by = NULL;
-            ch->absorbed_handle = 0;
-            leptris_document_free(ch);
+            if (ch->absorbed_by && ch->absorbed_handle > 0) {
+                /* #1557: a caller still holds this absorbed handle.
+                 * Freeing here would strand it on freed memory (its
+                 * later free read the cleared flag and re-released
+                 * the pool — the leptris-ruby#386 double free).
+                 * DEFER: detach from our chain and hand the release
+                 * to the holder's leptris_document_free, which sees
+                 * absorbed_deferred and runs the full release. */
+                ch->absorbed_deferred = 1;
+                ch->next_adopted = NULL;
+            } else {
+                /* #1548: the anchor's free is the REAL one — clear
+                 * the absorbed state so the early handle-return
+                 * above does not swallow it. */
+                ch->absorbed_by = NULL;
+                ch->absorbed_handle = 0;
+                leptris_document_free(ch);
+            }
             ch = next;
         }
         doc->child_docs = NULL;
