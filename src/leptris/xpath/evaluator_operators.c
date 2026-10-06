@@ -629,6 +629,26 @@ static const struct { const char* type; char mark; } xq_family_table[] = {
     { "xs:untypedAtomic", 'U' },
 };
 
+/* Lifetime-stable name for an atomic-type label: the family
+ * table's static literals, else the numeric labels. atomic_type is
+ * a BORROWED channel (xpath_result_free does not own it) — storing
+ * the cast's stack `base` buffer there is a stack-use-after-return
+ * once a later seq fold reads it (ASAN, cbcl-distinct-002). */
+static const char* xq_atomic_type_stable(const char* t) {
+    if (!t) return NULL;
+    for (size_t i = 0;
+         i < sizeof xq_family_table / sizeof xq_family_table[0];
+         i++)
+        if (strcmp(xq_family_table[i].type, t) == 0)
+            return xq_family_table[i].type;
+    static const char* const k_num[] = {
+        "xs:float", "xs:decimal", "xs:double", "xs:integer", NULL
+    };
+    for (int i = 0; k_num[i]; i++)
+        if (strcmp(k_num[i], t) == 0) return k_num[i];
+    return NULL;
+}
+
 static char xq_atomic_family_mark(const char* t) {
     if (!t) return 0;
     for (size_t i = 0;
@@ -3263,8 +3283,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                 out = xpath_result_new(XPATH_RESULT_STRING);
                 if (out) {
                     out->value.string_value = xpath_to_string(v);
-                    if (xq_atomic_family_mark(base))
-                        out->atomic_type = base;
+                    out->atomic_type = xq_atomic_type_stable(base);
                 }
             } else if (strcmp(base, "xs:boolean") == 0) {
                 /* the operand may ride a nodeset carrier — EBV of a
