@@ -314,6 +314,51 @@ static struct leptris_document* leaf_owner_doc(LeptrisNode* n) {
     }
 }
 
+/* #1534/#1539: copy ONE non-element node into the target pool.
+ * Doc-level arguments (prolog/epilog leaves on the #580 children
+ * chain) MUST copy single-node: their sibling chain includes the
+ * ROOT ELEMENT, and the chain copier misreads that element as an
+ * OOM failure (#1539's LEPTRIS_ERROR_MEMORY). */
+static LeptrisNode* copy_leaf_one(LeptrisNode* c,
+                                  struct leptris_document* target) {
+    switch (c->type) {
+        case LEPTRIS_NODE_TYPE_TEXT: {
+            LeptrisTextNode* t = (LeptrisTextNode*)c;
+            const char* content = leptris_textnode_content(t);
+            return (LeptrisNode*)leptris_text_create(
+                content, t->content_len, target->pool, target);
+        }
+        case LEPTRIS_NODE_TYPE_CDATA: {
+            LeptrisCDATANode* cd = (LeptrisCDATANode*)c;
+            return (LeptrisNode*)leptris_cdata_create(
+                cd->content, cd->content ? strlen(cd->content) : 0,
+                target->pool);
+        }
+        case LEPTRIS_NODE_TYPE_COMMENT: {
+            LeptrisCommentNode* cm = (LeptrisCommentNode*)c;
+            return (LeptrisNode*)leptris_comment_create(
+                cm->content,
+                cm->content ? strlen(cm->content) : 0,
+                target->pool);
+        }
+        case LEPTRIS_NODE_TYPE_PI: {
+            LeptrisPINode* pi = (LeptrisPINode*)c;
+            return (LeptrisNode*)leptris_pi_create(
+                pi->target, pi->target ? strlen(pi->target) : 0,
+                pi->data ? pi->data : "",
+                pi->data ? strlen(pi->data) : 0, target->pool);
+        }
+        case LEPTRIS_NODE_TYPE_ENTITY_REF: {
+            LeptrisEntityRefNode* er = (LeptrisEntityRefNode*)c;
+            return (LeptrisNode*)leptris_entity_ref_create(
+                er->name, er->name ? strlen(er->name) : 0,
+                target->pool);
+        }
+        default:
+            return NULL;
+    }
+}
+
 /* #1534: copy a non-element node (plus its linked tail — the #540
  * chain shape) into the target document's pool. Same per-kind
  * creation helpers the subtree copier uses. */
@@ -420,6 +465,11 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
          * the target — its pool dies with the target, so the node
          * moves by reference. */
         if (src->absorbed_by == target) return node;
+        /* top == node: a DOC-LEVEL leaf (prolog/epilog, #580) —
+         * its sibling chain spans unrelated nodes (including the
+         * root element), so copy exactly the argument (#1539).
+         * An in-element leaf keeps the #540 chain shape. */
+        if (top == node) return copy_leaf_one(node, target);
         LeptrisNode* copy = copy_leaf_chain(node, target);
         return copy;
     }
