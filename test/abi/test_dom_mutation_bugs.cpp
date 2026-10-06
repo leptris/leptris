@@ -588,3 +588,154 @@ TEST(RemoveChildMixedChain, NonChildStillInvalid) {
               LEPTRIS_ERROR_INVALID_ARG);
     leptris_document_free(doc);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #1548: cross-document splice adoption deep-copies the subtree
+// (#1528), doubling the live set — the sectioned corpus exceeds a 7GB
+// budget. leptris_document_absorb transfers a DOOMED source document's
+// lifetime into the destination, so the adoption gate can splice by
+// reference: no copy, the source's pool dies with the destination, and
+// the caller's later leptris_document_free(src) releases only the
+// handle.
+// ---------------------------------------------------------------------------
+
+static LeptrisElement FirstChildElem(LeptrisElement e) {
+    return leptris_element_first_child_any(e);
+}
+
+TEST(AbsorbAdoption, SpliceAfterAbsorbIsZeroCopy) {
+    LeptrisDocument dst = Parse("<main><keep/></main>");
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument src = Parse("<scratch><section id='1'>t</section>"
+                                "<section id='2'>u</section></scratch>");
+    ASSERT_NE(src, nullptr);
+    ASSERT_EQ(leptris_document_absorb(dst, src), LEPTRIS_OK);
+
+    LeptrisElement main_root = leptris_document_root(dst);
+    LeptrisElement sec = FirstChildElem(leptris_document_root(src));
+    ASSERT_NE(sec, nullptr);
+    void* before = (void*)sec;
+    ASSERT_EQ(leptris_element_append_child(main_root, sec), LEPTRIS_OK);
+
+    // Zero-copy: the SAME node pointer entered the destination tree.
+    LeptrisNodeRef adopted = leptris_node_last_child(
+        leptris_element_as_node(main_root));
+    EXPECT_EQ((void*)adopted, before);
+
+    // A second seam from the same absorbed source also moves.
+    LeptrisElement sec2 = FirstChildElem(leptris_document_root(src));
+    ASSERT_NE(sec2, nullptr);
+    ASSERT_EQ(leptris_element_append_child(main_root, sec2),
+              LEPTRIS_OK);
+
+    // The source handle's free releases only the handle.
+    leptris_document_free(src);
+
+    // The moved nodes live on with the destination.
+    char* xml = leptris_document_serialize(dst, NULL);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml,
+        "<main><keep/><section id=\"1\">t</section>"
+        "<section id=\"2\">u</section></main>");
+    leptris_free_string(xml);
+    leptris_document_free(dst);
+}
+
+TEST(AbsorbAdoption, DoubleSourceFreeIsSafe) {
+    LeptrisDocument dst = Parse("<main/>");
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument src = Parse("<scratch><x/></scratch>");
+    ASSERT_NE(src, nullptr);
+    ASSERT_EQ(leptris_document_absorb(dst, src), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_append_child(
+                  leptris_document_root(dst),
+                  FirstChildElem(leptris_document_root(src))),
+              LEPTRIS_OK);
+    leptris_document_free(src);
+    leptris_document_free(src);  // handle-only: must be a no-op
+    char* xml = leptris_document_serialize(dst, NULL);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, "<main><x/></main>");
+    leptris_free_string(xml);
+    leptris_document_free(dst);
+}
+
+TEST(AbsorbAdoption, SpliceIntoThirdDocumentStillCopies) {
+    LeptrisDocument dst = Parse("<main/>");
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument third = Parse("<third/>");
+    ASSERT_NE(third, nullptr);
+    LeptrisDocument src =
+        Parse("<scratch><x/><y/></scratch>");
+    ASSERT_NE(src, nullptr);
+    ASSERT_EQ(leptris_document_absorb(dst, src), LEPTRIS_OK);
+
+    LeptrisElement x = FirstChildElem(leptris_document_root(src));
+    void* before = (void*)x;
+
+    // The absorbed destination splices by reference...
+    ASSERT_EQ(leptris_element_append_child(
+                  leptris_document_root(dst), x),
+              LEPTRIS_OK);
+    EXPECT_EQ((void*)leptris_node_last_child(
+                  leptris_element_as_node(
+                      leptris_document_root(dst))),
+              before);
+
+    // ...but an UNRELATED document still adopts by copy (#1528).
+    LeptrisElement y = FirstChildElem(leptris_document_root(src));
+    ASSERT_EQ(leptris_element_append_child(
+                  leptris_document_root(third), y),
+              LEPTRIS_OK);
+    EXPECT_NE((void*)leptris_node_last_child(
+                  leptris_element_as_node(
+                      leptris_document_root(third))),
+              before);
+
+    leptris_document_free(src);
+    leptris_document_free(third);
+    leptris_document_free(dst);
+}
+
+TEST(AbsorbAdoption, WithoutAbsorbStillCopies) {
+    // The #1528 contract is unchanged when the caller does not absorb.
+    LeptrisDocument dst = Parse("<main/>");
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument src = Parse("<scratch><x/></scratch>");
+    ASSERT_NE(src, nullptr);
+    LeptrisElement x = FirstChildElem(leptris_document_root(src));
+    void* before = (void*)x;
+    ASSERT_EQ(leptris_element_append_child(
+                  leptris_document_root(dst), x),
+              LEPTRIS_OK);
+    EXPECT_NE((void*)leptris_node_last_child(
+                  leptris_element_as_node(
+                      leptris_document_root(dst))),
+              before);
+    leptris_document_free(src);
+    char* xml = leptris_document_serialize(dst, NULL);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_STREQ(xml, "<main><x/></main>");
+    leptris_free_string(xml);
+    leptris_document_free(dst);
+}
+
+TEST(AbsorbAdoption, InvalidArguments) {
+    LeptrisDocument a = Parse("<a/>");
+    ASSERT_NE(a, nullptr);
+    LeptrisDocument b = Parse("<b/>");
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_document_absorb(nullptr, b),
+              LEPTRIS_ERROR_NULL_ARG);
+    EXPECT_EQ(leptris_document_absorb(a, nullptr),
+              LEPTRIS_ERROR_NULL_ARG);
+    EXPECT_EQ(leptris_document_absorb(a, a), LEPTRIS_ERROR_INVALID_ARG);
+    ASSERT_EQ(leptris_document_absorb(a, b), LEPTRIS_OK);
+    // An absorbed document cannot absorb further (no chains).
+    LeptrisDocument c = Parse("<c/>");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_document_absorb(b, c), LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(c);
+    leptris_document_free(b);
+    leptris_document_free(a);
+}

@@ -416,6 +416,10 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
             src = leaf_owner_doc(top);
         }
         if (!src || src == target) return node;
+        /* #1548: the source is a doomed scratch doc absorbed into
+         * the target — its pool dies with the target, so the node
+         * moves by reference. */
+        if (src->absorbed_by == target) return node;
         LeptrisNode* copy = copy_leaf_chain(node, target);
         return copy;
     }
@@ -430,6 +434,10 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
     struct leptris_document* src =
         leptris_element_get_document((LeptrisElement)top);
     if (!src || src == target) return node;
+    /* #1548: the source is a doomed scratch doc absorbed into
+     * the target — its pool dies with the target, so the subtree
+     * moves by reference (O(1), no live-set doubling). */
+    if (src->absorbed_by == target) return node;
     LeptrisElement copy =
         leptris_element_copy((LeptrisElement)node, target);
     return copy ? (LeptrisNode*)copy : NULL;
