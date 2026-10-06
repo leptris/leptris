@@ -665,7 +665,8 @@ TEST(CrossDocumentLeafAdoption, RootLevelLeafArgumentAdoptsByKind) {
         ASSERT_NE(rt, nullptr) << "scratch: " << tc.scratch_xml;
         leptris_document_free(rt);
         leptris_document_free(scratch);
-        leptris_document_free(live);
+        /* live was consumed by SerializeReparse (it frees the doc
+         * it serializes — ASAN caught the double free). */
     }
 }
 
