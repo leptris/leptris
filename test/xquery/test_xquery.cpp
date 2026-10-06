@@ -205,6 +205,63 @@ TEST(XQueryCore, AbsEmptyAndDurationAggregates) {
     leptris_document_free(doc);
 }
 
+TEST(XQueryCore, DeclaredFoldRecursionAndCarriers) {
+    /* The spec'd fold via a DECLARED recursive function: the
+     * function-test parameter type must parse (its commas broke
+     * the parameter list), sequence arguments ride the member
+     * carrier through tail(), and the shared param names of a
+     * recursive closure must RESTORE the outer frame's bindings
+     * (fold-left/right-101..104). */
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:fold-left("
+        "$seq as item()*, $zero as item()*, "
+        "$f as function(item()*, item()) as item()*) "
+        "as item()* { "
+        "if (empty($seq)) then $zero "
+        "else local:fold-left(tail($seq), "
+        "$f($zero, head($seq)), $f) };"
+        "local:fold-left(1 to 5, 0, function($a,$b){$a+$b})"),
+        "15");
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:fold-right("
+        "$seq as item()*, $zero as item()*, "
+        "$f as function(item(), item()*) as item()*) "
+        "as item()* { "
+        "if (empty($seq)) then $zero "
+        "else $f(head($seq), "
+        "local:fold-right(tail($seq), $zero, $f)) };"
+        "local:fold-right(1 to 5, 0, function($a,$b){$a+$b})"),
+        "15");
+    /* The boolean accumulator keeps falsiness through the
+     * recursion (mark carriers survive the var round-trip). */
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:fl($seq, $zero, $f) { "
+        "if (empty($seq)) then $zero "
+        "else local:fl(tail($seq), $f($zero, head($seq)), $f) };"
+        "local:fl((true(), false(), false()), false(), "
+        "function($a,$b){$a and $b})"),
+        "false");
+    /* Empty-sequence zero: empty($acc) must see the empty
+     * sequence, not one empty item (fold-left-019). */
+    EXPECT_EQ(seq_string(doc,
+        "fold-left((13, 14, 9, 6), (), function($a, $b){ "
+        "if(empty($a)) then $b else ($a + $b) div 2 })"),
+        "8.625");
+    /* Inline function literals accept `as TYPE` on params and the
+     * return (fold-left-009's shape). */
+    EXPECT_EQ(seq_string(doc,
+        "let $f := function($a as node()*, $b as node()) as node()* "
+        "{ ($a, $b) } return count($f((<x/>, <y/>), <z/>))"),
+        "3");
+    /* The million-item range fold admits full ranges
+     * (fold-left-020). */
+    EXPECT_EQ(seq_string(doc,
+        "fold-left(1 to 1000000, 0, function($a, $b){ $a + 1})"),
+        "1000000");
+}
+
 TEST(XQueryCore, InstanceOfIntegerRequiresIntegrality) {
     /* F&O: xs:integer admits only integral values; the subtype
      * hierarchy (byte <: integer) still holds (K2-ABSFunc-27..30). */

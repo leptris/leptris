@@ -803,19 +803,38 @@ static struct leptris_xpath_result* fn_distinct_values(XPathContext* ctx,
                     if (dur_ms_parse(durj, &mj, &sj) &&
                         mj == mk && sj == sk)
                         dup = 1;
-                } else if (
+                } else {
+                    /* untypedAtomic vs PLAIN string: the untyped
+                     * operand casts to xs:string — lexical eq
+                     * (Saxon keeps {untyped+string} + {typed} per
+                     * value in cbcl-distinct-values-002). */
+                    int ku = items[k][0] == '\x03' && items[k][1] == 'U';
+                    int ju = items[j][0] == '\x03' && items[j][1] == 'U';
+                    if (ku != ju) {
+                        const char* ulex =
+                            (ku ? items[k] : items[j]) + 2;
+                        const char* other = ku ? items[j] : items[k];
+                        if (!(other[0] == '\x03' && other[1]))
+                            dup = strcmp(ulex, other) == 0;
+                    }
+                    if (!dup) {
 #if LEPTRIS_HAS_DUCET
-                    plain_str(items[k]) && plain_str(items[j]) &&
-                    dv_routed != 0
-                        ? (dv_routed < 0
-                               ? (collation_needed_error(ctx),
-                                  xpath_result_free(out), out = NULL,
-                                  dup = 1, 1)
-                               : str_eq_coll(items[k], items[j], &dvc))
-                        :
+                        if (plain_str(items[k]) && plain_str(items[j]) &&
+                            dv_routed != 0) {
+                            if (dv_routed < 0) {
+                                collation_needed_error(ctx);
+                                xpath_result_free(out);
+                                out = NULL;
+                                dup = 1;
+                            } else {
+                                dup = str_eq_coll(items[k], items[j],
+                                                  &dvc);
+                            }
+                        } else
 #endif
-                        leptris_atom_seq_eq_n(items[k], items[j], 1)) {
-                    dup = 1;
+                            dup = leptris_atom_seq_eq_n(items[k],
+                                                        items[j], 1);
+                    }
                 }
             }
             if (!dup) {
@@ -2593,8 +2612,53 @@ static struct leptris_xpath_result* fn_qname_part(XPathContext* ctx,
             out->value.string_value = p;
         } else
             out->value.string_value = leptris_strdup("");
-    } else               /* namespace uri — from the 2-arg form only */
-        out->value.string_value = leptris_strdup(last_qname_uri);
+    } else {             /* namespace uri */
+        char* uri = NULL;
+        if (colon) {
+            size_t pl = (size_t)(colon - qn);
+            /* Prefixed lexical QName: resolve the prefix in the
+             * static context first (declare namespace mappings,
+             * then the pre-bound prefixes) — the 2-arg constructor
+             * channel is only a fallback (for-each-010:
+             * namespace-uri-from-QName(function-name(xs:int#1))). */
+            for (size_t i = 0; !uri && ctx->namespace_mappings &&
+                            i < ctx->namespace_count; i++) {
+                const char* px = ctx->namespace_mappings[i].prefix;
+                if (strlen(px) == pl &&
+                    strncmp(px, qn, pl) == 0)
+                    uri = leptris_strdup(
+                        ctx->namespace_mappings[i].uri);
+            }
+            static const struct { const char* p; const char* u; }
+                k_pre[] = {
+                    { "fn",
+                      "http://www.w3.org/2005/xpath-functions" },
+                    { "xml",
+                      "http://www.w3.org/XML/1998/namespace" },
+                    { "xs", "http://www.w3.org/2001/XMLSchema" },
+                    { "xsi",
+                      "http://www.w3.org/2001/XMLSchema-instance" },
+                    { "math",
+                      "http://www.w3.org/2005/xpath-functions/math" },
+                    { "map",
+                      "http://www.w3.org/2005/xpath-functions/map" },
+                    { "array",
+                      "http://www.w3.org/2005/xpath-functions/array" },
+                    { "err", "http://www.w3.org/2005/xqt-errors" },
+                    { "local",
+                      "http://www.w3.org/2005/xquery-local-functions" },
+                    { NULL, NULL }
+                };
+            for (int i = 0; !uri && k_pre[i].p; i++)
+                if (strlen(k_pre[i].p) == pl &&
+                    strncmp(k_pre[i].p, qn, pl) == 0)
+                    uri = leptris_strdup(k_pre[i].u);
+        }
+        /* No prefix (QName("uri","local") constructor) or an
+         * unresolvable prefix: the 2-arg form's channel. */
+        if (!uri) uri = leptris_strdup(last_qname_uri);
+        out->value.string_value = uri;
+    }
     free(qn);
     (void)n;
     return out;
@@ -5126,11 +5190,30 @@ static struct leptris_xpath_result* fn_function_arity(
 }
 
 /* fn:for-each(sequence, $f) */
+/* Push a callback RESULT onto the output sequence: a nodeset
+ * contributes one item per member (for-each-pair-027: the callback
+ * returns ($a1, $a2)); scalars stringify as before. */
+static void seq_push_result(struct leptris_xpath_result* out,
+                            struct leptris_xpath_result* r) {
+    if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+        XPathNodeSet* ns = r->value.nodeset_value;
+        for (size_t j = 0; j < ns->count; j++) {
+            char* t = get_node_text(ns->nodes[j]);
+            seq_push_str(out, t ? t : "");
+            if (t) free(t);
+        }
+        return;
+    }
+    char* s = xpath_to_string(r);
+    seq_push_str(out, s ? s : "");
+    free(s);
+}
+
 static struct leptris_xpath_result* fn_for_each(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t cnt;
-    char** items = collect_items(ctx, args, 1, 0, &cnt, NULL, 0, NULL);
+    char** items = collect_items_raw(ctx, args, 1, 0, &cnt);
     if (!items) return NULL;
     char* cc = fn_item_content(ctx, args, 1);
     struct leptris_xpath_result* out = seq_new();
@@ -5140,9 +5223,7 @@ static struct leptris_xpath_result* fn_for_each(XPathContext* ctx,
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 1);
             if (r) {
-                char* s = xpath_to_string(r);
-                seq_push_str(out, s ? s : "");
-                free(s);
+                seq_push_result(out, r);
                 xpath_result_free(r);
             }
         }
@@ -5177,9 +5258,85 @@ static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
     return out;
 }
 
+/* Decode a fold accumulator carrier into the final result:
+ * \x03B boolean, \x03E empty sequence, \x03M member sequence,
+ * scalar marks stripped for the string result. */
+static struct leptris_xpath_result* fold_result_of(char* acc) {
+    struct leptris_xpath_result* out = NULL;
+    if (acc && acc[0] == '\x03') {
+        char mk = acc[1];
+        if (mk == 'B') {
+            out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+            if (out) out->value.boolean_value = acc[2] == 't';
+            free(acc);
+            return out;
+        }
+        if (mk == 'E') {
+            free(acc);
+            out = xpath_result_new(XPATH_RESULT_NODESET);
+            if (out) {
+                out->value.nodeset_value = xpath_nodeset_new();
+                if (!out->value.nodeset_value) {
+                    xpath_result_free(out);
+                    return NULL;
+                }
+            }
+            return out;
+        }
+        if (mk == 'M') {
+            char** mem = NULL;
+            size_t mn = 0;
+            if (xpath_array_members_of(acc, &mem, &mn) && mn) {
+                out = xpath_result_new(XPATH_RESULT_NODESET);
+                if (out) {
+                    out->value.nodeset_value = xpath_nodeset_new();
+                    if (out->value.nodeset_value)
+                        out->value.nodeset_value->owns_synthetic_text = 1;
+                    for (size_t j = 0; j < mn && out->value.nodeset_value;
+                         j++) {
+                        const char* body = mem[j];
+                        size_t bl = strlen(body);
+                        if (body[0] == '\x03' && bl >= 2) {
+                            body += 2;
+                            bl -= 2;
+                        }
+                        XPathTextNode* tn =
+                            xpath_synth_text(body, bl);
+                        if (tn)
+                            xpath_nodeset_add(
+                                out->value.nodeset_value, tn);
+                        free(mem[j]);
+                    }
+                }
+                free(mem);
+                free(acc);
+                return out;
+            }
+            if (mem) free(mem);
+        }
+        /* Scalar typed mark: strip it for the string result. */
+        char* stripped = leptris_strdup(acc + 2);
+        free(acc);
+        acc = stripped ? stripped : acc;
+        if (acc != stripped) { /* strdup failed: keep marked */ }
+    }
+    out = xpath_result_new(XPATH_RESULT_STRING);
+    if (out) {
+        out->value.string_value = acc;
+    } else {
+        free(acc);
+    }
+    return out;
+}
+
 /* fn:fold-left(sequence, zero, $f) — f(acc, item) left to right */
 /* Argv string for closure calls: booleans ride the \x03B mark so
  * param bindings keep falsiness; everything else stringifies. */
+char* xpath_seq_carrier_of(struct leptris_xpath_result* vr);
+
+/* Public alias: closure-callback argument stringification (the
+ * DYN_CALL evaluator shares this carrier discipline). */
+char* xpath_item_arg_string(struct leptris_xpath_result* r);
 static char* fn_item_arg_string(struct leptris_xpath_result* r) {
     if (r && r->type == XPATH_RESULT_BOOLEAN) {
         char* m = (char*)malloc(4);
@@ -5191,7 +5348,45 @@ static char* fn_item_arg_string(struct leptris_xpath_result* r) {
         }
         return m;
     }
-    return r ? xpath_to_string(r) : NULL;
+    /* Empty sequence: an explicit carrier, NOT "" — a string zero
+     * is one empty item (fold-left-019/020, fold-right-020:
+     * empty($acc) must see the empty sequence). */
+    if (!r || (r->type == XPATH_RESULT_NODESET &&
+               (!r->value.nodeset_value ||
+                r->value.nodeset_value->count == 0))) {
+        char* m = (char*)malloc(3);
+        if (m) {
+            m[0] = '\x03';
+            m[1] = 'E';
+            m[2] = 0;
+        }
+        return m;
+    }
+    /* A single marked member keeps its RAW content — the boolean
+     * mark survives into the next binding ($a and $b on a marked
+     * false() must stay falsy; declared-fold recursion round-trips
+     * the accumulator through a var, fold-left/right-104). */
+    if (r->type == XPATH_RESULT_NODESET &&
+        r->value.nodeset_value &&
+        r->value.nodeset_value->count == 1) {
+        void* nd = r->value.nodeset_value->nodes[0];
+        if ((int)XPATH_NODE_TYPE(nd) == (int)LEPTRIS_NODE_TEXT) {
+            const char* mc = ((XPathTextNode*)nd)->content;
+            if (mc && mc[0] == '\x03') return leptris_strdup(mc);
+        }
+    }
+    /* Multi-item all-text results ride the sequence carrier so the
+     * next call's params bind one node per member (for-each-pair
+     * -027: callbacks returning ($a1, $a2)). */
+    if (r->type == XPATH_RESULT_NODESET) {
+        char* m = xpath_seq_carrier_of(r);
+        if (m) return m;
+    }
+    return xpath_to_string(r);
+}
+
+char* xpath_item_arg_string(struct leptris_xpath_result* r) {
+    return fn_item_arg_string(r);
 }
 
 static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
@@ -5216,19 +5411,7 @@ static struct leptris_xpath_result* fn_fold_left(XPathContext* ctx,
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    /* A boolean accumulator returns as a boolean result, not the
-     * marked carrier string (fold-left-004). */
-    struct leptris_xpath_result* out;
-    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
-        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-        if (out) out->value.boolean_value = acc[2] == 't';
-        free(acc);
-    } else {
-        out = xpath_result_new(XPATH_RESULT_STRING);
-        if (!out) { free(acc); acc = NULL; }
-        if (out) out->value.string_value = acc;
-        else free(acc);
-    }
+    struct leptris_xpath_result* out = fold_result_of(acc);
     free(cc);
     free_items(items, cnt);
     return out;
@@ -5257,18 +5440,7 @@ static struct leptris_xpath_result* fn_fold_right(XPathContext* ctx,
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    /* A boolean accumulator returns as a boolean result, not the
-     * marked carrier string (fold-right's and-fold shape). */
-    struct leptris_xpath_result* out;
-    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
-        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-        if (out) out->value.boolean_value = acc[2] == 't';
-        free(acc);
-    } else {
-        out = xpath_result_new(XPATH_RESULT_STRING);
-        if (out) out->value.string_value = acc;
-        else free(acc);
-    }
+    struct leptris_xpath_result* out = fold_result_of(acc);
     free(cc);
     free_items(items, cnt);
     return out;
@@ -5367,9 +5539,10 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     size_t c1, c2;
-    char** xs = collect_items(ctx, args, 1, 0, &c1, NULL, 0, NULL);
+    char** xs = collect_items_raw(ctx, args, 1, 0, &c1);
     if (!xs) return NULL;
-    char** ys = collect_items(ctx, args, 1, 1, &c2, NULL, 0, NULL);
+    char** ys = collect_items_raw(ctx, args, 1, 1, &c2);
+    if (!ys) { free_items(xs, c1); return NULL; }
     char* cc = fn_item_content(ctx, args, 2);
     struct leptris_xpath_result* out = seq_new();
     if (cc && out) {
@@ -5379,9 +5552,7 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
             struct leptris_xpath_result* r =
                 xpath_call_function_item(ctx, cc, argv, 2);
             if (r) {
-                char* s = xpath_to_string(r);
-                seq_push_str(out, s ? s : "");
-                free(s);
+                seq_push_result(out, r);
                 xpath_result_free(r);
             }
         }
@@ -5395,9 +5566,10 @@ static struct leptris_xpath_result* fn_for_each_pair(XPathContext* ctx,
 /* fn:apply($f, array) — call with the array's members as the
  * argument list. */
 /* Encode one multi-item argument as a dense sub-carrier so the
- * call paths pass it as a sequence (fn-apply-03/07). Text items
- * only; returns NULL when the member holds non-text nodes. */
-static char* apply_seq_carrier(struct leptris_xpath_result* vr) {
+ * call paths pass it as a sequence (fn-apply-03/07, declared-fold
+ * recursion over tail()). Text items only; returns NULL when the
+ * member holds non-text nodes. */
+char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
     if (!vr || vr->type != XPATH_RESULT_NODESET ||
         !vr->value.nodeset_value ||
         vr->value.nodeset_value->count < 2)
@@ -5421,10 +5593,13 @@ static char* apply_seq_carrier(struct leptris_xpath_result* vr) {
         }
     for (size_t j = 0; j < mns->count; j++) {
         const char* mc = ((XPathTextNode*)mns->nodes[j])->content;
-        const char* body = (mc && mc[0] == '\x03') ? mc + 2 : mc;
+        /* Member marks SURVIVE the carrier: the next call's FN
+         * binding needs them (declared-fold recursion re-collects
+         * typed/untyped items, cbcl-distinct-values-002). The FR
+         * (named-call) expansion strips instead. */
         char key[24];
         snprintf(key, sizeof(key), "%zu", j + 1);
-        xpath_map_builder_add(b, key, body ? body : "");
+        xpath_map_builder_add(b, key, mc ? mc : "");
     }
     struct leptris_xpath_result* subr = xpath_map_builder_finish(b);
     char* out = NULL;
@@ -5467,7 +5642,7 @@ static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
             struct leptris_xpath_result* vr =
                 xpath_evaluate(ctx, arr->children[i]);
             if (!vr) goto done;
-            char* v = apply_seq_carrier(vr);
+            char* v = xpath_seq_carrier_of(vr);
             if (!v) v = xpath_to_string(vr);
             xpath_result_free(vr);
             /* XDM function conversion: node-valued arguments
@@ -5737,18 +5912,7 @@ static struct leptris_xpath_result* fn_array_fold_left(XPathContext* ctx,
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    /* A boolean accumulator returns as a boolean result, not the
-     * marked carrier string (fold-right's and-fold shape). */
-    struct leptris_xpath_result* out;
-    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
-        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-        if (out) out->value.boolean_value = acc[2] == 't';
-        free(acc);
-    } else {
-        out = xpath_result_new(XPATH_RESULT_STRING);
-        if (out) out->value.string_value = acc;
-        else free(acc);
-    }
+    struct leptris_xpath_result* out = fold_result_of(acc);
     free(cc);
     free_items(items, cnt);
     return out;
@@ -5777,18 +5941,7 @@ static struct leptris_xpath_result* fn_array_fold_right(XPathContext* ctx,
             acc = ns ? ns : leptris_strdup("");
         }
     }
-    /* A boolean accumulator returns as a boolean result, not the
-     * marked carrier string (fold-right's and-fold shape). */
-    struct leptris_xpath_result* out;
-    if (acc && acc[0] == '\x03' && acc[1] == 'B') {
-        out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-        if (out) out->value.boolean_value = acc[2] == 't';
-        free(acc);
-    } else {
-        out = xpath_result_new(XPATH_RESULT_STRING);
-        if (out) out->value.string_value = acc;
-        else free(acc);
-    }
+    struct leptris_xpath_result* out = fold_result_of(acc);
     free(cc);
     free_items(items, cnt);
     return out;

@@ -1138,12 +1138,33 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                 }
                 params[plen] = 0;
                 advance_token(parser);
+                /* Optional `as SequenceType` per param — advisory
+                 * (dynamic typing); parsed and discarded
+                 * (fold-left-009: `$this as node()`). */
+                if (current_token(parser)->type == TOK_NCNAME &&
+                    current_token(parser)->value_len == 2 &&
+                    memcmp(current_token(parser)->value, "as", 2) == 0) {
+                    advance_token(parser);
+                    char* ty = parse_sequence_type(parser);
+                    if (!ty) return NULL;
+                    free(ty);
+                }
                 if (current_token_is(parser, TOK_COMMA))
                     advance_token(parser);
                 else break;
             }
             if (!current_token_is(parser, TOK_RPAREN)) return NULL;
             advance_token(parser);
+            /* Optional return `as SequenceType` before '{' — also
+             * advisory (fold-left-009: `as node()*`). */
+            if (current_token(parser)->type == TOK_NCNAME &&
+                current_token(parser)->value_len == 2 &&
+                memcmp(current_token(parser)->value, "as", 2) == 0) {
+                advance_token(parser);
+                char* rty = parse_sequence_type(parser);
+                if (!rty) return NULL;
+                free(rty);
+            }
             if (!current_token_is(parser, TOK_LBRACE)) return NULL;
             advance_token(parser);
             XPathASTNode* body = parse_expr(parser);
