@@ -1069,6 +1069,31 @@ LEPTRIS_API void leptris_document_adopt_child(LeptrisDocument parent,
                                            LeptrisDocument child);
 
 /**
+ * Absorb a DOOMED source document into the destination: the source's
+ * node pool is released with the destination, so cross-document
+ * splices from source to destination move nodes by reference instead
+ * of deep-copying (#1548 — the #1528 adoption copy doubled the live
+ * set on scratch-document splice flows).
+ *
+ * After a successful absorb the caller must treat `src` as consumed:
+ * its tree may be spliced into `dst` (zero-copy), and the caller's
+ * leptris_document_free(src) releases only the handle — the memory
+ * dies with `dst`. Splicing an absorbed document's nodes into any
+ * OTHER document still deep-copies (#1528 semantics).
+ *
+ * @param dst Destination document (survives; owns src's pool)
+ * @param src Doomed source document (handle consumed)
+ * @return LEPTRIS_OK; LEPTRIS_ERROR_NULL_ARG on NULL arguments;
+ *         LEPTRIS_ERROR_INVALID_ARG when src == dst or src is
+ *         already absorbed (chaining is not supported).
+ *
+ * Memory: src's pool ownership transfers to dst. The caller's src
+ * handle becomes handle-only.
+ */
+LEPTRIS_API LeptrisStatus leptris_document_absorb(LeptrisDocument dst,
+                                               LeptrisDocument src);
+
+/**
  * Get root element of document
  *
  * @param doc Document

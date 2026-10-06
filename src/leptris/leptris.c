@@ -884,6 +884,24 @@ LEPTRIS_API LeptrisDocument leptris_parse_file(const char* filepath, LeptrisStat
 /**
  * Free document and all its contents
  */
+LEPTRIS_API LeptrisStatus leptris_document_absorb(LeptrisDocument dst,
+                                               LeptrisDocument src) {
+    if (!dst || !src) return LEPTRIS_ERROR_NULL_ARG;
+    if (dst == src) return LEPTRIS_ERROR_INVALID_ARG;
+    /* No chains: an absorbed document's lifetime already belongs to
+     * its absorber; re-absorbing would give one pool two owners. */
+    if (src->absorbed_by || dst->absorbed_by)
+        return LEPTRIS_ERROR_INVALID_ARG;
+
+    /* Ride the xi:include child_docs chain (TODO 117): document_free
+     * releases adopted children with the parent, AFTER its own tree
+     * references are gone — exactly the #1548 lifetime. */
+    leptris_document_adopt_child(dst, src);
+    src->absorbed_by = dst;
+    src->absorbed_handle = 1;
+    return LEPTRIS_OK;
+}
+
 LEPTRIS_API void leptris_document_adopt_child(LeptrisDocument parent,
                                            LeptrisDocument child) {
     if (!parent || !child) return;
@@ -912,6 +930,14 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         leptris_root_doc_memo_invalidate(doc);
     }
     if (!doc) return;
+
+    /* #1548: an absorbed document's MEMORY belongs to its absorber
+     * (it rides the absorber's child_docs chain). A caller free
+     * releases only the outstanding handle. */
+    if (doc->absorbed_by) {
+        doc->absorbed_handle = 0;
+        return;
+    }
 
     /* Decrement reference count */
     if (doc->ref_count > 0) {
@@ -995,6 +1021,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
                                        * doesn't try to walk the
                                        * adopted subtree. */
             ch->root = NULL;
+            /* #1548: the anchor's free is the REAL one — clear the
+             * absorbed state so the early handle-return above does
+             * not swallow it. */
+            ch->absorbed_by = NULL;
+            ch->absorbed_handle = 0;
             leptris_document_free(ch);
             ch = next;
         }

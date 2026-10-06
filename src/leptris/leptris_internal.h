@@ -179,10 +179,22 @@ struct leptris_document {
      * copies / analyze-string result trees, released with THIS
      * document so borrowed nodes live exactly as long as the
      * source tree (the ctx owned_docs chain dies at public-eval
-     * return and cannot serve plain leptris_xpath_eval results). */
+     * return and cannot serve plain leptris_xpath_eval results).
+     * Absorbed documents (#1548) ride the SAME chain: a doomed
+     * scratch doc's pool is released with the absorbing document,
+     * letting the splice adoption gate move nodes by reference. */
     struct leptris_document** anchored_docs;
     size_t n_anchored_docs;
     size_t cap_anchored_docs;
+    /* #1548 absorb-adoption: set by leptris_document_absorb on the
+     * SOURCE. absorbed_by owns this document's lifetime (it is in
+     * absorbed_by->anchored_docs); cross-document splice adoption
+     * into absorbed_by moves nodes by reference instead of
+     * copying. absorbed_handle counts outstanding CALLER handles:
+     * the caller's leptris_document_free releases only the handle
+     * (the anchor frees the memory later). */
+    struct leptris_document* absorbed_by;
+    int absorbed_handle;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
