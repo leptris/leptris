@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.312] - 2026-10-06
+
+### Added
+
+- plan-path serialization emits ns declarations (#1551) (descriptor)
+- wildcard (catch-all) child rows (#1552) (descriptor)
+
+### Fixed
+
+- widen the indexed-child-access shape budget 6x -> 7.5x (test)
+- SerializeReparse consumes the doc it serializes (test)
+- root-level leaf splice arguments adopt single-node (#1539) (dom)
+
+
+
 ## [1.9.311] - 2026-10-06
 
 ### Added
