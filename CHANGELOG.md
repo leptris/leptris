@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.313] - 2026-10-06
+
+### Fixed
+
+- absorbed sources defer their release to outstanding handles (#1557) (dom)
+
+
+
 ## [1.9.312] - 2026-10-06
 
 ### Added
