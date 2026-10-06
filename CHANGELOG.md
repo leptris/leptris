@@ -4,9 +4,47 @@
 
 ### Fixed
 
-- atomic_type is a borrowed channel — cast targets assign lifetime-stable labels (xpath)
-- closure carriers end-to-end + recursive fold semantics (QT3 #1182 finalize 3) (xquery)
+- **Memory safety: a typed cast stored the operator frame's stack
+  buffer in the result's borrowed `atomic_type` slot — read after
+  return by the sequence fold (ASAN stack-use-after-return, caught
+  by Linux CI on this very batch).** Cast targets now assign
+  lifetime-stable family-table labels.
+- **Recursive closures: a nested call sharing parameter names with
+  an outer frame removed the outer frame's bindings on exit —
+  `$a` vanished mid-recursion.** Both dynamic-call sites
+  detach/save the prior nodeset and restore it (fold-left/
+  fold-right-101..104: the spec'd recursive folds over `tail()`).
 
+### Added
+
+- **XQuery closure-call carriers, end-to-end — 19 more QT3
+  adoptions (for-each-010, for-each-pair-024/026/027, fold-left
+  -019/020/021/101..104, fold-right-013/019/020/101..104,
+  K2-SeqReverseFunc-1, cbcl-distinct-values-002).**
+  - `declare function` parameter types skip depth-aware — a
+    function-test type's own commas
+    (`$f as function(item()*, item()) as item()*`) broke the
+    parameter list; inline function literals accept `as TYPE`
+    annotations on params and the return.
+  - Callback arguments and accumulators keep their shape across
+    every hop: sequences ride the member carrier, empty sequences
+    bind zero nodes (`empty($acc)` on a `()` zero is true — the
+    average fold yields 8.625, min folds return 1), booleans stay
+    falsy through variable round-trips (and-folds return false).
+  - `xs:untypedAtomic` rides its own family mark: value-eq casts
+    it to the counterpart (cbcl-002 matches Saxon byte-for-byte)
+    while a plain `xs:string` never merges with typed values.
+  - QName tail: `namespace-uri-from-QName` resolves prefixed
+    lexical QNames in the static namespaces (`xs:int#1` → the
+    XMLSchema namespace); `castable/cast as xs:QName` accept
+    NCName:NCName lexicals; QName eq compares full lexicals.
+  - Range sequences and nodeset growth admit 1,000,000 items —
+    `fold-left(1 to 1000000, 0, ...)` computes the full million
+    (previously truncated at exactly 524288 items).
+  - Remaining QT3 pins are down to three, each documented in the
+    harness: fold-left-009/016 (node-typed accumulators must be
+    real nodes for path/identity shapes) and cbcl-002b (XQ10 vs
+    XQ30 value-eq contradiction).
 
 
 ## [1.9.309] - 2026-10-05
