@@ -195,6 +195,11 @@ struct leptris_document {
      * (the anchor frees the memory later). */
     struct leptris_document* absorbed_by;
     int absorbed_handle;
+    /* #1557: the absorber died while this handle was outstanding —
+     * the anchor deferred the pool release to THIS holder's free,
+     * so leptris_document_free must run the full release (not the
+     * handle-only early return). */
+    int absorbed_deferred;
     /* XML Declaration support */
     char* xml_version;              /* "1.0", "1.1", etc. or NULL if not present */
     int standalone;                 /* -1=not set, 0=no, 1=yes */
