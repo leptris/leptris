@@ -852,6 +852,11 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                  * back to the target plan's (NESTED matches with
                  * the target's form, #1115). */
                 if (row->ns_prefix) {
+                    /* The inner walk's own #1551 stamp may already
+                     * hold this pair — free before overwriting or
+                     * the first strdup orphans. */
+                    free(v->ns_prefix);
+                    free(v->ns_uri);
                     v->ns_prefix = dp_strdup(row->ns_prefix);
                     v->ns_uri = dp_strdup(row->ns_uri ? row->ns_uri
                                                       : target->ns_uri);
@@ -1343,7 +1348,8 @@ static int dp_emit_value(const struct leptris_plan_result* v,
 
 static int dp_emit_element(const struct leptris_plan_result* v,
                            const char* name, const LeptrisPlan pool,
-                           dp_sb* b, const dp_decls* decls, int is_root) {
+                           const dp_plan* kids_container, dp_sb* b,
+                           const dp_decls* decls, int is_root) {
     if (!dp_emit_element_open(v, name, b, decls, is_root)) return 0;
     const struct leptris_plan_result** kids = NULL;
     size_t nk = 0, cap = 0;
@@ -1360,11 +1366,14 @@ static int dp_emit_element(const struct leptris_plan_result* v,
         return 0;
     }
     qsort((void*)kids, nk, sizeof(*kids), dp_kid_pos_cmp);
-    const dp_plan* container =
-        &((const struct leptris_plan*)pool)->plans[v->container_plan];
+    /* #1565: kid ROWS live in the plan that WALKED this element —
+     * container_plan is the plan whose row CAPTURED it (the
+     * parent), so a nested member resolved its kids' rows against
+     * the parent's rows and a CONTENT row serialized as an
+     * empty-named wrapper. */
     int ok = 1;
     for (size_t i = 0; i < nk && ok; i++)
-        ok = dp_emit_value(kids[i], container, pool, b, NULL, 0);
+        ok = dp_emit_value(kids[i], kids_container, pool, b, NULL, 0);
     free((void*)kids);
     if (!ok) return 0;
     return dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
@@ -1377,6 +1386,16 @@ static int dp_emit_value(const struct leptris_plan_result* v,
     if (v->kind == LEPTRIS_PLAN_VALUE_RAW)
         return dp_sb_puts(b, v->str ? v->str : "");
     if (v->kind == LEPTRIS_PLAN_VALUE_ELEMENT) {
+        /* #1565: a walk member captured by a CONTENT row is an
+         * unnamed element — the row lookup must precede the name
+         * resolution, or the empty wire name becomes the wrapper
+         * (<w:item><>text</></w:item>). Content emits inline text
+         * at every nesting level. */
+        if (container && v->row_index != UINT32_MAX &&
+            v->row_index < container->child_count &&
+            container->child_plans[v->row_index].kind ==
+                LEPTRIS_PLAN_KIND_CONTENT)
+            return dp_sb_escape(b, v->str ? v->str : "", 0);
         /* The element's own binding was stamped at walk time; a
          * walk member without one falls back to its plan's. */
         char* name = NULL;
@@ -1397,7 +1416,24 @@ static int dp_emit_value(const struct leptris_plan_result* v,
         else
             name = dp_strdup(local ? local : "");
         if (!name) return 0;
-        int ok = dp_emit_element(v, name, pool, b, decls, is_root);
+        /* Kids resolve their rows against the plan that WALKED this
+         * element: the capturing row's child_plan_index when nested,
+         * else container_plan (the walk root is its own plan). */
+        const struct leptris_plan* poolp =
+            (const struct leptris_plan*)pool;
+        const dp_plan* kids_container =
+            &poolp->plans[v->container_plan];
+        if (container && v->row_index != UINT32_MAX &&
+            v->row_index < container->child_count) {
+            const leptris_child_plan* cap =
+                &container->child_plans[v->row_index];
+            if (cap->child_plan_index >= 0 &&
+                (uint32_t)cap->child_plan_index < poolp->plan_count)
+                kids_container =
+                    &poolp->plans[cap->child_plan_index];
+        }
+        int ok = dp_emit_element(v, name, pool, kids_container, b,
+                                 decls, is_root);
         free(name);
         return ok;
     }

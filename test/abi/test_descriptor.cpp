@@ -1594,6 +1594,64 @@ TEST(Plan1551, SerializeRoundTripsThroughTheWalk) {
     leptris_document_free(doc2);
 }
 
+/* Issue #1565: a CONTENT row inside a NESTED child plan serialized
+ * as an empty-named wrapper element (<w:item><>text</></w:item>).
+ * Content rows emit their text inline at every nesting level. */
+TEST(Plan1565, NestedContentRowEmitsInlineText) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<r xmlns:w=\"urn:w\"><w:item>text</w:item></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan item_row[1] = {};
+    item_row[0].wire_name = "item";
+    item_row[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    item_row[0].child_plan_index = 1;
+    item_row[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    item_row[0].ns_uri = "urn:w";
+    item_row[0].ns_prefix = "w";
+
+    leptris_child_plan content_row[1] = {};
+    content_row[0].wire_name = "";
+    content_row[0].kind = LEPTRIS_PLAN_KIND_CONTENT;
+    content_row[0].type_tag = 2;
+    content_row[0].child_plan_index = -1;
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[0].child_count = 1;
+    plans[0].child_plans = item_row;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+    plans[1].element_name = "item";
+    plans[1].child_count = 1;
+    plans[1].child_plans = content_row;
+    plans[1].flags = LEPTRIS_PLAN_FLAG_MIXED_CONTENT;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:w";
+    plans[1].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<w:r xmlns:w=\"urn:w\"><w:item>text</w:item></w:r>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 TEST(Plan1551, TextAndAttributeValuesAreEscaped) {
     LeptrisStatus st = LEPTRIS_OK;
     const char* xml =
