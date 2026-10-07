@@ -4,7 +4,21 @@
 
 ### Added
 
-- element constructors yield real nodes (#181) (xquery)
+- **XQuery element constructors yield real nodes (#181, PR #1568).**
+  `<a>…</a>`, `element name {…}`, and PI/comment constructors
+  materialize into real documents and yield their root ELEMENT node
+  (the `document{}` pattern), so identity (`is`, `intersect`), axis
+  steps, and higher-order callbacks see one stable node per
+  evaluation. Constructed elements ride sequences, maps,
+  `fn:reverse`, `unordered`, and `deep-equal` as markup — the
+  string-value collapse that made every element look like its text
+  content is gone — and `leptris xquery` prints them serialized.
+  Materialized documents anchor on the source tree (the #691
+  discipline), fixing an order-dependent use-after-free when FLWOR
+  or window results outlive the evaluation context, and an
+  (AST, content)-keyed memo bounds per-reference re-materialization:
+  the fold-recursion stress peaks at ~83MB where the unbounded path
+  reached 200GB.
 
 
 
