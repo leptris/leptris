@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.315] - 2026-10-07
+
+### Added
+
+- carrier-by-pointer node identity — adopt QT3 fold-left-009/016 (xquery)
+
+### Fixed
+
+- pointer carriers only for real ELEMENT members (xquery)
+
+
+
 ## [1.9.314] - 2026-10-07
 
 ### Added
