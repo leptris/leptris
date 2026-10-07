@@ -48,6 +48,8 @@ static int str_eq_coll(const char* a, const char* b,
 extern struct leptris_xpath_result* xpath_evaluate(XPathContext* context,
                                                    XPathASTNode* ast);
 extern char* get_node_text(void* node);
+/* evaluator_operators.c — element members keep their markup (#181). */
+extern char* ctor_member_markup(void* node);
 
 /* ---- sequence plumbing ---- */
 
@@ -332,7 +334,11 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
                 const char* c = ((XPathTextNode*)nd)->content;
                 items[cnt++] = leptris_strdup(c ? c : "");
             } else {
-                char* t = get_node_text(nd);
+                /* Element members keep their MARKUP (#181: ctor
+                 * nodes are real now) — a bare string-value fetch
+                 * collapses every constructed element to its text
+                 * (fn:reverse of (<a/>, <f/>) went empty). */
+                char* t = ctor_member_markup(nd);
                 items[cnt++] = t ? t : leptris_strdup("");
             }
         }
@@ -5583,16 +5589,26 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
         void* b);
     b = xpath_map_builder_new();
     if (!b) return NULL;
-    for (size_t j = 0; j < mns->count; j++)
-        if ((int)XPATH_NODE_TYPE(mns->nodes[j]) !=
-            (int)LEPTRIS_NODE_TEXT) {
+    for (size_t j = 0; j < mns->count; j++) {
+        char* mc;
+        int mtype = (int)XPATH_NODE_TYPE(mns->nodes[j]);
+        if (mtype == (int)LEPTRIS_NODE_TEXT) {
+            mc = leptris_strdup(
+                ((XPathTextNode*)mns->nodes[j])->content);
+        } else if (mtype == (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+            /* #181: materialized ctor members ride the carrier as
+             * their serialized MARKUP (the pre-#181 member
+             * spelling) so member COUNT survives typed argv;
+             * pointer identity through the channel remains the
+             * #181 follow-up. */
+            mc = leptris_element_serialize(
+                (LeptrisElement)mns->nodes[j], NULL);
+        } else {
             struct leptris_xpath_result* rel =
                 xpath_map_builder_finish(b);
             if (rel) xpath_result_free(rel);
             return NULL;
         }
-    for (size_t j = 0; j < mns->count; j++) {
-        const char* mc = ((XPathTextNode*)mns->nodes[j])->content;
         /* Member marks SURVIVE the carrier: the next call's FN
          * binding needs them (declared-fold recursion re-collects
          * typed/untyped items, cbcl-distinct-values-002). The FR
@@ -5600,6 +5616,7 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
         char key[24];
         snprintf(key, sizeof(key), "%zu", j + 1);
         xpath_map_builder_add(b, key, mc ? mc : "");
+        free(mc);
     }
     struct leptris_xpath_result* subr = xpath_map_builder_finish(b);
     char* out = NULL;
@@ -6687,8 +6704,8 @@ static struct leptris_xpath_result* fn_format_number_plain(
  * result is consumed, so the ctx owned_docs chain cannot carry
  * constructed nodes; the source doc's lifetime is the only owner
  * that outlives the result. */
-static int xq_anchor_on_source(XPathContext* ctx,
-                               struct leptris_document* anchored) {
+int xq_anchor_on_source(XPathContext* ctx,
+                        struct leptris_document* anchored) {
     struct leptris_document* src = ctx->document;
     if (!src) {
         leptris_document_free(anchored);

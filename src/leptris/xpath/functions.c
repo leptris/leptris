@@ -234,6 +234,8 @@ XPathFunctionDef* xpath_function_registry_get(
  * This is declared in evaluator_internal.h and implemented in evaluator_types.c
  */
 extern char* get_node_text(void* node);
+/* evaluator_operators.c — element markup discipline (#181). */
+extern char* ctor_member_markup(void* node);
 extern char* xpath_number_to_string(double number);
 extern char* xpath_int_to_string(long long v);
 
@@ -1140,6 +1142,19 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                 out[i].kind = 2;
                 out[i].borrow = leptris_text_get_content(
                     (LeptrisTextNode*)ns->nodes[i]);
+            } else if (ty == LEPTRIS_NODE_TYPE_ELEMENT) {
+                /* #181: ctor elements are real nodes now. Collect as
+                 * MARKUP so a constructed element compares against
+                 * the markup-string member every sequence function
+                 * emits (fn:reverse output) — de_markup_equal_n
+                 * reparses both sides into de_node_equal, so this is
+                 * the same compare, order-insensitive attrs and all. */
+                out[i].kind = 2;
+                out[i].str = ctor_member_markup(ns->nodes[i]);
+                if (!out[i].str) {
+                    out[i].kind = 0;
+                    out[i].node = ns->nodes[i];
+                }
             } else {
                 out[i].kind = 0;
                 out[i].node = ns->nodes[i];

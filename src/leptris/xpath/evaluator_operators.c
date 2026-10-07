@@ -144,6 +144,22 @@ void leptris_dur_format(double secs, char* buf, size_t cap) {
 
 extern char* get_node_text(void* node);
 
+/* functions_ext31.c — #691 source-document anchoring (#181 ctor docs). */
+extern int xq_anchor_on_source(XPathContext* ctx,
+                               struct leptris_document* anchored);
+
+/* #181: a materialized ctor node splices its MARKUP into a
+ * parent's serialized content — get_node_text would yield only its
+ * string value and the element would vanish. Non-element members
+ * keep the text fetch. Shared with the collect-items family
+ * (functions_ext31.c). */
+char* ctor_member_markup(void* node) {
+    if (node && (int)XPATH_NODE_TYPE(node) ==
+                    (int)LEPTRIS_NODE_TYPE_ELEMENT)
+        return leptris_element_serialize((LeptrisElement)node, NULL);
+    return get_node_text(node);
+}
+
 /* ============================================================================
  * Operator Evaluation
  * ============================================================================ */
@@ -1132,6 +1148,15 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     item->value.nodeset_value->count > 1) {
                     XPathNodeSet* sq = item->value.nodeset_value;
                     for (size_t si = 0; si < sq->count; si++) {
+                        /* #181: element members pass through as
+                         * NODES (identity preserved into the output
+                         * sequence); a text wrap would leave only
+                         * their string value. */
+                        if ((int)XPATH_NODE_TYPE(sq->nodes[si]) ==
+                            (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+                            xpath_nodeset_add(out, sq->nodes[si]);
+                            continue;
+                        }
                         char* piece = get_node_text(sq->nodes[si]);
                         XPathTextNode* tn =
                             synth_text(piece ? piece : "",
@@ -1179,6 +1204,27 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         }
                     }
                     xpath_result_free(item);
+                    if (pos_var)
+                        xpath_variable_set_remove(
+                            ctx->variable_set, pos_var);
+                    xpath_variable_set_remove(
+                        ctx->variable_set, loop_var);
+                    continue;
+                }
+                /* #181: a single ELEMENT member passes through as a
+                 * NODE (identity into the output sequence) — the
+                 * string wrap would leave its string value. Order-by
+                 * keeps the wrap (the ObItem collector stores text
+                 * nodes). */
+                if (item->type == XPATH_RESULT_NODESET &&
+                    item->value.nodeset_value &&
+                    item->value.nodeset_value->count == 1 && !n_obk &&
+                    (int)XPATH_NODE_TYPE(
+                        item->value.nodeset_value->nodes[0]) ==
+                        (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+                    void* en = item->value.nodeset_value->nodes[0];
+                    xpath_result_free(item);
+                    xpath_nodeset_add(out, en);
                     if (pos_var)
                         xpath_variable_set_remove(
                             ctx->variable_set, pos_var);
@@ -2127,7 +2173,7 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (!v) continue;
             if (v->type == XPATH_RESULT_NODESET && v->value.nodeset_value) {
                 for (size_t m = 0; m < v->value.nodeset_value->count; m++) {
-                    char* t = get_node_text(v->value.nodeset_value->nodes[m]);
+                    char* t = ctor_member_markup(v->value.nodeset_value->nodes[m]);
                     if (!t) continue;
                     while (len + strlen(t) + 1 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
                     memcpy(buf + len, t, strlen(t));
@@ -2427,8 +2473,9 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                  * (adjacent constructed items). */
                 for (size_t m = 0; m < v->value.nodeset_value->count;
                      m++) {
-                    char* t = get_node_text(
-                        v->value.nodeset_value->nodes[m]);
+                    char* t =
+                        ctor_member_markup(
+                            v->value.nodeset_value->nodes[m]);
                     if (!t) continue;
                     for (const char* q = t; *q; q++) {
                         while (len + 8 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
@@ -2464,6 +2511,113 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         } else {
             while (len + strlen(name) + 4 > cap) { cap *= 2; buf = (char*)realloc(buf, cap); if (!buf) return NULL; }
             len += (size_t)snprintf(buf + len, cap - len, "</%s>", name);
+        }
+        /* #181: node materialization — the ctor's serialized form
+         * parses into a REAL document (the document{} / fn:doc
+         * pattern above): the ctor yields its root ELEMENT node,
+         * so identity (is / intersect), axis steps, and HOF
+         * callbacks all see one stable node per evaluation. The
+         * document is anchored in the context's owned chain —
+         * results borrow the handle, exactly like document{}.
+         * Non-markup or parser-rejected content keeps the string
+         * spelling. */
+        {
+            /* #181 memo: reuse what THIS (AST occurrence, content)
+             * already materialized. Without it, re-evaluation of a
+             * bound ctor re-runs it per reference and each run
+             * anchors a fresh document — through fold recursion that
+             * reached 200GB. Same occurrence + same serialized form
+             * = the same binding's node (stable identity); a new
+             * serialized form (next loop iteration) is a new node. */
+            for (size_t mi = 0; mi < ctx->n_ctor_cache; mi++)
+                if (ctx->ctor_cache[mi].ast == (void*)ast &&
+                    strcmp(ctx->ctor_cache[mi].key, buf) == 0) {
+                    XPathNodeSet* mns = xpath_nodeset_new();
+                    struct leptris_xpath_result* mr =
+                        mns ? xpath_result_new(XPATH_RESULT_NODESET)
+                            : NULL;
+                    if (mr) {
+                        mr->value.nodeset_value = mns;
+                        xpath_nodeset_add(
+                            mns, (LeptrisNode*)ctx->ctor_cache[mi].root);
+                        free(buf);
+                        return mr;
+                    }
+                    if (mns) xpath_nodeset_free(mns);
+                    break;
+                }
+            size_t blen = strlen(buf);
+            LeptrisStatus pst = LEPTRIS_OK;
+            LeptrisDocument pdoc =
+                blen ? leptris_parse_string(buf, blen, &pst) : NULL;
+            if (pdoc) {
+                LeptrisElement root = leptris_document_root(pdoc);
+                /* #181: anchor on the SOURCE document (the #691
+                 * discipline — fn:snapshot / analyze-string). The
+                 * ctx owned_docs chain dies at cleanup, BEFORE the
+                 * public eval returns, and FLWOR member capture
+                 * borrows ctor roots into the result sequence — the
+                 * materialized doc must outlive the result, so it
+                 * rides the source tree's anchored_docs chain
+                 * (released with the caller's document). */
+                int anchored =
+                    root ? xq_anchor_on_source(ctx, pdoc) : -1;
+                if (anchored == 0) {
+                    if (ctx->n_ctor_cache == ctx->cap_ctor_cache) {
+                        size_t nc = ctx->cap_ctor_cache
+                                        ? ctx->cap_ctor_cache * 2 : 8;
+                        XPathCtorCacheEntry* ne =
+                            (XPathCtorCacheEntry*)realloc(
+                                ctx->ctor_cache,
+                                nc * sizeof(XPathCtorCacheEntry));
+                        if (!ne) {
+                            /* No cache slot: the node is still
+                             * valid, just unmemoized. */
+                            XPathNodeSet* fns = xpath_nodeset_new();
+                            struct leptris_xpath_result* fout =
+                                fns ? xpath_result_new(
+                                          XPATH_RESULT_NODESET)
+                                    : NULL;
+                            if (fout) {
+                                fout->value.nodeset_value = fns;
+                                xpath_nodeset_add(fns, (LeptrisNode*)root);
+                                free(buf);
+                                return fout;
+                            }
+                            if (fns) xpath_nodeset_free(fns);
+                        } else {
+                            ctx->ctor_cache = ne;
+                            ctx->cap_ctor_cache = nc;
+                        }
+                    }
+                    if (ctx->n_ctor_cache < ctx->cap_ctor_cache) {
+                        char* nkey = leptris_strdup(buf);
+                        if (nkey) {
+                            ctx->ctor_cache[ctx->n_ctor_cache].ast =
+                                (void*)ast;
+                            ctx->ctor_cache[ctx->n_ctor_cache].key = nkey;
+                            ctx->ctor_cache[ctx->n_ctor_cache].doc = pdoc;
+                            ctx->ctor_cache[ctx->n_ctor_cache].root =
+                                (void*)root;
+                            ctx->n_ctor_cache++;
+                        }
+                    }
+                    XPathNodeSet* ns = xpath_nodeset_new();
+                    struct leptris_xpath_result* nout =
+                        ns ? xpath_result_new(XPATH_RESULT_NODESET)
+                           : NULL;
+                    if (nout) {
+                        nout->value.nodeset_value = ns;
+                        xpath_nodeset_add(ns, (LeptrisNode*)root);
+                        free(buf);
+                        return nout;
+                    }
+                    if (ns) xpath_nodeset_free(ns);
+                    return NULL;
+                }
+                if (!root) leptris_document_free(pdoc);
+                /* anchor failure: the helper already freed pdoc */
+            }
         }
         struct leptris_xpath_result* out =
             xpath_result_new(XPATH_RESULT_STRING);
@@ -2614,6 +2768,19 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         }
                     }
                 }
+            }
+            /* Element values are REAL nodes now (#181): ride the
+             * serialized MARKUP, not the string-value — otherwise
+             * every <a>…</a> maps to its text ("23") and map
+             * deep-equality cannot see attributes at all
+             * (fn-deep-equal-maps-12). */
+            if (!v && vr && vr->type == XPATH_RESULT_NODESET &&
+                vr->value.nodeset_value &&
+                vr->value.nodeset_value->count == 1 &&
+                (int)XPATH_NODE_TYPE(vr->value.nodeset_value->nodes[0]) ==
+                    (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+                v = ctor_member_markup(
+                    vr->value.nodeset_value->nodes[0]);
             }
             if (!v && vr) v = xpath_to_string(vr);
             if (vr) xpath_result_free(vr);

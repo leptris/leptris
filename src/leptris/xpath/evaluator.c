@@ -147,6 +147,9 @@ void xpath_context_init(XPathContext* context,
     context->owned_docs = NULL;
     context->n_owned_docs = 0;
     context->cap_owned_docs = 0;
+    context->ctor_cache = NULL;
+    context->n_ctor_cache = 0;
+    context->cap_ctor_cache = 0;
     context->xquery_default_ns = NULL;
     context->xquery_spelling = 0;
 }
@@ -192,6 +195,15 @@ void xpath_context_cleanup(XPathContext* context) {
     context->owned_docs = NULL;
     context->n_owned_docs = 0;
     context->cap_owned_docs = 0;
+    /* #181: the ctor memo borrows docs (owned_docs freed them);
+     * the cache owns only its strdup'd content keys. */
+    if (context->ctor_cache) {
+        for (size_t i = 0; i < context->n_ctor_cache; i++)
+            free(context->ctor_cache[i].key);
+    }
+    free(context->ctor_cache);
+    context->ctor_cache = NULL;
+    context->n_ctor_cache = context->cap_ctor_cache = 0;
 }
 
 const char* xpath_context_error(XPathContext* context) {
