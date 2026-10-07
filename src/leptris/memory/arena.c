@@ -3,6 +3,7 @@
  */
 #include "arena.h"
 
+#include "../common/port.h" /* LEPTRIS_THREAD_LOCAL */
 #include <stdint.h> /* uintptr_t: was transitive via glibc's mman graph */
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,7 @@
  * every byte the library takes. */
 void* leptris_alloc_hook(size_t size);
 void leptris_free_hook(void* ptr);
+int leptris_custom_allocator_active(void);
 
 #define ARENA_ALIGNMENT 8u
 
@@ -92,11 +94,75 @@ static void retain_lock(void) {
 static void retain_unlock(void) { __sync_lock_release(&g_retain_lock); }
 #endif
 
+/* ---- Small-span TLS recycle (#1436 tiny-doc fixed row) ---------
+ * The global retain deliberately skips spans below ARENA_RETAIN_MIN
+ * ("libc zone-reuses them"), but the per-document fixed-cost profile
+ * names arena create+destroy as the heart of the ~185 ns/doc
+ * tiny-doc row: even zone-recycled, malloc/free pay bookkeeping per
+ * span, and the batched-GC shape pays first-touch faults when a
+ * batch's spans outrun the zone cache. A per-thread LIFO of small
+ * spans hands the previous document's span back with no allocator,
+ * no global spinlock, and no cross-thread traffic. Same contract as
+ * the global tier: NOT zeroed, callers memset what they need. */
+#define ARENA_TLS_SPANS 8u
+#define ARENA_TLS_MAX_BYTES (2u * 1024u * 1024u)
+
+typedef struct {
+    char* base[ARENA_TLS_SPANS];
+    size_t size[ARENA_TLS_SPANS];
+    size_t count;
+    size_t bytes;
+} ArenaSmallCache;
+
+static LEPTRIS_THREAD_LOCAL ArenaSmallCache g_small;
+
+/* LIFO take, EXACT size only: a reused span must report exactly the
+ * requested capacity (same as a fresh malloc), or the fail-fast
+ * bound silently widens for whoever sized a span to its budget —
+ * the exhaustion specs pin that. Small spans are near-homogeneous
+ * per workload (a 64 KB-doc stream recycles 64 KB spans), so
+ * exact-match still catches the hot case. */
+static char* small_take(size_t request, size_t* capacity) {
+    if (request >= ARENA_RETAIN_MIN) return NULL;
+    /* Stands down under custom allocators, same as the pool
+     * recycler: hooked accounting must see every malloc/free pair. */
+    if (leptris_custom_allocator_active()) return NULL;
+    for (size_t i = g_small.count; i > 0; i--) {
+        size_t idx = i - 1;
+        if (g_small.size[idx] == request) {
+            char* found = g_small.base[idx];
+            *capacity = g_small.size[idx];
+            g_small.bytes -= g_small.size[idx];
+            g_small.base[idx] = g_small.base[g_small.count - 1];
+            g_small.size[idx] = g_small.size[g_small.count - 1];
+            g_small.count--;
+            return found;
+        }
+    }
+    return NULL;
+}
+
+/* Returns 1 when the span was parked, 0 when the cache is full or
+ * the size belongs to the global tier — the caller frees then. */
+static int small_give(char* base, size_t size) {
+    if (size >= ARENA_RETAIN_MIN) return 0;
+    if (leptris_custom_allocator_active()) return 0;
+    if (g_small.count >= ARENA_TLS_SPANS ||
+        g_small.bytes + size > ARENA_TLS_MAX_BYTES)
+        return 0;
+    g_small.base[g_small.count] = base;
+    g_small.size[g_small.count] = size;
+    g_small.count++;
+    g_small.bytes += size;
+    return 1;
+}
+
 /* Best fit: the smallest retained block that covers the request, so
  * oversized blocks aren't burned on small documents. Returns the
- * block and reports its true capacity; NULL when nothing fits (or
- * the request is below the retain threshold — malloc territory). */
+ * block and reports its true capacity; NULL when nothing fits. */
 static char* retain_take(size_t request, size_t* capacity) {
+    char* small = small_take(request, capacity);
+    if (small) return small;
     if (request < ARENA_RETAIN_MIN) return NULL;
     char* found = NULL;
     size_t found_size = 0;
@@ -128,7 +194,8 @@ static void retain_give(char* base, size_t size) {
     return;
 #endif
     if (size < ARENA_RETAIN_MIN) {
-        leptris_free_hook(base);
+        if (!small_give(base, size))
+            leptris_free_hook(base);
         return;
     }
     retain_lock();
@@ -149,6 +216,16 @@ static void retain_give(char* base, size_t size) {
  * blocks are process-lifetime parking by design; release them so
  * embedded hosts and leak checkers see a clean exit. */
 void leptris_arena_retain_drain(void) {
+    /* The small tier drains the CALLING thread's cache — the shape
+     * leptris_thread_cleanup serves. Other threads' cached spans
+     * stay reachable through their TLS slots and die with the
+     * process (the same still-reachable parking as the global
+     * tier). */
+    for (size_t i = 0; i < g_small.count; i++)
+        leptris_free_hook(g_small.base[i]);
+    g_small.count = 0;
+    g_small.bytes = 0;
+
     retain_lock();
     for (size_t i = 0; i < g_retain.count; i++)
         leptris_free_hook(g_retain.base[i]);

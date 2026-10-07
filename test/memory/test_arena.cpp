@@ -9,6 +9,7 @@
 
 extern "C" {
 #include "arena.h"
+#include "leptris.h"
 }
 
 #include <cstdint>
@@ -271,3 +272,102 @@ TEST(LeptrisArena, BufferRoundTripReusesMapping) {
     leptris_arena_buffer_release(b2, 512u * 1024u);
 }
 }  // namespace
+
+// ---- #1436 tiny-doc fixed row: the small-span TLS recycle -------
+// The global retain tier deliberately skips spans below 256 KB; the
+// per-thread small cache parks them instead (stands down under
+// custom allocators, exactly like the pool recycler). Parking is
+// observable WITHOUT hooks via pointer identity: a same-size
+// create/destroy/create cycle reuses the parked span's address.
+TEST(ArenaSmallRecycle, SameSizeCycleReusesTheParkedSpan) {
+    leptris_arena_retain_drain();
+
+    LeptrisArena* a1 = leptris_arena_create(64u * 1024u);
+    ASSERT_NE(a1, nullptr);
+    void* base1 = leptris_arena_base(a1);
+    leptris_arena_destroy(a1);
+
+    LeptrisArena* a2 = leptris_arena_create(64u * 1024u);
+    ASSERT_NE(a2, nullptr);
+    /* Exact-size reuse: capacity stays exactly the request — the
+     * fail-fast bound does not silently widen (first-fit would). */
+    EXPECT_EQ(leptris_arena_remaining(a2), 64u * 1024u);
+    EXPECT_EQ(leptris_arena_base(a2), base1)
+        << "small span was not parked for reuse";
+    leptris_arena_destroy(a2);
+
+    leptris_arena_retain_drain();
+}
+
+// Custom-allocator accounting: every cycle is a visible
+// malloc/free pair — the cache must not park hooked spans.
+namespace {
+
+long g_recycle_allocs = 0;
+void* recycle_counting_alloc(size_t n) {
+    g_recycle_allocs++;
+    return malloc(n);
+}
+long g_recycle_frees = 0;
+void recycle_counting_free(void* p) {
+    g_recycle_frees++;
+    free(p);
+}
+
+}  // namespace
+
+TEST(ArenaSmallRecycle, StandsDownUnderCustomAllocator) {
+    leptris_arena_retain_drain();
+    leptris_set_memory_management_functions(
+        recycle_counting_alloc, recycle_counting_free);
+    g_recycle_allocs = 0;
+    g_recycle_frees = 0;
+
+    for (int i = 0; i < 32; i++) {
+        LeptrisArena* a = leptris_arena_create(32u * 1024u);
+        ASSERT_NE(a, nullptr);
+        leptris_arena_destroy(a);
+    }
+
+    /* No parking under hooks: one hooked allocation AND one hooked
+     * free per cycle, balanced to the byte. */
+    EXPECT_EQ(g_recycle_allocs, 32);
+    EXPECT_EQ(g_recycle_frees, 32);
+
+    leptris_arena_retain_drain();
+    leptris_set_memory_management_functions(NULL, NULL);
+}
+
+// The cache parks at most ARENA_TLS_SPANS spans; distinct sizes
+// make reuse identity unambiguous — recreate after a bulk destroy
+// and at least the parked bound's worth of addresses repeat.
+TEST(ArenaSmallRecycle, BulkDestroyParksUpToTheBound) {
+    leptris_arena_retain_drain();
+
+    enum { N = 12 };
+    LeptrisArena* keep[N];
+    void* bases[N];
+    for (int i = 0; i < N; i++) {
+        keep[i] = leptris_arena_create(64u * 1024u + (size_t)i * 8192u);
+        ASSERT_NE(keep[i], nullptr);
+        bases[i] = leptris_arena_base(keep[i]);
+    }
+    for (int i = 0; i < N; i++) leptris_arena_destroy(keep[i]);
+
+    int reused = 0;
+    for (int i = 0; i < N; i++) {
+        size_t sz = 64u * 1024u + (size_t)i * 8192u;
+        LeptrisArena* a = leptris_arena_create(sz);
+        ASSERT_NE(a, nullptr);
+        if (leptris_arena_base(a) == bases[i]) reused++;
+        leptris_arena_destroy(a);
+    }
+    /* 8 parked spans reuse their address; the rest went back to
+     * libc (which may or may not hand the same block back — the
+     * parked count is the stable lower bound). */
+    EXPECT_GE(reused, 8);
+    EXPECT_LE(reused, N);
+
+    leptris_arena_retain_drain();
+}
+
