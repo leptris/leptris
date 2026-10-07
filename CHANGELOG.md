@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.316] - 2026-10-07
+
+### Fixed
+
+- CONTENT rows serialize inline at every nesting level (#1565) (descriptor)
+
+
+
 ## [1.9.315] - 2026-10-07
 
 ### Added
