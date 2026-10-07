@@ -34,6 +34,7 @@ fn kind_and_flag_constants_match_engine_headers() {
     assert_eq!(PLAN_NS_NONE, 0);
     assert_eq!(PLAN_NS_EXACT, 1);
     assert_eq!(PLAN_NS_ANY, 2);
+    assert_eq!(PLAN_NS_UNQUALIFIED, 3);
     assert_eq!(PLAN_VALUE_ELEMENT, 0);
     assert_eq!(PLAN_VALUE_SCALAR, 1);
     assert_eq!(PLAN_VALUE_COLLECTION, 2);

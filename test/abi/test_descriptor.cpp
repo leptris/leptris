@@ -1754,3 +1754,86 @@ TEST(Plan1551, ChildrenEmitInDocumentOrderAcrossRows) {
     leptris_plan_free(plan);
     leptris_document_free(doc);
 }
+
+// ---- #1560: unqualified-only ns form -------------------------------
+// UNQUALIFIED matches the WRITTEN spelling: a child row binds
+// children with no prefix regardless of the effective namespace
+// URI, and refuses prefixed spellings. An unprefixed child binds
+// under both a namespace-less document and a default-xmlns
+// document (whose children inherit the default namespace — NS_NONE
+// drops them); a p:child never binds (ANY would accept it — the
+// superset lutaml-model#932 had to settle for). Round-trip through
+// the serializer agrees on all three shapes: the serializer emits
+// prefix declarations only, so a default-ns child serializes bare —
+// keying on the spelling, not the URI, is what keeps the re-walk
+// in agreement.
+TEST(Plan1560, UnqualifiedNsFormBindsNoPrefixSpellings) {
+    LeptrisStatus st = LEPTRIS_OK;
+
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "child";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_UNQUALIFIED;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "root";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    struct {
+        const char* xml;
+        const char* value; /* NULL = the row must NOT bind */
+    } shapes[] = {
+        {"<root><child>none</child></root>", "none"},
+        {"<root xmlns=\"urn:d\"><child>default</child></root>", "default"},
+        {"<root xmlns:p=\"urn:p\"><p:child>prefixed</p:child></root>", NULL},
+    };
+    for (const auto& sh : shapes) {
+        SCOPED_TRACE(sh.xml);
+        LeptrisDocument doc =
+            leptris_parse_string(sh.xml, strlen(sh.xml), &st);
+        ASSERT_NE(doc, nullptr);
+        LeptrisElement root = leptris_document_root(doc);
+        LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+        ASSERT_NE(r, nullptr);
+        if (sh.value == NULL) {
+            EXPECT_EQ(leptris_plan_value_count(r), 0u);
+        } else {
+            ASSERT_EQ(leptris_plan_value_count(r), 1u);
+            EXPECT_STREQ(leptris_plan_value_string(
+                             leptris_plan_value_at(r, 0)),
+                         sh.value);
+        }
+        /* Round-trip: serialize the walk, re-parse, re-walk — the
+         * bound values agree on every shape. */
+        char* out = leptris_plan_serialize(plan, r, &st);
+        leptris_plan_result_free(r);
+        ASSERT_NE(out, nullptr);
+        LeptrisDocument doc2 = leptris_parse_string(out, strlen(out), &st);
+        leptris_free_string(out);
+        ASSERT_NE(doc2, nullptr);
+        LeptrisPlanResult r2 =
+            leptris_plan_walk(doc2, leptris_document_root(doc2), plan, &st);
+        ASSERT_NE(r2, nullptr);
+        if (sh.value == NULL) {
+            EXPECT_EQ(leptris_plan_value_count(r2), 0u);
+        } else {
+            ASSERT_EQ(leptris_plan_value_count(r2), 1u);
+            EXPECT_STREQ(leptris_plan_value_string(
+                             leptris_plan_value_at(r2, 0)),
+                         sh.value);
+        }
+        leptris_plan_result_free(r2);
+        leptris_document_free(doc2);
+        leptris_document_free(doc);
+    }
+    leptris_plan_free(plan);
+}

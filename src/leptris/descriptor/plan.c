@@ -562,6 +562,11 @@ static int dp_ns_binds(LeptrisElement elem, uint8_t ns_form,
         case LEPTRIS_PLAN_NS_ANY:
         default:
             return 1;
+        case LEPTRIS_PLAN_NS_UNQUALIFIED:
+            /* #1560: the WRITTEN spelling — no prefix, any
+             * effective URI (default-xmlns elements included);
+             * prefixed spellings never bind. */
+            return prefix == NULL;
     }
 }
 

@@ -96,7 +96,14 @@ typedef enum {
 typedef enum {
     LEPTRIS_PLAN_NS_NONE = 0,  /* only elements with no namespace */
     LEPTRIS_PLAN_NS_EXACT = 1, /* resolved namespace URI equals ns_uri */
-    LEPTRIS_PLAN_NS_ANY = 2
+    LEPTRIS_PLAN_NS_ANY = 2,
+    /* #1560: matches the UNWRITTEN spelling — children with no
+     * prefix, regardless of the effective namespace URI. An
+     * unprefixed child binds under both a namespace-less document
+     * and a default-xmlns document; prefixed spellings never bind.
+     * Unprefixed attributes have no namespace by XML rules, so
+     * this form only applies to element rows. */
+    LEPTRIS_PLAN_NS_UNQUALIFIED = 3
 } LeptrisPlanNsForm;
 
 typedef struct {
