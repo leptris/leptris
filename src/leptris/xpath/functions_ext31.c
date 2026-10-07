@@ -358,15 +358,23 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
                     items[cnt++] = leptris_strdup(c ? c : "");
                 }
             } else {
-                /* carrier-by-pointer: element members ride their
-                 * NODE POINTER so callback identity (intersect
-                 * dedup, fold-left-009/016) survives the channel;
-                 * renderers decode to markup via
-                 * xpath_carrier_node_of. */
-                char pc[24];
-                snprintf(pc, sizeof(pc), "\x03P%016llx",
-                         (unsigned long long)(uintptr_t)nd);
-                items[cnt++] = leptris_strdup(pc);
+                /* carrier-by-pointer: real ELEMENT members ride
+                 * their NODE POINTER so callback identity (intersect
+                 * dedup, fold-left-009/016) survives the channel.
+                 * ONLY elements: synthetic attribute/namespace nodes
+                 * are heap-owned by this nodeset — a pointer carrier
+                 * would dangle once it is freed (ASAN UAF in
+                 * fn-subsequence); they keep the markup snapshot. */
+                if ((int)XPATH_NODE_TYPE(nd) ==
+                    (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+                    char pc[24];
+                    snprintf(pc, sizeof(pc), "\x03P%016llx",
+                             (unsigned long long)(uintptr_t)nd);
+                    items[cnt++] = leptris_strdup(pc);
+                } else {
+                    char* t = ctor_member_markup(nd);
+                    items[cnt++] = t ? t : leptris_strdup("");
+                }
             }
         }
     } else if (r->type == XPATH_RESULT_NUMBER) {
