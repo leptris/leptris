@@ -4,7 +4,19 @@
 
 ### Added
 
-- unqualified-only ns form for child rows (#1560) (descriptor)
+- **Descriptor: unqualified-only ns form for child rows (#1560,
+  PR #1574).** `LEPTRIS_PLAN_NS_UNQUALIFIED = 3` matches the WRITTEN
+  spelling — a child row binds children with no written prefix
+  regardless of the effective namespace URI, and refuses prefixed
+  spellings. An unprefixed child binds under both a namespace-less
+  document and a default-`xmlns` document (`NS_NONE` drops the
+  latter); a `p:child` never binds (the `NS_ANY` superset
+  lutaml-model#932 had to settle for). The serialize -> re-parse ->
+  re-walk round-trip agrees on all three shapes because the form
+  keys on the spelling, not the URI: the serializer emits prefix
+  declarations only, so a default-ns child serializes bare and
+  still re-binds. Rust descriptor-ABI mirror shipped in the same
+  wave (leptris-rs#4).
 
 
 
