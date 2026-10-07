@@ -993,12 +993,12 @@ TEST(Qt3Subset, FnForEachPair) {
     run_test_set("fn/for-each-pair.xml", {}, 6);
 }
 TEST(Qt3Subset, FnFoldLeft) {
-    /* 009/016: node-typed fold accumulators/callback args must be
-     * REAL nodes for path/identity shapes ($ctx//*[@id = ...],
-     * $foundSoFar intersect $this) — the narrowed node-carrier
-     * lever. */
-    run_test_set("fn/fold-left.xml", {}, 14, {},
-                 {"fold-left-009", "fold-left-016"});
+    /* 009/016 ADOPTED (v1.9.315 carrier-by-pointer): node-typed fold
+     * accumulators/callback args are REAL nodes now — the \x03P
+     * pointer carrier preserves identity ($foundSoFar intersect
+     * $this dedups by node), fold results decode so $result/text()
+     * steps, and keyword-named ctors (<div/>) parse. */
+    run_test_set("fn/fold-left.xml", {}, 16, {});
 }
 TEST(Qt3Subset, FnFoldRight) {
     run_test_set("fn/fold-right.xml", {}, 15);

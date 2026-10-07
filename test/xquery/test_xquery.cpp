@@ -9,6 +9,10 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
+/* carrier-by-pointer (fold-left-009/016): synth members may carry a
+ * node pointer — decode for markup rendering. */
+extern "C" void* xpath_carrier_node_of(const char* s);
+
 namespace {
 
 const char* kBooks =
@@ -31,6 +35,13 @@ std::string seq_string(LeptrisDocument doc, const char* query) {
         for (size_t i = 0; i < n; i++) {
             if (i) out += ' ';
             LeptrisElement el = leptris_xpath_result_get(r, i);
+            if (!el) {
+                const char* raw =
+                    leptris_xpath_result_node_value(r, i);
+                if (raw && (unsigned char)raw[0] == 0x03 &&
+                    raw[1] == 'P')
+                    el = (LeptrisElement)xpath_carrier_node_of(raw);
+            }
             if (el) {
                 char* s = leptris_element_serialize(el, NULL);
                 if (s) { out += s; leptris_free_string(s); }
@@ -263,6 +274,59 @@ TEST(XQueryCore, AbsEmptyAndDurationAggregates) {
         "avg(for $x in 1 to 10 return"
         " xs:dayTimeDuration(concat(\"PT\", $x, \"H\")))"),
               "PT5H30M");
+    leptris_document_free(doc);
+}
+
+/* fold-left-009/016: node IDENTITY survives the HOF callback
+ * carrier — $foundSoFar intersect $this dedups by node, not by
+ * serialized form, and the fold RESULT is the real node so path
+ * steps and text() resolve on it (the \x03P pointer carrier). */
+TEST(XQueryCore, FoldLeftCarriesNodeIdentity) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* Distinct literal ctors are DISTINCT nodes (one evaluation per
+     * occurrence) — the fold keeps all six, first-occurrence order. */
+    EXPECT_EQ(seq_string(doc,
+        "fold-left((<a/>, <b/>, <c/>, <d/>, <a/>, <b/>), (), "
+        "function($f, $t){ if ($f intersect $t) then $f "
+        "else ($f, $t) })/local-name()"),
+        "a b c d a b");
+    /* The declared-function shape of fold-left-009: distinct
+     * -nodes-stable over a permutation, first-occurrence order. */
+    EXPECT_EQ(seq_string(doc,
+        "declare function local:dns($seq as node()*) { "
+        "fold-left($seq, (), function($f as node()*, "
+        "$t as node()) as node()* { "
+        "if ($f intersect $t) then $f else ($f, $t) }) }; "
+        "let $n := (<a/>, <b/>, <c/>, <d/>, <e/>, <f/>) "
+        "let $p := ($n[1], $n[2], $n[4], $n[1], $n[2], "
+        "$n[3], $n[2], $n[1]) "
+        "return local:dns($p)/local-name()"),
+        "a b d c");
+    leptris_document_free(doc);
+}
+
+/* fold-left-016: the interpreter narrows the context through id
+ * then class selectors; only the nested <p> matches both, so
+ * $result/text() is its text — the Goodbye <p> sits outside the
+ * narrowed node. */
+TEST(XQueryCore, FoldLeftDynamicSelection) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "let $html := <html><body><div id=\"main\">"
+        "<p class=\"para\">Hello World!</p></div>"
+        "<p class=\"para\">Goodbye!</p></body></html> "
+        "let $css := <selectors><id>main</id>"
+        "<class>para</class></selectors>/* "
+        "let $interp := function($ctx, $sel) { "
+        "typeswitch($sel) "
+        "case $a as element(id) return $ctx//*[@id = $a/text()] "
+        "case $a as element(class) "
+        "return $ctx//*[@class = $a/text()] "
+        "default return () } "
+        "return fold-left($css, $html, $interp)/text()"),
+        "Hello World!");
     leptris_document_free(doc);
 }
 

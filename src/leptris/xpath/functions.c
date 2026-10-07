@@ -1120,6 +1120,26 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                 if (c[0] == '\x03' && c[1] == 'B') {
                     out[i].kind = 3;
                     out[i].num = c[2] == 't' ? 1 : 0;
+                } else if (c[0] == '\x03' && c[1] == 'P') {
+                    /* carrier-by-pointer: decode to the NODE's
+                     * MARKUP so both sides compare as markup
+                     * strings (real elements collect as markup in
+                     * the element branch below); the markup compare
+                     * reparses into de_node_equal. */
+                    extern void* xpath_carrier_node_of(const char*);
+                    extern char* ctor_member_markup(void* node);
+                    void* cn = xpath_carrier_node_of(c);
+                    if (cn) {
+                        out[i].kind = 2;
+                        out[i].str = ctor_member_markup(cn);
+                        if (!out[i].str) {
+                            out[i].kind = 0;
+                            out[i].node = cn;
+                        }
+                    } else {
+                        out[i].kind = 2;
+                        out[i].borrow = c;
+                    }
                 } else if (c[0] == '\x03' && c[1] == 'A') {
                     /* attribute ctor carrier: kind 4 compares
                      * name + value (K2-SeqDeepEqualFunc-25/31/32) */
