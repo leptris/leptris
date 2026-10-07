@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- CONTENT rows serialize inline at every nesting level (#1565) (descriptor)
+- **Descriptor plan serializer: nested captures emit their own rows
+  (#1565, PR #1573).** A captured child's rows now resolve against the
+  CAPTURING row's `child_plan_index` plan instead of the plan that
+  walked it, so a child bound by a nested row (the `w:font`-in-
+  `w:fonts` shape) serializes its own attribute and child rows —
+  previously they resolved against the parent plan and silently
+  vanished. CONTENT rows inline their text at every nesting level.
+  The new nested-capture spec also exposed a 2 x 16B leak: the inner
+  walk's ns stamp was overwritten without freeing; fixed
+  free-before-overwrite (leaks gate clean).
 
 
 
