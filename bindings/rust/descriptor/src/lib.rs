@@ -49,6 +49,12 @@ pub type PlanNsForm = u8;
 pub const PLAN_NS_NONE: PlanNsForm = 0;
 pub const PLAN_NS_EXACT: PlanNsForm = 1;
 pub const PLAN_NS_ANY: PlanNsForm = 2;
+/// #1560: matches the UNWRITTEN spelling — no written prefix,
+/// regardless of the effective namespace URI. An unprefixed child
+/// binds under both a namespace-less document and a default-xmlns
+/// document; prefixed spellings never bind. Element rows only
+/// (unprefixed attributes have no namespace by XML rules).
+pub const PLAN_NS_UNQUALIFIED: PlanNsForm = 3;
 
 /// Result node kinds (the value tree a walk returns).
 pub type PlanValueKind = i32;
