@@ -1837,3 +1837,129 @@ TEST(Plan1560, UnqualifiedNsFormBindsNoPrefixSpellings) {
     }
     leptris_plan_free(plan);
 }
+
+// ---- #1563: nested attr parity -------------------------------------
+// The report: a two-level plan whose root carries one exact-URI
+// attribute row drops the CHILD's attribute capture — the child's
+// PlanValue answers attribute("name") nil for a prefixed w:name
+// while the same child plan compiled as ROOT binds it. This is the
+// A/B discriminator: one child plan (plain unset-form attr row, the
+// reporter's shape; ANY-form as the binding control), walked BOTH
+// ways. Whatever the outcome, the two paths must AGREE.
+TEST(Plan1563, PlainAttrRowAgreesNestedVsRoot) {
+    LeptrisStatus st = LEPTRIS_OK;
+
+    leptris_attr_plan root_attrs[1] = {};
+    root_attrs[0].wire_name = "Ignorable";
+    root_attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    root_attrs[0].type_tag = 1;
+    root_attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    root_attrs[0].ns_uri = "urn:mc";
+    root_attrs[0].ns_prefix = "mc";
+
+    leptris_child_plan font_row[1] = {};
+    font_row[0].wire_name = "font";
+    font_row[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    font_row[0].child_plan_index = 1;
+    font_row[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    font_row[0].ns_uri = "urn:w";
+    font_row[0].ns_prefix = "w";
+
+    /* The reporter's child row: PLAIN wire_name, unset ns_form. */
+    leptris_attr_plan font_attrs_plain[1] = {};
+    font_attrs_plain[0].wire_name = "name";
+    font_attrs_plain[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    font_attrs_plain[0].type_tag = 1;
+
+    /* Control: ANY form with the LOCAL name must bind w:name. */
+    leptris_attr_plan font_attrs_any[1] = {};
+    font_attrs_any[0].wire_name = "name";
+    font_attrs_any[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    font_attrs_any[0].type_tag = 1;
+    font_attrs_any[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    font_attrs_any[0].pad_ns = 1;
+
+    leptris_element_plan nested_plans[2] = {};
+    nested_plans[0].element_name = "fonts";
+    nested_plans[0].attribute_count = 1;
+    nested_plans[0].attribute_plans = root_attrs;
+    nested_plans[0].child_count = 1;
+    nested_plans[0].child_plans = font_row;
+    nested_plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    nested_plans[0].ns_uri = "urn:w";
+    nested_plans[0].ns_prefix = "w";
+    nested_plans[1].element_name = "font";
+    nested_plans[1].attribute_count = 1;
+    nested_plans[1].attribute_plans = font_attrs_plain;
+    nested_plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    nested_plans[1].ns_uri = "urn:w";
+    nested_plans[1].ns_prefix = "w";
+
+    leptris_plan_spec nested_spec = {};
+    nested_spec.abi_version = leptris_plan_abi_version();
+    nested_spec.plan_count = 2;
+    nested_spec.plans = nested_plans;
+    LeptrisPlan nested_plan = leptris_plan_build(&nested_spec, &st);
+    ASSERT_NE(nested_plan, nullptr);
+
+    /* Root walk of the SAME child plan (reporter's standalone doc). */
+    leptris_element_plan root_plans[1] = {};
+    root_plans[0] = nested_plans[1];
+    leptris_plan_spec root_spec = {};
+    root_spec.abi_version = leptris_plan_abi_version();
+    root_spec.plan_count = 1;
+    root_spec.plans = root_plans;
+    LeptrisPlan root_plan = leptris_plan_build(&root_spec, &st);
+    ASSERT_NE(root_plan, nullptr);
+
+    const char* nested_xml =
+        "<w:fonts xmlns:w=\"urn:w\" xmlns:mc=\"urn:mc\""
+        " mc:Ignorable=\"w14\"><w:font w:name=\"Arial\"/></w:fonts>";
+    const char* root_xml =
+        "<w:font xmlns:w=\"urn:w\" w:name=\"Arial\"/>";
+
+    LeptrisDocument doc = leptris_parse_string(nested_xml, strlen(nested_xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisPlanResult r = leptris_plan_walk(doc, leptris_document_root(doc), nested_plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    LeptrisPlanResult font_nested = leptris_plan_value_at(r, 0);
+    ASSERT_NE(font_nested, nullptr);
+    const char* nested_plain = leptris_plan_value_attribute(font_nested, "name");
+    leptris_plan_result_free(r);
+    leptris_document_free(doc);
+
+    LeptrisDocument doc2 = leptris_parse_string(root_xml, strlen(root_xml), &st);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisPlanResult r2 = leptris_plan_walk(doc2, leptris_document_root(doc2), root_plan, &st);
+    ASSERT_NE(r2, nullptr);
+    /* The walk root carries no row stamp — its attrs answer through
+     * the plan's rows. */
+    const char* root_plain = leptris_plan_value_attribute(r2, "name");
+    leptris_plan_result_free(r2);
+    leptris_document_free(doc2);
+
+    RecordProperty("nested_plain_nil", nested_plain ? "0" : "1");
+    RecordProperty("root_plain_nil", root_plain ? "0" : "1");
+    /* The two paths must agree, whichever semantic that is. */
+    ASSERT_EQ(nested_plain == nullptr, root_plain == nullptr)
+        << "nested=" << (nested_plain ? nested_plain : "(nil)")
+        << " root=" << (root_plain ? root_plain : "(nil)");
+
+    /* Control: ANY-form rows bind w:name BOTH ways. */
+    nested_plans[1].attribute_plans = font_attrs_any;
+    LeptrisPlan nested_any = leptris_plan_build(&nested_spec, &st);
+    ASSERT_NE(nested_any, nullptr);
+    LeptrisDocument doc3 = leptris_parse_string(nested_xml, strlen(nested_xml), &st);
+    ASSERT_NE(doc3, nullptr);
+    LeptrisPlanResult r3 = leptris_plan_walk(doc3, leptris_document_root(doc3), nested_any, &st);
+    ASSERT_NE(r3, nullptr);
+    LeptrisPlanResult font_any = leptris_plan_value_at(r3, 0);
+    ASSERT_NE(font_any, nullptr);
+    EXPECT_STREQ(leptris_plan_value_attribute(font_any, "name"), "Arial");
+    leptris_plan_result_free(r3);
+    leptris_document_free(doc3);
+    leptris_plan_free(nested_any);
+    leptris_plan_free(root_plan);
+    leptris_plan_free(nested_plan);
+}
