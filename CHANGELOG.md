@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.314] - 2026-10-07
+
+### Added
+
+- element constructors yield real nodes (#181) (xquery)
+
+
+
 ## [1.9.313] - 2026-10-07
 
 ### Fixed
