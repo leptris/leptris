@@ -4,11 +4,32 @@
 
 ### Added
 
-- carrier-by-pointer node identity — adopt QT3 fold-left-009/016 (xquery)
+- **Carrier-by-pointer node identity — QT3 fold-left-009/016
+  adopted (PR #1571).** Element members riding the higher-order
+  function argument channel keep their NODE POINTER (the \x03P
+  carrier), so node identity survives a string-typed channel:
+  `$foundSoFar intersect $this` dedups by node (fold-left-009's
+  distinct-nodes-stable), and fold results decode to real nodes so
+  `$result/text()` steps (fold-left-016's css-selector interpreter).
+  The fold suite runs 16/16 — both long-pinned cases adopted.
+  Pointers are eval-safe: constructor documents anchor on the
+  source tree (the #691 discipline). Along the way, three language
+  gaps closed: typeswitch arms accept `element(id)` /
+  `element(class)` NAME arguments with case-bound variables binding
+  node operands as nodes; keyword-named constructors parse
+  (`<div/>`, `<mod/>` — HTML tag names colliding with XQuery
+  operators); and single-element results ride the carrier instead
+  of collapsing to their string value.
 
 ### Fixed
 
-- pointer carriers only for real ELEMENT members (xquery)
+- **Pointer carriers only for real ELEMENT members.** The item
+  collector handed \x03P carriers to synthetic attribute and
+  namespace nodes too — heap-owned by the carrying nodeset, so the
+  carrier dangled once it was freed (AddressSanitizer
+  heap-use-after-free via fn:subsequence over an attribute step).
+  Real elements stay document-anchored for the evaluation;
+  attributes and namespaces keep the markup snapshot.
 
 
 
