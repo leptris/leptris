@@ -55,11 +55,15 @@ jobs:
       - name: Configure (Windows / MSVC)
         if: runner.os == 'Windows'
         run: |
+          # 1577: /Zi + /DEBUG so the SEH handler's symbolized stack resolves.
           cmake -B build -S . `
             -DLEPTRIS_BUILD_CLI=ON `
             -DBUILD_TESTING=ON `
             -DLEPTRIS_ENABLE_UTF8PROC=OFF `
-            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_ICONV=OFF `
+            -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
 
       - name: Build
         run: cmake --build build --config Release

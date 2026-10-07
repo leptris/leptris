@@ -35,6 +35,80 @@ constexpr int kNodeTypeElement = 0;
 #  define LEPTRIS_STRESS_SANITIZER 1
 #endif
 
+/* #1577: on Windows the SEH reaches gtest unsymbolized ("SEH
+ * exception with code 0xc0000005"), and the crash is run-to-run
+ * nondeterministic — a bare code word is not actionable. A vectored
+ * handler runs before gtest's translator: print the faulting address
+ * and a dbghelp-symbolized stack, then hand the exception on so the
+ * normal gtest failure report still happens. First-chance non-fatal
+ * exceptions (C++ EH, debug breaks) pass through untouched. Needs
+ * /Zi + /DEBUG in the CI configure step for symbol resolution. */
+#ifdef _WIN32
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+#include <cstdio>
+
+namespace {
+
+LONG WINAPI leptris_test_seh_printer(EXCEPTION_POINTERS* ep) {
+    const DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code != 0xC0000005u && code != 0xC00000FDu)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    static volatile LONG in_flight = 0;
+    if (InterlockedExchange(&in_flight, 1) != 0)
+        return EXCEPTION_CONTINUE_SEARCH; /* fault while printing */
+
+    fprintf(stderr,
+            "\n=== #1577 SEH 0x%08lX at %p — symbolized stack ===\n",
+            (unsigned long)code, ep->ExceptionRecord->ExceptionAddress);
+    HANDLE proc = GetCurrentProcess();
+    SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS |
+                  SYMOPT_LOAD_LINES);
+    if (SymInitialize(proc, NULL, TRUE)) {
+        void* frames[62];
+        USHORT n = CaptureStackBackTrace(0, 62, frames, NULL);
+        alignas(SYMBOL_INFOW) unsigned char buf[
+            sizeof(SYMBOL_INFOW) + 512 * sizeof(wchar_t)];
+        for (USHORT i = 0; i < n; i++) {
+            SYMBOL_INFOW* si = reinterpret_cast<SYMBOL_INFOW*>(buf);
+            si->SizeOfStruct = sizeof(SYMBOL_INFOW);
+            si->MaxNameLen = 511;
+            DWORD64 disp = 0;
+            if (SymFromAddrW(proc, reinterpret_cast<DWORD64>(frames[i]),
+                             &disp, si)) {
+                IMAGEHLP_LINEW64 line;
+                memset(&line, 0, sizeof(line));
+                line.SizeOfStruct = sizeof(line);
+                DWORD line_disp = 0;
+                BOOL have_line = SymGetLineFromAddrW64(
+                    proc, reinterpret_cast<DWORD64>(frames[i]),
+                    &line_disp, &line);
+                fprintf(stderr, "  %2u %ls+0x%llX", (unsigned)i,
+                        si->Name, (unsigned long long)disp);
+                if (have_line)
+                    fprintf(stderr, "  [%ls:%lu]", line.FileName,
+                            (unsigned long)line.LineNumber);
+                fprintf(stderr, "\n");
+            } else {
+                fprintf(stderr, "  %2u %p\n", (unsigned)i, frames[i]);
+            }
+        }
+    } else {
+        fprintf(stderr, "  (SymInitialize failed: %lu)\n",
+                (unsigned long)GetLastError());
+    }
+    fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+const PVOID leptris_seh_registration =
+    AddVectoredExceptionHandler(1, leptris_test_seh_printer);
+
+}  // namespace
+#endif  /* _WIN32 */
+
 /* Byte sizes to sweep. 90 KB is the #450 reproduction threshold
  * (block gap crosses cp16 range); 300 KB/1 MB add margin; the big
  * ones prove nothing dies at scale. */
