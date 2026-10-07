@@ -147,6 +147,8 @@ extern char* get_node_text(void* node);
 /* functions_ext31.c — #691 source-document anchoring (#181 ctor docs). */
 extern int xq_anchor_on_source(XPathContext* ctx,
                                struct leptris_document* anchored);
+/* carrier-by-pointer decode (fold-left-009/016). */
+extern void* xpath_carrier_node_of(const char* s);
 
 /* #181: a materialized ctor node splices its MARKUP into a
  * parent's serialized content — get_node_text would yield only its
@@ -791,6 +793,7 @@ static int op_relational_cmp(XPathOperatorType op, double a, double b) {
  * `instance of` and XQuery typeswitch. */
 int xpath_result_matches_type(struct leptris_xpath_result* v,
                               const char* base) {
+    extern const char* leptris_element_get_name(LeptrisElement e);
     int is_string_ty = strcmp(base, "xs:string") == 0 ||
                        strcmp(base, "xs:anyURI") == 0 ||
                        strncmp(base, "xs:date", 7) == 0 ||
@@ -801,7 +804,9 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
                     strcmp(base, "node()") != 0 &&
                     strcmp(base, "item()") != 0 &&
                     strcmp(base, "element()") != 0 &&
+                    strncmp(base, "element(", 8) != 0 &&
                     strcmp(base, "attribute()") != 0 &&
+                    strncmp(base, "attribute(", 10) != 0 &&
                     strcmp(base, "text()") != 0 &&
                     strcmp(base, "comment()") != 0 &&
                     strcmp(base, "processing-instruction()") != 0;
@@ -825,6 +830,22 @@ int xpath_result_matches_type(struct leptris_xpath_result* v,
                 if (!(tag >= 0 && tag <= 7)) return 0;
             } else if (strcmp(base, "element()") == 0) {
                 if (tag != (int)LEPTRIS_NODE_ELEMENT) return 0;
+            } else if (strncmp(base, "element(", 8) == 0) {
+                /* ElementTest with a NAME: element(id) matches
+                 * local-name "id" (fold-left-016 selector arms);
+                 * element(*) is any element. */
+                size_t bl = strlen(base);
+                if (tag != (int)LEPTRIS_NODE_ELEMENT || bl < 10 ||
+                    base[bl - 1] != ')')
+                    return 0;
+                if (!(bl == 11 && base[9] == '*')) {
+                    const char* en =
+                        leptris_element_get_name((LeptrisElement)n);
+                    size_t nl = bl - 9;
+                    if (!en || strlen(en) != nl ||
+                        strncmp(en, base + 8, nl) != 0)
+                        return 0;
+                }
             } else if (strcmp(base, "attribute()") == 0) {
                 if (tag != (int)LEPTRIS_NODE_ATTRIBUTE) return 0;
             } else if (strcmp(base, "text()") == 0) {
@@ -1889,9 +1910,18 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     if (sv && sv[0] == '\x03' && sv[1] == 'M' &&
                         xpath_array_members_of(sv, &mem, &mn) && mn) {
                         for (size_t j = 0; j < mn; j++) {
-                            XPathTextNode* tn = synth_text(
-                                mem[j], strlen(mem[j]));
-                            if (tn) xpath_nodeset_add(one, tn);
+                            /* carrier-by-pointer: element members
+                             * decode to their NODE (identity —
+                             * fold-left-009/016). */
+                            void* cn = xpath_carrier_node_of(mem[j]);
+                            if (cn) {
+                                xpath_nodeset_add(one,
+                                                  (LeptrisNode*)cn);
+                            } else {
+                                XPathTextNode* tn = synth_text(
+                                    mem[j], strlen(mem[j]));
+                                if (tn) xpath_nodeset_add(one, tn);
+                            }
                             free(mem[j]);
                         }
                         free(mem);
@@ -1900,11 +1930,19 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                sv[1] == 'E') {
                         free(sv);
                     } else {
-                        XPathTextNode* tn =
-                            synth_text(sv ? sv : "",
-                                       sv ? strlen(sv) : 0);
-                        free(sv);
-                        if (tn) xpath_nodeset_add(one, tn);
+                        void* cn =
+                            xpath_carrier_node_of(sv ? sv : "");
+                        if (cn) {
+                            xpath_nodeset_add(one, (LeptrisNode*)cn);
+                        } else {
+                            XPathTextNode* tn =
+                                synth_text(sv ? sv : "",
+                                           sv ? strlen(sv) : 0);
+                            free(sv);
+                            if (tn) xpath_nodeset_add(one, tn);
+                            sv = NULL;
+                        }
+                        if (sv) free(sv);
                     }
                 }
                 XPathVariable* ex = xpath_variable_set_get(
@@ -2045,11 +2083,26 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     XPathNodeSet* one = xpath_nodeset_new();
                     if (one) {
                         one->owns_synthetic_text = 1;
-                        const char* bindv =
-                            marked ? marked : (vs_ ? vs_ : "");
-                        XPathTextNode* tn = xpath_synth_text(
-                            bindv, strlen(bindv));
-                        if (tn) xpath_nodeset_add(one, tn);
+                        if (v->type == XPATH_RESULT_NODESET &&
+                            v->value.nodeset_value &&
+                            v->value.nodeset_value->count > 0) {
+                            /* Node operands bind AS NODES — the arm
+                             * body steps axes on them
+                             * (fold-left-016: $a/text()); a
+                             * string-value synth has no children. */
+                            for (size_t xi = 0;
+                                 xi < v->value.nodeset_value->count;
+                                 xi++)
+                                xpath_nodeset_add(
+                                    one,
+                                    v->value.nodeset_value->nodes[xi]);
+                        } else {
+                            const char* bindv =
+                                marked ? marked : (vs_ ? vs_ : "");
+                            XPathTextNode* tn = xpath_synth_text(
+                                bindv, strlen(bindv));
+                            if (tn) xpath_nodeset_add(one, tn);
+                        }
                         XPathVariable* var = xpath_variable_set_add(
                             vs, vn, XPATH_VAR_TYPE_NODE_SET);
                         if (var)
@@ -4377,6 +4430,17 @@ struct leptris_xpath_result* xpath_call_function_item(
                          * typed/untyped carrier marks the M members
                          * now carry. */
                         const char* mv = mem[j];
+                        void* cn = xpath_carrier_node_of(mv);
+                        if (cn) {
+                            /* Node members atomize to their string
+                             * value (XDM function conversion). */
+                            const char* sv =
+                                leptris_element_text((LeptrisElement)cn);
+                            kids[j].value =
+                                (char*)(sv ? sv : "");
+                            karr[j] = &kids[j];
+                            continue;
+                        }
                         if (mv && mv[0] == '\x03' && mv[1] &&
                             mv[1] != 'A' && mv[1] != 'M')
                             mv += 2;
@@ -4408,8 +4472,16 @@ struct leptris_xpath_result* xpath_call_function_item(
                 else if (argv[i] && argv[i][0] == '\x03' &&
                          argv[i][1] == 'E')
                     argn[i].value = "";
-                else
-                    argn[i].value = argv[i];
+                else {
+                    void* cn = xpath_carrier_node_of(argv[i]);
+                    if (cn) {
+                        const char* sv = leptris_element_text(
+                            (LeptrisElement)cn);
+                        argn[i].value = (char*)(sv ? sv : "");
+                    } else {
+                        argn[i].value = argv[i];
+                    }
+                }
             }
             child_arr[i] = &argn[i];
         }
@@ -4476,17 +4548,30 @@ struct leptris_xpath_result* xpath_call_function_item(
             if (argv[ai][0] == '\x03' && argv[ai][1] == 'M' &&
                 xpath_array_members_of(argv[ai], &mem, &mn) && mn) {
                 for (size_t j = 0; j < mn; j++) {
-                    XPathTextNode* tn =
-                        synth_text(mem[j], strlen(mem[j]));
-                    if (tn) xpath_nodeset_add(one, tn);
+                    /* carrier-by-pointer: element members decode to
+                     * their NODE (identity — fold-left-009/016);
+                     * borrowed, not synth. */
+                    void* cn = xpath_carrier_node_of(mem[j]);
+                    if (cn) {
+                        xpath_nodeset_add(one, (LeptrisNode*)cn);
+                    } else {
+                        XPathTextNode* tn =
+                            synth_text(mem[j], strlen(mem[j]));
+                        if (tn) xpath_nodeset_add(one, tn);
+                    }
                     free(mem[j]);
                 }
                 free(mem);
             } else if (!(argv[ai][0] == '\x03' &&
                          argv[ai][1] == 'E')) {
-                XPathTextNode* tn =
-                    synth_text(argv[ai], strlen(argv[ai]));
-                if (tn) xpath_nodeset_add(one, tn);
+                void* cn = xpath_carrier_node_of(argv[ai]);
+                if (cn) {
+                    xpath_nodeset_add(one, (LeptrisNode*)cn);
+                } else {
+                    XPathTextNode* tn =
+                        synth_text(argv[ai], strlen(argv[ai]));
+                    if (tn) xpath_nodeset_add(one, tn);
+                }
             }
             /* "\x03E": the empty sequence binds NO nodes, so
              * empty($p) is true (fold zero accumulators). */

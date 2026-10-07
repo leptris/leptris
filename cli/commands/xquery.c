@@ -119,16 +119,28 @@ static cli_result_t xquery_run(int argc, char** argv) {
         cli_error("XQuery evaluation failed");
         rc = CLI_ERROR_XPATH;
     } else if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
+        /* carrier-by-pointer (fold-left-009/016): synth members may
+         * carry a node pointer — render its markup. */
+        extern void* xpath_carrier_node_of(const char* s);
         size_t n = leptris_xpath_result_count(r);
         for (size_t k = 0; k < n; k++) {
             if (k) putchar(' ');
+            LeptrisElement el = NULL;
+            if (leptris_xpath_result_node_kind(r, k) ==
+                LEPTRIS_XPATH_NODE_ELEMENT) {
+                el = leptris_xpath_result_get(r, k);
+            } else {
+                const char* raw =
+                    leptris_xpath_result_node_value(r, k);
+                if (raw && (unsigned char)raw[0] == 0x03 &&
+                    raw[1] == 'P')
+                    el = (LeptrisElement)xpath_carrier_node_of(raw);
+            }
             /* Constructed elements (#181) are real nodes now — print
              * their serialized markup, not the string-value (the
              * pre-node ctor spelling printed markup too). */
-            if (leptris_xpath_result_node_kind(r, k) ==
-                LEPTRIS_XPATH_NODE_ELEMENT) {
-                char* m = leptris_element_serialize(
-                    leptris_xpath_result_get(r, k), NULL);
+            if (el) {
+                char* m = leptris_element_serialize(el, NULL);
                 fputs(m ? m : "", stdout);
                 leptris_free_string(m);
             } else {

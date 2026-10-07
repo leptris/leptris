@@ -50,6 +50,8 @@ extern struct leptris_xpath_result* xpath_evaluate(XPathContext* context,
 extern char* get_node_text(void* node);
 /* evaluator_operators.c — element members keep their markup (#181). */
 extern char* ctor_member_markup(void* node);
+/* carrier-by-pointer decode (fold-left-009/016); defined below. */
+void* xpath_carrier_node_of(const char* s);
 
 /* ---- sequence plumbing ---- */
 
@@ -67,6 +69,20 @@ static struct leptris_xpath_result* seq_new(void) {
 }
 
 static void seq_push_str(struct leptris_xpath_result* seq, const char* s) {
+    /* carrier-by-pointer: element carriers pushed into a result
+     * sequence decode to their MARKUP — the members re-enter
+     * rendering/deep-equal as markup strings (identity-critical
+     * round-trips — fold accumulators — never route through here). */
+    void* cn = xpath_carrier_node_of(s ? s : "");
+    if (cn) {
+        char* m = ctor_member_markup(cn);
+        s = m ? m : "";
+        XPathTextNode* tn =
+            xpath_synth_text(s, strlen(s));
+        if (tn) xpath_nodeset_add(seq->value.nodeset_value, tn);
+        free(m);
+        return;
+    }
     XPathTextNode* tn =
         xpath_synth_text(s ? s : "", s ? strlen(s) : 0);
     if (tn) xpath_nodeset_add(seq->value.nodeset_value, tn);
@@ -332,14 +348,25 @@ static char** collect_items_raw(XPathContext* ctx, XPathASTNode** args,
             void* nd = ns->nodes[k];
             if (XPATH_NODE_TYPE(nd) == LEPTRIS_NODE_TEXT) {
                 const char* c = ((XPathTextNode*)nd)->content;
-                items[cnt++] = leptris_strdup(c ? c : "");
+                /* carrier-by-pointer: element carriers recover
+                 * their markup for the item string. */
+                void* cn = xpath_carrier_node_of(c ? c : "");
+                if (cn) {
+                    char* m = ctor_member_markup(cn);
+                    items[cnt++] = m ? m : leptris_strdup("");
+                } else {
+                    items[cnt++] = leptris_strdup(c ? c : "");
+                }
             } else {
-                /* Element members keep their MARKUP (#181: ctor
-                 * nodes are real now) — a bare string-value fetch
-                 * collapses every constructed element to its text
-                 * (fn:reverse of (<a/>, <f/>) went empty). */
-                char* t = ctor_member_markup(nd);
-                items[cnt++] = t ? t : leptris_strdup("");
+                /* carrier-by-pointer: element members ride their
+                 * NODE POINTER so callback identity (intersect
+                 * dedup, fold-left-009/016) survives the channel;
+                 * renderers decode to markup via
+                 * xpath_carrier_node_of. */
+                char pc[24];
+                snprintf(pc, sizeof(pc), "\x03P%016llx",
+                         (unsigned long long)(uintptr_t)nd);
+                items[cnt++] = leptris_strdup(pc);
             }
         }
     } else if (r->type == XPATH_RESULT_NUMBER) {
@@ -5265,8 +5292,9 @@ static struct leptris_xpath_result* fn_filter(XPathContext* ctx,
 }
 
 /* Decode a fold accumulator carrier into the final result:
- * \x03B boolean, \x03E empty sequence, \x03M member sequence,
- * scalar marks stripped for the string result. */
+ * \x03B boolean, \x03E empty sequence, \x03P node pointer,
+ * \x03M member sequence, scalar marks stripped for the string
+ * result. */
 static struct leptris_xpath_result* fold_result_of(char* acc) {
     struct leptris_xpath_result* out = NULL;
     if (acc && acc[0] == '\x03') {
@@ -5289,6 +5317,25 @@ static struct leptris_xpath_result* fold_result_of(char* acc) {
             }
             return out;
         }
+        if (mk == 'P') {
+            /* carrier-by-pointer: the fold result IS the node —
+             * path steps and text() resolve on the real node
+             * (fold-left-016's $result/text()). */
+            void* cn = xpath_carrier_node_of(acc);
+            free(acc);
+            out = xpath_result_new(XPATH_RESULT_NODESET);
+            if (out) {
+                out->value.nodeset_value = xpath_nodeset_new();
+                if (!out->value.nodeset_value) {
+                    xpath_result_free(out);
+                    return NULL;
+                }
+                if (cn)
+                    xpath_nodeset_add(out->value.nodeset_value,
+                                      (LeptrisNode*)cn);
+            }
+            return out;
+        }
         if (mk == 'M') {
             char** mem = NULL;
             size_t mn = 0;
@@ -5300,6 +5347,17 @@ static struct leptris_xpath_result* fold_result_of(char* acc) {
                         out->value.nodeset_value->owns_synthetic_text = 1;
                     for (size_t j = 0; j < mn && out->value.nodeset_value;
                          j++) {
+                        /* carrier-by-pointer members decode to
+                         * their NODE, before the generic mark
+                         * strip could eat the pointer. */
+                        void* cn = xpath_carrier_node_of(mem[j]);
+                        if (cn) {
+                            xpath_nodeset_add(
+                                out->value.nodeset_value,
+                                (LeptrisNode*)cn);
+                            free(mem[j]);
+                            continue;
+                        }
                         const char* body = mem[j];
                         size_t bl = strlen(body);
                         if (body[0] == '\x03' && bl >= 2) {
@@ -5379,6 +5437,17 @@ static char* fn_item_arg_string(struct leptris_xpath_result* r) {
         if ((int)XPATH_NODE_TYPE(nd) == (int)LEPTRIS_NODE_TEXT) {
             const char* mc = ((XPathTextNode*)nd)->content;
             if (mc && mc[0] == '\x03') return leptris_strdup(mc);
+        }
+        /* carrier-by-pointer: a lone ELEMENT rides its pointer —
+         * the string-value fallback collapses every element to its
+         * text and node identity dies (fold-left-016's context
+         * arg). seq_carrier_of only covers count >= 2. */
+        if ((int)XPATH_NODE_TYPE(nd) ==
+            (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+            char pc[24];
+            snprintf(pc, sizeof(pc), "\x03P%016llx",
+                     (unsigned long long)(uintptr_t)nd);
+            return leptris_strdup(pc);
         }
     }
     /* Multi-item all-text results ride the sequence carrier so the
@@ -5596,13 +5665,18 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
             mc = leptris_strdup(
                 ((XPathTextNode*)mns->nodes[j])->content);
         } else if (mtype == (int)LEPTRIS_NODE_TYPE_ELEMENT) {
-            /* #181: materialized ctor members ride the carrier as
-             * their serialized MARKUP (the pre-#181 member
-             * spelling) so member COUNT survives typed argv;
-             * pointer identity through the channel remains the
-             * #181 follow-up. */
-            mc = leptris_element_serialize(
-                (LeptrisElement)mns->nodes[j], NULL);
+            /* carrier-by-pointer (fold-left-009/016): element
+             * members ride their NODE POINTER, not markup — the
+             * callback's $foundSoFar intersect $this dedups by
+             * node identity, which a reparse can never restore.
+             * The pointer is eval-safe: ctor docs anchor on the
+             * source document (#691), parsed docs outlive the
+             * eval; consumers recover markup or the string value
+             * via xpath_carrier_node_of. */
+            char pc[24];
+            snprintf(pc, sizeof(pc), "\x03P%016llx",
+                     (unsigned long long)(uintptr_t)mns->nodes[j]);
+            mc = leptris_strdup(pc);
         } else {
             struct leptris_xpath_result* rel =
                 xpath_map_builder_finish(b);
@@ -5629,6 +5703,16 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
     }
     if (subr) xpath_result_free(subr);
     return out;
+}
+
+/* carrier-by-pointer decode (fold-left-009/016): a "\x03P" +
+ * 16-hex carrier resolves to its node, valid for the whole eval
+ * (ctor docs anchor on the source document, #691). NULL when the
+ * string is not a pointer carrier. */
+void* xpath_carrier_node_of(const char* s) {
+    if (!s || s[0] != '\x03' || s[1] != 'P' || strlen(s) != 18)
+        return NULL;
+    return (void*)(uintptr_t)strtoull(s + 2, NULL, 16);
 }
 
 static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
@@ -5664,21 +5748,32 @@ static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
             xpath_result_free(vr);
             /* XDM function conversion: node-valued arguments
              * atomize to their string value (fn-apply-14/15). */
-            if (v && v[0] == '<') {
-                LeptrisStatus st = LEPTRIS_OK;
-                LeptrisDocument nd = leptris_parse_string(
-                    v, strlen(v), &st);
-                if (nd) {
-                    LeptrisElement rt = leptris_document_root(nd);
-                    if (rt) {
-                        const char* sv = leptris_element_text(rt);
-                        char* c = leptris_strdup(sv ? sv : "");
-                        if (c) {
-                            free(v);
-                            v = c;
-                        }
+            {
+                void* cn = xpath_carrier_node_of(v);
+                if (cn) {
+                    const char* sv =
+                        leptris_element_text((LeptrisElement)cn);
+                    char* c = leptris_strdup(sv ? sv : "");
+                    if (c) {
+                        free(v);
+                        v = c;
                     }
-                    leptris_document_free(nd);
+                } else if (v && v[0] == '<') {
+                    LeptrisStatus st = LEPTRIS_OK;
+                    LeptrisDocument nd = leptris_parse_string(
+                        v, strlen(v), &st);
+                    if (nd) {
+                        LeptrisElement rt = leptris_document_root(nd);
+                        if (rt) {
+                            const char* sv = leptris_element_text(rt);
+                            char* c = leptris_strdup(sv ? sv : "");
+                            if (c) {
+                                free(v);
+                                v = c;
+                            }
+                        }
+                        leptris_document_free(nd);
+                    }
                 }
             }
             argv[i] = v;
@@ -5701,10 +5796,20 @@ static struct leptris_xpath_result* fn_apply(XPathContext* ctx,
         /* XDM function conversion: a node-valued argument atomizes
          * to its string value. Node members ride their
          * serialization ("<a>ABC</a>" — the array stores lexical
-         * members); parse and take the string value so lower-case#1
-         * sees "ABC", not "<a>ABC</a>" (fn-apply-14/15). */
+         * members) or the \x03P pointer carrier; parse/decode and
+         * take the string value so lower-case#1 sees "ABC", not
+         * the member spelling (fn-apply-14/15). */
         for (size_t i = 0; i < argc; i++) {
-            if (argv[i] && argv[i][0] == '<') {
+            void* cn = xpath_carrier_node_of(argv[i]);
+            if (cn) {
+                const char* sv =
+                    leptris_element_text((LeptrisElement)cn);
+                char* c = leptris_strdup(sv ? sv : "");
+                if (c) {
+                    argv[i] = c;
+                    conv[i] = c;
+                }
+            } else if (argv[i] && argv[i][0] == '<') {
                 LeptrisStatus st = LEPTRIS_OK;
                 LeptrisDocument nd = leptris_parse_string(
                     argv[i], strlen(argv[i]), &st);

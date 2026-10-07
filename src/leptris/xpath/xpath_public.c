@@ -522,6 +522,25 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
                         leptris_element_text((LeptrisElement)first);
                     return text ? leptris_strdup(text) : leptris_strdup("");
                 }
+                /* carrier-by-pointer (fold-left-009/016): a synth
+                 * member carrying a node pointer renders the node's
+                 * string-value (the same contract as a real
+                 * element). */
+                {
+                    extern void* xpath_carrier_node_of(const char* s);
+                    const char* raw =
+                        leptris_xpath_result_node_value(result, 0);
+                    if (raw && (unsigned char)raw[0] == 0x03 &&
+                        raw[1] == 'P') {
+                        LeptrisElement cn =
+                            (LeptrisElement)xpath_carrier_node_of(raw);
+                        if (cn) {
+                            const char* text = leptris_element_text(cn);
+                            return text ? leptris_strdup(text)
+                                        : leptris_strdup("");
+                        }
+                    }
+                }
                 const char* v = leptris_xpath_result_node_value(result, 0);
                 return v ? leptris_strdup(v) : leptris_strdup("");
             }

@@ -2037,6 +2037,22 @@ static struct leptris_xpath_result* xq_fn_thunk(XPathContext* ctx,
                         v = (mc && mc[0] == '\x03')
                                 ? leptris_strdup(mc) : NULL;
                     }
+                    /* carrier-by-pointer: a lone ELEMENT rides its
+                     * pointer — the string-value fallback collapses
+                     * every element to its text and node identity
+                     * dies (fold-left-016's context arg;
+                     * seq_carrier_of only covers count >= 2). */
+                    if (!v &&
+                        r->value.nodeset_value->count == 1 &&
+                        (int)XPATH_NODE_TYPE(
+                            r->value.nodeset_value->nodes[0]) ==
+                            (int)LEPTRIS_NODE_TYPE_ELEMENT) {
+                        char pc[24];
+                        snprintf(pc, sizeof(pc), "\x03P%016llx",
+                                 (unsigned long long)(uintptr_t)
+                                     r->value.nodeset_value->nodes[0]);
+                        v = leptris_strdup(pc);
+                    }
                     if (!v) v = xpath_to_string(r);
                 }
             }

@@ -1375,13 +1375,44 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                         advance_token(parser);
                         if (current_token_is(parser, TOK_LPAREN)) {
                             advance_token(parser);
-                            if (current_token_is(parser, TOK_RPAREN))
+                            /* ElementTest/AttributeTest with a NAME
+                             * argument: element(id),
+                             * attribute(class) — fold-left-016's
+                             * selector arms. */
+                            if (!current_token_is(parser,
+                                                  TOK_RPAREN)) {
+                                XPathToken* argt =
+                                    current_token(parser);
+                                if (!argt ||
+                                    (argt->type != TOK_NCNAME &&
+                                     argt->type != TOK_QNAME &&
+                                     argt->type != TOK_STAR)) {
+                                    ast_node_free(ts);
+                                    return NULL;
+                                }
+                                if (tnl + argt->value_len + 3 <
+                                    sizeof(tn)) {
+                                    tn[tnl++] = '(';
+                                    memcpy(tn + tnl, argt->value,
+                                           argt->value_len);
+                                    tnl += argt->value_len;
+                                    tn[tnl++] = ')';
+                                    tn[tnl] = 0;
+                                }
                                 advance_token(parser);
-                            else { ast_node_free(ts); return NULL; }
-                            if (tnl + 2 < sizeof(tn)) {
-                                tn[tnl++] = '(';
-                                tn[tnl++] = ')';
-                                tn[tnl] = 0;
+                            }
+                            if (!current_token_is(parser, TOK_RPAREN)) {
+                                ast_node_free(ts);
+                                return NULL;
+                            }
+                            advance_token(parser);
+                            if (tnl + 2 >= sizeof(tn) ||
+                                tn[tnl - 1] != ')') {
+                                if (tnl + 2 < sizeof(tn)) {
+                                    tn[tnl++] = '(';
+                                    tn[tnl++] = ')';
+                                    tn[tnl] = 0;
+                                }
                             }
                             break;
                         }
@@ -1616,8 +1647,17 @@ static XPathASTNode* parse_path_expr(XPathParser* parser) {
                    memcmp(current_token(parser)->value, "element", 7) == 0) ||
                   (current_token(parser)->value_len == 9 &&
                    memcmp(current_token(parser)->value, "attribute", 9) == 0)) &&
-                 next && (next->type == TOK_NCNAME ||
-                          next->type == TOK_QNAME) &&
+                 next &&
+                 /* The NAME may lex as an operator keyword (div,
+                  * mod, ...) — HTML tag names collide with XQuery
+                  * operators (<div/>, fold-left-016). Accept any
+                  * letter-initial token directly before LBRACE. */
+                 ((next->type == TOK_NCNAME ||
+                   next->type == TOK_QNAME) ||
+                  (next->value_len &&
+                   ((next->value[0] >= 'a' && next->value[0] <= 'z') ||
+                    (next->value[0] >= 'A' &&
+                     next->value[0] <= 'Z')))) &&
                  parser->token_pos + 2 < parser->token_count &&
                  parser->tokens[parser->token_pos + 2].type == TOK_LBRACE) {
             int is_attr =
