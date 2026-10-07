@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.317] - 2026-10-07
+
+### Added
+
+- unqualified-only ns form for child rows (#1560) (descriptor)
+
+
+
 ## [1.9.316] - 2026-10-07
 
 ### Fixed
