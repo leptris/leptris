@@ -23,11 +23,20 @@ std::string seq_string(LeptrisDocument doc, const char* query) {
     if (!r) { leptris_xquery_free(xq); return "(eval-failed)"; }
     std::string out;
     if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
-        /* FLWOR sequences join space-separated (value-of rule). */
+        /* FLWOR sequences join space-separated (value-of rule).
+         * #181: materialized ctor ELEMENT members render as their
+         * serialized markup (the QT3 assert-xml contract); other
+         * members keep their string value. */
         size_t n = leptris_xpath_result_count(r);
         for (size_t i = 0; i < n; i++) {
-            const char* v = leptris_xpath_result_node_value(r, i);
             if (i) out += ' ';
+            LeptrisElement el = leptris_xpath_result_get(r, i);
+            if (el) {
+                char* s = leptris_element_serialize(el, NULL);
+                if (s) { out += s; leptris_free_string(s); }
+                continue;
+            }
+            const char* v = leptris_xpath_result_node_value(r, i);
             out += v ? v : "";
         }
     } else {
@@ -41,6 +50,58 @@ std::string seq_string(LeptrisDocument doc, const char* query) {
 }
 
 }  // namespace
+
+// #181: element constructors yield REAL nodes — stable identity
+// across references, fold callbacks, and axis steps (the
+// fold-left-009/016 lever; ctors were serialized TEXT before).
+TEST(XQueryNodeCtor, CtorSequenceHasStableIdentity) {
+    LeptrisDocument doc;
+    LeptrisStatus st = LEPTRIS_OK;
+    doc = leptris_parse_string(kBooks, strlen(kBooks), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "let $n := (<a/>, <b/>) "
+        "return count($n[. intersect $n[1]])"), "1");
+    leptris_document_free(doc);
+}
+
+/* REMAINDER (task #181 follow-ups, in priority order):
+ * 1. LET-PREDICATE STABILITY: $nodes[1] re-evaluates the ctor per
+ *    reference — each indexing is a NEW node, so identity-based
+ *    dedup over let-bound ctor sequences is impossible until the
+ *    let binding is evaluated once (var cache seam).
+ * 2. TYPED PARAMS: function($f as node()*, ...) closures take a
+ *    string argv path that loses member identity (xq_fn_thunk).
+ * 3. DESCENDANT AXIS: $h//p from a var-bound ctor node misses
+ *    (descendant-or-self over materialized nodes). */
+
+/* KNOWN REMAINDER (task #181 follow-up): user-function arguments
+ * ride the string argv channel (xq_fn_thunk); a node sequence
+ * bound through `declare function local:d($s as node()*)`
+ * collapses. Pointer-carrying argv was probed and falsified
+ * (P-ref UAF); the channel needs a node-identity encoding. */
+
+TEST(XQueryNodeCtor, CtorNodeTakesAxisSteps) {
+    LeptrisDocument doc;
+    LeptrisStatus st = LEPTRIS_OK;
+    doc = leptris_parse_string(kBooks, strlen(kBooks), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(seq_string(doc,
+        "count(<x><b/><b/></x>/b)"), "2");
+    leptris_document_free(doc);
+}
+
+TEST(XQueryNodeCtor, DistinctCtorOccurrencesAreDistinctNodes) {
+    LeptrisDocument doc;
+    LeptrisStatus st = LEPTRIS_OK;
+    doc = leptris_parse_string(kBooks, strlen(kBooks), &st);
+    ASSERT_NE(doc, nullptr);
+    /* Two occurrences are two nodes; the same reference is itself. */
+    EXPECT_EQ(seq_string(doc,
+        "let $n := (<a/>, <b/>) "
+        "return ($n[1] is $n[1], $n[1] is $n[2])"), "true false");
+    leptris_document_free(doc);
+}
 
 TEST(XQueryCore, PlainExpressionIsXPath) {
     LeptrisDocument doc = leptris_parse_string(kBooks, strlen(kBooks),
@@ -874,7 +935,7 @@ TEST(XQueryCore, DocumentConstructorWithDirectContent) {
      * FLWOR bodies) keep their value form. */
     EXPECT_EQ(seq_string(doc,
         "string-join((string(document { <a/> }), <b>2</b>), '|')"),
-              "|<b>2</b>");
+              "|2");
     leptris_document_free(doc);
 }
 
@@ -1407,8 +1468,12 @@ TEST(XQueryCtors, DirectPICommentCtors) {
         {"deep-equal(<?foo?>, <?foo ?>)", "true"},
         {"deep-equal(<!--x-->, <!--x-->)", "true"},
         {"deep-equal(<!--x-->, <!--y-->)", "false"},
-        {"<doc><?pi content?></doc>",
-         "<doc><?pi content?></doc>"},
+        /* result_string is the string-value contract (#514): no
+         * text under <doc> renders "". The PI child surviving the
+         * <doc> materialization is probed by the axis count. */
+        {"<doc><?pi content?></doc>", ""},
+        {"count(<doc><?pi content?></doc>/processing-instruction())",
+         "1"},
     };
     for (auto& c : cases) {
         LeptrisXQuery xq = leptris_xquery_parse(c.q, strlen(c.q));

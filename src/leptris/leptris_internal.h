@@ -723,6 +723,14 @@ typedef struct xpath_namespace_mapping {
     char* uri;                   /* Namespace URI (required) */
 } XPathNamespaceMapping;
 
+/* #181: one materialized ctor doc per (AST occurrence, content). */
+typedef struct xpath_ctor_cache_entry {
+    void* ast;                   /* ELEMENT_CTOR AST occurrence */
+    char* key;                   /* strdup of the serialized ctor form */
+    struct leptris_document* doc; /* borrowed — owned_docs owns it */
+    void* root;                  /* materialized root node */
+} XPathCtorCacheEntry;
+
 /* XPath context - Matches ext/leptris/xpath.h _xpath_context */
 typedef struct xpath_context {
     struct leptris_document* document;
@@ -787,6 +795,17 @@ typedef struct xpath_context {
     struct leptris_document** owned_docs;
     size_t n_owned_docs;
     size_t cap_owned_docs;
+    /* #181 memo: ONE materialized ctor document per (AST
+     * occurrence, serialized content). Re-references of one
+     * binding (arg re-evaluation re-runs the ctor with identical
+     * content) reuse the cached node — allocation stays bounded by
+     * distinct occurrences, never by reference count (the 200GB
+     * recursion bomb). Loop-dependent ctors (`for $v in ... return
+     * <n>{$v}</n>`) serialize differently per iteration and stay
+     * distinct nodes. Docs stay owned by owned_docs; the cache
+     * only maps (ast, content) -> root. */
+    struct xpath_ctor_cache_entry* ctor_cache;
+    size_t n_ctor_cache, cap_ctor_cache;
 
     /* XQuery `declare default element namespace` — unprefixed name
      * tests match elements in THIS namespace, and unprefixed

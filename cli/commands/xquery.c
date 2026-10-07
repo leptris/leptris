@@ -121,9 +121,20 @@ static cli_result_t xquery_run(int argc, char** argv) {
     } else if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
         size_t n = leptris_xpath_result_count(r);
         for (size_t k = 0; k < n; k++) {
-            const char* v = leptris_xpath_result_node_value(r, k);
             if (k) putchar(' ');
-            fputs(v ? v : "", stdout);
+            /* Constructed elements (#181) are real nodes now — print
+             * their serialized markup, not the string-value (the
+             * pre-node ctor spelling printed markup too). */
+            if (leptris_xpath_result_node_kind(r, k) ==
+                LEPTRIS_XPATH_NODE_ELEMENT) {
+                char* m = leptris_element_serialize(
+                    leptris_xpath_result_get(r, k), NULL);
+                fputs(m ? m : "", stdout);
+                leptris_free_string(m);
+            } else {
+                const char* v = leptris_xpath_result_node_value(r, k);
+                fputs(v ? v : "", stdout);
+            }
         }
         if (n) putchar('\n');
     } else {
