@@ -285,6 +285,7 @@ static void dp_plan_free(LeptrisPlan p) {
         for (uint32_t c = 0; c < d->child_count; c++) {
             free((char *)d->child_plans[c].wire_name);
             free((char *)d->child_plans[c].ns_prefix);
+            free((char *)d->child_plans[c].ns_uri);
             for (uint16_t pi = 0;
                  pi < d->child_plans[c].predicate_count; pi++) {
                 free((char*)d->child_plans[c]
