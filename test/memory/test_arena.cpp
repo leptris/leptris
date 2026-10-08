@@ -280,6 +280,9 @@ TEST(LeptrisArena, BufferRoundTripReusesMapping) {
 // observable WITHOUT hooks via pointer identity: a same-size
 // create/destroy/create cycle reuses the parked span's address.
 TEST(ArenaSmallRecycle, SameSizeCycleReusesTheParkedSpan) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "small-span recycle disabled under ASAN";
+#endif
     leptris_arena_retain_drain();
 
     LeptrisArena* a1 = leptris_arena_create(64u * 1024u);
@@ -342,6 +345,9 @@ TEST(ArenaSmallRecycle, StandsDownUnderCustomAllocator) {
 // make reuse identity unambiguous — recreate after a bulk destroy
 // and at least the parked bound's worth of addresses repeat.
 TEST(ArenaSmallRecycle, BulkDestroyParksUpToTheBound) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "small-span recycle disabled under ASAN";
+#endif
     leptris_arena_retain_drain();
 
     enum { N = 12 };
