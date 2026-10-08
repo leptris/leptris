@@ -4,11 +4,33 @@
 
 ### Added
 
-- tier-1 slice 2 — datatype lexical validation + restriction facets (#1075) (xsd)
+- **XSD validation, tier 1, slices 1–2 (#1075, PRs #1581/#1583).**
+  Slice 1: the `leptris_xsd_compile` surface (xs:schema identity
+  under any namespace spelling, top-level declaration enumeration,
+  error-carrying failure handles) plus the corpus gate — libxml2's
+  own `test/schemas` set (350 files, MIT) vendored at
+  `test/xsd/libxml2-cases`, **163/163 fixtures compiling** with a
+  pinned monotonic floor. Slice 2: `leptris_xsd_builtin_valid` —
+  the tier-1 built-in lexical table (string/Name family, token,
+  language, anyURI, QName, boolean, decimal, the integer-derivation
+  ranges, float/double, the date/time family with month/day bounds,
+  duration, hex/base64Binary) — and `leptris_xsd_simple_valid`:
+  named simpleTypes captured at compile (base + pattern /
+  enumeration / min-max inclusive-exclusive / length family /
+  total-fractionDigits facets), validated through cycle-guarded
+  restriction chains where every hop's facets bind.
 
 ### Fixed
 
-- prefix the datatype statics — amalgamated single-TU collision (xsd)
+- **Regex engine: `{n}` EXACT quantifiers parsed open-ended
+  (PR #1583).** The no-comma branch never set the hi bound, so
+  `[A-Z]{3}` matched `ABCD` — any RELAX NG schema using exact
+  quantifier bounds silently accepted longer runs. Root fix in the
+  quantifier parser plus a never-again spec on the direct engine
+  call; `rng_internal.h` gained C++ guards for test-side calls.
+- Amalgamated single-TU build: the XSD datatype statics now carry
+  the `xsd_` prefix (collision with the xpath lexer's same-named
+  statics — the #1217 class).
 
 
 
