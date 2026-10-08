@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.320] - 2026-10-08
+
+### Fixed
+
+- free the retained child-row ns_uri — the copy's free twin (descriptor)
+- retain child-row ns_uri; lenient plain attr rows (#1585, #1586) (descriptor)
+
+
+
 ## [1.9.319] - 2026-10-08
 
 ### Added
