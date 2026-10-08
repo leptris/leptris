@@ -4,8 +4,21 @@
 
 ### Added
 
-- tier-1 slice 4 — instance validation (#1075) (xsd)
-- tier-1 slice 3 — content models via Thompson NFA (#1075) (xsd)
+- **XSD validation, tier 1, slices 3–4 (#1075, PRs #1589/#1590).**
+  Slice 3 — content models: the compiler captures top-level
+  `xs:element` declarations and named `xs:complexType` models
+  (sequence/choice/all, occurrence bounds incl. unbounded, element
+  name/ref particles, `xs:any` wildcards with the full
+  namespace-filter grammar); `leptris_xsd_content_valid` evaluates
+  a child sequence through a Thompson NFA — linear in children x
+  states, no backtracking blowup on nested choices. Slice 4 —
+  instance validation: `leptris_xsd_validate(schema, document)`
+  walks element declarations, complexType attribute rows
+  (required + typed + lenient qualified spellings), child content
+  models, and lexical text checks for simple-typed elements
+  (particles carry type refs); failures enumerate behind
+  `leptris_xsd_error_count/_at`. The libxml2 corpus gate holds at
+  163/163; full suite 1911/1911.
 
 
 
