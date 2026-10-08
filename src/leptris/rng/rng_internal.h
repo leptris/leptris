@@ -8,6 +8,10 @@
 #ifndef LEPTRIS_RNG_INTERNAL_H
 #define LEPTRIS_RNG_INTERNAL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "../include/leptris.h"
 #include "../dom/diag.h"
 #include <stddef.h>
@@ -108,5 +112,9 @@ int rng_regex_matches(const char* pat, const char* text);
 /* free.c duties are inline in the public entry */
 void rng_pattern_free(RngPattern* p);
 void rng_grammar_free(RngGrammar* g);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

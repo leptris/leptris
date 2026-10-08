@@ -289,6 +289,10 @@ static RreNode* parse_piece(RreParser* ps) {
                     }
                 }
             }
+            /* {n} with no comma is EXACT — h must be l, not the
+             * -1 "unbounded" sentinel. The old code left h = -1,
+             * so [A-Z]{3} matched ABCD (open-ended {3,}). */
+            if (*q != ',' && h == -1) h = l;
             if (*q == '}' && l >= 0 && (h == -1 || h >= l)) {
                 lo = l;
                 hi = h;

@@ -909,6 +909,17 @@ LEPTRIS_API size_t leptris_xsd_declaration_count(LeptrisXsdSchema schema);
 /* Last compile error detail (NULL when the handle is valid).
  * Schema-owned; lives until leptris_xsd_free. */
 LEPTRIS_API const char* leptris_xsd_error(LeptrisXsdSchema schema);
+
+/* Slice 2 — lexical validation. Built-ins take the "xs:NAME"
+ * reference spelling; -1 = not in the tier-1 table. */
+LEPTRIS_API int leptris_xsd_builtin_valid(const char* builtin,
+                                          const char* lexical);
+/* A user simpleType compiled into the schema, by local name:
+ * 1 valid, 0 invalid, -1 unknown type. Restriction chains (local
+ * bases) validate every hop's facets, cycle-guarded. */
+LEPTRIS_API int leptris_xsd_simple_valid(LeptrisXsdSchema schema,
+                                         const char* type_name,
+                                         const char* lexical);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,
