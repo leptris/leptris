@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.324] - 2026-10-08
+
+### Added
+
+- tier-1 slice 6 — identity constraints (#1075) (xsd)
+
+
+
 ## [1.9.323] - 2026-10-08
 
 ### Fixed
