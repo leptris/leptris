@@ -481,6 +481,15 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                     sc->ns_prefix ? dp_strdup(sc->ns_prefix) : NULL;
                 if (sc->ns_prefix && !d->child_plans[c].ns_prefix)
                     goto oom;
+                /* #1585: ns_uri rides the struct copy otherwise —
+                 * a dangling pointer into the caller's build
+                 * buffers once they are reclaimed (bindings GC
+                 * their anchors; the descriptor must outlive
+                 * them). Same retention as attr rows (#1486). */
+                d->child_plans[c].ns_uri =
+                    sc->ns_uri ? dp_strdup(sc->ns_uri) : NULL;
+                if (sc->ns_uri && !d->child_plans[c].ns_uri)
+                    goto oom;
                 uint16_t pc = sc->predicate_count;
                 if (pc) {
                     if (!sc->predicates) goto oom;
@@ -598,8 +607,25 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
  * namespace (XML namespaces §5.2) — EXACT never binds them. */
 static const char* dp_attr_value(LeptrisElement elem,
                                  const leptris_attr_plan* ap) {
-    if (!ap->ns_form)
-        return leptris_element_attribute(elem, ap->wire_name);
+    if (!ap->ns_form) {
+        /* #1586, the plan-path mirror of #758: the exact wire
+         * spelling first, then any qualification by local name —
+         * plain rows are lenient exactly like element rows under
+         * ns_lenient. Exact-URI rows keep their #1486 semantics. */
+        const char* exact =
+            leptris_element_attribute(elem, ap->wire_name);
+        if (exact) return exact;
+        for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+             at; at = leptris_attribute_next(at)) {
+            const char* qn = leptris_attribute_get_name(at);
+            if (!qn) continue;
+            const char* colon = strchr(qn, ':');
+            const char* local = colon ? colon + 1 : qn;
+            if (strcmp(local, ap->wire_name) == 0)
+                return leptris_attribute_get_value(elem, at);
+        }
+        return NULL;
+    }
     for (LeptrisAttribute at = leptris_element_first_attribute(elem);
          at; at = leptris_attribute_next(at)) {
         const char* qn = leptris_attribute_get_name(at);
@@ -832,8 +858,13 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 LeptrisElement child = (LeptrisElement)n;
                 if (!dp_wire_name_matches(child, row->wire_name))
                     continue;
+                /* The TARGET plan's form governs (#1115) — so its
+                 * lenient flag governs the leniency, not the outer
+                 * plan's (#1586: a namespaced child under a plan
+                 * that declares ns_lenient binds by local name). */
                 if (!dp_ns_binds(child, target->ns_form, target->ns_uri,
-                                 lenient))
+                                 (target->flags &
+                                  LEPTRIS_PLAN_FLAG_NS_LENIENT) != 0))
                     continue;
                 /* Claim the element against later same-wire rows
                  * (predicate partitioning). */

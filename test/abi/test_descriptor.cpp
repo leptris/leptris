@@ -1963,3 +1963,171 @@ TEST(Plan1563, PlainAttrRowAgreesNestedVsRoot) {
     leptris_plan_free(root_plan);
     leptris_plan_free(nested_plan);
 }
+
+// ---- #1585: child-row exact-URI ns_uri retention -------------------
+// The build copied child ns_prefix but left ns_uri pointing at the
+// CALLER's buffer — once the binding's build anchors are GC'd the
+// row dangles and silently stops matching. Retention is observable
+// without a GC: trash the caller's buffer after build; the row
+// must still bind.
+TEST(Plan1585, ChildRowNsUriIsRetained) {
+    LeptrisStatus st = LEPTRIS_OK;
+    char ns_uri_buf[64];
+    strcpy(ns_uri_buf, "http://purl.org/dc/elements/1.1/");
+
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "c";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[0].ns_uri = ns_uri_buf;
+    kids[0].ns_prefix = "d";
+    kids[1].wire_name = "p";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[1].type_tag = 2;
+    kids[1].child_plan_index = -1;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "r";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    /* Simulate the GC reclaiming the build anchor: the spec buffer
+     * is now garbage. */
+    memset(ns_uri_buf, 'X', sizeof(ns_uri_buf) - 1);
+
+    LeptrisDocument doc = parse(
+        "<r xmlns:d=\"http://purl.org/dc/elements/1.1/\">"
+        "<d:c>x</d:c><p>y</p></r>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+    EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(r, 0)),
+                 "x")
+        << "exact-URI child row lost its ns_uri";
+    EXPECT_STREQ(leptris_plan_value_string(leptris_plan_value_at(r, 1)),
+                 "y");
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+// ---- #1586: plain attribute rows match any qualification -----------
+// The plan-path mirror of #758 (exact wire spelling first, then any
+// qualification by local name) — a plain attr row must bind w:name
+// the same way the interpretive path does, at top level and nested.
+TEST(Plan1586, PlainAttrRowLenientSpelling) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<r xmlns:w=\"http://w/1\" w:top=\"T\"/>";
+
+    leptris_attr_plan attrs[1] = {};
+    attrs[0].wire_name = "top";
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].type_tag = 1;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "r";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = attrs;
+    plans[0].flags = LEPTRIS_PLAN_FLAG_NS_LENIENT;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    LeptrisDocument doc = parse(xml);
+    ASSERT_NE(doc, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    EXPECT_STREQ(leptris_plan_value_attribute(r, "top"), "T");
+    leptris_plan_result_free(r);
+    leptris_document_free(doc);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan1586, PlainAttrRowLenientUnderNestedRow) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<r xmlns:w=\"http://w/1\"><w:c w:n=\"N\"/></r>";
+
+    leptris_attr_plan c_attrs[1] = {};
+    c_attrs[0].wire_name = "n";
+    c_attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    c_attrs[0].type_tag = 1;
+    leptris_child_plan c_row = {};
+    c_row.wire_name = "c";
+    c_row.kind = LEPTRIS_PLAN_KIND_NESTED;
+    c_row.child_plan_index = 1;
+    c_row.ns_form = LEPTRIS_PLAN_NS_ANY;
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[0].child_count = 1;
+    plans[0].child_plans = &c_row;
+    plans[1].element_name = "c";
+    plans[1].attribute_count = 1;
+    plans[1].attribute_plans = c_attrs;
+    plans[1].flags = LEPTRIS_PLAN_FLAG_NS_LENIENT;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    LeptrisDocument doc = parse(xml);
+    ASSERT_NE(doc, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 1u);
+    LeptrisPlanResult child = leptris_plan_value_at(r, 0);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(leptris_plan_value_attribute(child, "n"), "N");
+    leptris_plan_result_free(r);
+    leptris_document_free(doc);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan1586, ExactUriRowStillWinsAndUnqualifiedStillBinds) {
+    LeptrisStatus st = LEPTRIS_OK;
+    /* exact-URI row keeps its #1486 semantics; unqualified wire
+     * attr binds a plain row by the literal spelling. */
+    const char* xml = "<r xmlns:w=\"http://w/1\" w:top=\"T\" top=\"U\"/>";
+    leptris_attr_plan exact[1] = {};
+    exact[0].wire_name = "top";
+    exact[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    exact[0].type_tag = 1;
+    exact[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    exact[0].ns_uri = "http://w/1";
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "r";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = exact;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisDocument doc = parse(xml);
+    ASSERT_NE(doc, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+    /* The qualified spelling carries "T"; the exact row must take
+     * it, not the unqualified "U". */
+    EXPECT_STREQ(leptris_plan_value_attribute(r, "top"), "T");
+    leptris_plan_result_free(r);
+    leptris_document_free(doc);
+    leptris_plan_free(plan);
+}
