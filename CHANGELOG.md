@@ -4,7 +4,12 @@
 
 ### Added
 
-- validate --xsd — the compiled XSD surface rides the validate command (#1075) (cli)
+- **`leptris validate --xsd FILE` (#1075, PR #1593).** The compiled
+  XSD surface rides the same validate command as `--dtd`/`--rng`/
+  `--schematron`: compile failures report the schema's own error
+  detail (compile returns error-carrying handles — the status keys
+  the failure); invalid documents print every accumulated error and
+  exit non-zero.
 
 
 
