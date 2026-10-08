@@ -13,6 +13,8 @@
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
 
+void xsd_capture_ics(struct leptris_xsd_schema* s,
+                     LeptrisElement elem, const char* element_name);
 extern int xsd_simple_valid(const XsdSimple* simple, const char* v);
 extern struct xsd_validator* xsd_validator_new(
     struct leptris_xsd_schema* s);
@@ -33,6 +35,7 @@ struct leptris_xsd_schema {
     XsdElementDecl* elements;
     XsdCm* complex_types; /* name-carrying model roots */
     XsdTypeAttrs* type_attrs;
+    XsdElementIcs* element_ics;
     char* target_ns;
     void* validator; /* slice-4 parked error list */
     char* error;
@@ -387,7 +390,10 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                     d->next = s->elements;
                     s->elements = d;
                 }
+                xsd_capture_ics(s, (LeptrisElement)n, nm);
             } else if (nm) {
+                /* slice 6: identity constraints ride the element. */
+                xsd_capture_ics(s, (LeptrisElement)n, nm);
                 /* #1592: inline anonymous type — capture under the
                  * synthesized slot and point the declaration at it. */
                 char synth[512];
@@ -482,6 +488,24 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return;
     xsd_cm_free(s->complex_types);
+    XsdElementIcs* slot = s->element_ics;
+    while (slot) {
+        XsdElementIcs* sn = slot->next;
+        XsdIc* ic = slot->constraints;
+        while (ic) {
+            XsdIc* in = ic->next;
+            free(ic->name);
+            free(ic->selector);
+            for (size_t f = 0; f < ic->field_count; f++)
+                free(ic->fields[f]);
+            free(ic->refer);
+            free(ic);
+            ic = in;
+        }
+        free(slot->element_name);
+        free(slot);
+        slot = sn;
+    }
     XsdTypeAttrs* ta = s->type_attrs;
     while (ta) {
         XsdTypeAttrs* tn = ta->next;
@@ -549,6 +573,146 @@ LEPTRIS_API int leptris_xsd_simple_valid(LeptrisXsdSchema schema,
     const XsdSimple* t = xsd_find_simple(s, type_name);
     if (!t) return -1; /* unknown type */
     return xsd_valid_chain(s, t, lexical, 0);
+}
+
+/* ---- slice 6: identity-constraint capture ------------------------ */
+
+/* The xs:selector child's @xpath (a child element, not an
+ * attribute of the constraint element itself). */
+static char* xsd_ic_selector_xpath(LeptrisElement constraint) {
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(constraint));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL, *prefix = NULL, *uri = NULL;
+        leptris_element_expanded_name(e, &local, &prefix, &uri);
+        if (!local || !uri || strcmp(uri, XSD_NS) != 0) continue;
+        if (strcmp(local, "selector") == 0)
+            return xsd_strdup(leptris_element_attribute(e, "xpath"));
+    }
+    return NULL;
+}
+
+void xsd_capture_ics(struct leptris_xsd_schema* s,
+                     LeptrisElement elem, const char* element_name) {
+    XsdIc* head = NULL;
+    XsdIc* tail = NULL;
+    /* ICs are direct children of xs:element, or children of its
+     * inline complexType — one hop covers the second spelling. */
+    for (int hop = 0; hop < 2; hop++) {
+        for (LeptrisNodeRef n =
+                 leptris_node_first_child(leptris_element_as_node(elem));
+             n; n = leptris_node_next_sibling(n)) {
+            if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement e = (LeptrisElement)n;
+            const char* local = NULL, *prefix = NULL, *uri = NULL;
+            leptris_element_expanded_name(e, &local, &prefix, &uri);
+            if (!local || !uri || strcmp(uri, XSD_NS) != 0) continue;
+            if (hop == 0 &&
+                (strcmp(local, "key") == 0 ||
+                 strcmp(local, "unique") == 0 ||
+                 strcmp(local, "keyref") == 0)) {
+                XsdIc* ic = (XsdIc*)calloc(1, sizeof(*ic));
+                if (!ic) continue;
+                ic->kind = strcmp(local, "key") == 0     ? 0
+                           : strcmp(local, "unique") == 0 ? 1
+                                                          : 2;
+                ic->name = xsd_strdup(
+                    leptris_element_attribute(e, "name"));
+                ic->selector = xsd_ic_selector_xpath(e);
+                ic->refer = xsd_strdup(
+                    leptris_element_attribute(e, "refer"));
+                for (LeptrisNodeRef fc = leptris_node_first_child(
+                         leptris_element_as_node(e));
+                     fc && ic->field_count < 8;
+                     fc = leptris_node_next_sibling(fc)) {
+                    if (leptris_node_get_type(fc) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement fe = (LeptrisElement)fc;
+                    const char* fl = NULL, *fp = NULL, *fu = NULL;
+                    leptris_element_expanded_name(fe, &fl, &fp, &fu);
+                    if (!fl || !fu || strcmp(fu, XSD_NS) != 0) continue;
+                    if (strcmp(fl, "field") != 0) continue;
+                    ic->fields[ic->field_count++] = xsd_strdup(
+                        leptris_element_attribute(fe, "xpath"));
+                }
+                if (tail)
+                    tail->next = ic;
+                else
+                    head = ic;
+                tail = ic;
+            } else if (hop == 0 && strcmp(local, "complexType") == 0) {
+                /* descend into the inline type's ICs */
+                for (LeptrisNodeRef ic_n = leptris_node_first_child(
+                         leptris_element_as_node(e));
+                     ic_n; ic_n = leptris_node_next_sibling(ic_n)) {
+                    if (leptris_node_get_type(ic_n) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement ie = (LeptrisElement)ic_n;
+                    const char* il = NULL, *ip = NULL, *iu = NULL;
+                    leptris_element_expanded_name(ie, &il, &ip, &iu);
+                    if (!il || !iu || strcmp(iu, XSD_NS) != 0) continue;
+                    if (strcmp(il, "key") != 0 &&
+                        strcmp(il, "unique") != 0 &&
+                        strcmp(il, "keyref") != 0)
+                        continue;
+                    XsdIc* ic = (XsdIc*)calloc(1, sizeof(*ic));
+                    if (!ic) continue;
+                    ic->kind = strcmp(il, "key") == 0     ? 0
+                               : strcmp(il, "unique") == 0 ? 1
+                                                            : 2;
+                    ic->name = xsd_strdup(
+                        leptris_element_attribute(ie, "name"));
+                    ic->selector = xsd_ic_selector_xpath(ie);
+                    ic->refer = xsd_strdup(
+                        leptris_element_attribute(ie, "refer"));
+                    for (LeptrisNodeRef fc =
+                             leptris_node_first_child(
+                                 leptris_element_as_node(ie));
+                         fc && ic->field_count < 8;
+                         fc = leptris_node_next_sibling(fc)) {
+                        if (leptris_node_get_type(fc) !=
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            continue;
+                        LeptrisElement fe = (LeptrisElement)fc;
+                        const char* fl = NULL, *fp = NULL, *fu = NULL;
+                        leptris_element_expanded_name(fe, &fl, &fp,
+                                                   &fu);
+                        if (!fl || !fu || strcmp(fu, XSD_NS) != 0)
+                            continue;
+                        if (strcmp(fl, "field") != 0) continue;
+                        ic->fields[ic->field_count++] = xsd_strdup(
+                            leptris_element_attribute(fe, "xpath"));
+                    }
+                    if (tail)
+                        tail->next = ic;
+                    else
+                        head = ic;
+                    tail = ic;
+                }
+            }
+        }
+    }
+    if (!head) return;
+    XsdElementIcs* slot = (XsdElementIcs*)calloc(1, sizeof(*slot));
+    if (!slot) return;
+    slot->element_name = xsd_strdup(element_name);
+    slot->constraints = head;
+    slot->next = s->element_ics;
+    s->element_ics = slot;
+}
+
+const XsdElementIcs* xsd_find_element_ics(struct leptris_xsd_schema* s,
+                                          const char* element_name) {
+    if (!s || !element_name) return NULL;
+    for (XsdElementIcs* t = s->element_ics; t; t = t->next)
+        if (strcmp(t->element_name, element_name) == 0) return t;
+    return NULL;
 }
 
 /* ---- validator accessors (validate.c) --------------------------- */

@@ -76,6 +76,26 @@ typedef struct xsd_attr_decl {
 
 /* complexType name -> its attribute declarations (hash-free: a
  * parallel list keyed the same way as complex model roots). */
+/* ---- slice 6: identity constraints -------------------------------- */
+
+/* xs:key | xs:unique | xs:keyref captured on an element decl. */
+typedef struct xsd_ic {
+    char* name;    /* constraint name */
+    int kind;      /* 0 = key, 1 = unique, 2 = keyref */
+    char* selector; /* XPath relative to the scoping element */
+    char* fields[8]; /* XPaths relative to each selected node */
+    size_t field_count;
+    char* refer;   /* keyref: the referenced constraint's name */
+    struct xsd_ic* next;
+} XsdIc;
+
+/* Per-declaration constraint list: entries keyed by element name. */
+typedef struct xsd_element_ics {
+    char* element_name;
+    XsdIc* constraints;
+    struct xsd_element_ics* next;
+} XsdElementIcs;
+
 typedef struct xsd_type_attrs {
     char* type_name;
     XsdAttrDecl* attrs;

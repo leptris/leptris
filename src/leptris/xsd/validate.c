@@ -40,6 +40,8 @@ extern const XsdSimple* xsd_find_simple_pub(
 extern const char* xsd_target_ns(struct leptris_xsd_schema* s);
 extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
+extern const XsdElementIcs* xsd_find_element_ics(
+    struct leptris_xsd_schema* s, const char* element_name);
 
 /* ---- error list ---------------------------------------------------- */
 
@@ -248,6 +250,206 @@ static void validate_element(struct xsd_validator* v,
     }
 }
 
+/* ---- slice 6: identity constraints -------------------------------- */
+
+/* A key tuple: the field values of one selected node. */
+typedef struct xsd_key_tuple {
+    char* values[8];
+    size_t count;
+    struct xsd_key_tuple* next;
+} XsdKeyTuple;
+
+/* All tuples collected for one constraint name, keyed by name. */
+typedef struct xsd_key_table {
+    char* name;
+    XsdKeyTuple* tuples;
+    XsdKeyTuple* tail;
+    struct xsd_key_table* next;
+} XsdKeyTable;
+
+static XsdKeyTable* table_find(XsdKeyTable* head, const char* name) {
+    for (; head; head = head->next)
+        if (strcmp(head->name, name) == 0) return head;
+    return NULL;
+}
+
+static char* xsd_dup_str(const char* s) {
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char* out = (char*)malloc(n);
+    if (out) memcpy(out, s, n);
+    return out;
+}
+
+static void table_add(XsdKeyTable** head, const char* name,
+                      char* const* values, size_t count) {
+    XsdKeyTable* t = table_find(*head, name);
+    if (!t) {
+        t = (XsdKeyTable*)calloc(1, sizeof(*t));
+        if (!t) return;
+        size_t n = strlen(name) + 1;
+        t->name = (char*)malloc(n);
+        if (!t->name) { free(t); return; }
+        memcpy(t->name, name, n);
+        t->next = *head;
+        *head = t;
+    }
+    XsdKeyTuple* tup = (XsdKeyTuple*)calloc(1, sizeof(*tup));
+    if (!tup) return;
+    for (size_t i = 0; i < count && i < 8; i++)
+        tup->values[i] = xsd_dup_str(values[i]);
+    tup->count = count < 8 ? count : 8;
+    if (t->tail)
+        t->tail->next = tup;
+    else
+        t->tuples = tup;
+    t->tail = tup;
+}
+
+/* Evaluate one IC against the scoping element. pass1: collect
+ * key/unique tuples and enforce uniqueness (key: also non-empty
+ * fields). pass2: keyref tuples resolve against collected tables. */
+static void validate_ics(struct xsd_validator* v,
+                         struct leptris_xsd_schema* s,
+                         LeptrisElement elem, const char* elem_name,
+                         XsdKeyTable** tables, int pass) {
+    (void)v;
+    const XsdElementIcs* ics = xsd_find_element_ics(s, elem_name);
+    if (!ics) return;
+    extern struct leptris_document* leptris_element_get_document(
+        LeptrisElement elem);
+    LeptrisDocument doc = leptris_element_get_document(elem);
+    for (XsdIc* ic = ics->constraints; ic; ic = ic->next) {
+        int is_ref = ic->kind == 2;
+        if (pass == 1 && is_ref) continue;
+        if (pass == 2 && !is_ref) continue;
+        if (!ic->selector || !ic->name) continue;
+        LeptrisXPathResult sel =
+            leptris_xpath_eval(doc, elem, ic->selector);
+        if (!sel) continue;
+        size_t sel_count = leptris_xpath_result_count(sel);
+        for (size_t i = 0; i < sel_count; i++) {
+            LeptrisElement node = leptris_xpath_result_get(sel, i);
+            if (!node) continue;
+            /* field values: string of each field expression */
+            char* vals[8] = {0};
+            size_t nv = 0;
+            int missing = 0;
+            for (size_t f = 0; f < ic->field_count && f < 8; f++) {
+                LeptrisXPathResult fr =
+                    leptris_xpath_eval(doc, node, ic->fields[f]);
+                if (!fr || leptris_xpath_result_count(fr) == 0) {
+                    missing = 1;
+                    if (fr) leptris_xpath_result_free(fr);
+                    break;
+                }
+                /* String-value of the first node — attribute nodes
+                 * included (leptris_xpath_result_string handles every
+                 * node kind; #3526 contract). */
+                char* sv = leptris_xpath_result_string(fr);
+                leptris_xpath_result_free(fr);
+                vals[nv] = xsd_dup_str(sv ? sv : "");
+                leptris_free_string(sv);
+                nv++;
+            }
+            for (size_t k = 0; k < nv; k++)
+                if (!vals[k] || !vals[k][0]) missing = 1;
+            if (missing) {
+                if (ic->kind == 0)
+                    verrf(v, "key", ic->name,
+                          "a selected node is missing a field value");
+                for (size_t k = 0; k < nv; k++) free(vals[k]);
+                continue;
+            }
+            if (pass == 1) {
+                /* uniqueness within this constraint */
+                XsdKeyTable* t = table_find(*tables, ic->name);
+                int dup = 0;
+                if (t) {
+                    for (XsdKeyTuple* tup = t->tuples; tup;
+                         tup = tup->next) {
+                        int eq = tup->count == nv;
+                        for (size_t k = 0; eq && k < nv; k++)
+                            if (strcmp(tup->values[k], vals[k]) != 0)
+                                eq = 0;
+                        if (eq) { dup = 1; break; }
+                    }
+                }
+                if (dup) {
+                    verrf(v, ic->kind == 0 ? "key" : "unique",
+                          ic->name, "duplicate key tuple");
+                }
+                table_add(tables, ic->name, vals, nv);
+            } else {
+                /* keyref: resolve later (deferred to pass 2 end) —
+                 * store under the REFER name */
+                table_add(tables, ic->refer ? ic->refer : "",
+                          vals, nv);
+            }
+            for (size_t k = 0; k < nv; k++) free(vals[k]);
+        }
+        leptris_xpath_result_free(sel);
+    }
+}
+
+/* Pass 2 tail: every keyref tuple must appear in the referenced
+ * key/unique table. */
+static void resolve_keyrefs(struct xsd_validator* v,
+                            struct leptris_xsd_schema* s,
+                            XsdKeyTable* all, XsdKeyTable* refs) {
+    (void)s;
+    for (XsdKeyTable* rt = refs; rt; rt = rt->next) {
+        XsdKeyTable* target = table_find(all, rt->name);
+        if (!target) continue; /* unknown refer: capture-time lax */
+        for (XsdKeyTuple* want = rt->tuples; want; want = want->next) {
+            int found = 0;
+            for (XsdKeyTuple* have = target->tuples; have;
+                 have = have->next) {
+                int eq = have->count == want->count;
+                for (size_t k = 0; eq && k < want->count; k++)
+                    if (strcmp(have->values[k], want->values[k]) != 0)
+                        eq = 0;
+                if (eq) { found = 1; break; }
+            }
+            if (!found)
+                verrf(v, "keyref", rt->name,
+                      "reference does not resolve to any key");
+        }
+    }
+}
+
+static void tables_free(XsdKeyTable* t) {
+    while (t) {
+        XsdKeyTable* n = t->next;
+        XsdKeyTuple* tup = t->tuples;
+        while (tup) {
+            XsdKeyTuple* tn = tup->next;
+            for (size_t k = 0; k < tup->count; k++) free(tup->values[k]);
+            free(tup);
+            tup = tn;
+        }
+        free(t->name);
+        free(t);
+        t = n;
+    }
+}
+
+/* Walk every element carrying constraints in both passes. */
+static void ic_walk(struct xsd_validator* v, struct leptris_xsd_schema* s,
+                    LeptrisElement elem, XsdKeyTable** keys,
+                    XsdKeyTable** refs, int pass) {
+    const char* local = NULL;
+    leptris_element_expanded_name(elem, &local, NULL, NULL);
+    if (local) validate_ics(v, s, elem, local, pass == 1 ? keys : refs, pass);
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(elem));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        ic_walk(v, s, (LeptrisElement)c, keys, refs, pass);
+    }
+}
+
 struct xsd_validator* xsd_validator_new(struct leptris_xsd_schema* s) {
     struct xsd_validator* v =
         (struct xsd_validator*)calloc(1, sizeof(*v));
@@ -272,6 +474,17 @@ int xsd_validator_run(struct xsd_validator* v, LeptrisDocument doc) {
     LeptrisElement root = leptris_document_root(doc);
     if (!root) return -1;
     validate_element(v, v->s, root, 0);
+
+    /* slice 6: identity constraints — collect (pass 1), resolve
+     * keyrefs (pass 2). */
+    XsdKeyTable* keys = NULL;
+    XsdKeyTable* refs = NULL;
+    ic_walk(v, v->s, root, &keys, &refs, 1);
+    ic_walk(v, v->s, root, &keys, &refs, 2);
+    resolve_keyrefs(v, v->s, keys, refs);
+    tables_free(keys);
+    tables_free(refs);
+
     return v->count == 0 ? 1 : 0;
 }
 
