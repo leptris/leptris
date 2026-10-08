@@ -552,3 +552,37 @@ TEST(CliValidate, MissingDtdIsIoError) {
 }
 
 #endif  /* !_WIN32 */
+
+// ---- validate --xsd (#1075 slice 5) ---------------------------------
+// The compiled XSD surface rides the same validate command as
+// dtd/rng/schematron. Windows runners: same harness limitation as
+// CliDiff (path + tmp semantics).
+#ifndef _WIN32
+TEST(CliValidateXsd, ValidDocumentExitsZero) {
+    write_file("leptris_cli_xsd.tmp",
+               "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+               "<xs:element name=\"r\" type=\"xs:integer\"/></xs:schema>");
+    auto r = run_cli({"validate", "--xsd", "leptris_cli_xsd.tmp",
+                      "-"}, "<r>7</r>");
+    EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("xsd: valid"), std::string::npos);
+}
+
+TEST(CliValidateXsd, InvalidDocumentReportsAndExitsNonzero) {
+    write_file("leptris_cli_xsd2.tmp",
+               "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+               "<xs:element name=\"r\" type=\"xs:integer\"/></xs:schema>");
+    auto r = run_cli({"validate", "--xsd", "leptris_cli_xsd2.tmp",
+                      "-"}, "<r>nope</r>");
+    EXPECT_NE(r.exit_code, 0);
+    EXPECT_NE(r.out.find("xsd: invalid"), std::string::npos);
+}
+
+TEST(CliValidateXsd, CompileFailureIsReported) {
+    write_file("leptris_cli_xsd3.tmp", "<not-a-schema/>");
+    auto r = run_cli({"validate", "--xsd", "leptris_cli_xsd3.tmp",
+                      "-"}, "<r>7</r>");
+    EXPECT_NE(r.exit_code, 0);
+    EXPECT_NE(r.err.find("XSD compile failed"), std::string::npos);
+}
+#endif
