@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- capture inline anonymous complexType/simpleType (#1592) (xsd)
+- **XSD: inline anonymous complexType/simpleType capture
+  (#1592, PR #1596).** Elements carrying an inline anonymous type —
+  arguably the most common XSD spelling — got no content model:
+  instance validation silently skipped their content check and
+  `leptris_xsd_content_valid` answered −1. Inline types now capture
+  under a synthesized `element:NAME` slot (collision-free — `:`
+  cannot appear in xs: NCName type names): top-level elements and
+  every particle fall back to the inline capture when the type
+  attribute is absent, and local simpleType particles type their
+  text through the slot.
 
 
 
