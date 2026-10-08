@@ -882,6 +882,33 @@ LEPTRIS_API LeptrisRelaxNG leptris_rng_parse(const char* schema,
 LEPTRIS_API LeptrisRelaxNG leptris_rng_parse_file(const char* path,
                                                   LeptrisStatus* status);
 LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
+
+/* ============================================================================
+ * XSD (W3C XML Schema) — #1075 tier 1, slice 1: compilation.
+ *
+ * leptris_xsd_compile parses schema text and builds the top-level
+ * declaration model (xs:element / xs:attribute / xs:simpleType /
+ * xs:complexType / xs:group / xs:attributeGroup / xs:notation).
+ * Slices that follow add the datatype/facet machinery, content
+ * models, identity constraints, and instance validation.
+ *
+ * @param xsd_text schema bytes (UTF-8)
+ * @param len      byte length
+ * @param status   LEPTRIS_OK, or LEPTRIS_ERROR_PARSE (not
+ *                 well-formed, not an xs:schema document, or no
+ *                 recognized XML Schema namespace spelling)
+ * @return compiled schema; on failure an error-carrying handle
+ *         (leptris_xsd_error says why — free it the same way)
+ */
+LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
+                                                 size_t len,
+                                                 LeptrisStatus* status);
+LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema);
+/* Number of top-level schema declarations compiled (0 is valid). */
+LEPTRIS_API size_t leptris_xsd_declaration_count(LeptrisXsdSchema schema);
+/* Last compile error detail (NULL when the handle is valid).
+ * Schema-owned; lives until leptris_xsd_free. */
+LEPTRIS_API const char* leptris_xsd_error(LeptrisXsdSchema schema);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,

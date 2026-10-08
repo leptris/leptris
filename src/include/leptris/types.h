@@ -34,6 +34,8 @@ typedef struct leptris_doctype*      LeptrisDoctype;
 typedef const char*                 LeptrisNamespace;
 typedef struct leptris_xpath_result* LeptrisXPathResult;
 typedef struct leptris_relaxng*    LeptrisRelaxNG;
+/* #1075 XSD tier 1: opaque compiled W3C XML Schema handle. */
+typedef struct leptris_xsd_schema*  LeptrisXsdSchema;
 #endif
 
 /* ============================================================================

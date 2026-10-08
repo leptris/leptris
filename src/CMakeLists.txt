@@ -27,6 +27,7 @@ set(LEPTRIS_SOURCES
     leptris/sch/schematron.c
     leptris/diff/diff.c
     leptris/rng/parse.c
+    leptris/xsd/compile.c
     leptris/rng/rng_public.c
     leptris/rng/rng_regex.c
     leptris/rng/validate.c
