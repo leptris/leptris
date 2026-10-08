@@ -1363,3 +1363,18 @@ TEST(RngParse, FileErrorsPublishToLastError) {
     ASSERT_NE(err, nullptr);
     EXPECT_NE(strstr(err, "open"), nullptr) << err;
 }
+
+// #1075 slice 2 found it: the {n} EXACT quantifier parsed as
+// open-ended {n,} (the no-comma branch never set the hi bound), so
+// [A-Z]{3} matched ABCD. Any RNG schema with exact bounds silently
+// accepted longer runs. Never-again spec on the direct engine call.
+TEST(RngRegex, ExactQuantifierIsClosed) {
+    EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABC"), 1);
+    EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABCD"), 0);
+    EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "AB"), 0);
+    EXPECT_EQ(rng_regex_matches("a{2,3}", "aa"), 1);
+    EXPECT_EQ(rng_regex_matches("a{2,3}", "aaa"), 1);
+    EXPECT_EQ(rng_regex_matches("a{2,3}", "aaaa"), 0);
+    EXPECT_EQ(rng_regex_matches("a{2}", "aa"), 1);
+    EXPECT_EQ(rng_regex_matches("a{2}", "aaa"), 0);
+}

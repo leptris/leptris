@@ -152,3 +152,115 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
 }
 
 }  // namespace
+
+// ---- slice 2: lexical validation ----------------------------------
+namespace {
+
+struct BuiltinCase {
+    const char* type;
+    const char* value;
+    int expect; /* 1 valid, 0 invalid, -1 not-in-table */
+};
+
+TEST(XsdDatatypes, BuiltinsLexicalMatrix) {
+    const BuiltinCase cases[] = {
+        {"xs:integer", "42", 1},        {"xs:integer", "-7", 1},
+        {"xs:integer", "+007", 1},       {"xs:integer", "3.5", 0},
+        {"xs:integer", "", 0},           {"xs:integer", "12a", 0},
+        {"xs:byte", "127", 1},           {"xs:byte", "128", 0},
+        {"xs:unsignedInt", "0", 1},      {"xs:unsignedInt", "-1", 0},
+        {"xs:positiveInteger", "1", 1},  {"xs:positiveInteger", "0", 0},
+        {"xs:decimal", "-0.5", 1},       {"xs:decimal", ".5", 1},
+        {"xs:decimal", "5.", 1},         {"xs:decimal", ".", 0},
+        {"xs:boolean", "true", 1},       {"xs:boolean", "2", 0},
+        {"xs:double", "1.5e10", 1},      {"xs:double", "INF", 1},
+        {"xs:date", "2026-10-08", 1},    {"xs:date", "2026-13-01", 0},
+        {"xs:dateTime", "2026-10-08T12:30:00", 1},
+        {"xs:time", "23:59:59.123", 1},  {"xs:time", "24:00:00", 1},
+        {"xs:duration", "P1Y2M3DT4H5M6S", 1},
+        {"xs:duration", "P", 0},
+        {"xs:hexBinary", "0A1F", 1},     {"xs:hexBinary", "0A1", 0},
+        {"xs:base64Binary", "QUJD", 1},  {"xs:base64Binary", "!", 0},
+        {"xs:NCName", "_a1", 1},         {"xs:NCName", "1a", 0},
+        {"xs:token", "a b", 1},          {"xs:token", "a  b", 0},
+        {"xs:language", "en", 1},        {"xs:language", "e!", 0},
+        {"xs:anyURI", "http://x/y", 1},
+        {"xs:notAThing", "x", -1},
+    };
+    for (const BuiltinCase& c : cases) {
+        SCOPED_TRACE(std::string(c.type) + " : " + c.value);
+        EXPECT_EQ(leptris_xsd_builtin_valid(c.type, c.value), c.expect)
+            << c.type << " : " << c.value;
+    }
+}
+
+TEST(XsdDatatypes, RestrictionFacetsApply) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"count\">"
+        "<xs:restriction base=\"xs:integer\">"
+        "<xs:minInclusive value=\"1\"/>"
+        "<xs:maxInclusive value=\"10\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"code\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[A-Z]{3}\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"color\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:enumeration value=\"red\"/>"
+        "<xs:enumeration value=\"green\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"label\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:minLength value=\"2\"/>"
+        "<xs:maxLength value=\"4\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(st, LEPTRIS_OK);
+
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "count", "5"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "count", "0"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "count", "11"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "count", "x"), 0);
+
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "ABC"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "ABCD"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "abc"), 0);
+
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "color", "red"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "color", "blue"), 0);
+
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "label", "ab"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "label", "abcde"), 0);
+
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "missing", "x"), -1);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdDatatypes, LocalBaseChainValidatesEveryHop) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"outer\">"
+        "<xs:restriction base=\"inner\">"
+        "<xs:maxInclusive value=\"100\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"inner\">"
+        "<xs:restriction base=\"xs:integer\">"
+        "<xs:minInclusive value=\"10\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* Both hops' facets bind: 5 fails inner, 150 fails outer. */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "outer", "50"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "outer", "5"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "outer", "150"), 0);
+    leptris_xsd_free(s);
+}
+
+}  // namespace
