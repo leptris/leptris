@@ -19,31 +19,31 @@ extern int rng_regex_matches(const char* pat, const char* text);
 
 /* ---- character-class helpers ------------------------------------- */
 
-static int is_ncname_start(char c) {
+static int xsd_ncname_start(char c) {
     return isalpha((unsigned char)c) || c == '_' ||
            (unsigned char)c >= 0x80;
 }
-static int is_ncname_char(char c) {
-    return is_ncname_start(c) || isdigit((unsigned char)c) ||
+static int xsd_ncname_char(char c) {
+    return xsd_ncname_start(c) || isdigit((unsigned char)c) ||
            c == '-' || c == '.';
 }
-static int is_ncname(const char* s) {
-    if (!s || !*s || !is_ncname_start(*s)) return 0;
+static int xsd_is_ncname(const char* s) {
+    if (!s || !*s || !xsd_ncname_start(*s)) return 0;
     for (const char* p = s + 1; *p; p++)
-        if (!is_ncname_char(*p)) return 0;
+        if (!xsd_ncname_char(*p)) return 0;
     return 1;
 }
-static int digits_only(const char* s) {
+static int xsd_digits_only(const char* s) {
     if (!s || !*s) return 0;
     for (const char* p = s; *p; p++)
         if (!isdigit((unsigned char)*p)) return 0;
     return 1;
 }
 /* [-+]?digits — the shared integer lexical shape. */
-static int signed_integer(const char* s) {
+static int xsd_signed_integer(const char* s) {
     if (!s || !*s) return 0;
     if (*s == '+' || *s == '-') s++;
-    return digits_only(s);
+    return xsd_digits_only(s);
 }
 
 /* ---- numeric range table (the integer derivations) --------------- */
@@ -74,7 +74,7 @@ static const NumType k_numerics[] = {
 /* XSD digits: no leading-zero rule beyond the sign for zero, but
  * "007" is a valid integer lexical in XSD (unlike most languages). */
 static int value_in_range(const char* s, long long lo, long long hi) {
-    if (!signed_integer(s)) return 0;
+    if (!xsd_signed_integer(s)) return 0;
     /* Guard 64-bit overflow: XSD allows arbitrarily many digits —
      * values beyond long long are still "in" xs:integer (arbitrary
      * precision) but cannot sit in a bounded derivation's range.
@@ -140,7 +140,7 @@ static int time_tail(const char** p) {
         if (!two_digits(p)) return 0;
         if (**p == '.') {
             (*p)++;
-            if (!digits_only(*p)) return 0;
+            if (!xsd_digits_only(*p)) return 0;
             while (isdigit((unsigned char)**p)) (*p)++;
         }
     }
@@ -169,20 +169,20 @@ int xsd_builtin_valid(const char* type, const char* v) {
     if (strcmp(type, "xs:Name") == 0) {
         /* Name: NameStartChar (NameChar)* — NCName is the strict
          * ASCII/80 subset; libxml2 accepts ':' in Names. */
-        if (!*v || !is_ncname_start(*v) && *v != ':') return 0;
+        if (!*v || !xsd_ncname_start(*v) && *v != ':') return 0;
         for (const char* p = v + 1; *p; p++)
-            if (!is_ncname_char(*p) && *p != ':') return 0;
+            if (!xsd_ncname_char(*p) && *p != ':') return 0;
         return 1;
     }
     if (strcmp(type, "xs:NMTOKEN") == 0) {
         if (!*v) return 0;
         for (const char* p = v; *p; p++)
-            if (!is_ncname_char(*p) && *p != ':') return 0;
+            if (!xsd_ncname_char(*p) && *p != ':') return 0;
         return 1;
     }
     if (strcmp(type, "xs:NCName") == 0 || strcmp(type, "xs:ID") == 0 ||
         strcmp(type, "xs:IDREF") == 0 || strcmp(type, "xs:ENTITY") == 0)
-        return is_ncname(v);
+        return xsd_is_ncname(v);
     if (strcmp(type, "xs:language") == 0) {
         /* [a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})* */
         const char* p = v;
@@ -209,13 +209,13 @@ int xsd_builtin_valid(const char* type, const char* v) {
     }
     if (strcmp(type, "xs:QName") == 0) {
         const char* colon = strchr(v, ':');
-        if (!colon) return is_ncname(v);
+        if (!colon) return xsd_is_ncname(v);
         size_t plen = (size_t)(colon - v);
         char pfx[256];
         if (plen >= sizeof(pfx)) return 0;
         memcpy(pfx, v, plen);
         pfx[plen] = 0;
-        return is_ncname(pfx) && is_ncname(colon + 1);
+        return xsd_is_ncname(pfx) && xsd_is_ncname(colon + 1);
     }
     if (strcmp(type, "xs:boolean") == 0)
         return strcmp(v, "true") == 0 || strcmp(v, "false") == 0 ||
@@ -254,7 +254,7 @@ int xsd_builtin_valid(const char* type, const char* v) {
         if (*p == 'e' || *p == 'E') {
             p++;
             if (*p == '+' || *p == '-') p++;
-            if (!digits_only(p)) return 0;
+            if (!xsd_digits_only(p)) return 0;
         } else if (*p) {
             return 0;
         }
