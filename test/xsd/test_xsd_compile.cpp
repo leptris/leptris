@@ -517,3 +517,91 @@ TEST(XsdValidate, NullTolerant) {
 }
 
 }  // namespace
+
+// ---- #1592: inline anonymous types ---------------------------------
+namespace {
+
+const char* k_anon_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:element name=\"book\">"
+    "<xs:complexType>"
+    "<xs:sequence>"
+    "<xs:element name=\"title\" type=\"xs:token\"/>"
+    "<xs:element name=\"author\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "</xs:element>"
+    "</xs:schema>";
+
+TEST(XsdContent, AnonymousInlineComplexTypeCaptured) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_anon_schema, strlen(k_anon_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* the issue's exact symptom: content_valid answered -1 */
+    const char* good[] = {"title", "author"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "book", good, NULL, 2), 1);
+    const char* bad[] = {"author", "author", "isbn"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "book", bad, NULL, 3), 0);
+    const char* miss[] = {"author"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "book", miss, NULL, 1), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, AnonymousInlineValidatesEndToEnd) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_anon_schema, strlen(k_anon_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* good_x = "<book><title>t</title><author>a</author></book>";
+    LeptrisDocument good =
+        leptris_parse_string(good_x, strlen(good_x), &st);
+    ASSERT_NE(good, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, good), 1);
+    leptris_document_free(good);
+    /* the issue's instance: missing title, out-of-model isbn */
+    const char* bad_x =
+        "<book><author/><author/><isbn>9</isbn></book>";
+    LeptrisDocument bad = leptris_parse_string(bad_x, strlen(bad_x), &st);
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, bad), 0);
+    EXPECT_GE(leptris_xsd_error_count(s), 1u);
+    leptris_document_free(bad);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdDatatypes, AnonymousInlineSimpleTypeOnParticle) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"t\">"
+        "<xs:sequence>"
+        "<xs:element name=\"score\">"
+        "<xs:simpleType>"
+        "<xs:restriction base=\"xs:integer\">"
+        "<xs:minInclusive value=\"1\"/>"
+        "</xs:restriction>"
+        "</xs:simpleType>"
+        "</xs:element>"
+        "</xs:sequence></xs:complexType>"
+        "<xs:element name=\"game\" type=\"t\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* good_x = "<game><score>9</score></game>";
+    LeptrisDocument good = leptris_parse_string(good_x, strlen(good_x), &st);
+    ASSERT_NE(good, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, good), 1);
+    leptris_document_free(good);
+    const char* bad_x = "<game><score>0</score></game>";
+    LeptrisDocument bad = leptris_parse_string(bad_x, strlen(bad_x), &st);
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, bad), 0);
+    leptris_document_free(bad);
+    /* the synthesized slot resolves directly too */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "element:score", "9"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "element:score", "0"), 0);
+    leptris_xsd_free(s);
+}
+
+}  // namespace
