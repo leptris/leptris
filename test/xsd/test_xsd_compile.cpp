@@ -605,3 +605,122 @@ TEST(XsdDatatypes, AnonymousInlineSimpleTypeOnParticle) {
 }
 
 }  // namespace
+
+// ---- slice 6: identity constraints ---------------------------------
+namespace {
+
+const char* k_ic_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:element name=\"catalog\">"
+    "<xs:complexType>"
+    "<xs:sequence>"
+    "<xs:element name=\"product\" maxOccurs=\"unbounded\">"
+    "<xs:complexType>"
+    "<xs:sequence>"
+    "<xs:element name=\"partNum\" type=\"xs:string\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"id\" type=\"xs:string\" use=\"required\"/>"
+    "</xs:complexType>"
+    "</xs:element>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:key name=\"productId\">"
+    "<xs:selector xpath=\"product\"/>"
+    "<xs:field xpath=\"@id\"/>"
+    "</xs:key>"
+    "<xs:keyref name=\"productRef\" refer=\"productId\">"
+    "<xs:selector xpath=\"product\"/>"
+    "<xs:field xpath=\"partNum\"/>"
+    "</xs:keyref>"
+    "</xs:element>"
+    "</xs:schema>";
+
+TEST(XsdIc, UniqueKeysValidate) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_ic_schema, strlen(k_ic_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* xml =
+        "<catalog>"
+        "<product id=\"A1\"><partNum>A1</partNum></product>"
+        "<product id=\"B2\"><partNum>B2</partNum></product>"
+        "</catalog>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << (leptris_xsd_error_count(s) ? leptris_xsd_error_at(s, 0) : "");
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdIc, DuplicateKeyReports) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_ic_schema, strlen(k_ic_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* xml =
+        "<catalog>"
+        "<product id=\"A1\"><partNum>A1</partNum></product>"
+        "<product id=\"A1\"><partNum>zz</partNum></product>"
+        "</catalog>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    size_t n = leptris_xsd_error_count(s);
+    int saw_dup = 0;
+    for (size_t i = 0; i < n; i++) {
+        const char* e = leptris_xsd_error_at(s, i);
+        if (e && strstr(e, "duplicate")) saw_dup = 1;
+    }
+    EXPECT_TRUE(saw_dup);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdIc, UnresolvedKeyrefReports) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_ic_schema, strlen(k_ic_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* xml =
+        "<catalog>"
+        "<product id=\"A1\"><partNum>NOPE</partNum></product>"
+        "</catalog>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    size_t n = leptris_xsd_error_count(s);
+    int saw_ref = 0;
+    for (size_t i = 0; i < n; i++) {
+        const char* e = leptris_xsd_error_at(s, i);
+        if (e && strstr(e, "keyref")) saw_ref = 1;
+    }
+    EXPECT_TRUE(saw_ref);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdIc, KeyRequiresFieldValues) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\">"
+        "<xs:complexType><xs:sequence>"
+        "<xs:element name=\"item\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence></xs:complexType>"
+        "<xs:key name=\"k\">"
+        "<xs:selector xpath=\"item\"/>"
+        "<xs:field xpath=\"@id\"/>"
+        "</xs:key>"
+        "</xs:element></xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* xml = "<r><item/><item id=\"a\"/></r>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0); /* missing field */
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+}  // namespace
