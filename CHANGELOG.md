@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.322] - 2026-10-08
+
+### Added
+
+- validate --xsd — the compiled XSD surface rides the validate command (#1075) (cli)
+
+
+
 ## [1.9.321] - 2026-10-08
 
 ### Added
