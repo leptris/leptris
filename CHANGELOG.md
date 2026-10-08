@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.318] - 2026-10-08
+
+### Fixed
+
+- name the parked-span local 'parked' — MSVC #defines small (arena)
+
+### Performance
+
+- per-thread small-span recycle — the #1436 tiny-doc row (arena)
+
+
+
 ## [1.9.317] - 2026-10-07
 
 ### Added
