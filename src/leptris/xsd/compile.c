@@ -4,6 +4,7 @@
  * grow the model (datatypes, facets, content models, identity
  * constraints) — this slice's contract is the API shape, the
  * xs:schema identity check, and the declaration enumeration. */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,6 +42,20 @@ struct leptris_xsd_schema {
 
 static char* xsd_strdup(const char* s);
 
+/* #1592: capture an INLINE anonymous xs:complexType / xs:simpleType
+ * under a synthesized name ("element:NAME" — ':' cannot appear in
+ * xs: NCName type names, so the slot is collision-free). Returns 1
+ * when a capture happened. Forward decls below; definitions later
+ * in this file. */
+static int xsd_capture_inline(struct leptris_xsd_schema* s,
+                              LeptrisElement elem, const char* synth);
+static XsdCm* xsd_cm_new(XsdCmKind kind);
+static void xsd_cm_occurrence(XsdCm* cm, LeptrisElement e);
+static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
+                           LeptrisElement group, XsdCm** tail_out);
+static XsdSimple* xsd_capture_simple(LeptrisElement st);
+
+
 static XsdCm* xsd_cm_new(XsdCmKind kind) {
     XsdCm* cm = (XsdCm*)calloc(1, sizeof(*cm));
     if (!cm) return NULL;
@@ -73,7 +88,45 @@ static void xsd_cm_occurrence(XsdCm* cm, LeptrisElement e) {
 /* Recursive model build over sequence | choice | all | element |
  * any children. Returns the child list head; *tail_out receives
  * the list tail for sibling chaining. */
-static XsdCm* xsd_cm_parse(LeptrisElement group, XsdCm** tail_out) {
+/* #1592: capture an INLINE anonymous xs:complexType / xs:simpleType
+ * under a synthesized name ("element:NAME" — ':' cannot appear in
+ * xs: NCName type names, so the slot is collision-free). Returns 1
+ * when a capture happened. */
+static int xsd_capture_inline(struct leptris_xsd_schema* s,
+                              LeptrisElement elem, const char* synth) {
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(elem));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL, *prefix = NULL, *uri = NULL;
+        leptris_element_expanded_name(e, &local, &prefix, &uri);
+        if (!local || !uri || strcmp(uri, XSD_NS) != 0) continue;
+        if (strcmp(local, "complexType") == 0) {
+            XsdCm* root = xsd_cm_new(XSD_CM_SEQ);
+            if (!root) return 0;
+            root->name = xsd_strdup(synth);
+            root->first_child = xsd_cm_parse(s, e, NULL);
+            root->next = s->complex_types;
+            s->complex_types = root;
+            return 1;
+        }
+        if (strcmp(local, "simpleType") == 0) {
+            XsdSimple* captured = xsd_capture_simple(e);
+            if (!captured) return 0;
+            free(captured->name);
+            captured->name = xsd_strdup(synth);
+            captured->next = s->simple_types;
+            s->simple_types = captured;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
+                           LeptrisElement group, XsdCm** tail_out) {
     XsdCm* head = NULL;
     XsdCm* tail = NULL;
     for (LeptrisNodeRef n =
@@ -92,7 +145,7 @@ static XsdCm* xsd_cm_parse(LeptrisElement group, XsdCm** tail_out) {
             cm = xsd_cm_new(strcmp(local, "sequence") == 0 ? XSD_CM_SEQ
                             : strcmp(local, "choice") == 0 ? XSD_CM_CHOICE
                                                            : XSD_CM_ALL);
-            if (cm) cm->first_child = xsd_cm_parse(e, NULL);
+            if (cm) cm->first_child = xsd_cm_parse(s, e, NULL);
         } else if (strcmp(local, "element") == 0) {
             cm = xsd_cm_new(XSD_CM_ELEMENT);
             if (cm) {
@@ -100,8 +153,17 @@ static XsdCm* xsd_cm_parse(LeptrisElement group, XsdCm** tail_out) {
                     leptris_element_attribute(e, "name");
                 if (!nm) nm = leptris_element_attribute(e, "ref");
                 cm->name = xsd_strdup(nm);
-                cm->type = xsd_strdup(
-                    leptris_element_attribute(e, "type"));
+                const char* pty =
+                    leptris_element_attribute(e, "type");
+                if (pty) {
+                    cm->type = xsd_strdup(pty);
+                } else if (s && nm) {
+                    /* #1592: inline anonymous type on the particle */
+                    char synth[512];
+                    snprintf(synth, sizeof(synth), "element:%s", nm);
+                    if (xsd_capture_inline(s, e, synth))
+                        cm->type = xsd_strdup(synth);
+                }
             }
         } else if (strcmp(local, "any") == 0) {
             cm = xsd_cm_new(XSD_CM_ANY);
@@ -140,7 +202,9 @@ static char* xsd_strdup(const char* s) {
 /* Capture one xs:simpleType's restriction model (slice 2). */
 static XsdSimple* xsd_capture_simple(LeptrisElement st) {
     const char* name = leptris_element_attribute(st, "name");
-    if (!name) return NULL; /* anonymous types ride their element */
+    /* Anonymous types ride their element — allowed: the caller
+     * renames the captured entry into its synthesized slot
+     * (#1592). */
 
     XsdSimple* simple = (XsdSimple*)calloc(1, sizeof(*simple));
     if (!simple) return NULL;
@@ -323,6 +387,21 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                     d->next = s->elements;
                     s->elements = d;
                 }
+            } else if (nm) {
+                /* #1592: inline anonymous type — capture under the
+                 * synthesized slot and point the declaration at it. */
+                char synth[512];
+                snprintf(synth, sizeof(synth), "element:%s", nm);
+                if (xsd_capture_inline(s, (LeptrisElement)n, synth)) {
+                    XsdElementDecl* d =
+                        (XsdElementDecl*)calloc(1, sizeof(*d));
+                    if (d) {
+                        d->name = xsd_strdup(nm);
+                        d->type = xsd_strdup(synth);
+                        d->next = s->elements;
+                        s->elements = d;
+                    }
+                }
             }
         } else if (strcmp(local, "complexType") == 0 && uri &&
                    !strcmp(uri, XSD_NS)) {
@@ -334,7 +413,7 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                 if (root) {
                     root->name = xsd_strdup(nm);
                     root->first_child =
-                        xsd_cm_parse((LeptrisElement)n, NULL);
+                        xsd_cm_parse(s, (LeptrisElement)n, NULL);
                     root->next = s->complex_types;
                     s->complex_types = root;
                 }
