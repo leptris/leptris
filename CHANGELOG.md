@@ -4,7 +4,20 @@
 
 ### Added
 
-- tier-1 slice 6 — identity constraints (#1075) (xsd)
+- **XSD identity constraints — tier-1 scope complete (#1075,
+  PR #1598).** `xs:key` / `xs:unique` / `xs:keyref` capture on
+  top-level element declarations (direct children or inside the
+  inline complexType) and two-pass instance validation driven by
+  the engine's own XPath with element context: pass 1 collects
+  key/unique field tuples (string-value extraction — attribute
+  fields included), enforces uniqueness, and requires non-empty
+  key fields; pass 2 collects keyref tuples; resolution then
+  requires every keyref to match a collected key/unique tuple.
+  The selector reads the `xs:selector` child's `@xpath`. Tuple
+  tables deep-copy their strings; IC captures free with the
+  schema. This completes the tier-1 engine scope: compile →
+  datatypes/facets → content models → instance validation →
+  identity constraints, gated on libxml2's 163-fixture corpus.
 
 
 
