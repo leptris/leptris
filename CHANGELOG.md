@@ -2,13 +2,22 @@
 
 ## [1.9.318] - 2026-10-08
 
-### Fixed
-
-- name the parked-span local 'parked' — MSVC #defines small (arena)
-
 ### Performance
 
-- per-thread small-span recycle — the #1436 tiny-doc row (arena)
+- **Per-thread small-span arena recycle — the tiny-doc fixed row
+  (#1436, PR #1580).** The global retain tier deliberately skipped
+  spans below 256 KB, so every small document paid full malloc/free
+  bookkeeping per create/destroy cycle; the quiet-hardware profile
+  named that cycle as the heart of the ~185 ns/doc tiny-doc row. A
+  per-thread LIFO cache inside the arena's retain seam hands the
+  previous document's span back with no allocator, no spinlock, and
+  no cross-thread traffic. Three standing contracts preserved:
+  exact-size take (the fail-fast capacity never silently widens),
+  custom-allocator stand-down (hooked accounting sees every
+  malloc/free pair), and ASAN bypass with thread-cleanup drain.
+  Measured on bench_doc_lifecycle (interleaved A/B, Release):
+  tight cycle 183/203/183 → 166/159/159 ns/doc (~15% off the
+  fixed row).
 
 
 
