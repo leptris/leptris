@@ -161,8 +161,11 @@ static int small_give(char* base, size_t size) {
  * oversized blocks aren't burned on small documents. Returns the
  * block and reports its true capacity; NULL when nothing fits. */
 static char* retain_take(size_t request, size_t* capacity) {
-    char* small = small_take(request, capacity);
-    if (small) return small;
+    /* 'parked', never 'small' — MSVC's headers #define small (the
+     * OLE `#define small char`) and turn the local into a type
+     * token (C2059). */
+    char* parked = small_take(request, capacity);
+    if (parked) return parked;
     if (request < ARENA_RETAIN_MIN) return NULL;
     char* found = NULL;
     size_t found_size = 0;
