@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.321] - 2026-10-08
+
+### Added
+
+- tier-1 slice 4 — instance validation (#1075) (xsd)
+- tier-1 slice 3 — content models via Thompson NFA (#1075) (xsd)
+
+
+
 ## [1.9.320] - 2026-10-08
 
 ### Fixed
