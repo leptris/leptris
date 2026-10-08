@@ -51,6 +51,7 @@ typedef enum {
 typedef struct xsd_cm {
     XsdCmKind kind;
     char* name;   /* CM_ELEMENT: child element local name */
+    char* type;   /* CM_ELEMENT: the particle's type ref, if any */
     char* ns;     /* CM_ELEMENT: expected namespace (NULL = unqualified) */
     char* any_ns; /* CM_ANY: the namespace attribute grammar */
     int process_skip; /* CM_ANY: processContents="skip" or "lax" */
@@ -66,7 +67,25 @@ typedef struct xsd_element_decl {
     struct xsd_element_decl* next;
 } XsdElementDecl;
 
+typedef struct xsd_attr_decl {
+    char* name;  /* attribute local name */
+    char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
+    int required;
+    struct xsd_attr_decl* next;
+} XsdAttrDecl;
+
+/* complexType name -> its attribute declarations (hash-free: a
+ * parallel list keyed the same way as complex model roots). */
+typedef struct xsd_type_attrs {
+    char* type_name;
+    XsdAttrDecl* attrs;
+    struct xsd_type_attrs* next;
+} XsdTypeAttrs;
+
 #ifdef __cplusplus
 }
 #endif
+
+/* ---- slice 4: attribute declarations + instance validation ------- */
+
 #endif /* LEPTRIS_XSD_INTERNAL_H */
