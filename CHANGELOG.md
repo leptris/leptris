@@ -4,8 +4,22 @@
 
 ### Fixed
 
-- free the retained child-row ns_uri — the copy's free twin (descriptor)
-- retain child-row ns_uri; lenient plain attr rows (#1585, #1586) (descriptor)
+- **Descriptor: child-row exact-URI `ns_uri` retained at build
+  (#1585, PR #1587).** The build deep-copied child `ns_prefix` but
+  let `ns_uri` ride the struct copy — a pointer into the caller's
+  build buffers. Bindings GC their anchors (a warm walk plus one GC
+  makes it deterministic), after which exact-URI child rows
+  silently stopped matching and hydration answered nil (uniword's
+  `dc:title`/`dc:creator`/`dc:description`). The spec trashes the
+  caller's buffer after build and asserts the row still binds.
+- **Descriptor: plain attribute rows match any qualification
+  (#1586, PR #1587).** `dp_attr_value`'s ns-unset path now mirrors
+  #758 — the exact wire spelling first, then any qualification by
+  local name — so plain rows bind `w:name`/`w:val` exactly as the
+  interpretive path does, top level and nested. Exact-URI rows keep
+  their #1486 precedence. A NESTED row's binding also consults the
+  TARGET plan's `ns_lenient` now (the #1115-consistent authority)
+  instead of the outer plan's.
 
 
 
