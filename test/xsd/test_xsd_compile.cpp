@@ -416,3 +416,104 @@ TEST(XsdContent, SimpleTypedElementTakesNoChildren) {
 }
 
 }  // namespace
+
+// ---- slice 4: instance validation ----------------------------------
+namespace {
+
+const char* k_v_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"rowT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"id\" type=\"xs:integer\"/>"
+    "<xs:element name=\"name\" type=\"xs:string\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"status\" type=\"xs:string\"/>"
+    "<xs:attribute name=\"version\" type=\"xs:integer\""
+    " use=\"required\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"rows\" type=\"rowT\"/>"
+    "<xs:element name=\"count\" type=\"xs:positiveInteger\"/>"
+    "</xs:schema>";
+
+int validate_doc(const char* schema, const char* xml) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(schema, strlen(schema), &st);
+    if (!s) return -2;
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    if (!d) {
+        leptris_xsd_free(s);
+        return -3;
+    }
+    int r = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return r;
+}
+
+TEST(XsdValidate, ValidDocumentPasses) {
+    EXPECT_EQ(validate_doc(k_v_schema,
+                           "<rows version=\"2\" status=\"ok\">"
+                           "<id>7</id><name>abc</name></rows>"), 1);
+    EXPECT_EQ(validate_doc(k_v_schema, "<count>3</count>"), 1);
+}
+
+TEST(XsdValidate, ContentModelViolationReports) {
+    EXPECT_EQ(validate_doc(k_v_schema,
+                           "<rows version=\"1\">"
+                           "<name>abc</name><id>7</id></rows>"), 0);
+}
+
+TEST(XsdValidate, RequiredAttributeAbsentReports) {
+    int r = validate_doc(k_v_schema, "<rows><id>7</id><name>a</name></rows>");
+    EXPECT_EQ(r, 0);
+}
+
+TEST(XsdValidate, AttributeTypeViolationReports) {
+    EXPECT_EQ(validate_doc(k_v_schema,
+                           "<rows version=\"x\"><id>7</id>"
+                           "<name>a</name></rows>"), 0);
+}
+
+TEST(XsdValidate, ElementTextTypeViolationReports) {
+    EXPECT_EQ(validate_doc(k_v_schema, "<count>-2</count>"), 0);
+    EXPECT_EQ(validate_doc(k_v_schema, "<count>0</count>"), 0);
+}
+
+TEST(XsdValidate, ChildElementTypeViolationReports) {
+    EXPECT_EQ(validate_doc(k_v_schema,
+                           "<rows version=\"1\">"
+                           "<id>nan</id><name>a</name></rows>"), 0);
+}
+
+TEST(XsdValidate, ErrorsEnumerate) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_v_schema, strlen(k_v_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* bad = "<rows><id>nan</id><name>a</name></rows>";
+    LeptrisDocument d = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(d, nullptr);
+    int r = leptris_xsd_validate(s, d);
+    EXPECT_EQ(r, 0);
+    EXPECT_GE(leptris_xsd_error_count(s), 1u);
+    const char* first = leptris_xsd_error_at(s, 0);
+    EXPECT_NE(first, nullptr);
+    EXPECT_EQ(leptris_xsd_error_at(s, 99), nullptr);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, NullTolerant) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_v_schema, strlen(k_v_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_validate(NULL, NULL), -1);
+    EXPECT_EQ(leptris_xsd_validate(s, NULL), -1);
+    EXPECT_EQ(leptris_xsd_error_count(NULL), 0u);
+    EXPECT_EQ(leptris_xsd_error_at(NULL, 0), nullptr);
+    leptris_xsd_free(s);
+}
+
+}  // namespace

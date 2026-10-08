@@ -929,6 +929,19 @@ LEPTRIS_API int leptris_xsd_content_valid(
     LeptrisXsdSchema schema, const char* element_name,
     const char* const* child_names, const char* const* child_ns,
     size_t child_count);
+/* Slice 4 — instance validation. Walks the document against the
+ * compiled schema: element declarations by name, attribute rows
+ * (required use + typed values, lenient qualified spellings),
+ * text lexical checks for simple-typed elements, child content
+ * models (slice 3). Returns 1 valid, 0 invalid, -1 bad args.
+ * Errors accumulate — leptris_xsd_error_count/_at enumerate them
+ * (schema-owned; the next validate run replaces them; freed with
+ * the schema). */
+LEPTRIS_API int leptris_xsd_validate(LeptrisXsdSchema schema,
+                                     LeptrisDocument doc);
+LEPTRIS_API size_t leptris_xsd_error_count(LeptrisXsdSchema schema);
+LEPTRIS_API const char* leptris_xsd_error_at(LeptrisXsdSchema schema,
+                                             size_t i);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,
