@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.319] - 2026-10-08
+
+### Added
+
+- tier-1 slice 2 — datatype lexical validation + restriction facets (#1075) (xsd)
+
+### Fixed
+
+- prefix the datatype statics — amalgamated single-TU collision (xsd)
+
+
+
 ## [1.9.318] - 2026-10-08
 
 ### Performance
