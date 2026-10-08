@@ -29,6 +29,7 @@ set(LEPTRIS_SOURCES
     leptris/rng/parse.c
     leptris/xsd/compile.c
     leptris/xsd/datatypes.c
+    leptris/xsd/content_model.c
     leptris/rng/rng_public.c
     leptris/rng/rng_regex.c
     leptris/rng/validate.c

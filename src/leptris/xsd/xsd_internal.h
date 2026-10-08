@@ -37,6 +37,35 @@ typedef struct xsd_simple {
     struct xsd_simple* next;
 } XsdSimple;
 
+/* Content-model node: a particle (element ref / wildcard) or a
+ * group (sequence | choice | all). Owned by the schema; freed
+ * with the schema. */
+typedef enum {
+    XSD_CM_ELEMENT = 0,
+    XSD_CM_ANY,
+    XSD_CM_SEQ,
+    XSD_CM_CHOICE,
+    XSD_CM_ALL
+} XsdCmKind;
+
+typedef struct xsd_cm {
+    XsdCmKind kind;
+    char* name;   /* CM_ELEMENT: child element local name */
+    char* ns;     /* CM_ELEMENT: expected namespace (NULL = unqualified) */
+    char* any_ns; /* CM_ANY: the namespace attribute grammar */
+    int process_skip; /* CM_ANY: processContents="skip" or "lax" */
+    int min, max; /* occurrence bounds; max < 0 = unbounded */
+    struct xsd_cm* first_child; /* group children list */
+    struct xsd_cm* next;        /* sibling link within the parent group */
+} XsdCm;
+
+/* A top-level xs:element declaration (slice 3: name + type ref). */
+typedef struct xsd_element_decl {
+    char* name;
+    char* type; /* "xs:string"-style builtin or a local type name */
+    struct xsd_element_decl* next;
+} XsdElementDecl;
+
 #ifdef __cplusplus
 }
 #endif

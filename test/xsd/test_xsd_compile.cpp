@@ -264,3 +264,155 @@ TEST(XsdDatatypes, LocalBaseChainValidatesEveryHop) {
 }
 
 }  // namespace
+
+// ---- slice 3: content models ---------------------------------------
+namespace {
+
+const char* k_cm_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " targetNamespace=\"urn:t\">"
+    "<xs:complexType name=\"pairT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\"/>"
+    "<xs:element name=\"b\"/>"
+    "</xs:sequence></xs:complexType>"
+    "<xs:element name=\"pair\" type=\"pairT\"/>"
+
+    "<xs:complexType name=\"pickT\">"
+    "<xs:choice>"
+    "<xs:element name=\"x\"/>"
+    "<xs:element name=\"y\"/>"
+    "</xs:choice></xs:complexType>"
+    "<xs:element name=\"pick\" type=\"pickT\"/>"
+
+    "<xs:complexType name=\"twoToThreeT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" minOccurs=\"2\" maxOccurs=\"3\"/>"
+    "</xs:sequence></xs:complexType>"
+    "<xs:element name=\"twoToThree\" type=\"twoToThreeT\"/>"
+
+    "<xs:complexType name=\"listT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"item\" maxOccurs=\"unbounded\"/>"
+    "</xs:sequence></xs:complexType>"
+    "<xs:element name=\"list\" type=\"listT\"/>"
+
+    "<xs:complexType name=\"looseT\">"
+    "<xs:sequence>"
+    "<xs:any namespace=\"##other\" processContents=\"skip\"/>"
+    "</xs:sequence></xs:complexType>"
+    "<xs:element name=\"loose\" type=\"looseT\"/>"
+
+    "<xs:complexType name=\"nestedT\">"
+    "<xs:sequence>"
+    "<xs:choice>"
+    "<xs:element name=\"x\"/>"
+    "<xs:element name=\"y\"/>"
+    "</xs:choice>"
+    "<xs:element name=\"c\"/>"
+    "</xs:sequence></xs:complexType>"
+    "<xs:element name=\"nested\" type=\"nestedT\"/>"
+
+    "<xs:element name=\"text\" type=\"xs:string\"/>"
+    "</xs:schema>";
+
+LeptrisXsdSchema compile_cm() {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_cm_schema, strlen(k_cm_schema), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    return s;
+}
+
+TEST(XsdContent, SequenceInOrder) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* ab[] = {"a", "b"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pair", ab, NULL, 2), 1);
+    const char* ba[] = {"b", "a"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pair", ba, NULL, 2), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pair", ab, NULL, 1), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pair", NULL, NULL, 0), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, ChoicePicksExactlyOne) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* x[] = {"x"};
+    const char* y[] = {"y"};
+    const char* xy[] = {"x", "y"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pick", x, NULL, 1), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pick", y, NULL, 1), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pick", xy, NULL, 2), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "pick", NULL, NULL, 0), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, OccurrenceBoundsHold) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* a1[] = {"a"};
+    const char* a2[] = {"a", "a"};
+    const char* a3[] = {"a", "a", "a"};
+    const char* a4[] = {"a", "a", "a", "a"};
+    SCOPED_TRACE("a1");
+    EXPECT_EQ(leptris_xsd_content_valid(s, "twoToThree", a1, NULL, 1), 0);
+    SCOPED_TRACE("a2");
+    EXPECT_EQ(leptris_xsd_content_valid(s, "twoToThree", a2, NULL, 2), 1);
+    SCOPED_TRACE("a3");
+    EXPECT_EQ(leptris_xsd_content_valid(s, "twoToThree", a3, NULL, 3), 1);
+    SCOPED_TRACE("a4");
+    EXPECT_EQ(leptris_xsd_content_valid(s, "twoToThree", a4, NULL, 4), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, UnboundedRepeats) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* i3[] = {"item", "item", "item"};
+    const char* i30[30];
+    for (int i = 0; i < 30; i++) i30[i] = "item";
+    EXPECT_EQ(leptris_xsd_content_valid(s, "list", NULL, NULL, 0), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "list", i3, NULL, 3), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "list", i30, NULL, 30), 1);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, WildcardNamespaceFilter) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* ##other: anything qualified OUTSIDE urn:t */
+    const char* w[] = {"widget"};
+    const char* tns[] = {"urn:t"};
+    const char* other[] = {"urn:elsewhere"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "loose", w, other, 1), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "loose", w, tns, 1), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "loose", w, NULL, 1), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, NestedGroupsCompose) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* xc[] = {"x", "c"};
+    const char* yc[] = {"y", "c"};
+    const char* cc[] = {"c", "c"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "nested", xc, NULL, 2), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "nested", yc, NULL, 2), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "nested", cc, NULL, 2), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, SimpleTypedElementTakesNoChildren) {
+    LeptrisXsdSchema s = compile_cm();
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* x[] = {"x"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "text", NULL, NULL, 0), 1);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "text", x, NULL, 1), 0);
+    EXPECT_EQ(leptris_xsd_content_valid(s, "noSuchElement", x, NULL, 1),
+              -1);
+    leptris_xsd_free(s);
+}
+
+}  // namespace

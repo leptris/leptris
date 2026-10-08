@@ -13,12 +13,108 @@
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
 
 extern int xsd_simple_valid(const XsdSimple* simple, const char* v);
+extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
+                             const char* target_ns,
+                             const char* const* names,
+                             const char* const* ns_uris, size_t count);
 
 struct leptris_xsd_schema {
     size_t declaration_count;
     XsdSimple* simple_types;
+    XsdElementDecl* elements;
+    XsdCm* complex_types; /* name-carrying model roots */
+    char* target_ns;
     char* error;
 };
+
+/* ---- slice 3: content-model capture ------------------------------ */
+
+static char* xsd_strdup(const char* s);
+
+static XsdCm* xsd_cm_new(XsdCmKind kind) {
+    XsdCm* cm = (XsdCm*)calloc(1, sizeof(*cm));
+    if (!cm) return NULL;
+    cm->kind = kind;
+    cm->min = 1;
+    cm->max = 1;
+    return cm;
+}
+
+static void xsd_cm_free(XsdCm* cm) {
+    while (cm) {
+        XsdCm* next = cm->next;
+        xsd_cm_free(cm->first_child);
+        free(cm->name);
+        free(cm->ns);
+        free(cm->any_ns);
+        free(cm);
+        cm = next;
+    }
+}
+
+static void xsd_cm_occurrence(XsdCm* cm, LeptrisElement e) {
+    const char* mn = leptris_element_attribute(e, "minOccurs");
+    if (mn) cm->min = (strcmp(mn, "unbounded") == 0) ? 0 : atoi(mn);
+    const char* mx = leptris_element_attribute(e, "maxOccurs");
+    if (mx) cm->max = (strcmp(mx, "unbounded") == 0) ? -1 : atoi(mx);
+}
+
+/* Recursive model build over sequence | choice | all | element |
+ * any children. Returns the child list head; *tail_out receives
+ * the list tail for sibling chaining. */
+static XsdCm* xsd_cm_parse(LeptrisElement group, XsdCm** tail_out) {
+    XsdCm* head = NULL;
+    XsdCm* tail = NULL;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(group));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL, *prefix = NULL, *uri = NULL;
+        leptris_element_expanded_name(e, &local, &prefix, &uri);
+        if (!local || (uri && strcmp(uri, XSD_NS) != 0)) continue;
+
+        XsdCm* cm = NULL;
+        if (strcmp(local, "sequence") == 0 || strcmp(local, "choice") == 0 ||
+            strcmp(local, "all") == 0) {
+            cm = xsd_cm_new(strcmp(local, "sequence") == 0 ? XSD_CM_SEQ
+                            : strcmp(local, "choice") == 0 ? XSD_CM_CHOICE
+                                                           : XSD_CM_ALL);
+            if (cm) cm->first_child = xsd_cm_parse(e, NULL);
+        } else if (strcmp(local, "element") == 0) {
+            cm = xsd_cm_new(XSD_CM_ELEMENT);
+            if (cm) {
+                const char* nm =
+                    leptris_element_attribute(e, "name");
+                if (!nm) nm = leptris_element_attribute(e, "ref");
+                cm->name = xsd_strdup(nm);
+            }
+        } else if (strcmp(local, "any") == 0) {
+            cm = xsd_cm_new(XSD_CM_ANY);
+            if (cm) {
+                cm->any_ns = xsd_strdup(
+                    leptris_element_attribute(e, "namespace"));
+                const char* pc = leptris_element_attribute(
+                    e, "processContents");
+                cm->process_skip =
+                    (pc && (strcmp(pc, "skip") == 0 ||
+                            strcmp(pc, "lax") == 0)) ? 1 : 0;
+            }
+        } else {
+            continue; /* annotation & friends */
+        }
+        if (!cm) continue;
+        xsd_cm_occurrence(cm, e);
+        if (tail)
+            tail->next = cm;
+        else
+            head = cm;
+        tail = cm;
+    }
+    if (tail_out) *tail_out = tail;
+    return head;
+}
 
 static char* xsd_strdup(const char* s) {
     if (!s) return NULL;
@@ -161,6 +257,9 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
         return NULL;
     }
 
+    /* target namespace (xs:any ##other/##targetNamespace filters) */
+    s->target_ns = NULL;
+
     LeptrisDocument doc = leptris_parse_string(xsd_text, len, status);
     if (!doc) {
         xsd_set_error(s, "schema document is not well-formed XML");
@@ -172,6 +271,8 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
         xsd_set_error(s, "schema document has no root element");
         goto fail;
     }
+    s->target_ns = xsd_strdup(
+        leptris_element_attribute(root, "targetNamespace"));
 
     const char* local = NULL;
     const char* prefix = NULL;
@@ -195,7 +296,37 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                                       &uri);
         if (!xsd_is_declaration(local, uri)) continue;
         s->declaration_count++;
-        if (strcmp(local, "simpleType") == 0 && uri && !strcmp(uri, XSD_NS)) {
+        if (strcmp(local, "element") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            const char* nm = leptris_element_attribute((LeptrisElement)n,
+                                                       "name");
+            const char* ty = leptris_element_attribute((LeptrisElement)n,
+                                                       "type");
+            if (nm && ty) {
+                XsdElementDecl* d =
+                    (XsdElementDecl*)calloc(1, sizeof(*d));
+                if (d) {
+                    d->name = xsd_strdup(nm);
+                    d->type = xsd_strdup(ty);
+                    d->next = s->elements;
+                    s->elements = d;
+                }
+            }
+        } else if (strcmp(local, "complexType") == 0 && uri &&
+                   !strcmp(uri, XSD_NS)) {
+            const char* nm =
+                leptris_element_attribute((LeptrisElement)n, "name");
+            if (nm) {
+                XsdCm* root =
+                    xsd_cm_new(XSD_CM_SEQ); /* wrapper keeps the name */
+                if (root) {
+                    root->name = xsd_strdup(nm);
+                    root->first_child =
+                        xsd_cm_parse((LeptrisElement)n, NULL);
+                    root->next = s->complex_types;
+                    s->complex_types = root;
+                }
+            }
+        } else if (strcmp(local, "simpleType") == 0 && uri && !strcmp(uri, XSD_NS)) {
             XsdSimple* captured = xsd_capture_simple((LeptrisElement)n);
             if (captured) {
                 captured->next = s->simple_types;
@@ -218,6 +349,16 @@ fail:
 LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return;
+    xsd_cm_free(s->complex_types);
+    XsdElementDecl* d = s->elements;
+    while (d) {
+        XsdElementDecl* dn = d->next;
+        free(d->name);
+        free(d->type);
+        free(d);
+        d = dn;
+    }
+    free(s->target_ns);
     XsdSimple* t = s->simple_types;
     while (t) {
         XsdSimple* next = t->next;
@@ -259,6 +400,36 @@ LEPTRIS_API int leptris_xsd_simple_valid(LeptrisXsdSchema schema,
     const XsdSimple* t = xsd_find_simple(s, type_name);
     if (!t) return -1; /* unknown type */
     return xsd_valid_chain(s, t, lexical, 0);
+}
+
+LEPTRIS_API int leptris_xsd_content_valid(
+    LeptrisXsdSchema schema, const char* element_name,
+    const char* const* child_names, const char* const* child_ns,
+    size_t child_count) {
+    struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
+    if (!s || !element_name) return -1;
+
+    const XsdElementDecl* d = s->elements;
+    while (d && strcmp(d->name, element_name) != 0) d = d->next;
+    if (!d) return -1; /* unknown element */
+
+    if (!d->type) return 1; /* no type attr: anyType accepts all */
+
+    /* built-in or simpleType ref: element content is text-only —
+     * any element child fails */
+    if (strncmp(d->type, "xs:", 3) == 0 ||
+        xsd_find_simple(s, d->type))
+        return child_count == 0;
+
+    XsdCm* ct = s->complex_types;
+    while (ct && strcmp(ct->name, d->type) != 0) ct = ct->next;
+    if (!ct) return child_count == 0; /* unknown type: accept-empty */
+
+    XsdCm* model = ct->first_child;
+    if (!model) return child_count == 0;
+
+    return xsd_content_valid(s, model, s->target_ns, child_names,
+                             child_ns, child_count);
 }
 
 LEPTRIS_API size_t leptris_xsd_declaration_count(LeptrisXsdSchema schema) {
