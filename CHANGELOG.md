@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.323] - 2026-10-08
+
+### Fixed
+
+- capture inline anonymous complexType/simpleType (#1592) (xsd)
+
+
+
 ## [1.9.322] - 2026-10-08
 
 ### Added
