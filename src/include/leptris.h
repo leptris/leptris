@@ -920,6 +920,15 @@ LEPTRIS_API int leptris_xsd_builtin_valid(const char* builtin,
 LEPTRIS_API int leptris_xsd_simple_valid(LeptrisXsdSchema schema,
                                          const char* type_name,
                                          const char* lexical);
+/* Slice 3 — content models. Validates a child sequence against the
+ * compiled content model of a top-level element declaration (its
+ * type's sequence/choice/all with occurrence bounds and xs:any
+ * wildcards). 1 valid, 0 invalid, -1 unknown element. child_ns may
+ * be NULL (all children unqualified). */
+LEPTRIS_API int leptris_xsd_content_valid(
+    LeptrisXsdSchema schema, const char* element_name,
+    const char* const* child_names, const char* const* child_ns,
+    size_t child_count);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,
