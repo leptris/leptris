@@ -116,6 +116,9 @@ leptris_add_test(test_text_borrowed dom/test_text_borrowed.cpp)
 leptris_add_test(test_compact    dom/test_compact.cpp)
 leptris_add_test(test_digest     dom/test_digest.cpp)
 leptris_add_test(test_rng        rng/test_rng.cpp)
+leptris_add_test(test_xsd_compile xsd/test_xsd_compile.cpp)
+target_compile_definitions(test_xsd_compile PRIVATE
+    LEPTRIS_XSD_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/libxml2-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
