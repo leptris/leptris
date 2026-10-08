@@ -156,6 +156,7 @@ static int run_schematron(const char* path, const char* phase,
 
 static cli_result_t validate_execute(int argc, char** argv) {
     const char* rng_path = NULL;
+    const char* xsd_path = NULL;
     const char* sch_path = NULL;
     const char* dtd_path = NULL;
     const char* phase = NULL;
@@ -164,6 +165,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--rng") == 0 && i + 1 < argc) {
             rng_path = argv[++i];
+        } else if (strcmp(argv[i], "--xsd") == 0 && i + 1 < argc) {
+            xsd_path = argv[++i];
         } else if ((strcmp(argv[i], "--schematron") == 0 ||
                     strcmp(argv[i], "-s") == 0) &&
                    i + 1 < argc) {
@@ -184,6 +187,7 @@ static cli_result_t validate_execute(int argc, char** argv) {
             printf("Options:\n");
             printf("  --dtd FILE          External DTD\n");
             printf("  --rng FILE          RELAX NG schema\n");
+            printf("  --xsd FILE          W3C XML Schema (XSD)\n");
             printf("  --schematron FILE   ISO Schematron schema\n");
             printf("  --phase ID          Schematron phase to");
             printf(" select\n");
@@ -205,8 +209,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
         cli_error("validate requires an XML document");
         return CLI_ERROR_ARGS;
     }
-    if (!rng_path && !sch_path && !dtd_path) {
-        cli_error("validate needs --dtd and/or --rng and/or --schematron");
+    if (!rng_path && !sch_path && !dtd_path && !xsd_path) {
+        cli_error("validate needs --dtd/--rng/--schematron/--xsd");
         return CLI_ERROR_ARGS;
     }
     LeptrisDocument doc = read_doc(xml_path);
@@ -261,6 +265,43 @@ static cli_result_t validate_execute(int argc, char** argv) {
         }
         leptris_rng_free(rng);
     }
+    if (xsd_path) {
+        size_t xsd_len = 0;
+        char* xsd_content = read_file(xsd_path, &xsd_len);
+        if (!xsd_content) {
+            cli_error("cannot read XSD: %s", xsd_path);
+            leptris_document_free(doc);
+            return CLI_ERROR_IO;
+        }
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXsdSchema xsd =
+            leptris_xsd_compile(xsd_content, xsd_len, &st);
+        free(xsd_content);
+        /* compile returns an error-carrying handle on failure — the
+         * status, not the pointer, says whether it succeeded. */
+        if (st != LEPTRIS_OK) {
+            const char* detail =
+                xsd ? leptris_xsd_error(xsd)
+                    : leptris_status_string(st);
+            cli_error("XSD compile failed: %s",
+                      detail ? detail : leptris_status_string(st));
+            if (xsd) leptris_xsd_free(xsd);
+            leptris_document_free(doc);
+            return CLI_ERROR_IO;
+        }
+        if (leptris_xsd_validate(xsd, doc)) {
+            printf("xsd: valid\n");
+        } else {
+            printf("xsd: invalid\n");
+            size_t n = leptris_xsd_error_count(xsd);
+            for (size_t i = 0; i < n; i++) {
+                const char* e = leptris_xsd_error_at(xsd, i);
+                if (e) printf("  %s\n", e);
+            }
+            invalid = 1;
+        }
+        leptris_xsd_free(xsd);
+    }
     if (sch_path) {
         cli_result_t r = run_schematron(
             sch_path, phase, want_svrl, doc, &invalid);
@@ -276,7 +317,8 @@ static cli_result_t validate_execute(int argc, char** argv) {
 
 static cli_command_t validate_command = {
     .name = "validate",
-    .description = "Validate XML against RELAX NG / Schematron",
+    .description =
+        "Validate XML against RELAX NG / Schematron / XSD",
     .execute = validate_execute,
     .print_help = NULL
 };
