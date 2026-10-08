@@ -8,11 +8,36 @@
 
 #include <cstdio>
 #include <cstring>
-#include <dirent.h>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 #include "leptris.h"
+
+#ifdef _WIN32
+#include <windows.h>
+static std::vector<std::string> list_dir(const std::string& path) {
+    std::vector<std::string> out;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((path + "\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do {
+        out.push_back(fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return out;
+}
+#else
+#include <dirent.h>
+static std::vector<std::string> list_dir(const std::string& path) {
+    std::vector<std::string> out;
+    DIR* d = opendir(path.c_str());
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) out.push_back(e->d_name);
+    closedir(d);
+    return out;
+}
+#endif
 
 namespace {
 
@@ -34,13 +59,10 @@ std::vector<std::string> fixture_dir(const char* sub) {
     const char* root = LEPTRIS_XSD_CASES_DIR;
     std::string path = std::string(root) + "/" + sub;
     std::vector<std::string> out;
-    DIR* d = opendir(path.c_str());
-    if (!d) return out;
-    struct dirent* e;
-    while ((e = readdir(d)))
-        if (std::strstr(e->d_name, ".xsd"))
-            out.push_back(path + "/" + e->d_name);
-    closedir(d);
+    for (const std::string& name : list_dir(path))
+        if (std::strstr(name.c_str(), ".xsd"))
+            out.push_back(path + "/" + name);
+    std::sort(out.begin(), out.end());
     return out;
 }
 
