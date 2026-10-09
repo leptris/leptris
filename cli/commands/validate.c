@@ -266,17 +266,15 @@ static cli_result_t validate_execute(int argc, char** argv) {
         leptris_rng_free(rng);
     }
     if (xsd_path) {
-        size_t xsd_len = 0;
-        char* xsd_content = read_file(xsd_path, &xsd_len);
-        if (!xsd_content) {
+        /* compile_file resolves schemaLocations relative to the
+         * schema's own directory */
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXsdSchema xsd = leptris_xsd_compile_file(xsd_path, &st);
+        if (!xsd) {
             cli_error("cannot read XSD: %s", xsd_path);
             leptris_document_free(doc);
             return CLI_ERROR_IO;
         }
-        LeptrisStatus st = LEPTRIS_OK;
-        LeptrisXsdSchema xsd =
-            leptris_xsd_compile(xsd_content, xsd_len, &st);
-        free(xsd_content);
         /* compile returns an error-carrying handle on failure — the
          * status, not the pointer, says whether it succeeded. */
         if (st != LEPTRIS_OK) {

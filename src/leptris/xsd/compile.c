@@ -4,6 +4,7 @@
  * grow the model (datatypes, facets, content models, identity
  * constraints) — this slice's contract is the API shape, the
  * xs:schema identity check, and the declaration enumeration. */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,9 +35,14 @@ struct leptris_xsd_schema {
     XsdSimple* simple_types;
     XsdElementDecl* elements;
     XsdCm* complex_types; /* name-carrying model roots */
+    XsdGroupDef* groups;  /* top-level xs:group definitions */
+    XsdAttrGroupDef* attr_groups;
+    XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
     XsdElementIcs* element_ics;
     char* target_ns;
+    char* base_dir;    /* schemaLocation resolution (file compile) */
+    int include_depth; /* include/import recursion guard */
     void* validator; /* slice-4 parked error list */
     char* error;
 };
@@ -56,6 +62,24 @@ static XsdCm* xsd_cm_new(XsdCmKind kind);
 static void xsd_cm_occurrence(XsdCm* cm, LeptrisElement e);
 static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                            LeptrisElement group, XsdCm** tail_out);
+static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
+                                          LeptrisElement container,
+                                          int depth);
+extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
+                               const char* type_name);
+extern const XsdTypeAttrs* xsd_find_type_attrs(
+    struct leptris_xsd_schema* s, const char* type_name);
+static XsdCm* xsd_cm_copy_list(const XsdCm* head);
+static void xsd_capture_root(struct leptris_xsd_schema* s,
+                             LeptrisElement root);
+static char* xsd_read_file(const char* path, size_t* out_len);
+static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src);
+static void xsd_register_complex(struct leptris_xsd_schema* s,
+                                 XsdCm* root, XsdAttrDecl* attrs,
+                                 const char* name);
+static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
+                                        LeptrisElement ct,
+                                        const char* name);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
 
@@ -76,6 +100,7 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->type);
         free(cm->ns);
         free(cm->any_ns);
+        free(cm->text_type);
         free(cm);
         cm = next;
     }
@@ -107,13 +132,7 @@ static int xsd_capture_inline(struct leptris_xsd_schema* s,
         leptris_element_expanded_name(e, &local, &prefix, &uri);
         if (!local || !uri || strcmp(uri, XSD_NS) != 0) continue;
         if (strcmp(local, "complexType") == 0) {
-            XsdCm* root = xsd_cm_new(XSD_CM_SEQ);
-            if (!root) return 0;
-            root->name = xsd_strdup(synth);
-            root->first_child = xsd_cm_parse(s, e, NULL);
-            root->next = s->complex_types;
-            s->complex_types = root;
-            return 1;
+            return xsd_capture_complex_model(s, e, synth) ? 1 : 0;
         }
         if (strcmp(local, "simpleType") == 0) {
             XsdSimple* captured = xsd_capture_simple(e);
@@ -168,6 +187,13 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                         cm->type = xsd_strdup(synth);
                 }
             }
+        } else if (strcmp(local, "group") == 0) {
+            /* <xs:group ref="g"/> — expanded at NFA build so
+             * forward references need no capture order */
+            cm = xsd_cm_new(XSD_CM_GROUP_REF);
+            if (cm)
+                cm->name = xsd_strdup(
+                    leptris_element_attribute(e, "ref"));
         } else if (strcmp(local, "any") == 0) {
             cm = xsd_cm_new(XSD_CM_ANY);
             if (cm) {
@@ -225,7 +251,81 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
         leptris_element_expanded_name(e, &local, &prefix, &uri);
         if (uri && strcmp(uri, XSD_NS) != 0) continue;
         if (!local) continue;
-        if (strcmp(local, "restriction") == 0) {
+        if (strcmp(local, "list") == 0) {
+            simple->deriv = XSD_SIMPLE_LIST;
+            const char* it = leptris_element_attribute(e, "itemType");
+            if (it && *it) {
+                simple->item_type = xsd_strdup(it);
+            } else {
+                /* inline anonymous item type rides this capture */
+                for (LeptrisNodeRef q = leptris_node_first_child(
+                         leptris_element_as_node(e));
+                     q && !simple->item_def;
+                     q = leptris_node_next_sibling(q)) {
+                    if (leptris_node_get_type(q) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement qe = (LeptrisElement)q;
+                    const char* ql = NULL;
+                    leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                    if (ql && strcmp(ql, "simpleType") == 0)
+                        simple->item_def = xsd_capture_simple(qe);
+                }
+            }
+        } else if (strcmp(local, "union") == 0) {
+            simple->deriv = XSD_SIMPLE_UNION;
+            const char* mt =
+                leptris_element_attribute(e, "memberTypes");
+            if (mt && *mt) {
+                size_t n = 0;
+                for (const char* p = mt; *p;) {
+                    while (*p && isspace((unsigned char)*p)) p++;
+                    if (!*p) break;
+                    while (*p && !isspace((unsigned char)*p)) p++;
+                    n++;
+                }
+                if (n) {
+                    simple->members = (char**)calloc(n, sizeof(char*));
+                    if (simple->members) {
+                        size_t i = 0;
+                        const char* p = mt;
+                        while (*p && i < n) {
+                            while (*p && isspace((unsigned char)*p)) p++;
+                            if (!*p) break;
+                            const char* start = p;
+                            while (*p && !isspace((unsigned char)*p)) p++;
+                            size_t len = (size_t)(p - start);
+                            char* tok = (char*)malloc(len + 1);
+                            if (!tok) break;
+                            memcpy(tok, start, len);
+                            tok[len] = 0;
+                            simple->members[i++] = tok;
+                        }
+                        simple->member_count = i;
+                    }
+                }
+            }
+            /* inline anonymous members ride this capture */
+            for (LeptrisNodeRef q = leptris_node_first_child(
+                     leptris_element_as_node(e));
+                 q; q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement qe = (LeptrisElement)q;
+                const char* ql = NULL;
+                leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                if (!ql || strcmp(ql, "simpleType") != 0) continue;
+                XsdSimple* def = xsd_capture_simple(qe);
+                if (!def) continue;
+                XsdSimple** grown = (XsdSimple**)realloc(
+                    simple->member_defs,
+                    (simple->member_def_count + 1) *
+                        sizeof(XsdSimple*));
+                if (!grown) break;
+                simple->member_defs = grown;
+                simple->member_defs[simple->member_def_count++] = def;
+            }
+        } else if (strcmp(local, "restriction") == 0) {
             simple->base =
                 xsd_strdup(leptris_element_attribute(e, "base"));
             for (LeptrisNodeRef f = leptris_node_first_child(
@@ -287,6 +387,71 @@ static const XsdSimple* xsd_find_simple(struct leptris_xsd_schema* s,
     return NULL;
 }
 
+extern int xsd_builtin_valid(const char* type, const char* v);
+extern int rng_regex_matches(const char* pat, const char* text);
+static int xsd_valid_chain(struct leptris_xsd_schema* s,
+                           const XsdSimple* t, const char* v, int depth);
+
+/* One list item or union member: a builtin reference, a local
+ * schema type (chain-walked), or an inline capture. Unresolved
+ * names accept (the compile-time leniency the corpus gate pins). */
+static int xsd_item_valid(struct leptris_xsd_schema* s,
+                          const char* name, const XsdSimple* def,
+                          const char* v, int depth) {
+    if (name && strncmp(name, "xs:", 3) == 0)
+        return xsd_builtin_valid(name, v);
+    if (def) return xsd_valid_chain(s, def, v, depth + 1);
+    if (name) {
+        const XsdSimple* next = xsd_find_simple(s, name);
+        if (next) return xsd_valid_chain(s, next, v, depth + 1);
+    }
+    return 1;
+}
+
+static int xsd_deriv_valid(struct leptris_xsd_schema* s,
+                           const XsdSimple* t, const char* v,
+                           int depth) {
+    if (t->deriv == XSD_SIMPLE_LIST) {
+        char* dup = xsd_strdup(v);
+        if (!dup) return 0;
+        size_t n = 0;
+        int ok = 1;
+        for (char* p = dup; *p;) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+            char* end = p;
+            while (*end && !isspace((unsigned char)*end)) end++;
+            char was = *end;
+            *end = 0;
+            if (ok && !xsd_item_valid(s, t->item_type, t->item_def, p,
+                                      depth))
+                ok = 0;
+            *end = was;
+            p = end;
+            n++;
+        }
+        free(dup);
+        /* length family counts ITEMS for lists (XSD semantics) */
+        if (ok && t->length >= 0 && (long)n != t->length) ok = 0;
+        if (ok && t->min_length >= 0 && (long)n < t->min_length) ok = 0;
+        if (ok && t->max_length >= 0 && (long)n > t->max_length) ok = 0;
+        /* pattern applies to the whole lexical */
+        if (ok && t->pattern && !rng_regex_matches(t->pattern, v))
+            ok = 0;
+        return ok;
+    }
+    if (t->deriv == XSD_SIMPLE_UNION) {
+        for (size_t i = 0; i < t->member_count; i++)
+            if (xsd_item_valid(s, t->members[i], NULL, v, depth))
+                return 1;
+        for (size_t i = 0; i < t->member_def_count; i++)
+            if (xsd_item_valid(s, NULL, t->member_defs[i], v, depth))
+                return 1;
+        return 0;
+    }
+    return xsd_simple_valid(t, v);
+}
+
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
                            const XsdSimple* t, const char* v, int depth) {
     if (!t || depth > 32) return 0;
@@ -294,6 +459,8 @@ static int xsd_valid_chain(struct leptris_xsd_schema* s,
         const XsdSimple* next = xsd_find_simple(s, t->base);
         if (next && !xsd_valid_chain(s, next, v, depth + 1)) return 0;
     }
+    if (t->deriv != XSD_SIMPLE_RESTRICT)
+        return xsd_deriv_valid(s, t, v, depth);
     return xsd_simple_valid(t, v);
 }
 
@@ -321,9 +488,80 @@ static int xsd_is_declaration(const char* local, const char* uri) {
     return 0;
 }
 
+static char* xsd_read_file(const char* path, size_t* out_len) {
+    *out_len = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long size = ftell(f);
+    if (size < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    char* buf = (char*)malloc((size_t)size + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    size_t got = fread(buf, 1, (size_t)size, f);
+    fclose(f);
+    buf[got] = 0;
+    *out_len = got;
+    return buf;
+}
+
+static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
+                                         size_t len,
+                                         const char* base_dir,
+                                         LeptrisStatus* status);
+
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                                                  size_t len,
                                                  LeptrisStatus* status) {
+    return xsd_compile_impl(xsd_text, len, NULL, status);
+}
+
+LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(
+    const char* path, LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!path || !*path) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        return NULL;
+    }
+    size_t len = 0;
+    char* text = xsd_read_file(path, &len);
+    if (!text) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        return NULL;
+    }
+    /* relative schemaLocations resolve against the schema's own
+     * directory */
+    const char* slash = strrchr(path, '/');
+    char* base_dir = NULL;
+    if (slash) {
+        size_t n = (size_t)(slash - path);
+        if (n == 0) n = 1; /* "/f.xsd" roots at "/" */
+        base_dir = (char*)malloc(n + 1);
+        if (base_dir) {
+            memcpy(base_dir, path, n);
+            base_dir[n] = 0;
+        }
+    } else {
+        base_dir = xsd_strdup(".");
+    }
+    LeptrisXsdSchema s = xsd_compile_impl(text, len, base_dir, status);
+    free(base_dir);
+    free(text);
+    return s;
+}
+
+static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
+                                         size_t len,
+                                         const char* base_dir,
+                                         LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!xsd_text || len == 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
@@ -336,6 +574,7 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;
     }
+    s->base_dir = xsd_strdup(base_dir);
 
     /* target namespace (xs:any ##other/##targetNamespace filters) */
     s->target_ns = NULL;
@@ -367,15 +606,79 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
         goto fail;
     }
 
+    xsd_capture_root(s, root);
+
+    leptris_document_free(doc);
+    return s;
+
+fail:
+    if (doc) leptris_document_free(doc);
+    if (status) *status = LEPTRIS_ERROR_PARSE;
+    /* Failure returns an error-carrying handle (the documented
+     * contract): leptris_xsd_error says why, free it the same way. */
+    return (LeptrisXsdSchema)s;
+}
+
+/* Every top-level declaration under an xs:schema root. xs:include
+ * / xs:import / xs:redefine resolve their schemaLocation against
+ * the owning schema's base_dir (string-compiled schemas have none
+ * and skip them); the referenced root's declarations merge into
+ * the same tables. */
+static void xsd_capture_root(struct leptris_xsd_schema* s,
+                             LeptrisElement root) {
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
             continue;
+        const char* local = NULL;
+        const char* prefix = NULL;
+        const char* uri = NULL;
         leptris_element_expanded_name((LeptrisElement)n, &local, &prefix,
                                       &uri);
         if (!xsd_is_declaration(local, uri)) continue;
         s->declaration_count++;
+
+        if (strcmp(local, "include") == 0 ||
+            strcmp(local, "import") == 0 ||
+            strcmp(local, "redefine") == 0) {
+            const char* loc = leptris_element_attribute(
+                (LeptrisElement)n, "schemaLocation");
+            if (loc && s->base_dir && s->include_depth < 16) {
+                char path[4096];
+                snprintf(path, sizeof(path), "%s/%s", s->base_dir,
+                         loc);
+                size_t flen = 0;
+                char* text = xsd_read_file(path, &flen);
+                if (text) {
+                    LeptrisDocument sub =
+                        leptris_parse_string(text, flen, NULL);
+                    if (sub) {
+                        LeptrisElement subroot =
+                            leptris_document_root(sub);
+                        const char* tns =
+                            subroot
+                                ? leptris_element_attribute(
+                                      subroot, "targetNamespace")
+                                : NULL;
+                        /* same-namespace merges and no-namespace
+                         * chameleon includes; foreign-namespace
+                         * imports stay lax at this tier */
+                        if (subroot &&
+                            (!tns || !s->target_ns ||
+                             strcmp(tns, s->target_ns) == 0)) {
+                            s->include_depth++;
+                            xsd_capture_root(s, subroot);
+                            s->include_depth--;
+                        }
+                        leptris_document_free(sub);
+                    }
+                    free(text);
+                }
+            }
+            continue;
+        }
+
         if (strcmp(local, "element") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm = leptris_element_attribute((LeptrisElement)n,
                                                        "name");
@@ -387,6 +690,16 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                 if (d) {
                     d->name = xsd_strdup(nm);
                     d->type = xsd_strdup(ty);
+                    d->fixed = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "fixed"));
+                    const char* sg = leptris_element_attribute(
+                        (LeptrisElement)n, "substitutionGroup");
+                    if (sg) {
+                        const char* colon = strchr(sg, ':');
+                        d->sub_head = xsd_strdup(
+                            colon ? colon + 1 : sg);
+                    }
                     d->next = s->elements;
                     s->elements = d;
                 }
@@ -413,55 +726,52 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                    !strcmp(uri, XSD_NS)) {
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
+            if (nm)
+                xsd_capture_complex_model(s, (LeptrisElement)n, nm);
+        } else if (strcmp(local, "attribute") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            const char* nm =
+                leptris_element_attribute((LeptrisElement)n, "name");
             if (nm) {
-                XsdCm* root =
-                    xsd_cm_new(XSD_CM_SEQ); /* wrapper keeps the name */
-                if (root) {
-                    root->name = xsd_strdup(nm);
-                    root->first_child =
-                        xsd_cm_parse(s, (LeptrisElement)n, NULL);
-                    root->next = s->complex_types;
-                    s->complex_types = root;
-                }
-                /* slice 4: attribute declarations of the type */
-                XsdAttrDecl* head = NULL;
-                XsdAttrDecl* tail = NULL;
-                for (LeptrisNodeRef ac = leptris_node_first_child(
-                         leptris_element_as_node((LeptrisElement)n));
-                     ac; ac = leptris_node_next_sibling(ac)) {
-                    if (leptris_node_get_type(ac) !=
-                        LEPTRIS_NODE_TYPE_ELEMENT)
-                        continue;
-                    LeptrisElement ae = (LeptrisElement)ac;
-                    const char* al = NULL, *ap = NULL, *au = NULL;
-                    leptris_element_expanded_name(ae, &al, &ap, &au);
-                    if (!al || (au && strcmp(au, XSD_NS) != 0)) continue;
-                    if (strcmp(al, "attribute") != 0) continue;
-                    const char* an = leptris_element_attribute(ae, "name");
-                    if (!an) continue; /* ref forms: slice 5 */
-                    XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
-                    if (!d) continue;
-                    d->name = xsd_strdup(an);
+                XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
+                if (d) {
+                    d->name = xsd_strdup(nm);
                     d->type = xsd_strdup(
-                        leptris_element_attribute(ae, "type"));
-                    const char* use =
-                        leptris_element_attribute(ae, "use");
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "type"));
+                    d->fixed = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "fixed"));
+                    const char* use = leptris_element_attribute(
+                        (LeptrisElement)n, "use");
                     d->required = (use && strcmp(use, "required") == 0);
-                    if (tail)
-                        tail->next = d;
-                    else
-                        head = d;
-                    tail = d;
+                    d->next = s->top_attrs;
+                    s->top_attrs = d;
                 }
-                if (head) {
-                    XsdTypeAttrs* ta =
-                        (XsdTypeAttrs*)calloc(1, sizeof(*ta));
-                    if (ta) {
-                        ta->type_name = xsd_strdup(nm);
-                        ta->attrs = head;
-                        ta->next = s->type_attrs;
-                        s->type_attrs = ta;
-                    }
+            }
+        } else if (strcmp(local, "attributeGroup") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            const char* nm =
+                leptris_element_attribute((LeptrisElement)n, "name");
+            if (nm) {
+                XsdAttrGroupDef* g =
+                    (XsdAttrGroupDef*)calloc(1, sizeof(*g));
+                if (g) {
+                    g->name = xsd_strdup(nm);
+                    g->attrs = xsd_capture_attr_rows(
+                        s, (LeptrisElement)n, 0);
+                    g->next = s->attr_groups;
+                    s->attr_groups = g;
+                }
+            }
+        } else if (strcmp(local, "group") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            const char* nm =
+                leptris_element_attribute((LeptrisElement)n, "name");
+            if (nm) {
+                XsdGroupDef* g = (XsdGroupDef*)calloc(1, sizeof(*g));
+                if (g) {
+                    g->name = xsd_strdup(nm);
+                    g->model = xsd_cm_parse(s, (LeptrisElement)n, NULL);
+                    g->next = s->groups;
+                    s->groups = g;
                 }
             }
         } else if (strcmp(local, "simpleType") == 0 && uri && !strcmp(uri, XSD_NS)) {
@@ -472,16 +782,33 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
             }
         }
     }
+}
 
-    leptris_document_free(doc);
-    return s;
-
-fail:
-    if (doc) leptris_document_free(doc);
-    if (status) *status = LEPTRIS_ERROR_PARSE;
-    /* Failure returns an error-carrying handle (the documented
-     * contract): leptris_xsd_error says why, free it the same way. */
-    return (LeptrisXsdSchema)s;
+static void xsd_free_simple_one(XsdSimple* t) {
+    if (!t) return;
+    free(t->name);
+    free(t->base);
+    free(t->pattern);
+    XsdFacetValue* fv = t->enum_values;
+    while (fv) {
+        XsdFacetValue* fn = fv->next;
+        free(fv->text);
+        free(fv);
+        fv = fn;
+    }
+    free(t->min_inclusive);
+    free(t->min_exclusive);
+    free(t->max_inclusive);
+    free(t->max_exclusive);
+    free(t->whitespace);
+    free(t->item_type);
+    xsd_free_simple_one(t->item_def);
+    for (size_t i = 0; i < t->member_count; i++) free(t->members[i]);
+    free(t->members);
+    for (size_t i = 0; i < t->member_def_count; i++)
+        xsd_free_simple_one(t->member_defs[i]);
+    free(t->member_defs);
+    free(t);
 }
 
 LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
@@ -514,6 +841,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             XsdAttrDecl* an = a->next;
             free(a->name);
             free(a->type);
+            free(a->fixed);
             free(a);
             a = an;
         }
@@ -526,31 +854,52 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         XsdElementDecl* dn = d->next;
         free(d->name);
         free(d->type);
+        free(d->fixed);
+        free(d->sub_head);
         free(d);
         d = dn;
     }
+    XsdAttrGroupDef* ag = s->attr_groups;
+    while (ag) {
+        XsdAttrGroupDef* agn = ag->next;
+        free(ag->name);
+        XsdAttrDecl* a = ag->attrs;
+        while (a) {
+            XsdAttrDecl* an2 = a->next;
+            free(a->name);
+            free(a->type);
+            free(a->fixed);
+            free(a);
+            a = an2;
+        }
+        free(ag);
+        ag = agn;
+    }
+    XsdAttrDecl* ta_row = s->top_attrs;
+    while (ta_row) {
+        XsdAttrDecl* ta_next = ta_row->next;
+        free(ta_row->name);
+        free(ta_row->type);
+        free(ta_row->fixed);
+        free(ta_row);
+        ta_row = ta_next;
+    }
+    XsdGroupDef* g = s->groups;
+    while (g) {
+        XsdGroupDef* gn = g->next;
+        free(g->name);
+        xsd_cm_free(g->model);
+        free(g);
+        g = gn;
+    }
     free(s->target_ns);
+    free(s->base_dir);
     if (s->validator)
         xsd_validator_free((struct xsd_validator*)s->validator);
     XsdSimple* t = s->simple_types;
     while (t) {
         XsdSimple* next = t->next;
-        free(t->name);
-        free(t->base);
-        free(t->pattern);
-        XsdFacetValue* fv = t->enum_values;
-        while (fv) {
-            XsdFacetValue* fn = fv->next;
-            free(fv->text);
-            free(fv);
-            fv = fn;
-        }
-        free(t->min_inclusive);
-        free(t->min_exclusive);
-        free(t->max_inclusive);
-        free(t->max_exclusive);
-        free(t->whitespace);
-        free(t);
+        xsd_free_simple_one(t);
         t = next;
     }
     free(s->error);
@@ -559,10 +908,371 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
 
 /* ---- slice 2: lexical validation --------------------------------- */
 
+static XsdCm* xsd_cm_copy_list(const XsdCm* head) {
+    XsdCm* out = NULL;
+    XsdCm* out_tail = NULL;
+    for (const XsdCm* src = head; src; src = src->next) {
+        XsdCm* d = (XsdCm*)calloc(1, sizeof(*d));
+        if (!d) break;
+        d->kind = src->kind;
+        d->name = xsd_strdup(src->name);
+        d->type = xsd_strdup(src->type);
+        d->ns = xsd_strdup(src->ns);
+        d->any_ns = xsd_strdup(src->any_ns);
+        d->process_skip = src->process_skip;
+        d->min = src->min;
+        d->max = src->max;
+        d->first_child = xsd_cm_copy_list(src->first_child);
+        if (out_tail)
+            out_tail->next = d;
+        else
+            out = d;
+        out_tail = d;
+    }
+    return out;
+}
+
+static void xsd_register_complex(struct leptris_xsd_schema* s,
+                                 XsdCm* root, XsdAttrDecl* attrs,
+                                 const char* name) {
+    if (!root) return;
+    root->name = xsd_strdup(name);
+    root->next = s->complex_types;
+    s->complex_types = root;
+    if (attrs) {
+        XsdTypeAttrs* ta = (XsdTypeAttrs*)calloc(1, sizeof(*ta));
+        if (ta) {
+            ta->type_name = xsd_strdup(name);
+            ta->attrs = attrs;
+            ta->next = s->type_attrs;
+            s->type_attrs = ta;
+        }
+    }
+}
+
+/* One complexType capture, shared by top-level declarations and
+ * inline anonymous types: content model + derivation
+ * (complexContent/simpleContent extension|restriction) + the
+ * attribute rows the derivation carries. */
+static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
+                                        LeptrisElement ct,
+                                        const char* name) {
+    XsdCm* root = xsd_cm_new(XSD_CM_SEQ); /* wrapper keeps the name */
+    if (!root) return NULL;
+    XsdAttrDecl* attrs = NULL;
+
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(ct));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL, *prefix = NULL, *uri = NULL;
+        leptris_element_expanded_name(e, &local, &prefix, &uri);
+        if (!local || !uri || strcmp(uri, XSD_NS) != 0) continue;
+
+        if (strcmp(local, "complexContent") == 0) {
+            /* extension|restriction child carries base + model */
+            for (LeptrisNodeRef q = leptris_node_first_child(
+                     leptris_element_as_node(e));
+                 q; q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement dq = (LeptrisElement)q;
+                const char* dl = NULL;
+                leptris_element_expanded_name(dq, &dl, NULL, NULL);
+                if (!dl || (strcmp(dl, "extension") != 0 &&
+                            strcmp(dl, "restriction") != 0))
+                    continue;
+                const char* base =
+                    leptris_element_attribute(dq, "base");
+                XsdCm* base_root =
+                    (base && strncmp(base, "xs:", 3) != 0)
+                        ? xsd_find_complex(s, base)
+                        : NULL;
+                if (strcmp(dl, "extension") == 0) {
+                    /* base content first, derived content after */
+                    root->first_child = xsd_cm_copy_list(
+                        base_root ? base_root->first_child : NULL);
+                    XsdCm* own_tail = root->first_child;
+                    while (own_tail && own_tail->next)
+                        own_tail = own_tail->next;
+                    XsdCm* own = xsd_cm_parse(s, dq, NULL);
+                    if (own_tail)
+                        own_tail->next = own;
+                    else if (!root->first_child)
+                        root->first_child = own;
+                    if (base_root) {
+                        const XsdTypeAttrs* bt = xsd_find_type_attrs(
+                            s, base);
+                        attrs = xsd_copy_attr_rows(bt ? bt->attrs
+                                                      : NULL);
+                    }
+                    XsdAttrDecl* own_attrs =
+                        xsd_capture_attr_rows(s, dq, 0);
+                    if (own_attrs) {
+                        XsdAttrDecl* at = attrs;
+                        while (at && at->next) at = at->next;
+                        if (at)
+                            at->next = own_attrs;
+                        else
+                            attrs = own_attrs;
+                    }
+                } else {
+                    /* restriction: the derived model REPLACES */
+                    root->first_child = xsd_cm_parse(s, dq, NULL);
+                    attrs = xsd_capture_attr_rows(s, dq, 0);
+                }
+            }
+        } else if (strcmp(local, "simpleContent") == 0) {
+            for (LeptrisNodeRef q = leptris_node_first_child(
+                     leptris_element_as_node(e));
+                 q; q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement dq = (LeptrisElement)q;
+                const char* dl = NULL;
+                leptris_element_expanded_name(dq, &dl, NULL, NULL);
+                if (!dl || (strcmp(dl, "extension") != 0 &&
+                            strcmp(dl, "restriction") != 0))
+                    continue;
+                const char* base =
+                    leptris_element_attribute(dq, "base");
+                if (base) {
+                    if (strncmp(base, "xs:", 3) == 0) {
+                        root->text_type = xsd_strdup(base);
+                    } else {
+                        /* restriction facets under a local base
+                         * ride a synthesized "complex:NAME" slot */
+                        int has_facets = 0;
+                        for (LeptrisNodeRef f =
+                                 leptris_node_first_child(
+                                     leptris_element_as_node(dq));
+                             f; f = leptris_node_next_sibling(f)) {
+                            if (leptris_node_get_type(f) !=
+                                LEPTRIS_NODE_TYPE_ELEMENT)
+                                continue;
+                            const char* fl = NULL;
+                            leptris_element_expanded_name(
+                                (LeptrisElement)f, &fl, NULL, NULL);
+                            if (fl && strcmp(fl, "facet") != 0 &&
+                                strcmp(fl, "simpleType") != 0)
+                                has_facets = 1;
+                        }
+                        XsdSimple* captured =
+                            has_facets
+                                ? xsd_capture_simple(dq)
+                                : NULL;
+                        if (captured) {
+                            char synth[512];
+                            snprintf(synth, sizeof(synth),
+                                     "complex:%s", name);
+                            free(captured->name);
+                            captured->name = xsd_strdup(synth);
+                            captured->next = s->simple_types;
+                            s->simple_types = captured;
+                            root->text_type = xsd_strdup(synth);
+                        } else {
+                            root->text_type = xsd_strdup(base);
+                        }
+                    }
+                }
+                attrs = xsd_capture_attr_rows(s, dq, 0);
+            }
+        }
+    }
+    if (!root->first_child && !root->text_type) {
+        /* no derivation: the direct-content spelling */
+        root->first_child = xsd_cm_parse(s, ct, NULL);
+        attrs = xsd_capture_attr_rows(s, ct, 0);
+    }
+    /* the NFA and model walkers consume ONE root particle —
+     * a multi-particle model (derivation splices) normalizes
+     * under a sequence */
+    if (root->first_child && root->first_child->next) {
+        XsdCm* seq = xsd_cm_new(XSD_CM_SEQ);
+        if (seq) {
+            seq->first_child = root->first_child;
+            root->first_child = seq;
+        }
+    }
+    xsd_register_complex(s, root, attrs, name);
+    return root;
+}
+
+static const XsdElementDecl* xsd_find_element_decl(
+    struct leptris_xsd_schema* s, const char* name) {
+    for (XsdElementDecl* d = s->elements; d; d = d->next)
+        if (strcmp(d->name, name) == 0) return d;
+    return NULL;
+}
+
+int xsd_is_substitute(struct leptris_xsd_schema* s,
+                      const char* name, const char* head) {
+    const XsdElementDecl* d = xsd_find_element_decl(s, name);
+    for (int hops = 0; d && d->sub_head && hops < 16; hops++) {
+        if (strcmp(d->sub_head, head) == 0) return 1;
+        d = xsd_find_element_decl(s, d->sub_head);
+    }
+    return 0;
+}
+
+XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
+                            const char* name) {
+    if (!s || !name) return NULL;
+    for (XsdGroupDef* g = s->groups; g; g = g->next)
+        if (strcmp(g->name, name) == 0) return g;
+    return NULL;
+}
+
+static const XsdAttrDecl* xsd_find_top_attr(
+    struct leptris_xsd_schema* s, const char* name) {
+    if (!s || !name) return NULL;
+    for (XsdAttrDecl* a = s->top_attrs; a; a = a->next)
+        if (strcmp(a->name, name) == 0) return a;
+    return NULL;
+}
+
+/* Deep-copy a captured row chain (attributeGroup refs splice
+ * copies — every referencing type owns its rows). */
+static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
+    XsdAttrDecl* head = NULL;
+    XsdAttrDecl* tail = NULL;
+    for (; src; src = src->next) {
+        XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
+        if (!d) break;
+        d->name = xsd_strdup(src->name);
+        d->type = xsd_strdup(src->type);
+        d->fixed = xsd_strdup(src->fixed);
+        d->required = src->required;
+        if (tail)
+            tail->next = d;
+        else
+            head = d;
+        tail = d;
+    }
+    return head;
+}
+
+/* Capture the attribute rows of a complexType or attributeGroup:
+ * named rows, inline anonymous simpleTypes (synthesized slots),
+ * refs to top-level attributes, and attributeGroup refs. */
+/* Named row with an inline anonymous simpleType rides a
+ * synthesized "attribute:NAME" slot, the element-slot pattern. */
+static const char* xsd_inline_attr_type(
+    struct leptris_xsd_schema* s, LeptrisElement ae,
+    const char* attr_name) {
+    for (LeptrisNodeRef q = leptris_node_first_child(
+             leptris_element_as_node(ae));
+         q; q = leptris_node_next_sibling(q)) {
+        if (leptris_node_get_type(q) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement qe = (LeptrisElement)q;
+        const char* ql = NULL;
+        leptris_element_expanded_name(qe, &ql, NULL, NULL);
+        if (!ql || strcmp(ql, "simpleType") != 0) continue;
+        char synth[512];
+        snprintf(synth, sizeof(synth), "attribute:%s", attr_name);
+        XsdSimple* captured = xsd_capture_simple(qe);
+        if (!captured) return NULL;
+        free(captured->name);
+        captured->name = xsd_strdup(synth);
+        captured->next = s->simple_types;
+        s->simple_types = captured;
+        return captured->name;
+    }
+    return NULL;
+}
+
+static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
+                                          LeptrisElement container,
+                                          int depth) {
+    XsdAttrDecl* head = NULL;
+    XsdAttrDecl* tail = NULL;
+    if (depth > 8) return NULL;
+    for (LeptrisNodeRef ac = leptris_node_first_child(
+             leptris_element_as_node(container));
+         ac; ac = leptris_node_next_sibling(ac)) {
+        if (leptris_node_get_type(ac) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement ae = (LeptrisElement)ac;
+        const char* al = NULL, *ap = NULL, *au = NULL;
+        leptris_element_expanded_name(ae, &al, &ap, &au);
+        if (!al || (au && strcmp(au, XSD_NS) != 0)) continue;
+
+        if (strcmp(al, "attribute") == 0) {
+            const char* an = leptris_element_attribute(ae, "name");
+            const char* use = leptris_element_attribute(ae, "use");
+            XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
+            if (!d) continue;
+            if (an) {
+                d->name = xsd_strdup(an);
+                d->type = xsd_strdup(
+                    leptris_element_attribute(ae, "type"));
+                if (!d->type)
+                    d->type = xsd_strdup(
+                        xsd_inline_attr_type(s, ae, an));
+                d->fixed = xsd_strdup(
+                    leptris_element_attribute(ae, "fixed"));
+                d->required = (use && strcmp(use, "required") == 0);
+            } else {
+                /* ref to a top-level attribute declaration */
+                const char* ref =
+                    leptris_element_attribute(ae, "ref");
+                const XsdAttrDecl* src =
+                    ref ? xsd_find_top_attr(s, ref) : NULL;
+                if (!src) {
+                    free(d);
+                    continue;
+                }
+                d->name = xsd_strdup(src->name);
+                d->type = xsd_strdup(src->type);
+                d->fixed = xsd_strdup(src->fixed);
+                d->required = use
+                                  ? (strcmp(use, "required") == 0)
+                                  : src->required;
+            }
+            if (tail)
+                tail->next = d;
+            else
+                head = d;
+            tail = d;
+        } else if (strcmp(al, "attributeGroup") == 0) {
+            const char* ref =
+                leptris_element_attribute(ae, "ref");
+            if (!ref) continue;
+            XsdAttrGroupDef* g = s->attr_groups;
+            for (; g; g = g->next)
+                if (strcmp(g->name, ref) == 0) break;
+            if (!g || !g->attrs) continue;
+            XsdAttrDecl* copied = xsd_copy_attr_rows(g->attrs);
+            if (!copied) continue;
+            if (!head)
+                head = copied;
+            else
+                tail->next = copied;
+            tail = copied;
+            while (tail->next) tail = tail->next;
+        }
+    }
+    return head;
+}
+
 LEPTRIS_API int leptris_xsd_builtin_valid(const char* builtin,
                                           const char* lexical) {
     extern int xsd_builtin_valid(const char* type, const char* v);
     return xsd_builtin_valid(builtin, lexical);
+}
+
+/* The instance validator routes every user simpleType through the
+ * chain walker so list/union derivations dispatch with the schema
+ * in hand (the bare xsd_simple_valid cannot resolve item/member
+ * names). */
+int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
+                           const XsdSimple* t, const char* v) {
+    return xsd_valid_chain(s, t, v, 0);
 }
 
 LEPTRIS_API int leptris_xsd_simple_valid(LeptrisXsdSchema schema,

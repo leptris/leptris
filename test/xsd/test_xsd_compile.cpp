@@ -130,11 +130,10 @@ TEST(XsdCompile, NullTolerant) {
 TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     size_t ok = 0, failed = 0;
     for (const std::string& path : fixture_dir(".")) {
-        std::string text = slurp(path.c_str());
-        ASSERT_FALSE(text.empty()) << path;
         LeptrisStatus st = (LeptrisStatus)0;
-        LeptrisXsdSchema s =
-            leptris_xsd_compile(text.data(), text.size(), &st);
+        /* compile_file: xs:include/xs:import schemaLocations
+         * resolve against the fixture's own directory */
+        LeptrisXsdSchema s = leptris_xsd_compile_file(path.c_str(), &st);
         ASSERT_NE(s, (LeptrisXsdSchema)0) << path;
         if (st == LEPTRIS_OK)
             ok++;
@@ -768,6 +767,355 @@ TEST(XsdLocal, LocalChildContentModelValidates) {
     EXPECT_EQ(validate_doc(k_local_schema,
                            "<order><item id=\"5\"><sku>a</sku>"
                            "<qty>nan</qty></item></order>"), 0);
+}
+
+}  // namespace
+
+// ---- tier-1 charter: union / list simple-type derivation -----------
+namespace {
+
+const char* k_ul_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:simpleType name=\"ints\">"
+    "<xs:list itemType=\"xs:integer\"/>"
+    "</xs:simpleType>"
+    "<xs:simpleType name=\"alpha\">"
+    "<xs:restriction base=\"xs:string\">"
+    "<xs:pattern value=\"[a-z]+\"/>"
+    "</xs:restriction>"
+    "</xs:simpleType>"
+    "<xs:simpleType name=\"code\">"
+    "<xs:union memberTypes=\"xs:integer alpha\"/>"
+    "</xs:simpleType>"
+    "<xs:element name=\"vals\" type=\"ints\"/>"
+    "<xs:element name=\"c\" type=\"code\"/>"
+    "</xs:schema>";
+
+TEST(XsdDatatypes, ListDerivationValidatesEveryItem) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_ul_schema, strlen(k_ul_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ints", "1 2 3"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ints", "1 x 3"), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdDatatypes, UnionDerivationAcceptsAnyMember) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(k_ul_schema, strlen(k_ul_schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "42"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "abc"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "code", "42x"), 0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, UnionAndListValidateInDocuments) {
+    EXPECT_EQ(validate_doc(k_ul_schema, "<vals>1 2 3</vals>"), 1);
+    EXPECT_EQ(validate_doc(k_ul_schema, "<vals>1 x</vals>"), 0);
+    EXPECT_EQ(validate_doc(k_ul_schema, "<c>abc</c>"), 1);
+    EXPECT_EQ(validate_doc(k_ul_schema, "<c>99</c>"), 1);
+    EXPECT_EQ(validate_doc(k_ul_schema, "<c>1.5</c>"), 0);
+}
+
+/* inline anonymous union member (no memberTypes for it) */
+TEST(XsdDatatypes, UnionInlineAnonymousMember) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"combo\">"
+        "<xs:union memberTypes=\"xs:integer\">"
+        "<xs:simpleType><xs:restriction base=\"xs:string\">"
+        "<xs:enumeration value=\"yes\"/>"
+        "<xs:enumeration value=\"no\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:union>"
+        "</xs:simpleType>"
+        "<xs:element name=\"q\" type=\"combo\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<q>3</q>"), 1);
+    EXPECT_EQ(validate_doc(x, "<q>yes</q>"), 1);
+    EXPECT_EQ(validate_doc(x, "<q>maybe</q>"), 0);
+}
+
+
+}  // namespace
+
+// ---- tier-1 charter: named groups + attribute groups + attr refs --
+namespace {
+
+const char* k_grp_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:group name=\"meta\">"
+    "<xs:sequence>"
+    "<xs:element name=\"title\" type=\"xs:token\"/>"
+    "<xs:element name=\"date\" type=\"xs:date\"/>"
+    "</xs:sequence>"
+    "</xs:group>"
+    "<xs:attribute name=\"rev\" type=\"xs:integer\"/>"
+    "<xs:attributeGroup name=\"common\">"
+    "<xs:attribute name=\"id\" type=\"xs:integer\" use=\"required\"/>"
+    "<xs:attribute name=\"lang\" type=\"xs:string\"/>"
+    "</xs:attributeGroup>"
+    "<xs:complexType name=\"docT\">"
+    "<xs:sequence>"
+    "<xs:group ref=\"meta\"/>"
+    "<xs:element name=\"body\" type=\"xs:string\"/>"
+    "</xs:sequence>"
+    "<xs:attributeGroup ref=\"common\"/>"
+    "<xs:attribute ref=\"rev\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"doc\" type=\"docT\"/>"
+    "</xs:schema>";
+
+TEST(XsdContent, NamedModelGroupSplices) {
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"1\" lang=\"en\" rev=\"2\">"
+                           "<title>t</title><date>2026-01-01</date>"
+                           "<body>b</body></doc>"), 1);
+    /* body before the spliced group content */
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"1\"><body>b</body>"
+                           "<title>t</title><date>2026-01-01</date>"
+                           "</doc>"), 0);
+    /* missing a group member */
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"1\"><title>t</title>"
+                           "<body>b</body></doc>"), 0);
+    /* group member text types ride the splice */
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"1\"><title>t</title>"
+                           "<date>not-a-date</date><body>b</body>"
+                           "</doc>"), 0);
+}
+
+TEST(XsdValidate, AttributeGroupRowsApply) {
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc><title>t</title>"
+                           "<date>2026-01-01</date><body>b</body></doc>"), 0);
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"x\"><title>t</title>"
+                           "<date>2026-01-01</date><body>b</body></doc>"),
+              0);
+    /* the referenced top-level attribute enforces its type */
+    EXPECT_EQ(validate_doc(k_grp_schema,
+                           "<doc id=\"1\" rev=\"x\"><title>t</title>"
+                           "<date>2026-01-01</date><body>b</body></doc>"),
+              0);
+}
+
+}  // namespace
+
+// ---- tier-1 charter: complexContent / simpleContent derivation -----
+namespace {
+
+const char* k_deriv_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"baseT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" type=\"xs:token\"/>"
+    "<xs:element name=\"b\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"x\" type=\"xs:integer\"/>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"extT\">"
+    "<xs:complexContent>"
+    "<xs:extension base=\"baseT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"c\" type=\"xs:integer\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"y\" type=\"xs:string\"/>"
+    "</xs:extension>"
+    "</xs:complexContent>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"rstrT\">"
+    "<xs:complexContent>"
+    "<xs:restriction base=\"baseT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "</xs:restriction>"
+    "</xs:complexContent>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"labelT\">"
+    "<xs:simpleContent>"
+    "<xs:extension base=\"xs:string\">"
+    "<xs:attribute name=\"lang\" type=\"xs:string\" use=\"required\"/>"
+    "</xs:extension>"
+    "</xs:simpleContent>"
+    "</xs:complexType>"
+    "<xs:element name=\"e\" type=\"extT\"/>"
+    "<xs:element name=\"r\" type=\"rstrT\"/>"
+    "<xs:element name=\"l\" type=\"labelT\"/>"
+    "</xs:schema>";
+
+TEST(XsdValidate, ExtensionSplicesBaseContentAndAttrs) {
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<e x=\"1\" y=\"s\"><a>t</a><b>u</b>"
+                           "<c>3</c></e>"), 1);
+    /* base child still required after extension */
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<e x=\"1\" y=\"s\"><a>t</a>"
+                           "<c>3</c></e>"), 0);
+    /* derived child appends after the base sequence */
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<e x=\"1\" y=\"s\"><c>3</c><a>t</a>"
+                           "<b>u</b></e>"), 0);
+    /* base attribute rows ride the derivation */
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<e x=\"z\" y=\"s\"><a>t</a><b>u</b>"
+                           "<c>3</c></e>"), 0);
+    /* derived-only attribute optional */
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<e x=\"1\"><a>t</a><b>u</b>"
+                           "<c>3</c></e>"), 1);
+}
+
+TEST(XsdValidate, RestrictionReplacesContentModel) {
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<r x=\"1\"><a>t</a></r>"), 1);
+    /* the restricted-away child is no longer allowed */
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<r x=\"1\"><a>t</a><b>u</b></r>"), 0);
+}
+
+TEST(XsdValidate, SimpleContentTextAndAttrs) {
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<l lang=\"en\">hello</l>"), 1);
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<l>hello</l>"), 0);
+    EXPECT_EQ(validate_doc(k_deriv_schema,
+                           "<l lang=\"en\">42</l>"), 1);
+}
+
+}  // namespace
+
+
+// ---- tier-1 charter: fixed/default + substitutionGroup -------------
+namespace {
+
+const char* k_fd_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"orderT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"item\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"country\" type=\"xs:string\" fixed=\"US\"/>"
+    "<xs:attribute name=\"prio\" type=\"xs:integer\" default=\"2\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"order\" type=\"orderT\"/>"
+    "<xs:element name=\"ship\" type=\"xs:string\" fixed=\"air\"/>"
+    "</xs:schema>";
+
+TEST(XsdValidate, FixedAttributeValueEnforced) {
+    EXPECT_EQ(validate_doc(k_fd_schema,
+                           "<order country=\"US\"><item>x</item>"
+                           "</order>"), 1);
+    EXPECT_EQ(validate_doc(k_fd_schema,
+                           "<order country=\"US\" prio=\"7\">"
+                           "<item>x</item></order>"), 1);
+    EXPECT_EQ(validate_doc(k_fd_schema,
+                           "<order country=\"DE\"><item>x</item>"
+                           "</order>"), 0);
+    EXPECT_EQ(validate_doc(k_fd_schema,
+                           "<order><item>x</item></order>"), 1);
+}
+
+TEST(XsdValidate, FixedElementTextEnforced) {
+    EXPECT_EQ(validate_doc(k_fd_schema, "<ship>air</ship>"), 1);
+    EXPECT_EQ(validate_doc(k_fd_schema, "<ship>sea</ship>"), 0);
+}
+
+const char* k_subst_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"boxT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"head\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:element name=\"head\" type=\"xs:token\"/>"
+    "<xs:element name=\"alt\" type=\"xs:token\" substitutionGroup=\"head\"/>"
+    "<xs:element name=\"box\" type=\"boxT\"/>"
+    "</xs:schema>";
+
+TEST(XsdValidate, SubstitutionGroupMembersBind) {
+    EXPECT_EQ(validate_doc(k_subst_schema,
+                           "<box><head>x</head></box>"), 1);
+    EXPECT_EQ(validate_doc(k_subst_schema,
+                           "<box><alt>y</alt></box>"), 1);
+    EXPECT_EQ(validate_doc(k_subst_schema,
+                           "<box><other>z</other></box>"), 0);
+}
+
+}  // namespace
+
+// ---- tier-1 charter: include/import via compile_file ---------------
+namespace {
+
+TEST(XsdCompileFile, IncludeResolvesRelativeSchemaLocation) {
+    std::string dir = ::testing::TempDir();
+    std::string common = dir + "xsdcommon.xsd";
+    std::string main = dir + "xsdmain.xsd";
+    FILE* f1 = fopen(common.c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* common_text =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"itemT\">"
+        "<xs:sequence>"
+        "<xs:element name=\"sku\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "<xs:attribute name=\"id\" type=\"xs:integer\" use=\"required\"/>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(common_text, 1, strlen(common_text), f1);
+    fclose(f1);
+    FILE* f2 = fopen(main.c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* main_text =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:include schemaLocation=\"xsdcommon.xsd\"/>"
+        "<xs:complexType name=\"listT\">"
+        "<xs:sequence>"
+        "<xs:element name=\"item\" type=\"itemT\""
+        " maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"list\" type=\"listT\"/>"
+        "</xs:schema>";
+    fwrite(main_text, 1, strlen(main_text), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(main.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* the included declaration participates: itemT's rows type the
+     * particle's attributes and its content model applies */
+    const char* good =
+        "<list><item id=\"5\"><sku>a</sku></item></list>";
+    LeptrisDocument d =
+        leptris_parse_string(good, strlen(good), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    const char* badx =
+        "<list><item id=\"x\"><sku>a</sku></item></list>";
+    LeptrisDocument bad =
+        leptris_parse_string(badx, strlen(badx), &st);
+    ASSERT_NE(bad, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, bad), 0);
+    leptris_document_free(d);
+    leptris_document_free(bad);
+    leptris_xsd_free(s);
+    remove(common.c_str());
+    remove(main.c_str());
+}
+
+TEST(XsdCompileFile, MissingFileIsNullWithStatus) {
+    LeptrisStatus st = LEPTRIS_OK;
+    EXPECT_EQ(leptris_xsd_compile_file("/no/such/schema.xsd", &st),
+              (LeptrisXsdSchema)0);
+    EXPECT_NE(st, LEPTRIS_OK);
+    EXPECT_EQ(leptris_xsd_compile_file(NULL, &st), (LeptrisXsdSchema)0);
 }
 
 }  // namespace
