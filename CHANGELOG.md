@@ -4,7 +4,13 @@
 
 ### Fixed
 
-- dp fail path frees the parse-diag array (parse)
+- **dp fail path frees the parse-diag array (PR #1607).** A RECOVER
+  diagnostic (duplicate attribute) emitted before an eventual parse
+  failure leaked its heap-grown `parse_diags` array: the dp fail
+  teardown freed the line-break table and destroyed the pool but
+  never the diag array or its offender names. Second nightly-fuzz
+  find (artifact `leak-75e0ee81`, 2304 bytes). The fail path runs
+  `leptris_diag_free` beside the line-break free now.
 
 
 
