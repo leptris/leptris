@@ -724,3 +724,50 @@ TEST(XsdIc, KeyRequiresFieldValues) {
 }
 
 }  // namespace
+
+// ---- local particle declarations -----------------------------------
+namespace {
+
+/* item is declared ONLY as a particle of orderT — no global
+ * xs:element named item exists — so its attributes and children
+ * must validate against itemT's rows through the particle's type. */
+const char* k_local_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"itemT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"sku\" type=\"xs:token\"/>"
+    "<xs:element name=\"qty\" type=\"xs:integer\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"id\" type=\"xs:integer\" use=\"required\"/>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"orderT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"item\" type=\"itemT\" maxOccurs=\"unbounded\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"ref\" type=\"xs:string\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"order\" type=\"orderT\"/>"
+    "</xs:schema>";
+
+TEST(XsdLocal, LocalChildAttributesValidate) {
+    EXPECT_EQ(validate_doc(k_local_schema,
+                           "<order><item id=\"5\"><sku>a</sku>"
+                           "<qty>2</qty></item></order>"), 1);
+    EXPECT_EQ(validate_doc(k_local_schema,
+                           "<order><item id=\"nan\"><sku>a</sku>"
+                           "<qty>2</qty></item></order>"), 0);
+    EXPECT_EQ(validate_doc(k_local_schema,
+                           "<order><item><sku>a</sku>"
+                           "<qty>2</qty></item></order>"), 0);
+}
+
+TEST(XsdLocal, LocalChildContentModelValidates) {
+    EXPECT_EQ(validate_doc(k_local_schema,
+                           "<order><item id=\"5\"><qty>2</qty>"
+                           "<sku>a</sku></item></order>"), 0);
+    EXPECT_EQ(validate_doc(k_local_schema,
+                           "<order><item id=\"5\"><sku>a</sku>"
+                           "<qty>nan</qty></item></order>"), 0);
+}
+
+}  // namespace
