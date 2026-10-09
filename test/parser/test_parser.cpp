@@ -662,3 +662,24 @@ TEST(ParseNulTextRun, NulLeadingRunSerializesVerbatim) {
     leptris_free_string(out);
     leptris_document_free(d);
 }
+
+/* Nightly-fuzz leak-75e0ee81: a duplicate-attribute RECOVER diag
+ * (heap-realloc'd by leptris_diag_emit) emitted before an eventual
+ * parse failure leaked — the dp fail path freed the line-break
+ * table but not the diag array. Leak visibility is the Linux CI
+ * ASAN job's (macOS cannot run LSan); this spec pins both paths:
+ * the failing parse (fail-path teardown) and the recovered parse
+ * (document_free owns the diags). */
+TEST(ParseDiagTeardown, DuplicateAttrDiagBeforeFailureAndRecovery) {
+    LeptrisStatus st = LEPTRIS_OK;
+    /* duplicate attribute (RECOVER diag) then malformed tail */
+    const char bad[] = "<r a=\"1\" a=\"2\"<<<<";
+    EXPECT_EQ(leptris_parse_string(bad, strlen(bad), &st), nullptr);
+    EXPECT_NE(st, LEPTRIS_OK);
+
+    /* duplicate attribute, well-formed rest: the doc owns the diag */
+    const char ok[] = "<r a=\"1\" a=\"2\"/>";
+    LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
+    ASSERT_NE(d, nullptr);
+    leptris_document_free(d);
+}

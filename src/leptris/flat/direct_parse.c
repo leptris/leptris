@@ -2337,7 +2337,15 @@ fail:
     }
     /* The eagerly-built line-break table is malloc'd, not pool-owned
      * — the fail path never reaches leptris_document_free. Free it
-     * BEFORE pool_destroy reclaims the doc struct. */
+     * BEFORE pool_destroy reclaims the doc struct. The parse-diag
+     * array is the same: heap-realloc'd (leptris_diag_emit), and a
+     * RECOVER diag (e.g. duplicate attribute) can precede the
+     * failure — nightly-fuzz leak-75e0ee81, 2304 bytes. */
+    {
+        extern void leptris_diag_free(struct LeptrisDiag**, int*, int*);
+        leptris_diag_free(&doc->parse_diags, &doc->parse_diag_count,
+                          &doc->parse_diag_cap);
+    }
     free(doc->line_breaks);
     /* Round 10: the elem_pos journal + lazy index are pool-carved —
      * pool_destroy below reclaims them. */
