@@ -471,8 +471,13 @@ LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length,
              (d[i] == 0xFE && d[i + 1] == 0xFF))) {
             /* Fall through to slow path. */
         } else if (i < length && d[i] == '<' &&
-                   !(length >= 5 && d[i + 1] == '?' &&
-                     d[i + 2] == 'x' && d[i + 3] == 'm' && d[i + 4] == 'l')) {
+                   /* bound against the REMAINING span: i indexes
+                    * past leading whitespace, so an absolute-length
+                    * check read d[i+4] one past the buffer
+                    * (nightly-fuzz crash-aac3c9bb) */
+                   !(length - i >= 5 && d[i + 1] == '?' &&
+                     d[i + 2] == 'x' && d[i + 3] == 'm' &&
+                     d[i + 4] == 'l')) {
             /* Not a "<?xml" declaration. Check for embedded NUL bytes
              * in the first 64 bytes (UTF-16 without BOM indicator). */
             int has_nul = 0;
