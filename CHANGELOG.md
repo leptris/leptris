@@ -4,7 +4,17 @@
 
 ### Fixed
 
-- fast-path declaration probe bounds against the span (parse)
+- **fast-path declaration probe bounds against the span
+  (PR #1609).** `leptris_parse_string`'s fast-path `<?xml` probe
+  checked the ABSOLUTE length while indexing from the first
+  non-whitespace offset, so an input whose markup starts after
+  leading whitespace read one byte past the caller's buffer
+  (heap-buffer-overflow; third nightly-fuzz find, artifact
+  `crash-aac3c9bb`). The probe bounds against the remaining span
+  now. The regression spec reproduces the fuzzer's exact shape —
+  a terminator-free 9-byte heap buffer: a string literal's
+  implicit NUL lands the read in bounds and 32-byte stack slot
+  padding hides the overread from ASAN.
 
 
 
