@@ -900,6 +900,14 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
  * @return compiled schema; on failure an error-carrying handle
  *         (leptris_xsd_error says why — free it the same way)
  */
+/* Compile a schema from a file: relative xs:include/xs:import/
+ * xs:redefine schemaLocations resolve against the schema's own
+ * directory. Returns NULL only when the file cannot be read; a
+ * malformed schema yields an error-carrying handle, exactly like
+ * leptris_xsd_compile. (Memory: free with leptris_xsd_free.) */
+LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(const char* path,
+                                                     LeptrisStatus* status);
+
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                                                  size_t len,
                                                  LeptrisStatus* status);

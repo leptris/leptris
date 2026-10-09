@@ -27,6 +27,8 @@ typedef struct {
     size_t count, cap;
     int state_count; /* explicit: state ids are NOT transition ids */
     int start, accept;
+    struct leptris_xsd_schema* s; /* group-ref resolution */
+    int depth;                    /* cyclic-group guard */
 } CmNfa;
 
 static int nfa_state(CmNfa* n) { return n->state_count++; }
@@ -80,6 +82,19 @@ static void cm_build(CmNfa* n, XsdCm* node, int from, int to) {
         case XSD_CM_ALL:
             cm_build_children(n, node, from, to);
             return;
+        case XSD_CM_GROUP_REF: {
+            XsdGroupDef* g =
+                n->s ? xsd_find_group(n->s, node->name) : NULL;
+            if (!g || !g->model || n->depth > 64) {
+                /* unresolved (or cyclic) ref: splice nothing */
+                nfa_trans(n, from, -1, NULL, to);
+                return;
+            }
+            n->depth++;
+            cm_build(n, g->model, from, to);
+            n->depth--;
+            return;
+        }
         case XSD_CM_CHOICE: {
             XsdCm* c = node->first_child;
             if (!c) {
@@ -181,10 +196,10 @@ static void ss_close(StateSet* ss, CmNfa* n) {
 int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
                       const char* const* ns_uris, size_t count) {
-    (void)s;
     if (!model) return -1;
     CmNfa n;
     memset(&n, 0, sizeof(n));
+    n.s = s;
     n.start = nfa_state(&n);
     n.accept = nfa_state(&n);
     cm_build_occurrence(&n, model, n.start, n.accept);
@@ -205,7 +220,10 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                     continue;
                 XsdCm* p = tr->particle;
                 if (p->kind == XSD_CM_ELEMENT) {
-                    if (strcmp(p->name, names[c]) == 0 &&
+                    int named = (strcmp(p->name, names[c]) == 0) ||
+                                (n.s && xsd_is_substitute(
+                                            n.s, names[c], p->name));
+                    if (named &&
                         (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
                         ss_add(&next, tr->to);
                 } else if (p->kind == XSD_CM_ANY) {

@@ -20,7 +20,8 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* const* names,
                              const char* const* ns_uris, size_t count);
 extern int xsd_builtin_valid(const char* type, const char* v);
-extern int xsd_simple_valid(const XsdSimple* simple, const char* v);
+extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
+                                  const XsdSimple* t, const char* v);
 
 struct xsd_error {
     char* text;
@@ -96,7 +97,7 @@ static int text_valid(struct xsd_validator* v,
     else {
         const XsdSimple* st = xsd_find_simple_pub(s, type);
         if (!st) return 1; /* unresolved: accept */
-        r = xsd_simple_valid(st, lexical);
+        r = xsd_simple_valid_chain(s, st, lexical);
     }
     if (r == 0) {
         verrf(v, what, name, "lexical value does not match its type");
@@ -185,6 +186,11 @@ static void validate_children(struct xsd_validator* v,
                         ptype = p->type;
                         break;
                     }
+                    if (p->kind == XSD_CM_GROUP_REF) {
+                        XsdGroupDef* g = xsd_find_group(s, p->name);
+                        if (g && g->model && sp < 64)
+                            stack[sp++] = g->model;
+                    }
                     if (sp < 64 && p->first_child)
                         stack[sp++] = p->first_child;
                 }
@@ -226,6 +232,9 @@ static void validate_attributes(struct xsd_validator* v,
             continue;
         }
         text_valid(v, s, a->type, val, "attribute", a->name);
+        if (a->fixed && strcmp(val, a->fixed) != 0)
+            verrf(v, "attribute", a->name,
+                  "value does not match the fixed value");
     }
 }
 
@@ -240,6 +249,12 @@ static void validate_element(struct xsd_validator* v,
     if (!d) return; /* undeclared: lax at this depth (strict later) */
 
     if (!d->type) return; /* anyType */
+    if (d->fixed) {
+        const char* text = leptris_element_text(elem);
+        if (text && *text && strcmp(text, d->fixed) != 0)
+            verrf(v, "element", local,
+                  "content does not match the fixed value");
+    }
     validate_local(v, s, elem, local, d->type);
 }
 
@@ -255,6 +270,12 @@ static void validate_local(struct xsd_validator* v,
     if (ct) {
         validate_attributes(v, s, elem, xsd_find_type_attrs(s, type));
         validate_children(v, s, elem, ct);
+        if (ct->text_type) {
+            const char* text = leptris_element_text(elem);
+            if (text && *text)
+                text_valid(v, s, ct->text_type, text, "element",
+                           local);
+        }
         return;
     }
 
