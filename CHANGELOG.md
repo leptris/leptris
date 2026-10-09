@@ -4,7 +4,15 @@
 
 ### Fixed
 
-- a second DOCTYPE keeps the first model (parse)
+- **a second DOCTYPE keeps the first model (PR #1613).** A
+  duplicate `<!DOCTYPE` re-entered the direct-parse DOCTYPE handler
+  and replaced the already-parsed model — the orphan's heap-grown
+  attribute-default array leaked (fifth nightly-fuzz find,
+  artifact `leak-168da36a`). The lane stays lenient about the
+  duplicate, but the FIRST model wins now, matching the
+  duplicate-attribute keep-first rule — so the first internal
+  subset's entities and defaults apply (previously the second
+  silently won). The replacement model is freed on arrival.
 
 
 
