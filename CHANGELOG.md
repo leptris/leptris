@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.332] - 2026-10-09
+
+### Added
+
+- tier 2 — XSD 1.1 assertions, open content, conditional types (#1075) (xsd)
+
+### Fixed
+
+- free the defaultOpenContent wildcard with the schema (xsd)
+
+
+
 ## [1.9.331] - 2026-10-09
 
 ### Fixed
