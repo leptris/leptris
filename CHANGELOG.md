@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.326] - 2026-10-09
+
+### Added
+
+- tier-1 charter completion — unions, lists, groups, attributeGroups, derivation, substitution groups, fixed values, includes (#1075) (xsd)
+
+### Fixed
+
+- ASAN attr-row leak + Windows base-dir split (xsd)
+
+
+
 ## [1.9.325] - 2026-10-09
 
 ### Fixed
