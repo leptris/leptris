@@ -4,7 +4,17 @@
 
 ### Added
 
-- tier 2 — XSD 1.1 assertions, open content, conditional types (#1075) (xsd)
+- **XSD 1.1 — tier 2 (#1075, PR #1616).** Gated on
+  `xs:schema @version="1.1"`: `xs:assert` on complexTypes (direct
+  and derivation-nested; compiled once, evaluated per instance
+  through the engine's XPath 2 lane; evaluation errors are
+  failures); `xs:assertion` on simpleTypes (`$value` binds the
+  lexical, element context); `xs:openContent` interleave/suffix
+  (wildcard self-loops at the Thompson NFA's junction states;
+  `xs:defaultOpenContent` schema-wide with `appliesToEmpty`) and
+  `xs:alternative` conditional type assignment (first passing
+  test types the instance, declared type as fallback). Ten
+  red-first specs; ctest 1951/1951; 1.0 schemas unaffected.
 
 ### Fixed
 
