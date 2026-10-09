@@ -3066,7 +3066,7 @@ static void strip_source_whitespace(XsltExec* ex) {
              * content decodes to a NUL-terminated "" (#1285 slice
              * 4b — no overflow-table entry per stripped node). */
             LeptrisTextNode* tn = (LeptrisTextNode*)c;
-            leptris_textnode_set_content_ptr_doc(tn, "", ex->result);
+            leptris_textnode_set_content_ptr_doc(tn, "", 0, ex->result);
             tn->content_len = 0;
         }
     }

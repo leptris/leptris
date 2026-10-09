@@ -630,3 +630,35 @@ TEST(ParseDoctype, SubsetBracketInsideQuotesAndComments) {
         leptris_document_free(d);
     }
 }
+
+/* Nightly-fuzz find (2026-10-09, artifact crash-0a24082b): a text
+ * run beginning with NUL bytes collapsed to the EMPTY sentinel —
+ * the content pointer read as "" while content_len kept the run's
+ * length, so serialize_text_internal walked past the 1-byte global
+ * (ASAN global-buffer-overflow). The setter is length-aware now:
+ * NUL-leading runs keep a real pointer and serialize verbatim. */
+TEST(ParseNulTextRun, NulLeadingRunSerializesVerbatim) {
+    /* between </item> and <item>: eight NULs, newline, two spaces */
+    const char xml[] =
+        "<?xml version=\"1.0\"?>\n<r>\n  <item id=\"1\">Hello</item>"
+        "\0\0\0\0\0\0\0\0\n  <item id=\"2\">World</item>\n</r>\n";
+    size_t len = sizeof(xml) - 1;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(xml, len, &st);
+    ASSERT_NE(d, nullptr);
+
+    char* out = leptris_document_serialize(d, NULL);
+    ASSERT_NE(out, nullptr);
+    /* "Hello</item>" precedes every NUL, so strstr anchors safely;
+     * the run that follows must be the verbatim eight NULs + "\n  ". */
+    const char* hello = strstr(out, "Hello</item>");
+    ASSERT_NE(hello, nullptr);
+    static const char needle[] =
+        "\0\0\0\0\0\0\0\0\n  <item id=\"2\"";
+    EXPECT_EQ(memcmp(hello + strlen("Hello</item>"), needle,
+                     sizeof(needle) - 1),
+              0)
+        << "NUL-leading run not serialized verbatim";
+    leptris_free_string(out);
+    leptris_document_free(d);
+}
