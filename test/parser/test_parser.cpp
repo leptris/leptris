@@ -722,3 +722,27 @@ TEST(ParseFailTeardown, DtdModelBeforeFailureAndRecovery) {
     ASSERT_NE(d, nullptr);
     leptris_document_free(d);
 }
+
+/* Nightly-fuzz leak-168da36a: a second <!DOCTYPE re-entered
+ * dp_parse_doctype with the first model still in hand —
+ * "dtd = parsed" orphaned it (its realloc'd default_decls array
+ * leaked). The lane is lenient about the duplicate, so the FIRST
+ * model wins, matching the duplicate-attribute keep-first rule;
+ * the replacement is freed. Observable: the first subset's
+ * entities keep expanding. */
+TEST(ParseDoctype, SecondDoctypeKeepsFirstModel) {
+    const char xml[] =
+        "<!DOCTYPE a [<!ENTITY e \"first\">"
+        "<!ATTLIST a x CDATA \"d1\">]>"
+        "<!DOCTYPE a [<!ENTITY e \"second\">]>"
+        "<a>&e;</a>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+    ASSERT_NE(root, nullptr);
+    const char* text = leptris_element_text(root);
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text, "first");
+    leptris_document_free(d);
+}
