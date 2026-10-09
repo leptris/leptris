@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.328] - 2026-10-09
+
+### Fixed
+
+- dp fail path frees the parse-diag array (parse)
+
+
+
 ## [1.9.327] - 2026-10-09
 
 ### Fixed
