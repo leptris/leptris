@@ -2346,6 +2346,15 @@ fail:
         leptris_diag_free(&doc->parse_diags, &doc->parse_diag_count,
                           &doc->parse_diag_cap);
     }
+    /* The parsed internal-subset DTD is heap-modelled
+     * (default_decls realloc, ttdtd_add_attribute) and never
+     * transferred to the doc on this path — the success epilogue
+     * assigns doc->dtd; without this free the model leaks
+     * (nightly-fuzz leak-e3246602, 8 bytes). */
+    {
+        extern void leptris_dtd_free(struct LeptrisDTD*);
+        if (p.dtd) leptris_dtd_free(p.dtd);
+    }
     free(doc->line_breaks);
     /* Round 10: the elem_pos journal + lazy index are pool-carved —
      * pool_destroy below reclaims them. */
