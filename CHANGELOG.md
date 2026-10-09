@@ -4,7 +4,14 @@
 
 ### Fixed
 
-- dp fail path frees the parsed internal-subset DTD (parse)
+- **dp fail path frees the parsed internal-subset DTD (PR #1611).**
+  A DOCTYPE internal subset with a default attribute declaration
+  grows the DTD model's heap array; the parse-success epilogue
+  transfers the model to the document, but a parse failure after
+  the DOCTYPE never did — and the fail teardown freed the diags
+  and line-break table but not the model (fourth nightly-fuzz
+  find, artifact `leak-e3246602`). The fail block frees the model
+  now, beside the other heap-owned pieces.
 
 
 
