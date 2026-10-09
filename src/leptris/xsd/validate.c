@@ -8,6 +8,7 @@
  * accumulate in the schema-owned error list — the RNG accessor
  * pattern: validate returns 1/0, errors enumerate every miss.
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,7 @@ static void verr(struct leptris_xsd_schema* s, const char* fmt,
                  const char* a, const char* b);
 struct xsd_validator {
     struct leptris_xsd_schema* s;
+    LeptrisDocument doc; /* the instance (assertion evaluation) */
     struct xsd_error* errors;
     struct xsd_error* tail;
     size_t count;
@@ -89,19 +91,75 @@ static void verrf(struct xsd_validator* v, const char* what,
 static int text_valid(struct xsd_validator* v,
                       struct leptris_xsd_schema* s, const char* type,
                       const char* lexical, const char* what,
-                      const char* name) {
+                      const char* name, LeptrisElement elem) {
     if (!type) return 1;
     int r;
+    const XsdSimple* st = NULL;
     if (strncmp(type, "xs:", 3) == 0)
         r = xsd_builtin_valid(type, lexical);
     else {
-        const XsdSimple* st = xsd_find_simple_pub(s, type);
+        st = xsd_find_simple_pub(s, type);
         if (!st) return 1; /* unresolved: accept */
         r = xsd_simple_valid_chain(s, st, lexical);
     }
     if (r == 0) {
         verrf(v, what, name, "lexical value does not match its type");
         return 0;
+    }
+    /* XSD 1.1 xs:assertion facet (document validation only):
+     * $value binds the lexical — numeric lexicals bind bare,
+     * everything else as a string — and the context is the
+     * owning element. */
+    if (st && st->assertion && elem && v->doc) {
+        XsdSimple* mut = (XsdSimple*)st;
+        if (!mut->assertion_tried) {
+            mut->assertion_tried = 1;
+            if (xsd_schema_version_11(s)) {
+                /* eval_params binds DECLARED external variables —
+                 * the test compiles under a $value declaration */
+                char wrapped[1024];
+                int w = snprintf(wrapped, sizeof(wrapped),
+                                 "declare variable $value external; %s",
+                                 mut->assertion);
+                if (w > 0 && (size_t)w < sizeof(wrapped))
+                    mut->assertion_q =
+                        leptris_xquery_parse(wrapped, (size_t)w);
+            }
+        }
+        if (mut->assertion_q) {
+            char sel[256];
+            int numeric = 1;
+            for (const char* p = lexical; *p; p++)
+                if (!isdigit((unsigned char)*p) && *p != '.' &&
+                    *p != '-' && *p != '+' && *p != 'e' && *p != 'E')
+                    numeric = 0;
+            if (numeric && *lexical)
+                snprintf(sel, sizeof(sel), "%s", lexical);
+            else {
+                size_t w = 0;
+                sel[w++] = '\'';
+                for (const char* p = lexical; *p && w < sizeof(sel) - 3;
+                     p++) {
+                    if (*p == '\'') sel[w++] = '\'';
+                    sel[w++] = *p;
+                }
+                sel[w++] = '\'';
+                sel[w] = 0;
+            }
+            const char* names[1] = {"value"};
+            const char* sels[1] = {sel};
+            LeptrisXPathResult r2 = leptris_xquery_eval_params(
+                mut->assertion_q, v->doc, elem, names, sels, 1);
+            int ebv = 0;
+            if (r2) {
+                ebv = leptris_xpath_result_boolean(r2);
+                leptris_xpath_result_free(r2);
+            }
+            if (!ebv) {
+                verrf(v, what, name, "assertion failed");
+                return 0;
+            }
+        }
     }
     return 1;
 }
@@ -231,7 +289,7 @@ static void validate_attributes(struct xsd_validator* v,
                 verrf(v, "attribute", a->name, "required but absent");
             continue;
         }
-        text_valid(v, s, a->type, val, "attribute", a->name);
+        text_valid(v, s, a->type, val, "attribute", a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0)
             verrf(v, "attribute", a->name,
                   "value does not match the fixed value");
@@ -248,14 +306,32 @@ static void validate_element(struct xsd_validator* v,
     const XsdElementDecl* d = xsd_find_element(s, local);
     if (!d) return; /* undeclared: lax at this depth (strict later) */
 
-    if (!d->type) return; /* anyType */
+    /* XSD 1.1: the first alternative whose test passes types the
+     * element for this instance (context = the element). */
+    const char* eff_type = d->type;
+    for (XsdAlternative* alt = d->alternatives; alt; alt = alt->next) {
+        int ebv = 0;
+        if (alt->compiled && v->doc) {
+            LeptrisXPathResult r =
+                leptris_xquery_eval(alt->compiled, v->doc, elem);
+            if (r) {
+                ebv = leptris_xpath_result_boolean(r);
+                leptris_xpath_result_free(r);
+            }
+        }
+        if (ebv) {
+            eff_type = alt->type;
+            break;
+        }
+    }
+    if (!eff_type) return; /* anyType */
     if (d->fixed) {
         const char* text = leptris_element_text(elem);
         if (text && *text && strcmp(text, d->fixed) != 0)
             verrf(v, "element", local,
                   "content does not match the fixed value");
     }
-    validate_local(v, s, elem, local, d->type);
+    validate_local(v, s, elem, local, eff_type);
 }
 
 /* Validate one element against a type name that comes from a
@@ -270,11 +346,27 @@ static void validate_local(struct xsd_validator* v,
     if (ct) {
         validate_attributes(v, s, elem, xsd_find_type_attrs(s, type));
         validate_children(v, s, elem, ct);
+        /* XSD 1.1: the type's xs:assert list — context is the
+         * element; evaluation errors are failures */
+        for (XsdAssert* a = ct->asserts; a; a = a->next) {
+            int ebv = 0;
+            if (a->compiled && v->doc) {
+                LeptrisXPathResult r =
+                    leptris_xquery_eval(a->compiled, v->doc, elem);
+                if (r) {
+                    ebv = leptris_xpath_result_boolean(r);
+                    leptris_xpath_result_free(r);
+                }
+            }
+            if (!ebv)
+                verrf(v, "assertion", local, a->test ? a->test
+                                                     : "(invalid)");
+        }
         if (ct->text_type) {
             const char* text = leptris_element_text(elem);
             if (text && *text)
                 text_valid(v, s, ct->text_type, text, "element",
-                           local);
+                           local, elem);
         }
         return;
     }
@@ -284,7 +376,7 @@ static void validate_local(struct xsd_validator* v,
         xsd_find_simple_pub(s, type)) {
         const char* text = leptris_element_text(elem);
         if (text && *text)
-            text_valid(v, s, type, text, "element", local);
+            text_valid(v, s, type, text, "element", local, elem);
     }
 }
 
@@ -509,6 +601,7 @@ void xsd_validator_free(struct xsd_validator* v) {
 
 int xsd_validator_run(struct xsd_validator* v, LeptrisDocument doc) {
     if (!v || !doc) return -1;
+    v->doc = doc; /* XSD 1.1: assertion evaluation context */
     LeptrisElement root = leptris_document_root(doc);
     if (!root) return -1;
     validate_element(v, v->s, root, 0);

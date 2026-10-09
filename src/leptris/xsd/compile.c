@@ -36,11 +36,14 @@ struct leptris_xsd_schema {
     XsdElementDecl* elements;
     XsdCm* complex_types; /* name-carrying model roots */
     XsdGroupDef* groups;  /* top-level xs:group definitions */
+    XsdCm* default_open;  /* xs:defaultOpenContent wildcard */
+    int default_oc_empty; /* appliesToEmpty="true" */
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
     XsdElementIcs* element_ics;
     char* target_ns;
+    int version_11;    /* xs:schema @version = "1.1" */
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth; /* include/import recursion guard */
     void* validator; /* slice-4 parked error list */
@@ -80,6 +83,12 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
 static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                         LeptrisElement ct,
                                         const char* name);
+static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
+                                     LeptrisElement e);
+static XsdCm* xsd_capture_any(LeptrisElement any_child);
+static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
+                                     LeptrisElement decl_elem,
+                                     XsdElementDecl* d);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
 
@@ -95,6 +104,15 @@ static XsdCm* xsd_cm_new(XsdCmKind kind) {
 static void xsd_cm_free(XsdCm* cm) {
     while (cm) {
         XsdCm* next = cm->next;
+        XsdAssert* a = cm->asserts;
+        while (a) {
+            XsdAssert* an = a->next;
+            if (a->compiled) leptris_xquery_free(a->compiled);
+            free(a->test);
+            free(a);
+            a = an;
+        }
+        if (cm->oc_owned && cm->open_any) xsd_cm_free(cm->open_any);
         xsd_cm_free(cm->first_child);
         free(cm->name);
         free(cm->type);
@@ -370,6 +388,9 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                     simple->fraction_digits = val ? strtol(val, NULL, 10) : -1;
                 else if (strcmp(fl, "whiteSpace") == 0)
                     simple->whitespace = xsd_strdup(val);
+                else if (strcmp(fl, "assertion") == 0)
+                    simple->assertion = xsd_strdup(
+                        leptris_element_attribute(fe, "test"));
             }
         }
     }
@@ -481,6 +502,7 @@ static int xsd_is_declaration(const char* local, const char* uri) {
     static const char* names[] = {
         "element",    "attribute",    "simpleType", "complexType",
         "group",      "attributeGroup", "notation", "include",
+        "defaultOpenContent",
         "import",     "redefine",     NULL
     };
     for (int i = 0; names[i]; i++)
@@ -594,6 +616,10 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     }
     s->target_ns = xsd_strdup(
         leptris_element_attribute(root, "targetNamespace"));
+    {
+        const char* ver = leptris_element_attribute(root, "version");
+        s->version_11 = (ver && strcmp(ver, "1.1") == 0);
+    }
 
     const char* local = NULL;
     const char* prefix = NULL;
@@ -692,6 +718,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 if (d) {
                     d->name = xsd_strdup(nm);
                     d->type = xsd_strdup(ty);
+                    xsd_capture_alternatives(s, (LeptrisElement)n, d);
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
@@ -730,6 +757,29 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 leptris_element_attribute((LeptrisElement)n, "name");
             if (nm)
                 xsd_capture_complex_model(s, (LeptrisElement)n, nm);
+        } else if (strcmp(local, "defaultOpenContent") == 0 && uri &&
+                   !strcmp(uri, XSD_NS)) {
+            if (s->version_11) {
+                const char* ape = leptris_element_attribute(
+                    (LeptrisElement)n, "appliesToEmpty");
+                for (LeptrisNodeRef q = leptris_node_first_child(
+                         leptris_element_as_node((LeptrisElement)n));
+                     q && !s->default_open;
+                     q = leptris_node_next_sibling(q)) {
+                    if (leptris_node_get_type(q) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement qe = (LeptrisElement)q;
+                    const char* ql = NULL;
+                    leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                    if (ql && strcmp(ql, "any") == 0)
+                        s->default_open = xsd_capture_any(qe);
+                }
+                if (s->default_open)
+                    s->default_oc_empty =
+                        (ape && strcmp(ape, "true") == 0);
+            }
+            continue;
         } else if (strcmp(local, "attribute") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
@@ -803,6 +853,8 @@ static void xsd_free_simple_one(XsdSimple* t) {
     free(t->max_inclusive);
     free(t->max_exclusive);
     free(t->whitespace);
+    if (t->assertion_q) leptris_xquery_free(t->assertion_q);
+    free(t->assertion);
     free(t->item_type);
     xsd_free_simple_one(t->item_def);
     for (size_t i = 0; i < t->member_count; i++) free(t->members[i]);
@@ -854,6 +906,15 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     XsdElementDecl* d = s->elements;
     while (d) {
         XsdElementDecl* dn = d->next;
+        XsdAlternative* a = d->alternatives;
+        while (a) {
+            XsdAlternative* an = a->next;
+            if (a->compiled) leptris_xquery_free(a->compiled);
+            free(a->test);
+            free(a->type);
+            free(a);
+            a = an;
+        }
         free(d->name);
         free(d->type);
         free(d->fixed);
@@ -952,6 +1013,90 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
     }
 }
 
+/* XSD 1.1: xs:alternative children of an element declaration. */
+static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
+                                     LeptrisElement decl_elem,
+                                     XsdElementDecl* d) {
+    if (!s->version_11) return;
+    XsdAlternative* tail = NULL;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(decl_elem));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL;
+        leptris_element_expanded_name(e, &local, NULL, NULL);
+        if (!local || strcmp(local, "alternative") != 0) continue;
+        const char* test = leptris_element_attribute(e, "test");
+        const char* type = leptris_element_attribute(e, "type");
+        if (!test || !type) continue;
+        XsdAlternative* a = (XsdAlternative*)calloc(1, sizeof(*a));
+        if (!a) continue;
+        a->test = xsd_strdup(test);
+        a->type = xsd_strdup(type);
+        a->compiled = leptris_xquery_parse(test, strlen(test));
+        if (tail)
+            tail->next = a;
+        else
+            d->alternatives = a;
+        tail = a;
+    }
+}
+
+static XsdCm* xsd_capture_any(LeptrisElement any_child) {
+    XsdCm* w = xsd_cm_new(XSD_CM_ANY);
+    if (!w) return NULL;
+    w->any_ns = xsd_strdup(
+        leptris_element_attribute(any_child, "namespace"));
+    const char* pc = leptris_element_attribute(any_child,
+                                               "processContents");
+    w->process_skip =
+        (pc && (strcmp(pc, "skip") == 0 || strcmp(pc, "lax") == 0))
+            ? 1
+            : 0;
+    w->min = 0;
+    w->max = -1;
+    return w;
+}
+
+static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
+                                     LeptrisElement e) {
+    const char* test = leptris_element_attribute(e, "test");
+    if (!test || !*test) return NULL;
+    XsdAssert* a = (XsdAssert*)calloc(1, sizeof(*a));
+    if (!a) return NULL;
+    a->test = xsd_strdup(test);
+    if (s->version_11) {
+        a->compiled = leptris_xquery_parse(test, strlen(test));
+        /* NULL = syntax error: evaluation reports the assertion
+         * as failed (XSD 1.1: an error is a failure) */
+    }
+    return a;
+}
+
+/* Append every xs:assert child under `container` to the type. */
+static void xsd_capture_assert_children(
+    struct leptris_xsd_schema* s, LeptrisElement container,
+    XsdCm* root) {
+    XsdAssert* tail = root->asserts;
+    while (tail && tail->next) tail = tail->next;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(container));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* local = NULL;
+        leptris_element_expanded_name(e, &local, NULL, NULL);
+        if (!local || strcmp(local, "assert") != 0) continue;
+        XsdAssert* a = xsd_capture_assert(s, e);
+        if (!a) continue;
+        if (!root->asserts) root->asserts = a;
+        tail = a;
+    }
+}
+
 /* One complexType capture, shared by top-level declarations and
  * inline anonymous types: content model + derivation
  * (complexContent/simpleContent extension|restriction) + the
@@ -1026,6 +1171,9 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     root->first_child = xsd_cm_parse(s, dq, NULL);
                     attrs = xsd_capture_attr_rows(s, dq, 0);
                 }
+                /* XSD 1.1: asserts nested under the derivation */
+                if (s->version_11)
+                    xsd_capture_assert_children(s, dq, root);
             }
         } else if (strcmp(local, "simpleContent") == 0) {
             for (LeptrisNodeRef q = leptris_node_first_child(
@@ -1093,6 +1241,50 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         root->first_child = xsd_cm_parse(s, ct, NULL);
         if (!attrs) attrs = xsd_capture_attr_rows(s, ct, 0);
     }
+    /* XSD 1.1: openContent on the type, else the schema default */
+    if (s->version_11) {
+        for (LeptrisNodeRef n =
+                 leptris_node_first_child(leptris_element_as_node(ct));
+             n; n = leptris_node_next_sibling(n)) {
+            if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement e = (LeptrisElement)n;
+            const char* ocl = NULL;
+            leptris_element_expanded_name(e, &ocl, NULL, NULL);
+            if (!ocl || strcmp(ocl, "openContent") != 0) continue;
+            const char* mode = leptris_element_attribute(e, "mode");
+            for (LeptrisNodeRef q = leptris_node_first_child(
+                     leptris_element_as_node(e));
+                 q && !root->open_any;
+                 q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement qe = (LeptrisElement)q;
+                const char* ql = NULL;
+                leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                if (ql && strcmp(ql, "any") == 0) {
+                    root->open_any = xsd_capture_any(qe);
+                    if (root->open_any) root->oc_owned = 1;
+                }
+            }
+            if (mode && strcmp(mode, "suffix") == 0)
+                root->oc_mode = 1;
+            else if (mode && strcmp(mode, "interleave") == 0)
+                root->oc_mode = 2;
+            else
+                root->oc_mode = 0;
+        }
+    }
+    if (!root->oc_mode && s->default_open && root->first_child)
+        root->oc_mode = 2;
+    if (!root->oc_mode && s->default_open && !root->first_child &&
+        s->default_oc_empty)
+        root->oc_mode = 2;
+    if (root->oc_mode == 2 && !root->open_any && s->default_open)
+        root->open_any = s->default_open;
+    /* XSD 1.1: direct xs:assert children of the complexType */
+    if (s->version_11) xsd_capture_assert_children(s, ct, root);
     /* the NFA and model walkers consume ONE root particle —
      * a multi-particle model (derivation splices) normalizes
      * under a sequence */
@@ -1102,6 +1294,18 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
             seq->first_child = root->first_child;
             root->first_child = seq;
         }
+    }
+    /* open-content semantics ride the model root (the NFA builds
+     * from ct->first_child, never the name wrapper) */
+    if (root->first_child) {
+        root->first_child->open_any = root->open_any;
+        root->first_child->oc_mode = root->oc_mode;
+        root->first_child->oc_owned = root->oc_owned;
+        root->open_any = NULL;
+        root->oc_owned = 0;
+    } else if (root->open_any && root->oc_owned) {
+        xsd_cm_free(root->open_any);
+        root->open_any = NULL;
     }
     xsd_register_complex(s, root, attrs, name);
     return root;
@@ -1122,6 +1326,10 @@ int xsd_is_substitute(struct leptris_xsd_schema* s,
         d = xsd_find_element_decl(s, d->sub_head);
     }
     return 0;
+}
+
+int xsd_schema_version_11(struct leptris_xsd_schema* s) {
+    return s ? s->version_11 : 0;
 }
 
 XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,

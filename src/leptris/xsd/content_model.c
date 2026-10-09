@@ -56,20 +56,35 @@ static void cm_build_occurrence(CmNfa* n, XsdCm* node,
 /* chain the group children: first reads `from`, last writes `to`.
  * xs:all is evaluated in sequence order for now (its order-free
  * semantics arrive with slice 4's all-semantics pass). */
+/* XSD 1.1 open content: a wildcard self-loop at a junction lets
+ * any-namespace elements (per the wildcard's grammar) consume a
+ * child without advancing the model. */
+static void oc_loop(CmNfa* n, XsdCm* node, int state) {
+    if (!node->open_any || !node->oc_mode) return;
+    nfa_trans(n, state, 0, node->open_any, state);
+}
+
 static void cm_build_children(CmNfa* n, XsdCm* node, int from, int to) {
     XsdCm* c = node->first_child;
     if (!c) {
         nfa_trans(n, from, -1, NULL, to);
         return;
     }
+    int interleave =
+        (node->open_any && node->oc_mode == 2) ? 1 : 0;
     int cursor = from;
+    if (interleave) oc_loop(n, node, cursor);
     while (c->next) {
         int mid = nfa_state(n);
         cm_build_occurrence(n, c, cursor, mid);
         cursor = mid;
+        if (interleave) oc_loop(n, node, cursor);
         c = c->next;
     }
     cm_build_occurrence(n, c, cursor, to);
+    /* suffix (and interleave) wildcards may follow the sequence */
+    if (node->open_any && node->oc_mode)
+        oc_loop(n, node, to);
 }
 
 static void cm_build(CmNfa* n, XsdCm* node, int from, int to) {

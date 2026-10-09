@@ -5,6 +5,8 @@
 
 #include <stddef.h>
 
+#include "../../include/leptris/xquery/xquery.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -57,6 +59,9 @@ typedef struct xsd_simple {
     long total_digits;
     long fraction_digits;
     char* whitespace; /* "preserve" | "replace" | "collapse" */
+    char* assertion; /* XSD 1.1: the xs:assertion test text */
+    LeptrisXQuery assertion_q; /* compiled lazily at first use */
+    int assertion_tried;       /* lazy-compile guard */
     struct xsd_simple* next;
 } XsdSimple;
 
@@ -64,6 +69,15 @@ typedef struct xsd_simple {
  * types and union member names through the schema. */
 int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
                            const XsdSimple* t, const char* v);
+
+/* XSD 1.1 (#1075 tier 2): one xs:assert bound to a complexType —
+ * the compiled XPath 2 test plus its source text. Evaluation
+ * errors count as assertion failure. */
+typedef struct xsd_assert {
+    char* test;             /* the wire expression, for reporting */
+    LeptrisXQuery compiled; /* NULL when compilation failed */
+    struct xsd_assert* next;
+} XsdAssert;
 
 /* Content-model node: a particle (element ref / wildcard) or a
  * group (sequence | choice | all). Owned by the schema; freed
@@ -88,7 +102,13 @@ typedef struct xsd_cm {
     struct xsd_cm* first_child; /* group children list */
     struct xsd_cm* next;        /* sibling link within the parent group */
     char* text_type; /* simpleContent wrapper: the text's type ref */
+    XsdAssert* asserts; /* XSD 1.1: the type's xs:assert list */
+    struct xsd_cm* open_any; /* XSD 1.1: xs:openContent wildcard */
+    int oc_mode;        /* 0 none/unset, 1 suffix, 2 interleave */
+    int oc_owned;       /* the wildcard node is this model's own */
 } XsdCm;
+
+
 
 /* A top-level xs:group definition: name + the model its refs
  * splice in (the definition's single sequence/choice/all). */
@@ -98,15 +118,28 @@ typedef struct xsd_group_def {
     struct xsd_group_def* next;
 } XsdGroupDef;
 
+/* XSD 1.1 (xs:schema @version="1.1") gates 1.1 enforcement. */
+int xsd_schema_version_11(struct leptris_xsd_schema* s);
+
 /* Group refs resolve through the schema at NFA-build time —
  * forward references need no capture order. */
 XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
                             const char* name);
 
+/* XSD 1.1 (#1075 tier 2): one xs:alternative on an element
+ * declaration — the test plus the type it selects. */
+typedef struct xsd_alternative {
+    char* test;             /* wire text, for reporting */
+    LeptrisXQuery compiled; /* NULL when compilation failed */
+    char* type;             /* the selected type name */
+    struct xsd_alternative* next;
+} XsdAlternative;
+
 /* A top-level xs:element declaration (slice 3: name + type ref). */
 typedef struct xsd_element_decl {
     char* name;
     char* type;     /* "xs:string"-style builtin or a local type name */
+    XsdAlternative* alternatives; /* XSD 1.1 conditional types */
     char* fixed;    /* fixed element content: text must string-equal it */
     char* sub_head; /* substitutionGroup head (local name after ':') */
     struct xsd_element_decl* next;

@@ -1119,3 +1119,249 @@ TEST(XsdCompileFile, MissingFileIsNullWithStatus) {
 }
 
 }  // namespace
+
+// ---- tier 2 (#1075): xs:assert --------------------------------------
+namespace {
+
+const char* k_assert_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:complexType name=\"boxT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"item\" type=\"xs:token\" minOccurs=\"0\""
+    " maxOccurs=\"unbounded\"/>"
+    "</xs:sequence>"
+    "<xs:attribute name=\"qty\" type=\"xs:integer\"/>"
+    "<xs:assert test=\"count(item) &lt;= 2\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"box\" type=\"boxT\"/>"
+    "</xs:schema>";
+
+TEST(XsdAssert11, ComplexTypeAssertionEnforces) {
+    EXPECT_EQ(validate_doc(k_assert_schema,
+                           "<box qty=\"1\"><item>a</item>"
+                           "</box>"), 1);
+    EXPECT_EQ(validate_doc(k_assert_schema,
+                           "<box qty=\"1\"><item>a</item><item>b</item>"
+                           "</box>"), 1);
+    /* the assertion fails at three items */
+    EXPECT_EQ(validate_doc(k_assert_schema,
+                           "<box qty=\"1\"><item>a</item><item>b</item>"
+                           "<item>c</item></box>"), 0);
+    /* attributes ride the assertion context too */
+    EXPECT_EQ(validate_doc(k_assert_schema,
+                           "<box qty=\"9\"><item>a</item>"
+                           "<item>b</item><item>c</item></box>"), 0);
+}
+
+const char* k_assert_attr_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:complexType name=\"pairT\">"
+    "<xs:attribute name=\"lo\" type=\"xs:integer\"/>"
+    "<xs:attribute name=\"hi\" type=\"xs:integer\"/>"
+    "<xs:assert test=\"number(@lo) &lt;= number(@hi)\"/>"
+    "</xs:complexType>"
+    "<xs:element name=\"p\" type=\"pairT\"/>"
+    "</xs:schema>";
+
+TEST(XsdAssert11, AttributeComparisonAssertion) {
+    EXPECT_EQ(validate_doc(k_assert_attr_schema,
+                           "<p lo=\"1\" hi=\"3\"/>"), 1);
+    EXPECT_EQ(validate_doc(k_assert_attr_schema,
+                           "<p lo=\"4\" hi=\"3\"/>"), 0);
+}
+
+/* assertions nested under complexContent/extension also bind */
+TEST(XsdAssert11, ExtensionAssertionEnforces) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " version=\"1.1\">"
+        "<xs:complexType name=\"baseT\">"
+        "<xs:sequence><xs:element name=\"a\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"extT\">"
+        "<xs:complexContent>"
+        "<xs:extension base=\"baseT\">"
+        "<xs:sequence><xs:element name=\"b\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "<xs:assert test=\"a = b\"/>"
+        "</xs:extension>"
+        "</xs:complexContent>"
+        "</xs:complexType>"
+        "<xs:element name=\"e\" type=\"extT\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<e><a>t</a><b>t</b></e>"), 1);
+    EXPECT_EQ(validate_doc(x, "<e><a>t</a><b>u</b></e>"), 0);
+}
+
+/* 1.0-labelled schemas ignore the construct (XSD 1.0 validators
+ * see unknown elements) — no assertion enforcement */
+TEST(XsdAssert11, Version10IgnoresAssertions) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " version=\"1.0\">"
+        "<xs:complexType name=\"boxT\">"
+        "<xs:sequence>"
+        "<xs:element name=\"item\" type=\"xs:token\" minOccurs=\"0\""
+        " maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "<xs:assert test=\"count(item) &lt;= 1\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"box\" type=\"boxT\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x,
+                           "<box><item>a</item><item>b</item></box>"), 1);
+}
+
+}  // namespace
+
+// ---- tier 2 (#1075): xs:assertion on simpleTypes -------------------
+namespace {
+
+const char* k_sa_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:simpleType name=\"small\">"
+    "<xs:restriction base=\"xs:integer\">"
+    "<xs:assertion test=\"$value &lt; 10\"/>"
+    "</xs:restriction>"
+    "</xs:simpleType>"
+    "<xs:simpleType name=\"word\">"
+    "<xs:restriction base=\"xs:string\">"
+    "<xs:assertion test=\"string-length($value) &lt;= 3\"/>"
+    "</xs:restriction>"
+    "</xs:simpleType>"
+    "<xs:element name=\"n\" type=\"small\"/>"
+    "<xs:element name=\"w\" type=\"word\"/>"
+    "</xs:schema>";
+
+TEST(XsdAssertion11, SimpleTypeValueAssertions) {
+    EXPECT_EQ(validate_doc(k_sa_schema, "<n>5</n>"), 1);
+    EXPECT_EQ(validate_doc(k_sa_schema, "<n>50</n>"), 0);
+    EXPECT_EQ(validate_doc(k_sa_schema, "<w>abc</w>"), 1);
+    EXPECT_EQ(validate_doc(k_sa_schema, "<w>abcd</w>"), 0);
+}
+
+}  // namespace
+
+// ---- tier 2 (#1075): open content ----------------------------------
+namespace {
+
+const char* k_oc_interleave =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:complexType name=\"tT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" type=\"xs:token\"/>"
+    "<xs:element name=\"b\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "<xs:openContent mode=\"interleave\">"
+    "<xs:any namespace=\"##any\" processContents=\"lax\"/>"
+    "</xs:openContent>"
+    "</xs:complexType>"
+    "<xs:element name=\"e\" type=\"tT\"/>"
+    "</xs:schema>";
+
+TEST(XsdOpenContent11, InterleavedWildcardsBindAnywhere) {
+    /* the plain sequence */
+    EXPECT_EQ(validate_doc(k_oc_interleave,
+                           "<e><a>1</a><b>2</b></e>"), 1);
+    /* foreign element before, between, after */
+    EXPECT_EQ(validate_doc(k_oc_interleave,
+                           "<e><q/><a>1</a><b>2</b></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_interleave,
+                           "<e><a>1</a><q/><b>2</b></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_interleave,
+                           "<e><a>1</a><b>2</b><q/></e>"), 1);
+    /* the sequence itself still enforces order */
+    EXPECT_EQ(validate_doc(k_oc_interleave,
+                           "<e><b>2</b><a>1</a></e>"), 0);
+}
+
+const char* k_oc_suffix =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:complexType name=\"tT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "<xs:openContent mode=\"suffix\">"
+    "<xs:any namespace=\"##any\" processContents=\"lax\"/>"
+    "</xs:openContent>"
+    "</xs:complexType>"
+    "<xs:element name=\"e\" type=\"tT\"/>"
+    "</xs:schema>";
+
+TEST(XsdOpenContent11, SuffixWildcardsBindOnlyAtTheEnd) {
+    EXPECT_EQ(validate_doc(k_oc_suffix, "<e><a>1</a><q/></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_suffix, "<e><a>1</a><q/><r/></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_suffix, "<e><q/><a>1</a></e>"), 0);
+}
+
+const char* k_oc_default =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:defaultOpenContent mode=\"interleave\">"
+    "<xs:any namespace=\"##any\" processContents=\"lax\"/>"
+    "</xs:defaultOpenContent>"
+    "<xs:complexType name=\"tT\">"
+    "<xs:sequence>"
+    "<xs:element name=\"a\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:element name=\"e\" type=\"tT\"/>"
+    "</xs:schema>";
+
+TEST(XsdOpenContent11, DefaultOpenContentApplies) {
+    EXPECT_EQ(validate_doc(k_oc_default, "<e><a>1</a></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_default, "<e><a>1</a><q/></e>"), 1);
+    EXPECT_EQ(validate_doc(k_oc_default, "<e><q/><a>1</a></e>"), 1);
+}
+
+}  // namespace
+
+// ---- tier 2 (#1075): conditional type assignment --------------
+namespace {
+
+const char* k_alt_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " version=\"1.1\">"
+    "<xs:complexType name=\"circleT\">"
+    "<xs:sequence><xs:element name=\"r\" type=\"xs:integer\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"squareT\">"
+    "<xs:sequence><xs:element name=\"s\" type=\"xs:string\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:complexType name=\"fallbackT\">"
+    "<xs:sequence><xs:element name=\"u\" type=\"xs:token\"/>"
+    "</xs:sequence>"
+    "</xs:complexType>"
+    "<xs:element name=\"shape\" type=\"fallbackT\">"
+    "<xs:alternative test=\"@kind = 'circle'\" type=\"circleT\"/>"
+    "<xs:alternative test=\"@kind = 'square'\" type=\"squareT\"/>"
+    "</xs:element>"
+    "</xs:schema>";
+
+TEST(XsdAlternative11, FirstMatchingAlternativeTypes) {
+    /* circle alternative */
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"circle\"><r>2</r></shape>"), 1);
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"circle\"><r>x</r></shape>"), 0);
+    /* square alternative */
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"square\"><s>hi</s></shape>"), 1);
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"square\"><r>2</r></shape>"), 0);
+    /* no alternative matches: the declared fallback type applies */
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"blob\"><u>t</u></shape>"), 1);
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"blob\"><r>2</r></shape>"), 0);
+}
+
+}  // namespace
