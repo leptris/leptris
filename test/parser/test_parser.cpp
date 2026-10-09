@@ -6,6 +6,7 @@
 #include "leptris/error.h"
 
 #include <cstring>
+#include <cstdlib>
 #include <string>
 
 namespace {
@@ -682,4 +683,23 @@ TEST(ParseDiagTeardown, DuplicateAttrDiagBeforeFailureAndRecovery) {
     LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
     ASSERT_NE(d, nullptr);
     leptris_document_free(d);
+}
+
+/* Nightly-fuzz crash-aac3c9bb: the fast-path "<?xml" probe bounded
+ * against the ABSOLUTE length while indexing from the first
+ * non-whitespace offset — "     <?xm" (9 bytes, i=5) read d[i+4]
+ * one byte past the caller's buffer. The probe must bound against
+ * the remaining span. */
+TEST(ParseFastPath, XmlDeclProbeStaysInBoundsAfterLeadingWhitespace) {
+    /* exact 9-byte heap buffer, fuzzer-shaped: a string literal's
+     * terminator would land the probe's read in bounds, and stack
+     * slots pad to 32 bytes (ASAN cannot see intra-object reads) */
+    const char shape[] = {' ', ' ', ' ', ' ', ' ', '<', '?', 'x', 'm'};
+    char* xml = (char*)malloc(sizeof(shape));
+    ASSERT_NE(xml, nullptr);
+    memcpy(xml, shape, sizeof(shape));
+    LeptrisStatus st = LEPTRIS_OK;
+    EXPECT_EQ(leptris_parse_string(xml, sizeof(shape), &st), nullptr);
+    EXPECT_NE(st, LEPTRIS_OK);
+    free(xml);
 }
