@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.327] - 2026-10-09
+
+### Fixed
+
+- NUL-leading text runs keep a real content pointer (dom)
+- nightly fuzz binary lands at the documented path (ci)
+
+
+
 ## [1.9.326] - 2026-10-09
 
 ### Added
