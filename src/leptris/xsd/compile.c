@@ -538,8 +538,10 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(
         return NULL;
     }
     /* relative schemaLocations resolve against the schema's own
-     * directory */
+     * directory (both separators: Windows paths carry '\') */
     const char* slash = strrchr(path, '/');
+    const char* bslash = strrchr(path, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
     char* base_dir = NULL;
     if (slash) {
         size_t n = (size_t)(slash - path);
@@ -1084,9 +1086,12 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         }
     }
     if (!root->first_child && !root->text_type) {
-        /* no derivation: the direct-content spelling */
+        /* no derivation: the direct-content spelling. A derivation
+         * that captured attributes but produced no element model
+         * (e.g. an attributes-only restriction) already set them —
+         * re-capturing would orphan those rows. */
         root->first_child = xsd_cm_parse(s, ct, NULL);
-        attrs = xsd_capture_attr_rows(s, ct, 0);
+        if (!attrs) attrs = xsd_capture_attr_rows(s, ct, 0);
     }
     /* the NFA and model walkers consume ONE root particle —
      * a multi-particle model (derivation splices) normalizes
