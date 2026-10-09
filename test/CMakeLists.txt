@@ -265,4 +265,9 @@ if(LEPTRIS_ENABLE_FUZZING)
     target_link_libraries(fuzz_parse PRIVATE leptris)
     target_include_directories(fuzz_parse PRIVATE
         ${PROJECT_SOURCE_DIR}/src/include)
+    # The harness doc and the nightly workflow invoke the binary at
+    # the build root, not under build/test/ where subdirectory
+    # targets land by default.
+    set_target_properties(fuzz_parse PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
