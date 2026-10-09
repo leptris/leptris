@@ -703,3 +703,22 @@ TEST(ParseFastPath, XmlDeclProbeStaysInBoundsAfterLeadingWhitespace) {
     EXPECT_NE(st, LEPTRIS_OK);
     free(xml);
 }
+
+/* Nightly-fuzz leak-e3246602: a DOCTYPE internal subset with a
+ * DEFAULT attribute declaration grows the DTD model's heap
+ * default_decls array — and a subsequent parse failure never
+ * transferred p.dtd to the document, so the fail teardown missed
+ * it. Pins both paths; leak visibility is the Linux CI ASAN job. */
+TEST(ParseFailTeardown, DtdModelBeforeFailureAndRecovery) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char bad[] =
+        "<!DOCTYPE r [<!ATTLIST r a CDATA \"x\">]><r><";
+    EXPECT_EQ(leptris_parse_string(bad, strlen(bad), &st), nullptr);
+    EXPECT_NE(st, LEPTRIS_OK);
+
+    const char ok[] =
+        "<!DOCTYPE r [<!ATTLIST r a CDATA \"x\">]><r/>";
+    LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
+    ASSERT_NE(d, nullptr);
+    leptris_document_free(d);
+}
