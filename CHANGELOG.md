@@ -4,8 +4,23 @@
 
 ### Fixed
 
-- NUL-leading text runs keep a real content pointer (dom)
-- nightly fuzz binary lands at the documented path (ci)
+- **NUL-leading text runs keep a real content pointer — ASAN
+  global-buffer-overflow (PR #1605).** The text-content setter
+  collapsed any run whose first byte is NUL onto the shared EMPTY
+  sentinel regardless of its length, so a NUL-leading run stored
+  content `""` with its real `content_len` — the serializer then
+  read past the 1-byte global. Found by the nightly libFuzzer run
+  (artifact `crash-0a24082b`, the harness's first working session
+  after #1604 repaired it). The setter is length-aware now: EMPTY
+  only for genuinely empty runs; NUL-leading runs serialize
+  verbatim, consistent with the never-trimmed content contract.
+- **Nightly fuzz binary lands at the documented path (PR #1604).**
+  `fuzz_parse` is a `test/` subdirectory target, so it built under
+  `build/test/` while `fuzz-nightly.yml` invoked `./build/fuzz_parse`
+  — every scheduled run since 2026-09-30 failed before fuzzing
+  started. The target now sets its runtime output directory to the
+  build root, where the workflow and the harness's own docs expect
+  it.
 
 
 
