@@ -109,6 +109,10 @@ static int text_valid(struct xsd_validator* v,
 static void validate_element(struct xsd_validator* v,
                              struct leptris_xsd_schema* s,
                              LeptrisElement elem, int depth);
+static void validate_local(struct xsd_validator* v,
+                           struct leptris_xsd_schema* s,
+                           LeptrisElement elem, const char* local,
+                           const char* type);
 
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
@@ -151,16 +155,25 @@ static void validate_children(struct xsd_validator* v,
         leptris_element_expanded_name(elem, &local, NULL, NULL);
         verrf(v, "element", local, "children do not match the content model");
     }
-    /* recurse; local particles carry types (first-name-match DFS —
-     * position-exact particle typing arrives with the NFA trace). */
+    /* recurse: a global declaration governs the child when one
+     * exists; otherwise the parent's particle declaration does
+     * (first-name-match DFS — position-exact particle typing
+     * arrives with the NFA trace). */
     for (LeptrisNodeRef c =
              leptris_node_first_child(leptris_element_as_node(elem));
          c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
         LeptrisElement ce = (LeptrisElement)c;
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
-        if (cl && !xsd_find_element(s, cl) && model) {
-            const char* ptype = NULL;
+        if (!cl) continue;
+        if (xsd_find_element(s, cl)) {
+            validate_element(v, s, ce, 0);
+            continue;
+        }
+        const char* ptype = NULL;
+        if (model) {
             XsdCm* stack[64];
             int sp = 0;
             stack[sp++] = model;
@@ -176,15 +189,9 @@ static void validate_children(struct xsd_validator* v,
                         stack[sp++] = p->first_child;
                 }
             }
-            if (ptype) {
-                const char* text = leptris_element_text(ce);
-                if (text && *text)
-                    text_valid(v, s, ptype, text, "element", cl);
-            }
         }
-        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
-            continue;
-        validate_element(v, s, ce, 0);
+        if (ptype)
+            validate_local(v, s, ce, cl, ptype);
     }
 }
 
@@ -233,20 +240,30 @@ static void validate_element(struct xsd_validator* v,
     if (!d) return; /* undeclared: lax at this depth (strict later) */
 
     if (!d->type) return; /* anyType */
+    validate_local(v, s, elem, local, d->type);
+}
 
-    XsdCm* ct = xsd_find_complex(s, d->type);
+/* Validate one element against a type name that comes from a
+ * global declaration or a local particle: attributes and content
+ * model for complex types, lexical text otherwise. */
+static void validate_local(struct xsd_validator* v,
+                           struct leptris_xsd_schema* s,
+                           LeptrisElement elem, const char* local,
+                           const char* type) {
+    if (!type) return;
+    XsdCm* ct = xsd_find_complex(s, type);
     if (ct) {
-        validate_attributes(v, s, elem, xsd_find_type_attrs(s, d->type));
+        validate_attributes(v, s, elem, xsd_find_type_attrs(s, type));
         validate_children(v, s, elem, ct);
         return;
     }
 
     /* simple-typed element: text must be lexically valid */
-    if (strncmp(d->type, "xs:", 3) == 0 ||
-        xsd_find_simple_pub(s, d->type)) {
+    if (strncmp(type, "xs:", 3) == 0 ||
+        xsd_find_simple_pub(s, type)) {
         const char* text = leptris_element_text(elem);
         if (text && *text)
-            text_valid(v, s, d->type, text, "element", local);
+            text_valid(v, s, type, text, "element", local);
     }
 }
 
