@@ -955,6 +955,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(g);
         g = gn;
     }
+    if (s->default_open) xsd_cm_free(s->default_open);
     free(s->target_ns);
     free(s->base_dir);
     if (s->validator)
