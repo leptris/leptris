@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.331] - 2026-10-09
+
+### Fixed
+
+- a second DOCTYPE keeps the first model (parse)
+
+
+
 ## [1.9.330] - 2026-10-09
 
 ### Fixed
