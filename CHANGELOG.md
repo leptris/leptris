@@ -4,11 +4,37 @@
 
 ### Added
 
-- tier-1 charter completion — unions, lists, groups, attributeGroups, derivation, substitution groups, fixed values, includes (#1075) (xsd)
+- **XSD: tier-1 charter completion — unions, lists, groups,
+  attributeGroups, derivation, substitution groups, fixed values,
+  includes (#1075, PR #1602).** Every remaining charter feature
+  ships: `xs:union`/`xs:list` derivation (lists type every token,
+  length counts items; unions accept any named or inline member);
+  `xs:group` definitions with refs that expand lazily at NFA build
+  (forward references need no capture order, cyclic refs splice
+  nothing); `xs:attributeGroup` refs plus top-level attribute refs
+  and inline anonymous attribute simpleTypes;
+  complexContent/simpleContent extension and restriction through a
+  shared complexType capture (extension splices base content and
+  attribute rows, restriction replaces them, simpleContent types
+  element text); `xs:substitutionGroup` members bind in content
+  models; `@fixed` enforced on attributes and element text; and
+  `leptris_xsd_compile_file` resolves `xs:include`/`xs:import`/
+  `xs:redefine` schemaLocations against the schema's own directory
+  — the CLI `--xsd` path and the corpus gate now use it, so the
+  gate's 23 multi-file fixtures resolve their includes. Multi-
+  particle derivation splices normalize under a sequence (the NFA
+  consumes one root particle). 14 new red-first specs; ctest
+  1937/1937; corpus gate green with its floor held.
 
 ### Fixed
 
-- ASAN attr-row leak + Windows base-dir split (xsd)
+- **follow-up on the same PR (52a5a8d9):** the direct-content
+  fallback re-captured attribute rows when a derivation had already
+  captured them (attributes-only restriction), orphaning the chain
+  — 1309 bytes across 69 allocations under ASAN; the fallback now
+  captures only when no derivation did. `leptris_xsd_compile_file`
+  split the base directory on `/` only; Windows paths carry
+  backslashes, so includes never resolved there.
 
 
 
