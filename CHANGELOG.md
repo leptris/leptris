@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.330] - 2026-10-09
+
+### Fixed
+
+- dp fail path frees the parsed internal-subset DTD (parse)
+
+
+
 ## [1.9.329] - 2026-10-09
 
 ### Fixed
