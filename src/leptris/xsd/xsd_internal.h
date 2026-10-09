@@ -9,6 +9,10 @@
 extern "C" {
 #endif
 
+/* Opaque here: compile.c owns the definition; prototypes below
+ * take it by pointer only. */
+struct leptris_xsd_schema;
+
 /* One xs:enumeration / facet value, schema-owned. */
 typedef struct xsd_facet_value {
     char* text;
