@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.329] - 2026-10-09
+
+### Fixed
+
+- fast-path declaration probe bounds against the span (parse)
+
+
+
 ## [1.9.328] - 2026-10-09
 
 ### Fixed
