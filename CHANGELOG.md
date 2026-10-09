@@ -4,7 +4,19 @@
 
 ### Fixed
 
-- local particle declarations govern nested children (#1075) (xsd)
+- **XSD: local particle declarations govern nested children —
+  tier-1 boundary closed (#1075, PR #1600).** Children declared
+  only as particles of a parent's content model — no global
+  `xs:element` of that name — skipped attribute and content-model
+  validation: the instance walk resolved every child through the
+  global element table and at most text-typed local particles, so
+  `<order><item id="nan"/></order>` against an `xs:integer`
+  particle attribute validated clean. When no global declaration
+  exists, the parent's particle declaration now governs the child:
+  the particle's type drives the full element check — attribute
+  rows, content model, lexical text — through the shared
+  `validate_local` tail that global declarations use, and
+  grandchildren type through the particle chain.
 
 
 
