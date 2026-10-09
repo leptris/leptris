@@ -845,7 +845,16 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
             subset_start, (size_t)(subset_end - subset_start),
             pool);
         if (parsed) {
-            dtd = parsed;
+            extern void leptris_dtd_free(struct LeptrisDTD*);
+            if (dtd) {
+                /* a second <!DOCTYPE: the first model wins (the
+                 * duplicate-attribute keep-first rule); the
+                 * replacement's heap default_decls array would
+                 * leak otherwise (nightly-fuzz leak-168da36a) */
+                leptris_dtd_free(parsed);
+            } else {
+                dtd = parsed;
+            }
         }
     }
     *pos_io = pos;
