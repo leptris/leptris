@@ -162,10 +162,15 @@ static inline const char* leptris_textnode_content(const LeptrisTextNode* t) {
  * use this form; the pooled-create contiguous path never spills but
  * takes doc anyway so the oversized-content fallback is covered. */
 static inline void leptris_textnode_set_content_ptr_doc(
-    LeptrisTextNode* t, const char* p, struct leptris_document* doc) {
+    LeptrisTextNode* t, const char* p, size_t len,
+    struct leptris_document* doc) {
     if (!t) return;
     if (!p) { t->content_off = 0; return; }
-    if (*p == '\0') { t->content_off = LEPTRIS_COMPACT_INT32_EMPTY; return; }
+    /* EMPTY only for genuinely empty runs. A NUL FIRST byte is
+     * content (nightly-fuzz 2026-10-09: NUL-leading runs collapsed
+     * here while content_len kept the length — the serializer then
+     * walked past the 1-byte EMPTY global). */
+    if (len == 0) { t->content_off = LEPTRIS_COMPACT_INT32_EMPTY; return; }
     ptrdiff_t d = (char*)p - (char*)t;
     if (d < INT32_MIN || d >= INT32_MAX)
         t->content_off = leptris_compact_int32_encode_doc(
