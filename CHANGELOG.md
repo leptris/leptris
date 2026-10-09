@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.325] - 2026-10-09
+
+### Fixed
+
+- local particle declarations govern nested children (#1075) (xsd)
+
+
+
 ## [1.9.324] - 2026-10-08
 
 ### Added
