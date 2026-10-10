@@ -493,6 +493,13 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
     return copy ? (LeptrisNode*)copy : NULL;
 }
 
+LeptrisStatus leptris_element_add_child_addr(uintptr_t parent_addr,
+                                             uintptr_t child_addr) {
+    if (!parent_addr || !child_addr) return LEPTRIS_ERROR_NULL_ARG;
+    return leptris_element_append_child((LeptrisElement)parent_addr,
+                                        (LeptrisElement)child_addr);
+}
+
 LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
