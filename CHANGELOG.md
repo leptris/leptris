@@ -4,7 +4,18 @@
 
 ### Fixed
 
-- builder members emit in op order on every platform (descriptor)
+- **plan_result_build members emit in op order on every platform
+  (leptris#1625, PR #1629).** The serializer orders children by
+  byte position with an unstable qsort; builder-created values
+  carry no position, so the tie fell to unspecified libc behavior
+  and collection members reversed on Windows (both x64 and
+  arm64). Builder values now take a dense insertion rank before
+  push — fixing an off-by-one in the element branch besides — and
+  the comparator breaks position ties on it, making the order
+  total and platform-independent. Walk output is undisturbed (the
+  walk's own ranks are dense already). The binding's round-trip
+  spec can flip to strict member order once a release carries
+  this.
 
 
 
