@@ -2,12 +2,16 @@
 
 ## [1.9.333] - 2026-10-10
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **Regression pin: union `memberTypes` + inline anonymous members
+  (#1615, PR #1618).** The reported over-acceptance was not
+  reproducible on any engine artifact (main, the v1.9.331 tag,
+  every published gem binary — including through the full Ruby
+  binding path). The exact schema now asserts in CI through both
+  `leptris_xsd_simple_valid` and instance validation, so the
+  mixed-member semantics are verifiable binary-independent of any
+  binding environment.
 
 
 ## [1.9.332] - 2026-10-09
