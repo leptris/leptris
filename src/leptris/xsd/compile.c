@@ -88,6 +88,37 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
 static XsdCm* xsd_capture_any(LeptrisElement any_child);
 static char* xsd_capture_any_attr_ns(LeptrisElement container);
+
+/* #1626: prefixed QName refs (type="w:CT_Border") resolve by local
+ * name — the engine's tables key on local names; the prefix maps
+ * to a namespace the name-based resolution folds away. Returns the
+ * local part after the colon when present, else the argument. */
+static char xsd_qname_buf[8][512];
+static int xsd_qname_slot;
+
+static const char* xsd_local_name(const char* qname) {
+    if (!qname) return NULL;
+    const char* colon = strchr(qname, ':');
+    if (!colon) return qname;
+    /* xs:/xsd: are builtin references — canonize to "xs:local" so
+     * text_valid's dispatch matches both spellings (xsd:-spelled
+     * types were silently untyped before #1626). */
+    size_t pl = (size_t)(colon - qname);
+    if ((pl == 2 && strncmp(qname, "xs", 2) == 0) ||
+        (pl == 3 && strncmp(qname, "xsd", 3) == 0)) {
+        if (pl == 2) return qname;
+        char* dst = xsd_qname_buf[xsd_qname_slot++ & 7];
+        dst[0] = 'x';
+        dst[1] = 's';
+        dst[2] = ':';
+        snprintf(dst + 3, sizeof(xsd_qname_buf[0]) - 3, "%s",
+                 colon + 1);
+        return dst;
+    }
+    /* a foreign prefix maps to a namespace; the name-based tables
+     * resolve by local name */
+    return colon + 1;
+}
 static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
                                      LeptrisElement decl_elem,
                                      XsdElementDecl* d);
@@ -193,12 +224,14 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
             if (cm) {
                 const char* nm =
                     leptris_element_attribute(e, "name");
-                if (!nm) nm = leptris_element_attribute(e, "ref");
+                if (!nm)
+                    nm = xsd_local_name(
+                        leptris_element_attribute(e, "ref"));
                 cm->name = xsd_strdup(nm);
                 const char* pty =
                     leptris_element_attribute(e, "type");
                 if (pty) {
-                    cm->type = xsd_strdup(pty);
+                    cm->type = xsd_strdup(xsd_local_name(pty));
                 } else if (s && nm) {
                     /* #1592: inline anonymous type on the particle */
                     char synth[512];
@@ -212,8 +245,8 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
              * forward references need no capture order */
             cm = xsd_cm_new(XSD_CM_GROUP_REF);
             if (cm)
-                cm->name = xsd_strdup(
-                    leptris_element_attribute(e, "ref"));
+                cm->name = xsd_strdup(xsd_local_name(
+                    leptris_element_attribute(e, "ref")));
         } else if (strcmp(local, "any") == 0) {
             cm = xsd_cm_new(XSD_CM_ANY);
             if (cm) {
@@ -273,7 +306,8 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
         if (!local) continue;
         if (strcmp(local, "list") == 0) {
             simple->deriv = XSD_SIMPLE_LIST;
-            const char* it = leptris_element_attribute(e, "itemType");
+            const char* it = xsd_local_name(
+                leptris_element_attribute(e, "itemType"));
             if (it && *it) {
                 simple->item_type = xsd_strdup(it);
             } else {
@@ -346,8 +380,8 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                 simple->member_defs[simple->member_def_count++] = def;
             }
         } else if (strcmp(local, "restriction") == 0) {
-            simple->base =
-                xsd_strdup(leptris_element_attribute(e, "base"));
+            simple->base = xsd_strdup(xsd_local_name(
+                leptris_element_attribute(e, "base")));
             for (LeptrisNodeRef f = leptris_node_first_child(
                      leptris_element_as_node(e));
                  f; f = leptris_node_next_sibling(f)) {
@@ -694,9 +728,16 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                         /* same-namespace merges and no-namespace
                          * chameleon includes; foreign-namespace
                          * imports stay lax at this tier */
+                        /* xs:include: same-namespace (or
+                         * chameleon — the no-tns form adopts ours).
+                         * xs:import: foreign namespaces are the
+                         * point — merge regardless (#1626: wml-2010
+                         * shape imports were skipped when the
+                         * compiler had its own targetNamespace). */
+                        int same_ns = subroot && (!tns || !s->target_ns ||
+                                                  strcmp(tns, s->target_ns) == 0);
                         if (subroot &&
-                            (!tns || !s->target_ns ||
-                             strcmp(tns, s->target_ns) == 0)) {
+                            (strcmp(local, "import") == 0 || same_ns)) {
                             s->include_depth++;
                             xsd_capture_root(s, subroot);
                             s->include_depth--;
@@ -719,7 +760,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     (XsdElementDecl*)calloc(1, sizeof(*d));
                 if (d) {
                     d->name = xsd_strdup(nm);
-                    d->type = xsd_strdup(ty);
+                    d->type = xsd_strdup(xsd_local_name(ty));
                     xsd_capture_alternatives(s, (LeptrisElement)n, d);
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
@@ -789,9 +830,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
                 if (d) {
                     d->name = xsd_strdup(nm);
-                    d->type = xsd_strdup(
+                    d->type = xsd_strdup(xsd_local_name(
                         leptris_element_attribute((LeptrisElement)n,
-                                                  "type"));
+                                                  "type")));
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
@@ -1141,8 +1182,9 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 if (!dl || (strcmp(dl, "extension") != 0 &&
                             strcmp(dl, "restriction") != 0))
                     continue;
-                const char* base =
+                const char* base_raw =
                     leptris_element_attribute(dq, "base");
+                const char* base = xsd_local_name(base_raw);
                 XsdCm* base_root =
                     (base && strncmp(base, "xs:", 3) != 0)
                         ? xsd_find_complex(s, base)
@@ -1199,8 +1241,8 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 if (!dl || (strcmp(dl, "extension") != 0 &&
                             strcmp(dl, "restriction") != 0))
                     continue;
-                const char* base =
-                    leptris_element_attribute(dq, "base");
+                const char* base = xsd_local_name(
+                    leptris_element_attribute(dq, "base"));
                 if (base) {
                     if (strncmp(base, "xs:", 3) == 0) {
                         root->text_type = xsd_strdup(base);
@@ -1434,8 +1476,8 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
             if (!d) continue;
             if (an) {
                 d->name = xsd_strdup(an);
-                d->type = xsd_strdup(
-                    leptris_element_attribute(ae, "type"));
+                d->type = xsd_strdup(xsd_local_name(
+                    leptris_element_attribute(ae, "type")));
                 if (!d->type)
                     d->type = xsd_strdup(
                         xsd_inline_attr_type(s, ae, an));
@@ -1444,8 +1486,8 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                 d->required = (use && strcmp(use, "required") == 0);
             } else {
                 /* ref to a top-level attribute declaration */
-                const char* ref =
-                    leptris_element_attribute(ae, "ref");
+                const char* ref = xsd_local_name(
+                    leptris_element_attribute(ae, "ref"));
                 const XsdAttrDecl* src =
                     ref ? xsd_find_top_attr(s, ref) : NULL;
                 if (!src) {
@@ -1465,8 +1507,8 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                 head = d;
             tail = d;
         } else if (strcmp(al, "attributeGroup") == 0) {
-            const char* ref =
-                leptris_element_attribute(ae, "ref");
+            const char* ref = xsd_local_name(
+                leptris_element_attribute(ae, "ref"));
             if (!ref) continue;
             XsdAttrGroupDef* g = s->attr_groups;
             for (; g; g = g->next)
