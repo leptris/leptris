@@ -43,8 +43,16 @@ typedef struct IlAttr {
 typedef struct IlCtx {
     IlRec* recs; size_t nrec, crec;
     IlAttr* attrs; size_t nattr, cattr;
-    uint32_t open[LEPTRIS_IL_MAX_DEPTH];
-    uint32_t last_child[LEPTRIS_IL_MAX_DEPTH];
+    /* Depth stacks (leptris#1577): the fixed buffers serve the
+     * default 256 cap; a configured max depth above that switches
+     * the pointers to one heap block. Owned by leptris_il_scan —
+     * initialized at entry, released at every exit; callers never
+     * touch these directly. */
+    uint32_t open_buf[LEPTRIS_IL_MAX_DEPTH];
+    uint32_t last_child_buf[LEPTRIS_IL_MAX_DEPTH];
+    uint32_t* open;
+    uint32_t* last_child;
+    void* stack_heap;
     int depth;
 } IlCtx;
 
