@@ -2495,7 +2495,35 @@ static LEPTRIS_ALWAYS_INLINE size_t il_name_end(const char* s,
     return (size_t)(p - s);
 }
 
+/* leptris#1577: the IL scan's depth stacks sized to the configured
+ * max depth (fixed 256 before — same overflow class as the classic
+ * lane). The wrapper owns the block so every body exit is covered. */
+static int il_stacks_init(IlCtx* c, size_t cap) {
+    if (cap <= LEPTRIS_IL_MAX_DEPTH) {
+        c->open = c->open_buf;
+        c->last_child = c->last_child_buf;
+        c->stack_heap = NULL;
+        return 1;
+    }
+    unsigned char* blk = (unsigned char*)malloc(
+        2u * cap * sizeof(uint32_t));
+    if (!blk) return 0;
+    c->open = (uint32_t*)blk;
+    c->last_child = (uint32_t*)(blk + cap * sizeof(uint32_t));
+    c->stack_heap = blk;
+    return 1;
+}
+
+static void il_stacks_release(IlCtx* c) {
+    free(c->stack_heap);
+    c->stack_heap = NULL;
+}
+
 int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
+                    uint32_t* root_out, size_t* trail_off,
+                    size_t* trail_len);
+
+static int il_scan_body(char* s, size_t len, int drop_ws, IlCtx* c,
                    uint32_t* root_out, size_t* trail_off,
                    size_t* trail_len) {
     const char* send = s + len;
@@ -2729,6 +2757,19 @@ int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
             j = cs;             /* continue content at this depth */
         }
     }
+}
+
+int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
+                    uint32_t* root_out, size_t* trail_off,
+                    size_t* trail_len) {
+    extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
+    size_t dcap = g_leptris_max_depth > 0
+        ? (size_t)g_leptris_max_depth : (size_t)LEPTRIS_IL_MAX_DEPTH;
+    if (!il_stacks_init(c, dcap)) return 0;
+    int ok = il_scan_body(s, len, drop_ws, c, root_out, trail_off,
+                          trail_len);
+    il_stacks_release(c);
+    return ok;
 }
 
 
