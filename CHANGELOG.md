@@ -4,8 +4,28 @@
 
 ### Added
 
-- native plan-result builder + address-based attach (#408) (api)
-- completion wave — order-free xs:all, strict validation, typed $value (#1075) (xsd)
+- **XSD completion wave (#1075, PR #1620).** `xs:all` at the model
+  root is order-free now (counting check: each member at most
+  maxOccurs, minOccurs floors, foreign children rejected) — it
+  previously enforced declaration order. Strict validation:
+  undeclared elements (including the document root) and undeclared
+  attributes fail with `not declared (strict)`, unless the type
+  captures `xs:anyAttribute`, whose namespace grammar
+  (`##any`/`##other`/`##targetNamespace`/`##local`/URI list) is
+  enforced. Unresolved named types are loud — `type not found in
+  the schema` — closing the silent-accept class behind #1615.
+  `$value` binds typed: the simple type's numeric chain decides
+  number-vs-string, not the lexical's shape. Eight red-first
+  specs; zero fallout in existing pins.
+- **Native plan-result builder + address-based attach (leptris-
+  ruby#408 asks, PR #1621).** `leptris_plan_result_build` builds
+  the standalone result tree from a flat op program —
+  ELEMENT/SCALAR/ATTR/END, stamped exactly as a walk stamps it —
+  so `leptris_plan_serialize` serves standalone serialization with
+  zero DOM mint on the host (the to_xml → to_json-floor path).
+  `leptris_element_add_child_addr` attaches by raw addresses,
+  dropping the per-node FFI pointer-wrapper mint (~2 allocs/row).
+  The Ruby-side wiring rides the binding repo.
 
 
 
