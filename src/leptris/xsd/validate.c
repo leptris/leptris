@@ -88,6 +88,9 @@ static void verrf(struct xsd_validator* v, const char* what,
 
 /* ---- lexical helpers ---------------------------------------------- */
 
+static int simple_is_numeric(struct leptris_xsd_schema* s,
+                             const XsdSimple* st);
+
 static int text_valid(struct xsd_validator* v,
                       struct leptris_xsd_schema* s, const char* type,
                       const char* lexical, const char* what,
@@ -128,12 +131,10 @@ static int text_valid(struct xsd_validator* v,
         }
         if (mut->assertion_q) {
             char sel[256];
-            int numeric = 1;
-            for (const char* p = lexical; *p; p++)
-                if (!isdigit((unsigned char)*p) && *p != '.' &&
-                    *p != '-' && *p != '+' && *p != 'e' && *p != 'E')
-                    numeric = 0;
-            if (numeric && *lexical)
+            int numeric =
+                simple_is_numeric(s, st) && *lexical &&
+                strspn(lexical, "0123456789.+-eE") == strlen(lexical);
+            if (numeric)
                 snprintf(sel, sizeof(sel), "%s", lexical);
             else {
                 size_t w = 0;
@@ -259,6 +260,59 @@ static void validate_children(struct xsd_validator* v,
     }
 }
 
+/* $value binds typed: a numeric-derived simple type binds the
+ * lexical as a number literal, everything else as a string — the
+ * TYPE decides, not the lexical's shape ("5" under xs:string is
+ * the string '5'). */
+static int numeric_builtin(const char* b) {
+    static const char* nums[] = {
+        "xs:integer",  "xs:decimal",     "xs:double", "xs:float",
+        "xs:int",      "xs:long",        "xs:short",  "xs:byte",
+        "xs:nonNegativeInteger", "xs:positiveInteger",
+        "xs:negativeInteger",    "xs:nonPositiveInteger",
+        "xs:unsignedLong",       "xs:unsignedInt",
+        "xs:unsignedShort",      "xs:unsignedByte", NULL};
+    for (int i = 0; nums[i]; i++)
+        if (strcmp(b, nums[i]) == 0) return 1;
+    return 0;
+}
+
+static int simple_is_numeric(struct leptris_xsd_schema* s,
+                             const XsdSimple* st) {
+    for (int d = 0; st && d < 32; d++) {
+        if (!st->base) return 0;
+        if (strncmp(st->base, "xs:", 3) == 0)
+            return numeric_builtin(st->base);
+        st = xsd_find_simple_pub(s, st->base);
+    }
+    return 0;
+}
+
+/* xs:anyAttribute grammar: ##any (or an absent attribute),
+ * ##other, ##targetNamespace, ##local, or a space-separated URI
+ * list. */
+static int any_attr_matches(const char* grammar, const char* uri,
+                            const char* target_ns) {
+    if (!grammar || strcmp(grammar, "##any") == 0) return 1;
+    if (strcmp(grammar, "##other") == 0)
+        return uri && target_ns && strcmp(uri, target_ns) != 0;
+    if (strcmp(grammar, "##targetNamespace") == 0)
+        return uri && target_ns && strcmp(uri, target_ns) == 0;
+    if (strcmp(grammar, "##local") == 0) return uri == NULL;
+    /* URI list */
+    const char* p = grammar;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        size_t len = (size_t)(p - start);
+        if (uri && strlen(uri) == len && strncmp(uri, start, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
@@ -294,6 +348,32 @@ static void validate_attributes(struct xsd_validator* v,
             verrf(v, "attribute", a->name,
                   "value does not match the fixed value");
     }
+    /* strict: every instance attribute must be declared (or pass
+     * the type's xs:anyAttribute grammar). Namespace declarations
+     * are not attributes. */
+    for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+         at; at = leptris_attribute_next(at)) {
+        const char* qn = leptris_attribute_get_name(at);
+        if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
+        const char* colon = strchr(qn, ':');
+        const char* local = colon ? colon + 1 : qn;
+        int declared = 0;
+        for (XsdAttrDecl* a = ta->attrs; a && !declared; a = a->next)
+            if (strcmp(a->name, local) == 0 ||
+                strcmp(a->name, qn) == 0)
+                declared = 1;
+        if (declared) continue;
+        if (ta->any_attr_ns) {
+            /* namespace of the attribute: engine-side attributes
+             * carry their uri through the expanded form */
+            const char* auri =
+                leptris_attribute_namespace_uri(at);
+            if (any_attr_matches(ta->any_attr_ns, auri,
+                                 xsd_target_ns(s)))
+                continue;
+        }
+        verrf(v, "attribute", local, "not declared (strict)");
+    }
 }
 
 static void validate_element(struct xsd_validator* v,
@@ -304,7 +384,12 @@ static void validate_element(struct xsd_validator* v,
     leptris_element_expanded_name(elem, &local, &prefix, &uri);
     if (!local) return;
     const XsdElementDecl* d = xsd_find_element(s, local);
-    if (!d) return; /* undeclared: lax at this depth (strict later) */
+    if (!d) {
+        /* strict: the instance uses an element the schema never
+         * declared (a local particle would have typed it) */
+        verrf(v, "element", local, "not declared (strict)");
+        return;
+    }
 
     /* XSD 1.1: the first alternative whose test passes types the
      * element for this instance (context = the element). */
@@ -377,7 +462,11 @@ static void validate_local(struct xsd_validator* v,
         const char* text = leptris_element_text(elem);
         if (text && *text)
             text_valid(v, s, type, text, "element", local, elem);
+        return;
     }
+    /* neither complex nor simple nor builtin: the schema is
+     * incomplete — loud, never a silent accept (#1615 class) */
+    verrf(v, "element", local, "type not found in the schema");
 }
 
 /* ---- slice 6: identity constraints -------------------------------- */

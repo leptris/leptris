@@ -1396,3 +1396,106 @@ TEST(XsdDatatypes, UnionMixesNamedAndInlineMembers) {
     EXPECT_EQ(validate_doc(x, "<v>42</v>"), 1);
     EXPECT_EQ(validate_doc(x, "<v>auto</v>"), 1);
 }
+
+// ---- completion wave: xs:all order-free semantics ------------------
+namespace {
+
+const char* k_all_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+    "<xs:complexType name=\"aT\">"
+    "<xs:all>"
+    "<xs:element name=\"x\" type=\"xs:token\"/>"
+    "<xs:element name=\"y\" type=\"xs:token\" minOccurs=\"0\"/>"
+    "</xs:all>"
+    "</xs:complexType>"
+    "<xs:element name=\"r\" type=\"aT\"/>"
+    "</xs:schema>";
+
+TEST(XsdContent, AllGroupIsOrderFree) {
+    /* declaration order */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><x>1</x><y>2</y></r>"), 1);
+    /* reversed order: xs:all is order-free */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><y>2</y><x>1</x></r>"), 1);
+    /* optional member absent */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><x>1</x></r>"), 1);
+    /* a member appears twice: at most once in xs:all */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><x>1</x><x>1</x></r>"), 0);
+    /* required member missing */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><y>2</y></r>"), 0);
+    /* undeclared child inside xs:all */
+    EXPECT_EQ(validate_doc(k_all_schema, "<r><x>1</x><z/></r>"), 0);
+}
+
+}  // namespace
+
+// ---- completion wave: loud unresolved types ------------------------
+namespace {
+
+TEST(XsdValidate, UnresolvedTypeIsALoudFailure) {
+    /* the schema references a type that does not exist — the
+     * instance must not silently validate (the #1615 symptom
+     * class: stale engines accepted unresolved types) */
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"v\" type=\"noSuchType\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<v>anything</v>"), 0);
+}
+
+}  // namespace
+
+// ---- completion wave: strict undeclared elements/attributes -------
+namespace {
+
+TEST(XsdValidate, UndeclaredElementIsStrict) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\">"
+        "<xs:complexType><xs:sequence>"
+        "<xs:element name=\"a\" type=\"xs:token\"/>"
+        "</xs:sequence></xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<r><a>1</a></r>"), 1);
+    /* a child the schema never declared */
+    EXPECT_EQ(validate_doc(x, "<r><a>1</a><ghost/></r>"), 0);
+    /* an element outside the sequence */
+    EXPECT_EQ(validate_doc(x, "<r><ghost/><a>1</a></r>"), 0);
+    /* an undeclared ROOT element */
+    EXPECT_EQ(validate_doc(x, "<ghost/>"), 0);
+}
+
+TEST(XsdValidate, UndeclaredAttributeIsStrictUnlessAnyAttribute) {
+    const char* strict =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\">"
+        "<xs:complexType><xs:sequence>"
+        "<xs:element name=\"a\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "<xs:attribute name=\"id\" type=\"xs:integer\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(strict, "<r id=\"1\"><a>x</a></r>"), 1);
+    /* an attribute the schema never declared */
+    EXPECT_EQ(validate_doc(strict, "<r id=\"1\" note=\"hi\"><a>x</a></r>"),
+              0);
+
+    /* xs:anyAttribute opens the wildcard: undeclared attrs pass */
+    const char* open_attrs =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\">"
+        "<xs:complexType><xs:sequence>"
+        "<xs:element name=\"a\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "<xs:attribute name=\"id\" type=\"xs:integer\"/>"
+        "<xs:anyAttribute namespace=\"##any\" processContents=\"lax\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(open_attrs,
+                           "<r id=\"1\" note=\"hi\" tag=\"x\"><a>x</a></r>"),
+              1);
+}
+
+}  // namespace
