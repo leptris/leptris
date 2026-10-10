@@ -4,8 +4,26 @@
 
 ### Fixed
 
-- cross-namespace imports, prefixed type refs, named content errors (#1626) (xsd)
-- compute record depths BEFORE sizing the replay stacks (il)
+- **XSD: cross-namespace imports, prefixed type refs, named
+  content errors (#1626, PR #1627).** `xs:import` with a foreign
+  targetNamespace merges its declarations — the previous gate
+  skipped the normal multi-namespace shape (wml-2010 imports were
+  invisible when the compiling schema carried its own
+  targetNamespace). Prefixed QName references
+  (`type="w:CT_Border"`) resolve by local name at every capture
+  site, and the `xs:`/`xsd:` builtin spellings canonize —
+  closing a pre-existing gap where `xsd:`-spelled types were
+  silently untyped. Content-model failures name the offending
+  child once (`children do not match the content model
+  (at 'insideH')`) via a greedy expected-next match with
+  `minOccurs="0"` optionals skippable — one misordered child no
+  longer cascades anonymously down the ancestors (the reported
+  ~175x amplification is a bounded single report).
+- **interleaved lane: compute record depths before sizing the
+  replay stacks (leptris#1577, PR #1624).** The sizing scan read
+  the still-zero-filled depth array, bound the replay to the
+  in-struct 256-slot buffers, and every document deeper than
+  DP_MAX_DEPTH overflowed them under a raised cap.
 
 
 
