@@ -64,15 +64,26 @@ typedef struct {
     char* end;
     LeptrisMemoryPool* pool;
     struct leptris_document* doc;
-    LeptrisElement open_stack[DP_MAX_DEPTH];
+    LeptrisElement open_stack_buf[DP_MAX_DEPTH];
     /* Round 10: journal slot of each open element's elem_pos entry —
      * the close path updates by slot (O(1)) instead of hashing. */
-    int pos_slot_stack[DP_MAX_DEPTH];
+    int pos_slot_stack_buf[DP_MAX_DEPTH];
     /* TODO 155 Phase C: per-depth last-child cache. Replaces the
      * last_child_off field on element. last_child_stack[i] holds
      * the most recently wired child of open_stack[i], or NULL when
      * no child has been wired yet at that depth. */
-    LeptrisNode* last_child_stack[DP_MAX_DEPTH];
+    LeptrisNode* last_child_stack_buf[DP_MAX_DEPTH];
+    /* Depth-stack indirection (leptris#1577): the in-struct buffers
+     * serve the default DP_MAX_DEPTH cap; a configured max depth
+     * above that (public leptris_set_max_depth / parse options)
+     * switches the pointers to one heap block sized for the cap.
+     * The open-tag guard honors the configured depth — with the
+     * arrays fixed at 256, any deeper document wrote past them. */
+    LeptrisElement* open_stack;
+    int* pos_slot_stack;
+    LeptrisNode** last_child_stack;
+    size_t stack_cap;
+    void* stack_heap;
     int depth;
     LeptrisElement root;
     /* Document children (issue #580): [prolog..., root, epilog...]
@@ -194,6 +205,36 @@ typedef struct {
      * (&foo; where foo is declared in the DTD) resolve correctly. */
     LeptrisDTD* dtd;
 } DParser;
+
+/* Depth stacks (leptris#1577): the default cap stays on the in-struct
+ * buffers (zero allocation); a larger configured cap gets one
+ * aligned heap block. Returns 0 on OOM (pointers left NULL). */
+static int dp_stacks_init(DParser* p, size_t cap) {
+    if (cap <= DP_MAX_DEPTH) {
+        p->open_stack = p->open_stack_buf;
+        p->pos_slot_stack = p->pos_slot_stack_buf;
+        p->last_child_stack = p->last_child_stack_buf;
+        p->stack_cap = DP_MAX_DEPTH;
+        p->stack_heap = NULL;
+        return 1;
+    }
+    size_t a = (cap * sizeof(LeptrisElement) + 15u) & ~(size_t)15u;
+    size_t b = (cap * sizeof(int) + 15u) & ~(size_t)15u;
+    size_t c = cap * sizeof(LeptrisNode*);
+    unsigned char* blk = (unsigned char*)malloc(a + b + c);
+    if (!blk) return 0;
+    p->open_stack = (LeptrisElement*)blk;
+    p->pos_slot_stack = (int*)(blk + a);
+    p->last_child_stack = (LeptrisNode**)(blk + a + b);
+    p->stack_cap = cap;
+    p->stack_heap = blk;
+    return 1;
+}
+
+static void dp_stacks_release(DParser* p) {
+    free(p->stack_heap);
+    p->stack_heap = NULL;
+}
 
 /* ---- #1125: immutable-buffer logs --------------------------------
  *
@@ -1551,6 +1592,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.end = buf + len;
     p.pool = pool;
     p.doc = doc;
+    {
+        extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
+        size_t dcap = g_leptris_max_depth > 0
+            ? (size_t)g_leptris_max_depth : (size_t)DP_MAX_DEPTH;
+        if (!dp_stacks_init(&p, dcap)) goto fail;
+    }
     p.skip_flags = skip_flags;
     p.depth = 0;
     p.root = NULL;
@@ -2311,6 +2358,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * ends the parse byte-identical to the input. (Runs after the
      * encoding/version strdups above, which read the buffer.) */
 
+    dp_stacks_release(&p);
     return doc;
 
 fail:
@@ -2372,6 +2420,7 @@ fail:
      * pool_destroy above. Don't LEPTRIS_FREE(doc) (TODO 154). */
     /* Round 8: scratch/pristine are arena-carved — pool_destroy
      * above already reclaimed them. */
+    dp_stacks_release(&p);
     return NULL;
 }
 
@@ -2791,6 +2840,16 @@ static struct leptris_document* dp_il_build(
     if (!smap || !rdepth || !lc) {
         free(smap); free(rdepth); free(lc); goto oom_pool;
     }
+    /* Depth-stack indirection (leptris#1577): record depths are not
+     * bounded by DP_MAX_DEPTH here — the replay indexes
+     * last_child_stack by them. Size the stacks to the document. */
+    uint32_t il_max_d = 0;
+    for (size_t i = 0; i < c->nrec; i++) {
+        if (rdepth[i] > il_max_d) il_max_d = rdepth[i];
+    }
+    if (!dp_stacks_init(&pp, (size_t)il_max_d + 1)) {
+        free(smap); free(rdepth); free(lc); goto oom_pool;
+    }
 
     for (size_t i = 0; i < c->nrec; i++) {
         IlRec* r = &c->recs[i];
@@ -3015,10 +3074,14 @@ static struct leptris_document* dp_il_build(
     }
 
     leptris_root_doc_register(doc->root, doc);
+    dp_stacks_release(&pp);
     free(smap); free(rdepth); free(lc);
     return doc;
 
 oom_pool:
+    /* Reached only at/after the replay's DParser init — the init
+     * failure path leaves stack_heap NULL, so the release is safe. */
+    dp_stacks_release(&pp);
     leptris_pool_destroy(pool);
     free(scratch);
     free(pristine);
