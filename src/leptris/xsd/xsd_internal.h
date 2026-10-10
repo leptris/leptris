@@ -190,6 +190,7 @@ typedef struct xsd_attrgroup_def {
 
 typedef struct xsd_type_attrs {
     char* type_name;
+    char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
     XsdAttrDecl* attrs;
     struct xsd_type_attrs* next;
 } XsdTypeAttrs;

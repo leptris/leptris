@@ -208,10 +208,45 @@ static void ss_close(StateSet* ss, CmNfa* n) {
     }
 }
 
+/* XSD xs:all at the model root: order-free, each particle at
+ * most maxOccurs times, minOccurs floors — a counting check over
+ * the particle list (XSD 1.0 restricts xs:all to the model root,
+ * each child a particle, maxOccurs <= 1). */
+static int all_root_valid(XsdCm* all, const char* target_ns,
+                          const char* const* names,
+                          const char* const* ns_uris, size_t count) {
+    for (XsdCm* p = all->first_child; p; p = p->next) {
+        size_t hits = 0;
+        for (size_t i = 0; i < count; i++) {
+            const char* uri = ns_uris ? ns_uris[i] : NULL;
+            if (p->name && strcmp(p->name, names[i]) == 0 &&
+                (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
+                hits++;
+        }
+        if ((long)hits < p->min) return 0;
+        if (p->max >= 0 && (long)hits > p->max) return 0;
+    }
+    /* every instance child must belong to a particle */
+    for (size_t i = 0; i < count; i++) {
+        int matched = 0;
+        const char* uri = ns_uris ? ns_uris[i] : NULL;
+        for (XsdCm* p = all->first_child; p && !matched; p = p->next) {
+            if (p->name && strcmp(p->name, names[i]) == 0 &&
+                (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
+                matched = 1;
+        }
+        if (!matched) return 0;
+    }
+    (void)target_ns;
+    return 1;
+}
+
 int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
                       const char* const* ns_uris, size_t count) {
     if (!model) return -1;
+    if (model->kind == XSD_CM_ALL && model->first_child)
+        return all_root_valid(model, target_ns, names, ns_uris, count);
     CmNfa n;
     memset(&n, 0, sizeof(n));
     n.s = s;
