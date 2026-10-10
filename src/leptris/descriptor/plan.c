@@ -1344,6 +1344,11 @@ static int dp_kid_pos_cmp(const void* a, const void* b) {
         (const struct leptris_plan_result* const*)b;
     if ((*ka)->position < (*kb)->position) return -1;
     if ((*ka)->position > (*kb)->position) return 1;
+    /* #1625: position ties (builder nodes, offset-less rows) fall
+     * to the dense insertion rank - qsort is not stable, and an
+     * unspecified tie reordered members per platform libc. */
+    if ((*ka)->order_index < (*kb)->order_index) return -1;
+    if ((*ka)->order_index > (*kb)->order_index) return 1;
     return 0;
 }
 
@@ -1586,12 +1591,16 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                     return NULL;
                 }
                 root = v;
-            } else if (!dp_value_push(stack[sp - 1], v)) {
-                dp_result_free_rec(v);
-                goto oom;
+            } else {
+                /* rank BEFORE push (kid_count is post-increment) -
+                 * every value needs one: the serializer's qsort
+                 * breaks position ties on it (#1625) */
+                v->order_index = (uint32_t)stack[sp - 1]->kid_count;
+                if (!dp_value_push(stack[sp - 1], v)) {
+                    dp_result_free_rec(v);
+                    goto oom;
+                }
             }
-            v->order_index = (uint32_t)
-                (sp == 0 ? 0 : stack[sp - 1]->kid_count);
             stack[sp++] = v;
         } else if (op->kind == LEPTRIS_PLAN_OP_SCALAR) {
             if (sp == 0) {
@@ -1609,6 +1618,7 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             if (!dp_value_set_str(v, op->value ? op->value : "",
                                   op->value ? op->value_len : 0))
                 dp_value_set_str(v, "", 0);
+            v->order_index = (uint32_t)stack[sp - 1]->kid_count;
             if (!dp_value_push(stack[sp - 1], v)) {
                 dp_result_free_rec(v);
                 goto oom;
