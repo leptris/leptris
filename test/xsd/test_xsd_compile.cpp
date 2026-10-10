@@ -1499,3 +1499,128 @@ TEST(XsdValidate, UndeclaredAttributeIsStrictUnlessAnyAttribute) {
 }
 
 }  // namespace
+
+// ---- #1626: cross-ns imports, prefixed refs, error cascade -----
+namespace {
+
+/* 1. cross-namespace xs:import registers its declarations when the
+ * compiling schema carries its own targetNamespace (the wml-2010
+ * shape). Chameleon/same-ns worked; foreign imports were skipped. */
+TEST(XsdImport1626, CrossNamespaceImportRegisters) {
+    std::string dir = ::testing::TempDir();
+    FILE* f1 = fopen((dir + "x6shared.xsd").c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* shared =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:w=\"urn:shared\""
+        " targetNamespace=\"urn:shared\">"
+        "<xs:complexType name=\"CT_Border\">"
+        "<xs:attribute name=\"val\" type=\"xs:token\"/>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(shared, 1, strlen(shared), f1);
+    fclose(f1);
+    FILE* f2 = fopen((dir + "x6main.xsd").c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    /* the importing schema has ITS OWN target namespace and
+     * references the imported type through the shared prefix */
+    const char* mainx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:w=\"urn:shared\""
+        " targetNamespace=\"urn:main\">"
+        "<xs:import namespace=\"urn:shared\""
+        " schemaLocation=\"x6shared.xsd\"/>"
+        "<xs:element name=\"b\">"
+        "<xs:complexType>"
+        "<xs:attribute name=\"id\" type=\"xs:integer\"/>"
+        "<xs:attribute name=\"bd\" type=\"w:CT_Border\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    fwrite(mainx, 1, strlen(mainx), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((dir + "x6main.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* the imported type resolves: the attribute types */
+    LeptrisDocument d = leptris_parse_string(
+        "<b id=\"1\" bd=\"x\"/>", strlen("<b id=\"1\" bd=\"x\"/>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    remove((dir + "x6shared.xsd").c_str());
+    remove((dir + "x6main.xsd").c_str());
+}
+
+/* 3. prefixed type refs resolve by local name (uniword's
+ * default-xmlns spelling always worked; the w: spelling did not) */
+TEST(XsdImport1626, PrefixedTypeRefsResolve) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:w=\"urn:x\" targetNamespace=\"urn:x\">"
+        "<xs:complexType name=\"CT_Border\">"
+        "<xs:attribute name=\"v\" type=\"xs:integer\"/>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"CT_Wrap\">"
+        "<xs:sequence>"
+        "<xs:element name=\"b\" type=\"w:CT_Border\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"r\" type=\"w:CT_Wrap\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<r><b v=\"1\"/></r>"), 1);
+    EXPECT_EQ(validate_doc(x, "<r><b v=\"z\"/></r>"), 0);
+}
+
+/* 2. error amplification: one misordered child reports ONCE, with
+ * the offending child named — not once per ancestor (~175x) */
+TEST(XsdImport1626, MisorderReportsOnceNamed) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"CT_TblBorders\">"
+        "<xs:sequence>"
+        "<xs:element name=\"top\" type=\"xs:token\"/>"
+        "<xs:element name=\"right\" type=\"xs:token\"/>"
+        "<xs:element name=\"insideH\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"CT_TblPr\">"
+        "<xs:sequence>"
+        "<xs:element name=\"borders\" type=\"CT_TblBorders\"/>"
+        "<xs:element name=\"width\" type=\"xs:integer\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"CT_Tbl\">"
+        "<xs:sequence>"
+        "<xs:element name=\"tblPr\" type=\"CT_TblPr\"/>"
+        "<xs:element name=\"row\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"tbl\" type=\"CT_Tbl\"/>"
+        "</xs:schema>";
+    /* insideH before right: the classic wml minimal case */
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(x, strlen(x), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* bad =
+        "<tbl><tblPr><borders><top/><insideH/><right/>"
+        "</borders><width>5</width></tblPr><row/></tbl>";
+    LeptrisDocument d = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    size_t n = leptris_xsd_error_count(s);
+    EXPECT_LE(n, 3u) << "amplified: " << n << " errors";
+    if (n > 0) {
+        const char* e = leptris_xsd_error_at(s, 0);
+        EXPECT_NE(e, nullptr);
+        EXPECT_NE(strstr(e, "insideH"), nullptr)
+            << "first error names the offending child: " << e;
+    }
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+}  // namespace

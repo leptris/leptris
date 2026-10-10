@@ -208,12 +208,56 @@ static void validate_children(struct xsd_validator* v,
     }
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
                                n);
-    free(names);
-    free(uris);
-    if (!ok) {
+    if (ok) {
+        free(names);
+        free(uris);
+    } else {
+        /* Name the culprit: libxml2 names the offending child once
+         * and recovers; the unnamed form cascaded ambiguously
+         * (#1626 — 353 errors for one misordered pair). Greedy
+         * linear match against the sequence's particle list;
+         * non-sequence models keep the generic message. */
+        const char* culprit = NULL;
+        if (model->kind == XSD_CM_SEQ) {
+            XsdCm* parts[256];
+            size_t j = 0;
+            for (XsdCm* q = model->first_child; q && j < 256;
+                 q = q->next)
+                parts[j++] = q;
+            size_t pj = 0;
+            for (size_t k2 = 0; k2 < n && !culprit; k2++) {
+                const char* uri = uris ? uris[k2] : NULL;
+                int matched = 0;
+                while (pj < j) {
+                    XsdCm* q = parts[pj];
+                    if (q->name && strcmp(q->name, names[k2]) == 0 &&
+                        (!q->ns ||
+                         (uri && strcmp(uri, q->ns) == 0))) {
+                        matched = 1;
+                        pj++;
+                        break;
+                    }
+                    if (q->min == 0) {
+                        pj++; /* skippable optional: not expected here */
+                        continue;
+                    }
+                    culprit = names[k2]; /* expected q, found this */
+                    break;
+                }
+                if (!matched && !culprit) culprit = names[k2];
+            }
+        }
         const char* local = NULL;
         leptris_element_expanded_name(elem, &local, NULL, NULL);
-        verrf(v, "element", local, "children do not match the content model");
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 culprit
+                     ? "children do not match the content model (at '%s')"
+                     : "children do not match the content model",
+                 culprit ? culprit : "");
+        verrf(v, "element", local, msg);
+        free(names);
+        free(uris);
     }
     /* recurse: a global declaration governs the child when one
      * exists; otherwise the parent's particle declaration does
