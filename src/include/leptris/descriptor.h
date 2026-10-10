@@ -259,6 +259,36 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc,
                                                 LeptrisStatus* status);
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result);
 
+/* #408 ask 2: build a standalone result natively from a flat op
+ * program — the same tree a walk produces (wrappers, ns bindings,
+ * kid order), so leptris_plan_serialize serves standalone
+ * serialization with no DOM mint on the host side. ELEMENT ops
+ * reference the plan row that captured the member (plan_index +
+ * row_index; the walk root uses row_index = UINT32_MAX); SCALAR
+ * and ATTR carry the value; END pops the open element. Programs
+ * must balance (every ELEMENT closed; no END without an open
+ * element) and open with the root element op. Strings are copied.
+ * Memory: free with leptris_plan_result_free. */
+typedef enum {
+    LEPTRIS_PLAN_OP_SCALAR = 0,
+    LEPTRIS_PLAN_OP_ELEMENT = 1,
+    LEPTRIS_PLAN_OP_ATTR = 2,
+    LEPTRIS_PLAN_OP_END = 3
+} LeptrisPlanRowOpKind;
+
+typedef struct {
+    LeptrisPlanRowOpKind kind;
+    uint32_t plan_index;  /* ELEMENT: the plan whose row captured it */
+    uint32_t row_index;   /* producing row (UINT32_MAX = root) */
+    const char* name;     /* ATTR: attribute name */
+    const char* value;    /* SCALAR/ATTR: value (NULL = empty) */
+    size_t value_len;
+} leptris_plan_row_op;
+
+LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
+    LeptrisPlan plan, const leptris_plan_row_op* ops, size_t count,
+    LeptrisStatus* status);
+
 /* #1551: serialize a walk result back to XML, guided by its plan.
  * The plan supplies element wrappers (row wire_name + ns_prefix)
  * and the result supplies content; children emit in document order

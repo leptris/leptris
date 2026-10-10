@@ -1530,6 +1530,150 @@ LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
     return b.s;
 }
 
+LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
+    LeptrisPlan plan, const leptris_plan_row_op* ops, size_t count,
+    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!plan || !ops || count == 0) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    const struct leptris_plan* pool =
+        (const struct leptris_plan*)plan;
+    /* op stack of open elements; depth is program-bounded */
+    struct leptris_plan_result** stack =
+        (struct leptris_plan_result**)calloc(count,
+                                             sizeof(*stack));
+    if (!stack) {
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    int sp = 0;
+    struct leptris_plan_result* root = NULL;
+    for (size_t i = 0; i < count; i++) {
+        const leptris_plan_row_op* op = &ops[i];
+        if (op->kind == LEPTRIS_PLAN_OP_ELEMENT) {
+            if (op->plan_index >= pool->plan_count ||
+                (op->row_index != UINT32_MAX &&
+                 op->row_index >= pool->plans[op->plan_index]
+                                      .child_count)) {
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            struct leptris_plan_result* v = dp_value_new(
+                LEPTRIS_PLAN_VALUE_ELEMENT);
+            if (!v) goto oom;
+            const dp_plan* cp = &pool->plans[op->plan_index];
+            const char* wire =
+                op->row_index == UINT32_MAX
+                    ? cp->element_name
+                    : cp->child_plans[op->row_index].wire_name;
+            v->name = dp_strdup(wire);
+            v->container_plan = op->plan_index;
+            v->row_index = op->row_index;
+            if (op->row_index != UINT32_MAX) {
+                const leptris_child_plan* cr =
+                    &cp->child_plans[op->row_index];
+                v->ns_prefix = dp_strdup(cr->ns_prefix);
+                v->ns_uri = dp_strdup(cr->ns_uri);
+            }
+            if (sp == 0) {
+                if (root) { /* multiple roots */
+                    dp_result_free_rec(v);
+                    free(stack);
+                    if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                    return NULL;
+                }
+                root = v;
+            } else if (!dp_value_push(stack[sp - 1], v)) {
+                dp_result_free_rec(v);
+                goto oom;
+            }
+            v->order_index = (uint32_t)
+                (sp == 0 ? 0 : stack[sp - 1]->kid_count);
+            stack[sp++] = v;
+        } else if (op->kind == LEPTRIS_PLAN_OP_SCALAR) {
+            if (sp == 0) {
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            struct leptris_plan_result* v =
+                dp_value_new(LEPTRIS_PLAN_VALUE_SCALAR);
+            if (!v) goto oom;
+            const dp_plan* cp = &pool->plans[op->plan_index];
+            if (op->row_index < cp->child_count)
+                v->name = dp_strdup(
+                    cp->child_plans[op->row_index].wire_name);
+            if (!dp_value_set_str(v, op->value ? op->value : "",
+                                  op->value ? op->value_len : 0))
+                dp_value_set_str(v, "", 0);
+            if (!dp_value_push(stack[sp - 1], v)) {
+                dp_result_free_rec(v);
+                goto oom;
+            }
+        } else if (op->kind == LEPTRIS_PLAN_OP_ATTR) {
+            if (sp == 0 || !op->name) {
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            struct leptris_plan_result* el = stack[sp - 1];
+            char** gn = (char**)realloc(
+                el->attr_names,
+                (el->attr_count + 1) * sizeof(char*));
+            char** gv = (char**)realloc(
+                el->attr_values,
+                (el->attr_count + 1) * sizeof(char*));
+            char** gp = (char**)realloc(
+                el->attr_ns_prefixes,
+                (el->attr_count + 1) * sizeof(char*));
+            char** gu = (char**)realloc(
+                el->attr_ns_uris,
+                (el->attr_count + 1) * sizeof(char*));
+            if (!gn || !gv || !gp || !gu) {
+                free(gn); free(gv); free(gp); free(gu);
+                goto oom;
+            }
+            el->attr_names = gn;
+            el->attr_values = gv;
+            el->attr_ns_prefixes = gp;
+            el->attr_ns_uris = gu;
+            gn[el->attr_count] = dp_strdup(op->name);
+            gv[el->attr_count] =
+                dp_strdup_n(op->value ? op->value : "",
+                            op->value ? op->value_len : 0);
+            gp[el->attr_count] = NULL;
+            gu[el->attr_count] = NULL;
+            if (!gn[el->attr_count] || !gv[el->attr_count])
+                goto oom;
+            el->attr_count++;
+        } else if (op->kind == LEPTRIS_PLAN_OP_END) {
+            if (sp == 0) {
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            sp--;
+        }
+    }
+    int balanced = (sp == 0 && root != NULL);
+    free(stack);
+    if (!balanced) {
+        dp_result_free_rec(root);
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    return (LeptrisPlanResult)root;
+
+oom:
+    if (root) dp_result_free_rec(root);
+    free(stack);
+    if (status) *status = LEPTRIS_ERROR_MEMORY;
+    return NULL;
+}
+
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result) {
     dp_result_free_rec((struct leptris_plan_result*)result);
 }

@@ -2131,3 +2131,98 @@ TEST(Plan1586, ExactUriRowStillWinsAndUnqualifiedStillBinds) {
     leptris_document_free(doc);
     leptris_plan_free(plan);
 }
+
+// ---- #408: native result builder + address attach -------------------
+namespace {
+
+/* leptris_plan_result_build: a flat op program produces the same
+ * standalone result tree a walk would — wrappers, ns bindings, kid
+ * order — so leptris_plan_serialize serves standalone
+ * serialization with no DOM mint on the host side. */
+TEST(Plan408, ResultBuildFeedsSerialize) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "b";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    /* a SCALAR op IS the row's value (name and binding come from
+     * the plan row) — no ELEMENT wrapper needed for scalar rows */
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ATTR, 0, UINT32_MAX, "id", "7", 1},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "first", 5},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r =
+        leptris_plan_result_build(plan, ops, 4, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<b id=\"7\"><p>first</p></b>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan408, ResultBuildRejectsBadPrograms) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "b";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    /* END without an open element */
+    leptris_plan_row_op bad1[] = {
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0}};
+    EXPECT_EQ(leptris_plan_result_build(plan, bad1, 1, &st), nullptr);
+    /* unclosed element */
+    leptris_plan_row_op bad2[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0}};
+    EXPECT_EQ(leptris_plan_result_build(plan, bad2, 1, &st), nullptr);
+    /* NULL/empty args */
+    EXPECT_EQ(leptris_plan_result_build(NULL, bad2, 1, &st), nullptr);
+    EXPECT_EQ(leptris_plan_result_build(plan, NULL, 0, &st), nullptr);
+    leptris_plan_free(plan);
+}
+
+/* leptris_element_add_child_addr: attach by raw addresses — the
+ * binding's per-node FFI::Pointer mint (#408 ask 1) disappears. */
+TEST(Plan408, AddChildByAddress) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement parent = leptris_document_root(doc);
+    LeptrisElement child = leptris_element_create(doc, "c");
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(leptris_element_add_child_addr(
+                  (uintptr_t)parent, (uintptr_t)child),
+              LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_child_count(parent), 1u);
+    LeptrisElement got = leptris_element_first_child_any(parent);
+    ASSERT_NE(got, nullptr);
+    EXPECT_STREQ(leptris_element_name(got), "c");
+    /* NULL-shaped addresses are clean errors */
+    EXPECT_NE(leptris_element_add_child_addr(0, (uintptr_t)child),
+              LEPTRIS_OK);
+    leptris_document_free(doc);
+}
+
+}  // namespace

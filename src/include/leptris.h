@@ -2153,6 +2153,11 @@ LEPTRIS_API LeptrisStatus leptris_element_set_name(LeptrisElement elem, const ch
  * @param child Child element to append
  * @return LEPTRIS_OK on success, error code otherwise
  */
+/* #408: address-based attach — bindings pass raw addresses and
+ * skip the per-node FFI pointer-wrapper mint. Same semantics and
+ * status contract as leptris_element_append_child. */
+LEPTRIS_API LeptrisStatus leptris_element_add_child_addr(uintptr_t parent_addr,
+                                                        uintptr_t child_addr);
 LEPTRIS_API LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child);
 
 /**
