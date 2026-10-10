@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.335] - 2026-10-10
+
+### Fixed
+
+- cross-namespace imports, prefixed type refs, named content errors (#1626) (xsd)
+- compute record depths BEFORE sizing the replay stacks (il)
+
+
+
 ## [1.9.334] - 2026-10-10
 
 ### Added
