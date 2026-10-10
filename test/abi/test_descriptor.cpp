@@ -2163,15 +2163,21 @@ TEST(Plan408, ResultBuildFeedsSerialize) {
     leptris_plan_row_op ops[] = {
         {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
         {LEPTRIS_PLAN_OP_ATTR, 0, UINT32_MAX, "id", "7", 1},
-        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "first", 5},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "alpha", 5},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "beta", 4},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "gamma", 5},
         {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
     };
     LeptrisPlanResult r =
-        leptris_plan_result_build(plan, ops, 4, &st);
+        leptris_plan_result_build(plan, ops, 6, &st);
     ASSERT_NE(r, nullptr);
     char* out = leptris_plan_serialize(plan, r, &st);
     ASSERT_NE(out, nullptr);
-    EXPECT_STREQ(out, "<b id=\"7\"><p>first</p></b>");
+    /* #1625: multi-member order is the OP order on every platform
+     * (position ties fell to unstable qsort and reversed members
+     * on Windows) */
+    EXPECT_STREQ(out,
+                 "<b id=\"7\"><p>alpha</p><p>beta</p><p>gamma</p></b>");
     leptris_free_string(out);
     leptris_plan_result_free(r);
     leptris_plan_free(plan);
