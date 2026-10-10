@@ -75,7 +75,8 @@ jobs:
             -DBUILD_TESTING=ON `
             -DLEPTRIS_BUILD_CLI=ON `
             -DLEPTRIS_ENABLE_UTF8PROC=OFF `
-            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_ICONV=OFF `
+            -DCMAKE_C_FLAGS_RELEASE="/O2 /Zi /FS"
 
       - name: Build
         run: cmake --build build --config Release
@@ -83,6 +84,22 @@ jobs:
       - name: Run tests
         if: runner.os != 'Windows'
         run: ctest --test-dir build --output-on-failure --build-config Release
+
+      - name: Enable crash minidumps (Windows, leptris#1577)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The DeepSpinesSurviveAllSizes SEH is nondeterministic and
+          # gtest catches it without a symbolized stack. WER
+          # LocalDumps writes a minidump for every crashing test exe
+          # into build\dumps; the artifact upload below ships it with
+          # the /Zi PDBs so the next failure is decodable.
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Path $key -Force | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}\build\dumps" | Out-Null
+          Set-ItemProperty -Path $key -Name DumpFolder -Value "${{ github.workspace }}\build\dumps"
+          Set-ItemProperty -Path $key -Name DumpType -Value 2 -Type DWord
+          Set-ItemProperty -Path $key -Name DumpCount -Value 10 -Type DWord
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
@@ -92,8 +109,21 @@ jobs:
           # CTest working dir; SymbolExportCheck uses nm-style symbol
           # extraction. Skip all three until they're portable. The
           # MSVC build itself is the contract this job verifies.
+          # /Zi in the configure step writes PDBs beside the test
+          # executables so the minidumps decode with symbols.
           ctest --test-dir build --output-on-failure --build-config Release `
             --exclude-regex 'XIncludeProcess|XIncludeXpointer|XIncludeRecursion|XIncludePhaseA|XIncludePhaseC|CliVersion|CliParse|CliFormat|CliXpath|SymbolExportCheck'
+
+      - name: Upload crash dumps (Windows, leptris#1577)
+        if: runner.os == 'Windows' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-crash-dumps
+          path: |
+            build/dumps/**
+            build/**/test_*.pdb
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Build shared library (Windows DLL export check, issue #278)
         if: runner.os == 'Windows'

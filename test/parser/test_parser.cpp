@@ -232,6 +232,36 @@ TEST(ParserConfigurableDepth, LowerCapRejectsShallowerNesting) {
     leptris_set_max_depth(0);
 }
 
+/* leptris#1577: the open-tag guard honors the configured max depth
+ * while the parser's depth stacks were fixed at DP_MAX_DEPTH (256) —
+ * any document deeper than 256 under a raised cap wrote past the
+ * stacks (layout-dependent state corruption). The stacks now size to
+ * the cap; a 600-deep document must parse and walk cleanly. */
+TEST(ParserConfigurableDepth, DeepDocumentUnderRaisedCap) {
+    leptris_set_max_depth(1024);
+    std::string xml;
+    for (int i = 0; i < 600; i++) xml += "<d>";
+    xml += 'x';
+    for (int i = 0; i < 600; i++) xml += "</d>";
+
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Walk to the spine bottom: 600 opens must survive intact. */
+    int depth_seen = 0;
+    LeptrisElement e = root;
+    while (e) {
+        depth_seen++;
+        e = leptris_element_first_child_any(e);
+    }
+    EXPECT_EQ(depth_seen, 600);  /* the spine: 600 nested <d> */
+    leptris_document_free(doc);
+    leptris_set_max_depth(0);
+}
+
 TEST(ParserConfigurableDepth, GetReturnsEffectiveValue) {
     leptris_set_max_depth(0);
     EXPECT_EQ(leptris_get_max_depth(), 256);
