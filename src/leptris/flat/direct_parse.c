@@ -2884,6 +2884,15 @@ static struct leptris_document* dp_il_build(
     /* Depth-stack indirection (leptris#1577): record depths are not
      * bounded by DP_MAX_DEPTH here — the replay indexes
      * last_child_stack by them. Size the stacks to the document. */
+    /* Depth computation FIRST: the sizing scan below reads
+     * rdepth — computed here, before the max is taken (the sizing
+     * pass originally ran on the zero-filled array and sized the
+     * stacks to 1, so every deep replay overflowed the in-struct
+     * buffers — the exact class this PR fixes). */
+    for (size_t i = 0; i < c->nrec; i++) {
+        rdepth[i] = (c->recs[i].parent == IL_NONE)
+            ? 0 : rdepth[c->recs[i].parent] + 1;
+    }
     uint32_t il_max_d = 0;
     for (size_t i = 0; i < c->nrec; i++) {
         if (rdepth[i] > il_max_d) il_max_d = rdepth[i];
@@ -2894,8 +2903,6 @@ static struct leptris_document* dp_il_build(
 
     for (size_t i = 0; i < c->nrec; i++) {
         IlRec* r = &c->recs[i];
-        rdepth[i] = (r->parent == IL_NONE)
-            ? 0 : rdepth[r->parent] + 1;
         if (r->kind == 0) {
             LeptrisElement e = &eblk[nelem++];
             e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
