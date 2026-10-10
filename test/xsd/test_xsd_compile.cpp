@@ -1365,3 +1365,34 @@ TEST(XsdAlternative11, FirstMatchingAlternativeTypes) {
 }
 
 }  // namespace
+
+/* #1615 regression pin: a union combining memberTypes with inline
+ * anonymous members consults BOTH member sets (the issue reported
+ * over-acceptance through a stale binding binary; the engine was
+ * verified correct on main, the tag, and every published gem —
+ * this pins the behavior in CI, binary-independent). */
+TEST(XsdDatatypes, UnionMixesNamedAndInlineMembers) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"intOrAuto\">"
+        "<xs:union memberTypes=\"xs:integer\">"
+        "<xs:simpleType>"
+        "<xs:restriction base=\"xs:token\">"
+        "<xs:enumeration value=\"auto\"/>"
+        "</xs:restriction>"
+        "</xs:simpleType>"
+        "</xs:union>"
+        "</xs:simpleType>"
+        "<xs:element name=\"v\" type=\"intOrAuto\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(x, strlen(x), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "intOrAuto", "42"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "intOrAuto", "auto"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "intOrAuto", "zz"), 0);
+    leptris_xsd_free(s);
+    EXPECT_EQ(validate_doc(x, "<v>zz</v>"), 0);
+    EXPECT_EQ(validate_doc(x, "<v>42</v>"), 1);
+    EXPECT_EQ(validate_doc(x, "<v>auto</v>"), 1);
+}
