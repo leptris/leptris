@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.336] - 2026-10-10
+
+### Fixed
+
+- builder members emit in op order on every platform (descriptor)
+
+
+
 ## [1.9.335] - 2026-10-10
 
 ### Fixed
