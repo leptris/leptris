@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.334] - 2026-10-10
+
+### Added
+
+- native plan-result builder + address-based attach (#408) (api)
+- completion wave — order-free xs:all, strict validation, typed $value (#1075) (xsd)
+
+
+
 ## [1.9.333] - 2026-10-10
 
 ### Added
