@@ -2,13 +2,29 @@
 
 ## [1.9.341] - 2026-10-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
-
+- **XSD compilation of large multi-import schemas (leptris#1644,
+  leptris-ruby#423).** `xsd_capture_root` recursed into
+  `xs:include`/`xs:import`/`xs:redefine` with no visited set —
+  `include_depth<16` bounds depth only, so a dense import DAG (every
+  OOXML schema family) was re-parsed and re-captured along every
+  path through the graph. dml-main.xsd (155 KB): >300s / 3.5GB+
+  timeout -> **0.0s / 8MB**; the "per-compile accumulation" (6.7GB
+  across sequential compiles) was allocator survival of that blowup —
+  now a 12MB plateau returned fully after each free. Each unique
+  schema unit is captured exactly once (lexically normalized path
+  key, marked before recursing so cycles close). Red-first spec
+  `ImportDagCapturesEachUnitOnce` (6-file DAG fixture).
+- **`indent_html`: a LAST block child now nests (leptris#1647).**
+  The single-child inline rule set `mixed=1`, which the layout
+  machinery inherits down the subtree — a trailing block child
+  (body > div > p+span) glued to its parent's tag and its own
+  children fell flat. indent_html-only refinement
+  (`html_block_child_needs_lines`): a block parent whose single
+  child is itself a line-taking block breaks before its children
+  and before its close tag; `head>title` stays inline; the legacy
+  16.2 byte shape is untouched.
 
 ### Added
 
@@ -24,6 +40,12 @@
   string round trip. Attributes verbatim, #1626 root declarations
   as xmlns attributes, op-order member emission (#1625's rank)
   preserved; non-ELEMENT roots rejected.
+- **Absorb/copy attach survival specs (leptris#1646)**: both C-level
+  attach shapes (absorb-move and adopt-by-copy) pinned as
+  `DomAbsorbSurvival.*` with post-free reads of names, text,
+  attributes, and the expanded-QName prefix/URI views — the engine
+  is ASAN-clean on both; the residual dangling is binding-side
+  (leptris-ruby#1636's wrapper rebase, landed on the binding).
 
 ## [Unreleased]
 
