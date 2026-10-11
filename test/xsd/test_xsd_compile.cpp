@@ -1624,3 +1624,62 @@ TEST(XsdImport1626, MisorderReportsOnceNamed) {
 }
 
 }  // namespace
+
+// ---- leptris-ruby#419: error context (element + location) -------
+namespace {
+
+TEST(XsdErrorContext, AttributeErrorCarriesElementAndPosition) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"CT_PgMar\">"
+        "<xs:attribute name=\"header\" type=\"xs:integer\""
+        " use=\"required\"/>"
+        "<xs:attribute name=\"gutter\" type=\"xs:integer\""
+        " use=\"required\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"pgMar\" type=\"CT_PgMar\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(x, strlen(x), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* doc =
+        "\n  <pgMar/>\n";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    size_t n = leptris_xsd_error_count(s);
+    ASSERT_GE(n, 1u);
+    const char* e = leptris_xsd_error_at(s, 0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_NE(strstr(e, "pgMar"), nullptr) << e;
+    EXPECT_NE(strstr(e, "@2:"), nullptr) << e;
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdErrorContext, ContentModelErrorCarriesPosition) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"T\">"
+        "<xs:sequence>"
+        "<xs:element name=\"a\" type=\"xs:token\"/>"
+        "<xs:element name=\"b\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"r\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(x, strlen(x), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* doc = "<r>\n  <a/>\n  <b/>\n  <c/>\n</r>\n";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    const char* e = leptris_xsd_error_at(s, 0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_NE(strstr(e, "@1:"), nullptr) << e;
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+}  // namespace
