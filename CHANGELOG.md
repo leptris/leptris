@@ -1,3 +1,20 @@
+## Unreleased
+
+### Added
+
+- **`leptris_plan_serialize_ext` (#425, leptris-ruby#425)**:
+  formatting-bearing plan serialization — `indent` (+ optional
+  `indent_unit`) pretty-prints element boundaries; RAW/CONTENT
+  runs stay verbatim inline (the byte-exact mixed-content rule).
+  The 3-arg face is the compact default, unchanged. Options ride
+  the growable size-tagged struct pattern (#129).
+- **`leptris_document_from_plan_result` (#426,
+  leptris-ruby#426)**: materialize a built result as a native
+  document tree — build_result → this → the document writer, no
+  string round trip. Attributes verbatim, #1626 root declarations
+  as xmlns attributes, op-order member emission (#1625's rank)
+  preserved; non-ELEMENT roots rejected.
+
 ## [Unreleased]
 
 ## [1.9.339] - 2026-10-11
