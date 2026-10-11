@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.339] - 2026-10-11
+
+### Fixed
+
+- reject cycle-creating reparents (#1636) (dom)
+
+
+
 ## [1.9.338] - 2026-10-11
 
 ### Added
