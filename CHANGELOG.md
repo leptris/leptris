@@ -4,7 +4,18 @@
 
 ### Added
 
-- add_child_addr twin reports the installed address (leptris-ruby#1636) (dom)
+- **`leptris_element_add_child_addr_installed` — the add_child_addr
+  twin reporting the effective installed address (leptris-ruby#1636,
+  PR #1642).** `add_child_addr` is status-only: a foreign node is
+  adopted by copy (#1528) and the installed copy's address is
+  dropped, so callers kept addressing the foreign original — which
+  dies with its document (the dangling-wrapper mechanism behind the
+  Windows `fast_element_xml` segfault). The twin returns the
+  effective node: same-document attaches return the argument
+  unchanged (zero extra cost), foreign attaches return the copy the
+  caller must rebase its wrapper to. `installed_addr = NULL` is the
+  status-only form; the status contract is identical to
+  `add_child_addr`, and the #1639 cycle rejection rides the append.
 
 
 
