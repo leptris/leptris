@@ -1686,8 +1686,12 @@ static LeptrisElement dp_mint_element(LeptrisDocument doc,
                      ? dp_join_colon(v->ns_prefix, local ? local : "")
                      : dp_strdup(local ? local : "");
     if (!name) return NULL;
+    /* char*[] reads as const char*[] element-wise; the DOUBLE
+     * pointer conversion is the part C rejects (GCC 14 errors,
+     * leptris#1656). */
     LeptrisElement el = leptris_element_new_with_attributes(
-        doc, name, v->attr_names, v->attr_values, v->attr_count);
+        doc, name, (const char**)v->attr_names,
+        (const char**)v->attr_values, v->attr_count);
     free(name);
     if (!el) return NULL;
     const dp_plan* kids_container = &poolp->plans[v->container_plan];
@@ -1818,6 +1822,14 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             stack[sp++] = v;
         } else if (op->kind == LEPTRIS_PLAN_OP_SCALAR) {
             if (sp == 0) {
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            /* The ELEMENT branch validates the pool bounds; SCALAR
+             * reads cp->child_count right after, so an out-of-pool
+             * plan_index here is an OOB read (leptris#1654). */
+            if (op->plan_index >= pool->plan_count) {
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
