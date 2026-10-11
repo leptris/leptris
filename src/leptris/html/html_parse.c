@@ -7213,23 +7213,46 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
-        /* <col>/<colgroup> in body drops - they are
-         * table-structure only (tests25:7: <body><col>A keeps
-         * just "A"; tests1:109's trailing <colgroup> after
-         * </table> vanishes). */
+        /* Table-structure-only start tags in body drop - "in
+         * body" has no insertion rule for caption, col, colgroup,
+         * head, tbody, td, tfoot, th, thead, tr (WHATWG 13.2.6.4
+         * "any other start tag" path: parse error, ignore the
+         * token, its content flows into body; tests25:7
+         * <body><col>A keeps just "A", tests1:109's trailing
+         * <colgroup> after </table> vanishes). Valid inside a
+         * table/colgroup/template context - the in-table machinery
+         * owns them there. */
         if (b.whatwg &&
             (strcmp(name, "col") == 0 ||
-             strcmp(name, "colgroup") == 0)) {
-            int col_tbl = 0;
+             strcmp(name, "colgroup") == 0 ||
+             strcmp(name, "caption") == 0 ||
+             strcmp(name, "head") == 0 ||
+             strcmp(name, "tbody") == 0 ||
+             strcmp(name, "td") == 0 ||
+             strcmp(name, "tfoot") == 0 ||
+             strcmp(name, "th") == 0 ||
+             strcmp(name, "thead") == 0 ||
+             strcmp(name, "tr") == 0)) {
+            /* Foreign content inserts any start tag (the svg/math
+             * breakout list does not include these names) — the
+             * drop is an "in body" rule only. */
+            int tbl_ctx = h_top_foreign(&b) ? 1 : 0;
             for (size_t d2 = b.depth; d2 > 0; d2--) {
                 uint8_t oid2 = b.open_id[d2 - 1];
                 if (oid2 == h_id_table || oid2 == h_id_colgroup ||
                     oid2 == h_id_template) {
-                    col_tbl = 1;
+                    tbl_ctx = 1;
                     break;
                 }
             }
-            if (!col_tbl) {
+            if (!tbl_ctx) {
+                /* The TOKEN is ignored - surrounding character
+                 * tokens keep flowing into body (the html-merge
+                 * flush pattern). */
+                if (text < p) {
+                    LeptrisTextNode* t = h_text_node(&b, text, p);
+                    if (t) h_append(&b, (LeptrisNodeRef)t);
+                }
                 while (q < end && *q != '>') q++;
                 p = (q < end) ? q + 1 : end;
                 text = p;
