@@ -595,6 +595,39 @@ static int html_break_after_elem(LeptrisElement elem,
     return 1;
 }
 
+/* leptris#1647 (indent_html only): a block element whose SINGLE
+ * child is itself a block keeps the line layout — the child's own
+ * block content must not glue to the parent's tag (and the parent
+ * must not poison the subtree with mixed=1). The legacy §16.2
+ * shape is untouched: its site rules stay inline for a single
+ * child. p* parents stay inline (site-rule parity). */
+static int html_block_child_needs_lines(LeptrisElement elem,
+                                        const char* name, size_t len,
+                                        int flags) {
+    if (!html_breaks_block(name, len, flags)) return 0;
+    if (name[0] == 'p') return 0;
+    LeptrisNode* c =
+        leptris_node_first_child_internal((LeptrisNode*)elem);
+    if (!c || leptris_node_get_next_sibling(c)) return 0;
+    if (c->type != LEPTRIS_NODE_TYPE_ELEMENT) return 0;
+    /* The child must itself take the line layout: it breaks its own
+     * children (site 1), or it nests a further element. A block
+     * whose only child is text (head>title) stays inline. */
+    {
+        LeptrisElement ce = (LeptrisElement)c;
+        const char* cn = elem_name(ce);
+        size_t cnl = (ce->name_len != 0xFF) ? (size_t)ce->name_len
+                                            : strlen(cn);
+        if (html_break_before_children(ce, cn, cnl,
+                                       html_elem_sem_flags(ce)))
+            return 1;
+        for (LeptrisNode* g = leptris_node_first_child_internal(c); g;
+             g = leptris_node_get_next_sibling(g))
+            if (g->type == LEPTRIS_NODE_TYPE_ELEMENT) return 1;
+    }
+    return 0;
+}
+
 /* Emit the CDATA BODY, splitting "]]>" across section closes. The
  * caller owns the surrounding <![CDATA[ / ]]> brackets (run merging).
  * The close scan runs to len-3 INCLUSIVE — a "]]>" at the very END
@@ -1639,6 +1672,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * the newlines. Elements that keep their children
                  * inline (single-child rule) own no whitespace. */
                 int brk_bc = html_break_before_children(e, name, nl, hf);
+                if (!brk_bc)
+                    brk_bc = html_block_child_needs_lines(e, name, nl, hf);
                 if (brk_bc) {
                     mixed = buf->ws_mixed
                         ? ser_children_have_any_text(fc)
@@ -1650,6 +1685,9 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                 if (brk_bc) buffer_append_newline(buf);
             }
             close_brk = html_break_before_close(e, name, nl, hf);
+            if (!close_brk && buf->indent_html)
+                close_brk =
+                    html_block_child_needs_lines(e, name, nl, hf);
         } else {
             /* #129 indent_text: the formatter owns ALL whitespace —
              * no element is "mixed" for layout purposes. */
