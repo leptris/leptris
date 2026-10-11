@@ -46,6 +46,12 @@ struct leptris_xsd_schema {
     int version_11;    /* xs:schema @version = "1.1" */
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth; /* include/import recursion guard */
+    /* leptris#1644: already-captured schema units (canonical
+     * location per entry) — the include/import DAG is dense and
+     * cyclic; without this set every DAG path re-parses and
+     * re-captures the whole subtree (multi-GB / minutes). */
+    char** visited;
+    size_t visited_len, visited_cap;
     void* validator; /* slice-4 parked error list */
     char* error;
 };
@@ -688,6 +694,70 @@ fail:
  * the owning schema's base_dir (string-compiled schemas have none
  * and skip them); the referenced root's declarations merge into
  * the same tables. */
+/* leptris#1644: lexical path normalization — collapse "." and
+ * ".." segments (and duplicate separators) so the same file reached
+ * through different relative spellings yields one dedup key.
+ * Purely lexical: no filesystem access, portable. */
+static void xsd_path_normalize(const char* in, char* out, size_t outsz) {
+    struct {
+        const char* p;
+        size_t len;
+    } comps[512];
+    size_t n = 0;
+    int is_abs = in[0] == '/';
+    const char* q = in;
+    while (*q) {
+        while (*q == '/') q++;
+        if (!*q) break;
+        const char* start = q;
+        while (*q && *q != '/') q++;
+        size_t len = (size_t)(q - start);
+        if (len == 1 && start[0] == '.') continue;
+        if (len == 2 && start[0] == '.' && start[1] == '.') {
+            if (n > 0)
+                n--; /* ".." pops; a leading pop on an absolute
+                        path would escape the root — drop it */
+            continue;
+        }
+        if (n < sizeof(comps) / sizeof(comps[0])) {
+            comps[n].p = start;
+            comps[n].len = len;
+            n++;
+        }
+    }
+    size_t o = 0;
+    if (is_abs && o < outsz) out[o++] = '/';
+    for (size_t i = 0; i < n; i++) {
+        if (o && o < outsz && out[o - 1] != '/') out[o++] = '/';
+        if (o + comps[i].len >= outsz) break;
+        memcpy(out + o, comps[i].p, comps[i].len);
+        o += comps[i].len;
+    }
+    if (o == 0 && outsz > 1) out[o++] = '.';
+    out[o] = 0;
+}
+
+static int xsd_visited_has(struct leptris_xsd_schema* s,
+                           const char* path) {
+    for (size_t i = 0; i < s->visited_len; i++)
+        if (strcmp(s->visited[i], path) == 0) return 1;
+    return 0;
+}
+
+static void xsd_visited_add(struct leptris_xsd_schema* s,
+                            const char* path) {
+    if (s->visited_len == s->visited_cap) {
+        size_t nc = s->visited_cap ? s->visited_cap * 2 : 8;
+        char** nv = (char**)realloc(s->visited, nc * sizeof(*nv));
+        if (!nv) return; /* dedup degrades to the old behavior */
+        s->visited = nv;
+        s->visited_cap = nc;
+    }
+    char* dup = xsd_strdup(path);
+    if (!dup) return;
+    s->visited[s->visited_len++] = dup;
+}
+
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
     for (LeptrisNodeRef n =
@@ -712,6 +782,13 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 char path[4096];
                 snprintf(path, sizeof(path), "%s/%s", s->base_dir,
                          loc);
+                /* leptris#1644: capture each schema unit once per
+                 * compile — mark before recursing so cycles close
+                 * (w.xsd includes a1.xsd includes w.xsd). */
+                char canon[4096];
+                xsd_path_normalize(path, canon, sizeof(canon));
+                if (xsd_visited_has(s, canon)) continue;
+                xsd_visited_add(s, canon);
                 size_t flen = 0;
                 char* text = xsd_read_file(path, &flen);
                 if (text) {
@@ -1000,6 +1077,8 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         g = gn;
     }
     if (s->default_open) xsd_cm_free(s->default_open);
+    for (size_t i = 0; i < s->visited_len; i++) free(s->visited[i]);
+    free(s->visited);
     free(s->target_ns);
     free(s->base_dir);
     if (s->validator)

@@ -152,6 +152,21 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
 
 }  // namespace
 
+// leptris#1644: a dense include/import DAG must capture each schema
+// unit exactly once. Without a visited set, every path through the
+// DAG re-parses and re-captures the whole subtree (the dml-main
+// blowup: multi-GB / minutes at include_depth 16). Unique captures
+// here: 6 element declarations + 8 include markers = 14;
+// path-enumerated capture reports 21 (a2/b2 twice, s four times).
+TEST(XsdCompile, ImportDagCapturesEachUnitOnce) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/import_dag/w.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_declaration_count(s), 14u);
+    leptris_xsd_free(s);
+}
+
 // ---- slice 2: lexical validation ----------------------------------
 namespace {
 
