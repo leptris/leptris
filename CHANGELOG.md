@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.338] - 2026-10-11
+
+### Added
+
+- indent_html ext option — nested HTML indent (#1635) (serialize)
+
+### Fixed
+
+- in-body drops the table-structure start tags (#1634) (html)
+
+
+
 ## [1.9.337] - 2026-10-11
 
 ### Added
