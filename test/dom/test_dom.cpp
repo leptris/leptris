@@ -2843,3 +2843,50 @@ TEST(ElementNewWithAttributes, DuplicateNamesReplaceLastWins) {
     EXPECT_STREQ(leptris_element_attribute(e, "id"), "second");
     leptris_document_free(doc);
 }
+
+/* #1636: appending a node into its own descendant subtree built a
+ * parent cycle; the serializer (every tree walker) then recursed
+ * unbounded and the process died (_chkstk SEGV on Windows through
+ * moxml fragment merges). Reparenting mutators reject the cycle
+ * edge now. */
+TEST(DomCycleGuard, AncestorAppendRejected) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d =
+        leptris_parse_string("<a><b/></a>", strlen("<a><b/></a>"), &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement a = leptris_document_root(d);
+    LeptrisElement b = leptris_element_first_child_any(a);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_element_append_child(b, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_element_prepend_child(b, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_element_append_child(a, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    /* the legal shape still works and serializes */
+    LeptrisElement c = leptris_element_create(d, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_element_append_child(b, c), LEPTRIS_OK);
+    char* out = leptris_document_serialize(d, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(strstr(out, "<b><c/></b>"), nullptr);
+    leptris_free_string(out);
+    leptris_document_free(d);
+}
+
+TEST(DomCycleGuard, InsertIntoOwnSubtreeRejected) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d =
+        leptris_parse_string("<a><b><x/></b></a>", strlen("<a><b><x/></b></a>"), &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement a = leptris_document_root(d);
+    LeptrisElement b = leptris_element_first_child_any(a);
+    LeptrisElement x = leptris_element_first_child_any(b);
+    ASSERT_NE(x, nullptr);
+    /* inserting a (ancestor) inside a's own subtree */
+    EXPECT_EQ(leptris_element_insert_before(x, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_element_insert_after(x, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    leptris_document_free(d);
+}

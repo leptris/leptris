@@ -503,6 +503,25 @@ LeptrisStatus leptris_element_add_child_addr(uintptr_t parent_addr,
 LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
+    /* #1636: appending a node into its own descendant subtree
+     * builds a parent cycle — every tree walker (serializer
+     * first) then recurses without bound and the process dies
+     * (_chkstk SEGV on Windows). Parse-built trees cannot cycle
+     * (the open stack is a stack); only mutation can. Reject the
+     * ancestor edge: walk child's parent chain for parent. The
+     * same-document fast path below never sees foreign copies as
+     * ancestors, so the walk runs on the caller's node — O(depth),
+     * depth bounded by the parse cap. */
+    {
+        if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
+        LeptrisElement p = leptris_element_parent(parent);
+        int guard = 0;
+        while (p && guard++ < 8192) {
+            if (p == child) return LEPTRIS_ERROR_INVALID_ARG;
+            p = leptris_element_parent(p);
+        }
+    }
+
     /* Single document resolution per mutation (TODO 195c): the
      * root walk + map lookup was paid three times per append
      * (twice here, once inside the internal for the tail cache). */
@@ -542,6 +561,13 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
 LeptrisStatus leptris_element_prepend_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
+    /* #1636: no cycles — see leptris_element_append_child. */
+    if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
+    for (LeptrisElement p = leptris_element_parent(parent);
+         p; p = leptris_element_parent(p)) {
+        if (p == child) return LEPTRIS_ERROR_INVALID_ARG;
+    }
+
     /* #1528: a foreign document's node is adopted by copy, never
      * spliced raw. */
     child = (LeptrisElement)adopt_for_splice(
@@ -563,6 +589,19 @@ LeptrisStatus leptris_element_prepend_child(LeptrisElement parent, LeptrisElemen
 LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisElement new_node) {
     if (!sibling || !new_node) return LEPTRIS_ERROR_NULL_ARG;
 
+    /* #1636: reparenting a node into its own descendant subtree
+     * builds a parent cycle — tree walkers recurse unbounded and
+     * the process dies. Reject when the new parent position lies
+     * under the node itself. */
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+        if ((LeptrisElement)sibling == (LeptrisElement)new_node)
+            return LEPTRIS_ERROR_INVALID_ARG;
+        for (LeptrisElement p = leptris_element_parent(sibling);
+             p; p = leptris_element_parent(p)) {
+            if (p == (LeptrisElement)new_node)
+                return LEPTRIS_ERROR_INVALID_ARG;
+        }
+    }
     LeptrisNode* new_node_ptr = (LeptrisNode*)new_node;
     LeptrisNode* sibling_ptr = (LeptrisNode*)sibling;
 
@@ -634,7 +673,7 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
 
     /* Set parent (type-dispatching). TODO 155 Phase A: document field
      * removed; non-root elements reach doc via walk to root. */
-    if (new_node_ptr->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         leptris_element_set_parent((LeptrisElement)new_node_ptr, parent);
     } else {
         switch (new_node_ptr->type) {
@@ -660,7 +699,7 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
 
     /* Issue #213: maintain child_count for element children only,
      * matching leptris_element_append_child_internal. */
-    if (new_node_ptr->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
     }
 
@@ -676,6 +715,19 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
 LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElement new_node) {
     if (!sibling || !new_node) return LEPTRIS_ERROR_NULL_ARG;
 
+    /* #1636: reparenting a node into its own descendant subtree
+     * builds a parent cycle — tree walkers recurse unbounded and
+     * the process dies. Reject when the new parent position lies
+     * under the node itself. */
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+        if ((LeptrisElement)sibling == (LeptrisElement)new_node)
+            return LEPTRIS_ERROR_INVALID_ARG;
+        for (LeptrisElement p = leptris_element_parent(sibling);
+             p; p = leptris_element_parent(p)) {
+            if (p == (LeptrisElement)new_node)
+                return LEPTRIS_ERROR_INVALID_ARG;
+        }
+    }
     LeptrisNode* new_node_ptr = (LeptrisNode*)new_node;
     LeptrisNode* sibling_ptr = (LeptrisNode*)sibling;
 
@@ -731,7 +783,7 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
 
     /* Set parent (type-dispatching). TODO 155 Phase A: document field
      * removed; non-root elements reach doc via walk to root. */
-    if (new_node_ptr->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         leptris_element_set_parent((LeptrisElement)new_node_ptr, parent);
     } else {
         switch (new_node_ptr->type) {
@@ -761,7 +813,7 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
         leptris_elem_set_last_child(parent, new_node_ptr);
     }
 
-    if (new_node_ptr->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+    if (((LeptrisNode*)new_node)->type == LEPTRIS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
     }
 
