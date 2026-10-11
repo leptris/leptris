@@ -4,7 +4,16 @@
 
 ### Added
 
-- instance errors carry the owning element and position (leptris-ruby#419) (xsd)
+- **XSD instance errors carry the owning element and source
+  position (leptris-ruby#419, PR #1632).** In the libxml2/Nokogiri
+  shape consumers present: `element 'pgMar' @2:3: attribute
+  'header': required but absent`. Applied to attribute rows
+  (required-absent, fixed mismatch, strict-undeclared), strict
+  elements, unresolved types, and content-model failures — the
+  #1626 culprit naming rides along. The position comes from the
+  recorded parse-time source stamp and falls back to the prior
+  form for skipped-positions parses and the public `simple_valid`
+  face. Compile-time schema errors are unchanged.
 
 
 
