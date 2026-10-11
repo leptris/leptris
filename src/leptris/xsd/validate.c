@@ -86,6 +86,38 @@ static void verrf(struct xsd_validator* v, const char* what,
     verr_push(v, buf);
 }
 
+/* leptris-ruby#419: instance-side errors carry the owning element
+ * and its source position (libxml2/Nokogiri shape). The element's
+ * own name rides the prefix; the position comes from the recorded
+ * source stamp (0 = unlocated — a skipped-positions parse). */
+static void verrf_at(struct xsd_validator* v, LeptrisElement elem,
+                     const char* what, const char* name,
+                     const char* detail) {
+    char buf[320];
+    const char* el = NULL;
+    leptris_element_expanded_name(elem, &el, NULL, NULL);
+    if (!el) el = "?";
+    int line = 0, col = 0;
+    {
+        LeptrisSourcePosition pos;
+        leptris_node_source_position((LeptrisNodeRef)elem, &pos);
+        line = pos.line;
+        col = pos.col_start;
+    }
+    int w;
+    if (line > 0)
+        w = snprintf(buf, sizeof(buf),
+                     "element '%s' @%d:%d: %s '%s': %s", el, line,
+                     col, what, name ? name : "?",
+                     detail ? detail : "invalid");
+    else
+        w = snprintf(buf, sizeof(buf), "element '%s': %s '%s': %s",
+                     el, what, name ? name : "?",
+                     detail ? detail : "invalid");
+    (void)w;
+    verr_push(v, buf);
+}
+
 /* ---- lexical helpers ---------------------------------------------- */
 
 static int simple_is_numeric(struct leptris_xsd_schema* s,
@@ -106,7 +138,12 @@ static int text_valid(struct xsd_validator* v,
         r = xsd_simple_valid_chain(s, st, lexical);
     }
     if (r == 0) {
-        verrf(v, what, name, "lexical value does not match its type");
+        if (elem)
+            verrf_at(v, elem, what, name,
+                     "lexical value does not match its type");
+        else
+            verrf(v, what, name,
+                  "lexical value does not match its type");
         return 0;
     }
     /* XSD 1.1 xs:assertion facet (document validation only):
@@ -255,7 +292,7 @@ static void validate_children(struct xsd_validator* v,
                      ? "children do not match the content model (at '%s')"
                      : "children do not match the content model",
                  culprit ? culprit : "");
-        verrf(v, "element", local, msg);
+        verrf_at(v, elem, "element", local, msg);
         free(names);
         free(uris);
     }
@@ -384,13 +421,14 @@ static void validate_attributes(struct xsd_validator* v,
         }
         if (!val) {
             if (a->required)
-                verrf(v, "attribute", a->name, "required but absent");
+                verrf_at(v, elem, "attribute", a->name,
+                         "required but absent");
             continue;
         }
         text_valid(v, s, a->type, val, "attribute", a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0)
-            verrf(v, "attribute", a->name,
-                  "value does not match the fixed value");
+            verrf_at(v, elem, "attribute", a->name,
+                     "value does not match the fixed value");
     }
     /* strict: every instance attribute must be declared (or pass
      * the type's xs:anyAttribute grammar). Namespace declarations
@@ -416,7 +454,8 @@ static void validate_attributes(struct xsd_validator* v,
                                  xsd_target_ns(s)))
                 continue;
         }
-        verrf(v, "attribute", local, "not declared (strict)");
+        verrf_at(v, elem, "attribute", local,
+                 "not declared (strict)");
     }
 }
 
@@ -431,7 +470,7 @@ static void validate_element(struct xsd_validator* v,
     if (!d) {
         /* strict: the instance uses an element the schema never
          * declared (a local particle would have typed it) */
-        verrf(v, "element", local, "not declared (strict)");
+        verrf_at(v, elem, "element", local, "not declared (strict)");
         return;
     }
 
@@ -510,7 +549,8 @@ static void validate_local(struct xsd_validator* v,
     }
     /* neither complex nor simple nor builtin: the schema is
      * incomplete — loud, never a silent accept (#1615 class) */
-    verrf(v, "element", local, "type not found in the schema");
+    verrf_at(v, elem, "element", local,
+             "type not found in the schema");
 }
 
 /* ---- slice 6: identity constraints -------------------------------- */
