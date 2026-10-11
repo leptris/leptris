@@ -2959,3 +2959,80 @@ TEST(DomAttachInstalled, NullShapeAndStatusContract) {
               LEPTRIS_ERROR_NULL_ARG);
     leptris_document_free(d);
 }
+
+namespace {
+/* leptris#1646: reads every element's name, text, attribute names, and
+ * expanded-QName prefix/URI views — the pool-backed views suspected of
+ * dangling once the source document is freed. NULL text is legal; views
+ * must be readable, not necessarily non-empty. */
+void ReadAllViews(LeptrisElement e) {
+    const char* name = leptris_element_name(e);
+    ASSERT_NE(name, nullptr);
+    if (const char* text = leptris_element_text(e)) (void)strlen(text);
+    const char* px = nullptr;
+    const char* uri = nullptr;
+    leptris_element_expanded_name(e, nullptr, &px, &uri);
+    if (px) (void)strlen(px);
+    if (uri) (void)strlen(uri);
+    for (LeptrisAttribute a = leptris_element_first_attribute(e); a;
+         a = leptris_attribute_next(a)) {
+        const char* an = leptris_attribute_get_name(a);
+        ASSERT_NE(an, nullptr);
+    }
+    for (LeptrisNodeRef c = leptris_node_first_child(leptris_element_as_node(e)); c;
+         c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT)
+            ReadAllViews((LeptrisElement)c);
+    }
+}
+} // namespace
+
+/* leptris#1646 — the two attach shapes whose survival the issue asked to
+ * pin at the C level: (A) absorb-move, where dst's document absorbs src's
+ * pool and the source document is then freed; (B) plain cross-document
+ * append, which adopts by copy. In both, everything reachable from dst
+ * must remain readable and serializable after leptris_document_free(src). */
+TEST(DomAbsorbSurvival, AbsorbedChildrenSurviveSourceFree) {
+    static const char kSrc[] = "<w><a id=\"k1\" xmlns:p=\"urn:p\"><b>p:t</b><c>deep text</c></a></w>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument dst = leptris_parse_string("<r/>", strlen("<r/>"), &st);
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument src = leptris_parse_string(kSrc, strlen(kSrc), &st);
+    ASSERT_NE(src, nullptr);
+    LeptrisElement droot = leptris_document_root(dst);
+    LeptrisElement sroot = leptris_document_root(src);
+    ASSERT_EQ(leptris_document_absorb(dst, src), LEPTRIS_OK);
+    LeptrisNodeRef moved = leptris_node_first_child(leptris_element_as_node(sroot));
+    ASSERT_NE(moved, nullptr);
+    EXPECT_EQ(leptris_element_append_child(droot, (LeptrisElement)moved), LEPTRIS_OK);
+
+    leptris_document_free(src);
+    char* out = leptris_document_serialize(dst, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r><a xmlns:p=\"urn:p\" id=\"k1\"><b>p:t</b><c>deep text</c></a></r>");
+    leptris_free_string(out);
+    ReadAllViews(droot);
+    leptris_document_free(dst);
+}
+
+TEST(DomAbsorbSurvival, CopyAttachSurvivesSourceFree) {
+    static const char kSrc[] = "<w><a id=\"k1\" xmlns:p=\"urn:p\"><b>p:t</b><c>deep text</c></a></w>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument dst = leptris_parse_string("<r/>", strlen("<r/>"), &st);
+    ASSERT_NE(dst, nullptr);
+    LeptrisDocument src = leptris_parse_string(kSrc, strlen(kSrc), &st);
+    ASSERT_NE(src, nullptr);
+    LeptrisElement droot = leptris_document_root(dst);
+    LeptrisElement sroot = leptris_document_root(src);
+    LeptrisNodeRef orig = leptris_node_first_child(leptris_element_as_node(sroot));
+    ASSERT_NE(orig, nullptr);
+    EXPECT_EQ(leptris_element_append_child(droot, (LeptrisElement)orig), LEPTRIS_OK);
+
+    leptris_document_free(src);
+    char* out = leptris_document_serialize(dst, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r><a xmlns:p=\"urn:p\" id=\"k1\"><b>p:t</b><c>deep text</c></a></r>");
+    leptris_free_string(out);
+    ReadAllViews(droot);
+    leptris_document_free(dst);
+}
