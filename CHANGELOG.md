@@ -1,5 +1,23 @@
 ## Unreleased
 
+### Fixed
+
+- **XSD compile: diamond imports re-expanded exponentially
+  (#1644, leptris-ruby#423).** `xsd_capture_root` recursed into
+  every xs:import/xs:include with no visited memo — a diamond
+  (shared units imported by many schemas; the dml family's shape)
+  re-parsed and re-merged the whole subtree per edge, up to the
+  depth-16 guard: dml-main.xsd compiled unbounded at 13-21 GB RSS
+  (killed at 180-600 s, never finished). Captured locations are
+  now canonicalized (realpath — sibling dirs reach one shared
+  unit through different relative spellings) and memoized: the
+  same compile finishes in 0.01 s at ~1 MB. Duplicate
+  declarations from diamonds were a correctness bug too — the
+  captured-once semantics are pinned by a diamond test. The
+  libxml2 163-fixture corpus gate holds.
+
+## Unreleased
+
 ### Added
 
 - **`leptris_plan_serialize_ext` (#425, leptris-ruby#425)**:

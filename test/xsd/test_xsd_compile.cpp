@@ -1682,4 +1682,74 @@ TEST(XsdErrorContext, ContentModelErrorCarriesPosition) {
     leptris_xsd_free(s);
 }
 
+/* #1644: diamond imports — two schemas importing the SAME unit
+ * (through different relative spellings and target namespaces)
+ * must capture it once. Pre-memo, each import edge re-parsed and
+ * re-merged the whole subtree (multi-GB on the dml family). */
+TEST(XsdCompileFile, DiamondImportsCaptureOnce) {
+    std::string dir = ::testing::TempDir();
+    std::string iso = dir + "iso1644", ms = dir + "ms1644";
+    (void)system(("mkdir -p " + iso + " " + ms).c_str());
+
+    FILE* f = fopen((iso + "/inner.xsd").c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    fputs(
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" "
+        "xmlns:w=\"urn:w\" targetNamespace=\"urn:w\" "
+        "elementFormDefault=\"qualified\">"
+        "<xs:element name=\"doc\" type=\"w:docT\"/>"
+        "<xs:complexType name=\"docT\"><xs:sequence>"
+        "<xs:element name=\"p\" type=\"xs:token\" "
+        "minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence></xs:complexType></xs:schema>",
+        f);
+    fclose(f);
+
+    /* chameleon stub in ms/ pointing back at iso/ */
+    f = fopen((ms + "/stub.xsd").c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    fputs(
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:import namespace=\"urn:w\" "
+        "schemaLocation=\"../iso1644/inner.xsd\"/></xs:schema>",
+        f);
+    fclose(f);
+
+    /* wrapper importing the shared unit from the OTHER dir —
+     * a different relative spelling of the same resolved file */
+    f = fopen((ms + "/wrapper.xsd").c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    fputs(
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:import namespace=\"urn:w\" "
+        "schemaLocation=\"../iso1644/inner.xsd\"/></xs:schema>",
+        f);
+    fclose(f);
+
+    /* the wrapper imports the stub AND the unit directly: a
+     * diamond through two paths to one file */
+    f = fopen((ms + "/diamond.xsd").c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    fputs(
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:import namespace=\"urn:w\" schemaLocation=\"stub.xsd\"/>"
+        "<xs:import namespace=\"urn:w\" "
+        "schemaLocation=\"../iso1644/inner.xsd\"/></xs:schema>",
+        f);
+    fclose(f);
+
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((ms + "/diamond.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* inner.xsd declares exactly two top-level items, captured
+     * ONCE (pre-memo the diamond re-merged them per edge). The
+     * count also includes the three xs:import directives
+     * themselves (a long-standing counter quirk): 2 + 3 = 5.
+     * Seven would mean the diamond duplicated the subtree. */
+    EXPECT_EQ(leptris_xsd_declaration_count(s), 5u);
+    leptris_xsd_free(s);
+}
+
 }  // namespace
+

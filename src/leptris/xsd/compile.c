@@ -46,6 +46,12 @@ struct leptris_xsd_schema {
     int version_11;    /* xs:schema @version = "1.1" */
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth; /* include/import recursion guard */
+    /* #1644: schemaLocations already captured — diamond imports
+     * (shared units imported by many schemas) previously
+     * re-parsed and re-merged their whole subtree per edge,
+     * exponentially (multi-GB / minutes on dml-main). */
+    char** visited;
+    size_t visited_n, visited_cap;
     void* validator; /* slice-4 parked error list */
     char* error;
 };
@@ -683,6 +689,29 @@ fail:
     return (LeptrisXsdSchema)s;
 }
 
+/* #1644: has this resolved schemaLocation been captured already? */
+static int xsd_visited_has(struct leptris_xsd_schema* s,
+                           const char* path) {
+    for (size_t i = 0; i < s->visited_n; i++)
+        if (strcmp(s->visited[i], path) == 0) return 1;
+    return 0;
+}
+
+static int xsd_visited_add(struct leptris_xsd_schema* s,
+                           const char* path) {
+    if (s->visited_n == s->visited_cap) {
+        size_t nc = s->visited_cap ? s->visited_cap * 2 : 8;
+        char** nv = (char**)realloc(s->visited, nc * sizeof(*nv));
+        if (!nv) return 0;
+        s->visited = nv;
+        s->visited_cap = nc;
+    }
+    char* copy = xsd_strdup(path);
+    if (!copy) return 0;
+    s->visited[s->visited_n++] = copy;
+    return 1;
+}
+
 /* Every top-level declaration under an xs:schema root. xs:include
  * / xs:import / xs:redefine resolve their schemaLocation against
  * the owning schema's base_dir (string-compiled schemas have none
@@ -709,9 +738,17 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
             const char* loc = leptris_element_attribute(
                 (LeptrisElement)n, "schemaLocation");
             if (loc && s->base_dir && s->include_depth < 16) {
-                char path[4096];
-                snprintf(path, sizeof(path), "%s/%s", s->base_dir,
+                char raw[4096];
+                snprintf(raw, sizeof(raw), "%s/%s", s->base_dir,
                          loc);
+                /* Canonical: sibling dirs reach one shared unit
+                 * through different relative spellings — the memo
+                 * must key on the resolved file, not the spelling
+                 * (#1644). */
+                char path[4096];
+                if (!realpath(raw, path)) continue;
+                if (xsd_visited_has(s, path)) continue;
+                if (!xsd_visited_add(s, path)) continue;
                 size_t flen = 0;
                 char* text = xsd_read_file(path, &flen);
                 if (text) {
@@ -1010,6 +1047,8 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         xsd_free_simple_one(t);
         t = next;
     }
+    for (size_t vi = 0; vi < s->visited_n; vi++) free(s->visited[vi]);
+    free(s->visited);
     free(s->error);
     free(s);
 }
