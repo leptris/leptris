@@ -2351,4 +2351,36 @@ TEST(Plan426, FromPlanResultMintsNativeDocument) {
     leptris_document_free(doc);
 }
 
+TEST(PlanBuild, ScalarOpRejectsOutOfPoolPlanIndex) {
+    /* leptris#1654: SCALAR ops read pool->plans[plan_index] before
+     * any bounds check — an out-of-pool index OOB-reads (crash or
+     * fabricated output). Must fail with INVALID_ARG exactly like
+     * the ELEMENT branch. */
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "i";
+    kids[0].kind = LEPTRIS_PLAN_KIND_COLLECTION;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "r";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 9, 0, NULL, "x", 1},
+        {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 3, &st);
+    EXPECT_EQ(r, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    leptris_plan_free(plan);
+}
+
 }  // namespace
