@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.340] - 2026-10-11
+
+### Added
+
+- add_child_addr twin reports the installed address (leptris-ruby#1636) (dom)
+
+
+
 ## [1.9.339] - 2026-10-11
 
 ### Fixed
