@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.337] - 2026-10-11
+
+### Added
+
+- instance errors carry the owning element and position (leptris-ruby#419) (xsd)
+
+
+
 ## [1.9.336] - 2026-10-10
 
 ### Fixed
