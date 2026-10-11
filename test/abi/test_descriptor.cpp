@@ -2256,14 +2256,13 @@ TEST(Plan425, SerializeExtIndentsBoundaries) {
     LeptrisPlan plan = leptris_plan_build(&spec, &st);
     ASSERT_NE(plan, nullptr);
 
-    LeptrisPlanResult r = leptris_plan_result_build(
-        plan,
-        (leptris_plan_row_op[]){
-            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, nullptr, nullptr, 0},
-            {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "v1", 2},
-            {LEPTRIS_PLAN_OP_SCALAR, 0, 1, nullptr, "v2", 2},
-            {LEPTRIS_PLAN_OP_END, 0, 0, nullptr, nullptr, 0}},
-        4, &st);
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "v1", 2},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 1, NULL, "v2", 2},
+        {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 4, &st);
     ASSERT_NE(r, nullptr);
 
     /* Compact (default) — unchanged shape. */
@@ -2316,15 +2315,14 @@ TEST(Plan426, FromPlanResultMintsNativeDocument) {
     LeptrisPlan plan = leptris_plan_build(&spec, &st);
     ASSERT_NE(plan, nullptr);
 
-    LeptrisPlanResult r = leptris_plan_result_build(
-        plan,
-        (leptris_plan_row_op[]){
-            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, nullptr, nullptr, 0},
-            {LEPTRIS_PLAN_OP_ATTR, 0, 0, "k", "1", 1},
-            {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "v1", 2},
-            {LEPTRIS_PLAN_OP_SCALAR, 0, 1, nullptr, "v2", 2},
-            {LEPTRIS_PLAN_OP_END, 0, 0, nullptr, nullptr, 0}},
-        5, &st);
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ATTR, 0, 0, "k", "1", 1},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "v1", 2},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 1, NULL, "v2", 2},
+        {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 5, &st);
     ASSERT_NE(r, nullptr);
 
     LeptrisDocument doc = leptris_document_from_plan_result(plan, r, &st);
@@ -2340,11 +2338,10 @@ TEST(Plan426, FromPlanResultMintsNativeDocument) {
     EXPECT_STREQ(leptris_element_text(first), "v1");
 
     /* Non-ELEMENT roots are rejected. */
+    leptris_plan_row_op scalar_ops[] = {
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "x", 1}};
     LeptrisPlanResult scalar_root =
-        leptris_plan_result_build(plan,
-            (leptris_plan_row_op[]){
-                {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "x", 1}},
-            1, &st);
+        leptris_plan_result_build(plan, scalar_ops, 1, &st);
     EXPECT_EQ(leptris_document_from_plan_result(plan, scalar_root, &st),
               nullptr);
 
