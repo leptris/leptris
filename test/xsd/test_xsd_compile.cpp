@@ -167,6 +167,84 @@ TEST(XsdCompile, ImportDagCapturesEachUnitOnce) {
     leptris_xsd_free(s);
 }
 
+// leptris-ruby#434: the length family counts OCTETS for binary
+// bases (XML Schema Part 2: hexBinary/base64Binary length is in
+// bytes) — the wml ST_LongHexNumber shape (hexBinary + length 4)
+// rejected every canonical 8-digit rsid.
+TEST(XsdDatatypes, LengthFacetCountsOctetsForHexBinary) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"ST_LongHexNumber\">"
+        "<xs:restriction base=\"xs:hexBinary\">"
+        "<xs:length value=\"4\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"ST_Range\">"
+        "<xs:restriction base=\"xs:hexBinary\">"
+        "<xs:minLength value=\"1\"/><xs:maxLength value=\"4\"/>"
+        "</xs:restriction>"
+        "</xs:simpleType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    // 8 hex digits = 4 octets
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_LongHexNumber", "00A1B2C3"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_LongHexNumber", "00A1B2C3FF"), 0);
+    // 4 hex digits = 2 octets
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_LongHexNumber", "00A1"), 0);
+    // min/max in octets: 2..8 hex digits
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_Range", "00A1"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_Range", "00A1B2C3"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_Range", "0"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_Range", "00A1B2C3FF"), 0);
+    // string-family length stays in characters
+    const char xsd2[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"T\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:length value=\"4\"/></xs:restriction>"
+        "</xs:simpleType></xs:schema>";
+    LeptrisXsdSchema s2 = leptris_xsd_compile(xsd2, strlen(xsd2), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    EXPECT_EQ(leptris_xsd_simple_valid(s2, "T", "abcd"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s2, "T", "abcde"), 0);
+    leptris_xsd_free(s);
+    leptris_xsd_free(s2);
+}
+
+// leptris-ruby#434: XSD pattern property classes for the Latin-1
+// byte world and character-class SUBTRACTION — the OPC
+// ST_ContentType shape. A pattern that fails to parse rejects
+// everything, so media types failed wholesale.
+TEST(XsdDatatypes, PatternPropertyClassesAndSubtraction) {
+    // The OPC ST_ContentType shape, minus the quoted-string member
+    // (same property-class + subtraction machinery): type/subtype
+    // segments of IsBasicLatin minus Cc controls, split on '/'.
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"ST_ContentType\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:pattern value="
+        "\"[\\p{IsBasicLatin}-[\\p{Cc}\\s()<>@,;:]]+/"
+        "[\\p{IsBasicLatin}-[\\p{Cc}\\s()<>@,;:]]+\"/>"
+        "</xs:restriction></xs:simpleType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_ContentType", "application/xml"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(
+                  s, "ST_ContentType",
+                  "application/vnd.openxmlformats-officedocument"
+                  ".wordprocessingml.document+xml"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_ContentType", "text/plain"), 1);
+    // a control char never matches
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_ContentType", "app\x01xml"), 0);
+    // the slash split is required by the pattern's /+ shape
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "ST_ContentType", "application"), 0);
+    leptris_xsd_free(s);
+}
+
 // ---- slice 2: lexical validation ----------------------------------
 namespace {
 
