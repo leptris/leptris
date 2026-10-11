@@ -500,6 +500,38 @@ LeptrisStatus leptris_element_add_child_addr(uintptr_t parent_addr,
                                         (LeptrisElement)child_addr);
 }
 
+LeptrisStatus leptris_element_add_child_addr_installed(
+    uintptr_t parent_addr, uintptr_t child_addr,
+    uintptr_t* installed_addr) {
+    if (!parent_addr || !child_addr) return LEPTRIS_ERROR_NULL_ARG;
+    if (installed_addr) *installed_addr = child_addr;
+
+    /* The same-document fast path installs the argument itself;
+     * the foreign gate deep-copies (#1528) and the status-only
+     * face drops the copy's address — callers kept addressing the
+     * foreign original, which dies with its document (#1636).
+     * This face always reports the effective node. */
+    LeptrisElement original = (LeptrisElement)child_addr;
+    if (leptris_element_get_document(original) ==
+        leptris_element_get_document((LeptrisElement)parent_addr)) {
+        return leptris_element_append_child(
+            (LeptrisElement)parent_addr, original);
+    }
+
+    LeptrisElement installed =
+        (LeptrisElement)adopt_for_splice((LeptrisNode*)original,
+                                         leptris_element_get_document(
+                                             (LeptrisElement)parent_addr));
+    if (!installed) return LEPTRIS_ERROR_MEMORY;
+
+    /* Cycle rejection rides the append; report the copy. */
+    LeptrisStatus rc = leptris_element_append_child(
+        (LeptrisElement)parent_addr, installed);
+    if (rc != LEPTRIS_OK) return rc;
+    if (installed_addr) *installed_addr = (uintptr_t)installed;
+    return LEPTRIS_OK;
+}
+
 LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
