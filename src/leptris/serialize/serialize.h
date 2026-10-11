@@ -77,6 +77,9 @@ typedef struct SerializeBuffer {
     /* §16.2 method="html": newline-per-block-element layout governed
      * by the HTML element table (html_elem_flags). */
     int html_method;
+    /* #1635: html layout nests with the indent machinery (0 = the
+     * §16.2 newline-only shape). */
+    int indent_html;
     /* libxml2 XHTML serialization (xmlsave.c xhtmlNodeDumpOutput
      * parity): an xml-method result whose doctype ids match an XHTML
      * DTD injects the Content-Type meta into the root html/head and
@@ -138,6 +141,7 @@ typedef struct {
     /* Indent unit string (#633): one copy per depth level; NULL =
      * indent_spaces spaces per level. */
     const char* indent_unit;
+    int indent_html;   /* #1635: nested html indent (§16.2 default 0) */
 } LeptrisSerializeExtended;
 
 LEPTRIS_API char* leptris_document_serialize_ext(

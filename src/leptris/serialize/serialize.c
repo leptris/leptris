@@ -48,6 +48,7 @@ SerializeBuffer* buffer_create(int indent_spaces) {
     buf->indent_spaces = indent_spaces;
     buf->indent_unit = NULL;   /* #633: callers opt in per unit string */
     buf->html_method = 0;
+    buf->indent_html = 0;
     buf->indent_text = 0;
     buf->expand_empty = 0;
     buf->at_line_start = 0;
@@ -135,9 +136,11 @@ void buffer_append_char(SerializeBuffer* buf, char c) {
 
 void buffer_append_indent(SerializeBuffer* buf) {
     if (!buf || buf->indent_spaces <= 0) return;
-    /* §16.2 html method: newline-only layout — libxml2's HTML dump
-     * never nests with spaces. */
-    if (buf->html_method) return;
+    /* §16.2 html method: the historical layout is newline-only —
+     * libxml2's unindented HTML dump never nests. #1635
+     * indent_html opts the html method into the nesting layout
+     * (htmlNodeDumpFormatOutput format=1). */
+    if (buf->html_method && !buf->indent_html) return;
 
     if (buf->indent_unit && buf->indent_unit[0]) {
         size_t ul = strlen(buf->indent_unit);
@@ -1015,7 +1018,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
              * inside a mixed parent is verbatim content: never
              * dropped. HTML mode prints text verbatim (libxml2 has
              * no formatter-owned whitespace there). */
-            if (buf->indent_spaces > 0 && !buf->html_method &&
+            if (buf->indent_spaces > 0 &&
+                (!buf->html_method || buf->indent_html) &&
                 cur->type == LEPTRIS_NODE_TYPE_TEXT &&
                 !((sp > 0) && st[sp - 1].mixed)) {
                 LeptrisTextNode* wsn = (LeptrisTextNode*)cur;
@@ -1102,7 +1106,7 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
              * line, like element siblings. Mixed-content parents
              * keep them inline — a PI between text must not move. */
             if (buf->indent_spaces > 0 && sp > 0 && !st[sp - 1].mixed &&
-                !buf->html_method &&
+                (!buf->html_method || buf->indent_html) &&
                 (cur->type == LEPTRIS_NODE_TYPE_COMMENT ||
                  cur->type == LEPTRIS_NODE_TYPE_PI)) {
                 buffer_append_indent(buf);
@@ -1183,8 +1187,8 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                  * close into the same single reservation — leaves
                  * otherwise pay ~8 capacity-checked appends each
                  * (the raw-only guard was why pretty trailed). */
-                int pretty0 = buf->indent_spaces > 0 &&
-                              !buf->html_method && !parent_mixed;
+                int pretty0 = buf->indent_spaces > 0 && !parent_mixed &&
+                              (!buf->html_method || buf->indent_html);
                 /* HTML mode: zero lead ever; trail follows the
                  * after-close break rule (mixed is not a gate). */
                 int htrail0 = buf->html_method && !is_root_cur &&
@@ -1619,12 +1623,32 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
         int mixed = 0;
         int close_brk = 0;
         if (buf->html_method) {
-            /* §16.2: mixed is not a gate — the site rules own the
-             * newlines. mixed=1 keeps ws-only text verbatim. */
-            mixed = 1;
             int hf = html_elem_sem_flags(e);
-            if (html_break_before_children(e, name, nl, hf))
-                buffer_append_newline(buf);
+            if (!buf->indent_html) {
+                /* §16.2 legacy: mixed is not a gate — the site
+                 * rules own the newlines. mixed=1 keeps ws-only
+                 * text verbatim. */
+                mixed = 1;
+                if (html_break_before_children(e, name, nl, hf))
+                    buffer_append_newline(buf);
+            } else {
+                /* #1635 indented HTML: the element takes the block
+                 * layout — mixed follows actual text children like
+                 * the XML formatter (libxml2 format mode), so the
+                 * layout machinery nests; the site rules still own
+                 * the newlines. Elements that keep their children
+                 * inline (single-child rule) own no whitespace. */
+                int brk_bc = html_break_before_children(e, name, nl, hf);
+                if (brk_bc) {
+                    mixed = buf->ws_mixed
+                        ? ser_children_have_any_text(fc)
+                        : ser_children_have_text(fc);
+                    if (!mixed && sp > 0 && st[sp - 1].mixed) mixed = 1;
+                } else {
+                    mixed = 1;
+                }
+                if (brk_bc) buffer_append_newline(buf);
+            }
             close_brk = html_break_before_close(e, name, nl, hf);
         } else {
             /* #129 indent_text: the formatter owns ALL whitespace —
@@ -1698,8 +1722,19 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
             const char* pfx2 = leptris_element_get_prefix(pe);
             /* #534: no indent inside a mixed-content element. HTML
              * mode: site-3 newline before the close tag, no spaces. */
-            if (buf->html_method) {
+            if (buf->html_method && !buf->indent_html) {
                 if (st[sp].close_brk) buffer_append_newline(buf);
+            } else if (buf->html_method) {
+                /* #1635: the last child's after-close break may
+                 * already have ended the line — dedup so the close
+                 * tag nests without a blank line. */
+                if (st[sp].close_brk && buf->size > 0 &&
+                    buf->data[buf->size - 1] == '\n') {
+                    buffer_append_indent(buf);
+                } else if (st[sp].close_brk) {
+                    buffer_append_newline(buf);
+                    buffer_append_indent(buf);
+                }
             } else if (buf->indent_spaces > 0 && !st[sp].mixed) {
                 buffer_append_indent(buf);
             }
@@ -1891,6 +1926,9 @@ LEPTRIS_API char* leptris_document_serialize_ext_sized(
         if (ext_size >= offsetof(LeptrisSerializeExtOptions, html_method) +
                             sizeof(int))
             internal.html_method = ext->html_method;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_html) +
+                            sizeof(int))
+            internal.indent_html = ext->indent_html;
     }
     return leptris_document_serialize_ex(doc, options, &internal);
 }
@@ -1926,6 +1964,9 @@ LEPTRIS_API char* leptris_element_serialize_ext_sized(
         if (ext_size >= offsetof(LeptrisSerializeExtOptions, html_method) +
                             sizeof(int))
             internal.html_method = ext->html_method;
+        if (ext_size >= offsetof(LeptrisSerializeExtOptions, indent_html) +
+                            sizeof(int))
+            internal.indent_html = ext->indent_html;
     }
     return leptris_element_serialize_ex(elem, options, &internal);
 }
@@ -1946,6 +1987,7 @@ char* leptris_element_serialize_ex(LeptrisElement elem,
         buf->cdata_names = extended->cdata_elements;
         buf->cdata_count = extended->cdata_element_count;
         buf->html_method = extended->html_method != 0;
+        buf->indent_html = extended->indent_html != 0;
         buf->indent_text = extended->indent_text != 0;
         buf->expand_empty = extended->expand_empty != 0;
         buf->indent_unit = extended->indent_unit;
@@ -2010,6 +2052,7 @@ char* leptris_document_serialize_ex(struct leptris_document* doc,
          * force XML (Nokogiri's to_xml-on-HTML-doc). */
         if (extended->html_method == -1) buf->html_method = 0;
         else if (extended->html_method == 1) buf->html_method = 1;
+        buf->indent_html = extended->indent_html != 0;
         buf->indent_text = extended->indent_text != 0;
         buf->expand_empty = extended->expand_empty != 0;
         buf->indent_unit = extended->indent_unit;
