@@ -4,7 +4,18 @@
 
 ### Fixed
 
-- reject cycle-creating reparents (#1636) (dom)
+- **reject cycle-creating reparents (#1636, PR #1640).** The
+  Windows `fast_element_xml` CFUNC segfault in leptris 1.9.33x:
+  mutation could append a node into its own descendant subtree,
+  building a parent cycle — any serialize then recursed without
+  bound and the process died (the `_chkstk` signature in the
+  metanorma-standoc dump is the stack probe hitting the exhausted
+  stack; reproduced deterministically under ASAN). All four
+  reparenting mutators — `append_child`, `prepend_child`,
+  `insert_before`, `insert_after`, and `add_child_addr` through
+  the append contract — now reject the cycle edge with
+  `LEPTRIS_ERROR_INVALID_ARG`. Legal appends are byte-identical
+  (spec-pinned).
 
 
 
