@@ -1384,14 +1384,40 @@ static int dp_emit_element_open(const struct leptris_plan_result* v,
     return 1;
 }
 
+/* #425: plan-serialize formatting — depth-tracked indent for
+ * element boundaries. NULL fmt = the compact historical form.
+ * RAW/CONTENT runs stay verbatim inline (the byte-exact
+ * mixed-content rule, #534 discipline): a subtree with any
+ * non-element kid is emitted compact as a whole. */
+typedef struct {
+    int indent;          /* spaces per level; 0 = compact */
+    const char* unit;    /* NULL = spaces */
+} dp_fmt;
+
+static int dp_sb_indent_newline(dp_sb* b, const dp_fmt* fmt, int depth) {
+    if (!dp_sb_putn(b, "\n", 1)) return 0;
+    /* One unit (or one indent-step of spaces) PER LEVEL. */
+    if (fmt->unit) {
+        size_t ul = strlen(fmt->unit);
+        for (int i = 0; i < depth; i++)
+            if (!dp_sb_putn(b, fmt->unit, ul)) return 0;
+        return 1;
+    }
+    for (int i = 0; i < depth * fmt->indent; i++)
+        if (!dp_sb_putn(b, " ", 1)) return 0;
+    return 1;
+}
+
 static int dp_emit_value(const struct leptris_plan_result* v,
                          const dp_plan* container, const LeptrisPlan pool,
-                         dp_sb* b, const dp_decls* decls, int is_root);
+                         dp_sb* b, const dp_decls* decls, int is_root,
+                         const dp_fmt* fmt, int depth);
 
 static int dp_emit_element(const struct leptris_plan_result* v,
                            const char* name, const LeptrisPlan pool,
                            const dp_plan* kids_container, dp_sb* b,
-                           const dp_decls* decls, int is_root) {
+                           const dp_decls* decls, int is_root,
+                           const dp_fmt* fmt, int depth) {
     if (!dp_emit_element_open(v, name, b, decls, is_root)) return 0;
     const struct leptris_plan_result** kids = NULL;
     size_t nk = 0, cap = 0;
@@ -1408,23 +1434,38 @@ static int dp_emit_element(const struct leptris_plan_result* v,
         return 0;
     }
     qsort((void*)kids, nk, sizeof(*kids), dp_kid_pos_cmp);
+    int indent_kids = fmt && fmt->indent > 0;
+    for (size_t i = 0; i < nk && indent_kids; i++)
+        if (kids[i]->kind == LEPTRIS_PLAN_VALUE_RAW)
+            indent_kids = 0;
     /* #1565: kid ROWS live in the plan that WALKED this element —
      * container_plan is the plan whose row CAPTURED it (the
      * parent), so a nested member resolved its kids' rows against
      * the parent's rows and a CONTENT row serialized as an
      * empty-named wrapper. */
     int ok = 1;
-    for (size_t i = 0; i < nk && ok; i++)
-        ok = dp_emit_value(kids[i], kids_container, pool, b, NULL, 0);
+    for (size_t i = 0; i < nk && ok; i++) {
+        if (indent_kids && !dp_sb_indent_newline(b, fmt, depth + 1)) {
+            ok = 0;
+            break;
+        }
+        ok = dp_emit_value(kids[i], kids_container, pool, b, NULL, 0,
+                           fmt, indent_kids ? depth + 1 : depth);
+    }
     free((void*)kids);
     if (!ok) return 0;
-    return dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
-           dp_sb_putn(b, ">", 1);
+    if (indent_kids && !dp_sb_indent_newline(b, fmt, depth)) return 0;
+    ok = dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
+         dp_sb_putn(b, ">", 1);
+    if (ok && is_root && fmt && fmt->indent > 0)
+        ok = dp_sb_putn(b, "\n", 1);
+    return ok;
 }
 
 static int dp_emit_value(const struct leptris_plan_result* v,
                          const dp_plan* container, const LeptrisPlan pool,
-                         dp_sb* b, const dp_decls* decls, int is_root) {
+                         dp_sb* b, const dp_decls* decls, int is_root,
+                         const dp_fmt* fmt, int depth) {
     if (v->kind == LEPTRIS_PLAN_VALUE_RAW)
         return dp_sb_puts(b, v->str ? v->str : "");
     if (v->kind == LEPTRIS_PLAN_VALUE_ELEMENT) {
@@ -1475,7 +1516,7 @@ static int dp_emit_value(const struct leptris_plan_result* v,
                     &poolp->plans[cap->child_plan_index];
         }
         int ok = dp_emit_element(v, name, pool, kids_container, b,
-                                 decls, is_root);
+                                 decls, is_root, fmt, depth);
         free(name);
         return ok;
     }
@@ -1500,9 +1541,9 @@ static int dp_emit_value(const struct leptris_plan_result* v,
     return dp_sb_escape(b, text, 0);
 }
 
-LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
-                                         const LeptrisPlanResult result,
-                                         LeptrisStatus* status) {
+static char* dp_serialize_impl(LeptrisPlan plan,
+                               const LeptrisPlanResult result,
+                               const dp_fmt* fmt, LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!plan || !result) {
         if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
@@ -1518,7 +1559,7 @@ LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
     }
     dp_sb b = {0};
     int ok = dp_emit_value(rv, NULL, (const LeptrisPlan)plan, &b,
-                           &decls, 1);
+                           &decls, 1, fmt, 0);
     dp_decls_free(&decls);
     if (!ok) {
         free(b.s);
@@ -1533,6 +1574,179 @@ LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
         }
     }
     return b.s;
+}
+
+LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
+                                         const LeptrisPlanResult result,
+                                         LeptrisStatus* status) {
+    return dp_serialize_impl(plan, result, NULL, status);
+}
+
+/* #425: formatting-bearing variant — indent > 0 pretty-prints
+ * element boundaries (RAW/CONTENT runs stay verbatim inline);
+ * indent_unit replaces the two-space default per level. options
+ * NULL = the compact historical form. opts_size must cover the
+ * struct the caller compiled against (growable, #129 pattern). */
+LEPTRIS_API char* leptris_plan_serialize_ext(
+    LeptrisPlan plan, const LeptrisPlanResult result,
+    const leptris_plan_serialize_options* options, size_t options_size,
+    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (options && options_size < sizeof(*options)) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    dp_fmt fmt;
+    memset(&fmt, 0, sizeof(fmt));
+    if (options) {
+        fmt.indent = options->indent;
+        fmt.unit = options->indent_unit;
+    }
+    return dp_serialize_impl(plan, result, &fmt, status);
+}
+
+/* #426: materialize a built result as a native document tree —
+ * the consumer path becomes build_result -> this -> the document
+ * writer, with no string round trip. Attributes carry verbatim
+ * (wire spellings); the #1626 root declarations ride as xmlns
+ * attributes. Caller frees with leptris_document_free. */
+static LeptrisElement dp_mint_element(LeptrisDocument doc,
+                                      const struct leptris_plan_result* v,
+                                      const dp_plan* container,
+                                      const LeptrisPlan pool);
+
+static int dp_mint_kids(LeptrisDocument doc, LeptrisElement parent,
+                        const struct leptris_plan_result* v,
+                        const dp_plan* kids_container,
+                        const LeptrisPlan pool) {
+    const struct leptris_plan_result** kids = NULL;
+    size_t nk = 0, cap = 0;
+    if (!dp_flatten_kids(v, &kids, &nk, &cap)) {
+        free((void*)kids);
+        return 0;
+    }
+    qsort((void*)kids, nk, sizeof(*kids), dp_kid_pos_cmp);
+    int ok = 1;
+    for (size_t i = 0; i < nk && ok; i++) {
+        const struct leptris_plan_result* k = kids[i];
+        if (k->kind == LEPTRIS_PLAN_VALUE_ELEMENT) {
+            LeptrisElement el =
+                dp_mint_element(doc, k, kids_container, pool);
+            if (!el) {
+                ok = 0;
+                break;
+            }
+            ok = leptris_element_append_child(parent, el) == LEPTRIS_OK;
+        } else if (k->kind == LEPTRIS_PLAN_VALUE_RAW ||
+                   (kids_container && k->row_index != UINT32_MAX &&
+                    k->row_index < kids_container->child_count &&
+                    kids_container->child_plans[k->row_index].kind ==
+                        LEPTRIS_PLAN_KIND_CONTENT)) {
+            LeptrisNodeRef t =
+                leptris_text_node_create(doc, k->str ? k->str : "");
+            ok = t && leptris_element_append_child(
+                          parent, (LeptrisElement)t) == LEPTRIS_OK;
+        } else {
+            char* name = dp_wrapper_name(k);
+            if (!name) {
+                ok = 0;
+                break;
+            }
+            LeptrisElement w = leptris_element_new_with_attributes(
+                doc, name, NULL, NULL, 0);
+            free(name);
+            if (!w) {
+                ok = 0;
+                break;
+            }
+            ok = leptris_element_set_text(w, k->str ? k->str : "") ==
+                     LEPTRIS_OK &&
+                 leptris_element_append_child(parent, w) == LEPTRIS_OK;
+        }
+    }
+    free((void*)kids);
+    return ok;
+}
+
+static LeptrisElement dp_mint_element(LeptrisDocument doc,
+                                      const struct leptris_plan_result* v,
+                                      const dp_plan* container,
+                                      const LeptrisPlan pool) {
+    /* Name/kids resolution mirrors dp_emit_value. */
+    const struct leptris_plan* poolp = (const struct leptris_plan*)pool;
+    const dp_plan* self = &poolp->plans[v->container_plan];
+    const char* local = NULL;
+    if (v->name) {
+        const char* colon = strchr(v->name, ':');
+        local = colon ? colon + 1 : v->name;
+    } else {
+        local = self->element_name;
+    }
+    char* name = v->ns_prefix
+                     ? dp_join_colon(v->ns_prefix, local ? local : "")
+                     : dp_strdup(local ? local : "");
+    if (!name) return NULL;
+    LeptrisElement el = leptris_element_new_with_attributes(
+        doc, name, v->attr_names, v->attr_values, v->attr_count);
+    free(name);
+    if (!el) return NULL;
+    const dp_plan* kids_container = &poolp->plans[v->container_plan];
+    if (container && v->row_index != UINT32_MAX &&
+        v->row_index < container->child_count) {
+        const leptris_child_plan* cap =
+            &container->child_plans[v->row_index];
+        if (cap->child_plan_index >= 0 &&
+            (uint32_t)cap->child_plan_index < poolp->plan_count)
+            kids_container = &poolp->plans[cap->child_plan_index];
+    }
+    if (!dp_mint_kids(doc, el, v, kids_container, pool)) return NULL;
+    return el;
+}
+
+LEPTRIS_API LeptrisDocument leptris_document_from_plan_result(
+    LeptrisPlan plan, const LeptrisPlanResult result,
+    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!plan || !result) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    const struct leptris_plan_result* rv =
+        (const struct leptris_plan_result*)result;
+    if (rv->kind != LEPTRIS_PLAN_VALUE_ELEMENT) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    LeptrisDocument doc = leptris_document_create();
+    if (!doc) {
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    dp_decls decls = {0};
+    int ok = dp_collect_decls(rv, &decls);
+    LeptrisElement root = NULL;
+    if (ok) {
+        root = dp_mint_element(doc, rv, NULL, (const LeptrisPlan)plan);
+        ok = root != NULL;
+    }
+    for (size_t i = 0; ok && i < decls.n; i++) {
+        char* dn = dp_join_colon("xmlns", decls.p[i]);
+        if (!dn) {
+            ok = 0;
+            break;
+        }
+        ok = leptris_element_set_attribute(root, dn, decls.u[i]) ==
+             LEPTRIS_OK;
+        free(dn);
+    }
+    if (ok) ok = leptris_document_set_root(doc, root) == LEPTRIS_OK;
+    dp_decls_free(&decls);
+    if (!ok) {
+        leptris_document_free(doc);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    return doc;
 }
 
 LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(

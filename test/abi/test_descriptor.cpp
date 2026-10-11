@@ -2231,4 +2231,127 @@ TEST(Plan408, AddChildByAddress) {
     leptris_document_free(doc);
 }
 
+/* #425: the ext face — indent on element boundaries, compact
+ * default; the 3-arg face stays byte-identical to before. */
+TEST(Plan425, SerializeExtIndentsBoundaries) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[1].element_name = "a";
+
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "a";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].child_plan_index = 1;
+    kids[1].wire_name = "b";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    LeptrisPlanResult r = leptris_plan_result_build(
+        plan,
+        (leptris_plan_row_op[]){
+            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, nullptr, nullptr, 0},
+            {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "v1", 2},
+            {LEPTRIS_PLAN_OP_SCALAR, 0, 1, nullptr, "v2", 2},
+            {LEPTRIS_PLAN_OP_END, 0, 0, nullptr, nullptr, 0}},
+        4, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* Compact (default) — unchanged shape. */
+    char* compact = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(compact, nullptr);
+    EXPECT_STREQ(compact, "<r><a>v1</a><b>v2</b></r>");
+
+    /* Ext: indent=2 — newline+indent before each child open and
+     * before the root close. */
+    leptris_plan_serialize_options opts = {};
+    opts.indent = 2;
+    char* pretty = leptris_plan_serialize_ext(plan, r, &opts,
+                                              sizeof(opts), &st);
+    ASSERT_NE(pretty, nullptr);
+    EXPECT_STREQ(pretty,
+                 "<r>\n  <a>v1</a>\n  <b>v2</b>\n</r>\n");
+
+    /* Ext with a shorter opts_size than the struct is rejected. */
+    EXPECT_EQ(leptris_plan_serialize_ext(plan, r, &opts, 1, &st),
+              nullptr);
+
+    leptris_free_string(compact);
+    leptris_free_string(pretty);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+/* #426: build_result -> native document -> the document writer,
+ * with no string round trip. */
+TEST(Plan426, FromPlanResultMintsNativeDocument) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[1].element_name = "a";
+
+    leptris_child_plan kids[2] = {};
+    kids[0].wire_name = "a";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].child_plan_index = 1;
+    kids[1].wire_name = "b";
+    kids[1].kind = LEPTRIS_PLAN_KIND_SCALAR;
+
+    plans[0].child_count = 2;
+    plans[0].child_plans = kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    LeptrisPlanResult r = leptris_plan_result_build(
+        plan,
+        (leptris_plan_row_op[]){
+            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, nullptr, nullptr, 0},
+            {LEPTRIS_PLAN_OP_ATTR, 0, 0, "k", "1", 1},
+            {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "v1", 2},
+            {LEPTRIS_PLAN_OP_SCALAR, 0, 1, nullptr, "v2", 2},
+            {LEPTRIS_PLAN_OP_END, 0, 0, nullptr, nullptr, 0}},
+        5, &st);
+    ASSERT_NE(r, nullptr);
+
+    LeptrisDocument doc = leptris_document_from_plan_result(plan, r, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "r");
+    EXPECT_STREQ(leptris_element_attribute(root, "k"), "1");
+    EXPECT_EQ(leptris_element_child_count(root), 2u);
+    LeptrisElement first = leptris_element_first_child_any(root);
+    ASSERT_NE(first, nullptr);
+    EXPECT_STREQ(leptris_element_name(first), "a");
+    EXPECT_STREQ(leptris_element_text(first), "v1");
+
+    /* Non-ELEMENT roots are rejected. */
+    LeptrisPlanResult scalar_root =
+        leptris_plan_result_build(plan,
+            (leptris_plan_row_op[]){
+                {LEPTRIS_PLAN_OP_SCALAR, 0, 0, nullptr, "x", 1}},
+            1, &st);
+    EXPECT_EQ(leptris_document_from_plan_result(plan, scalar_root, &st),
+              nullptr);
+
+    leptris_plan_result_free(scalar_root);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 }  // namespace

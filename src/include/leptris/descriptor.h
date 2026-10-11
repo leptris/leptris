@@ -303,6 +303,33 @@ LEPTRIS_API char* leptris_plan_serialize(LeptrisPlan plan,
                                          const LeptrisPlanResult result,
                                          LeptrisStatus* status);
 
+/* #425: formatting-bearing plan serialization (leptris-ruby#425).
+ * Zero-initialize; every field defaults to the compact historical
+ * form. indent > 0 pretty-prints element boundaries (one newline
+ * + indent per level; RAW/CONTENT runs stay verbatim inline);
+ * indent_unit replaces the two-space default per level.
+ * options NULL = the compact form. opts_size must cover the
+ * struct as compiled by the caller (growable, #129 pattern). */
+typedef struct {
+    int indent;           /* spaces per level; 0 = compact */
+    const char* indent_unit; /* NULL = spaces; requires indent > 0 */
+} leptris_plan_serialize_options;
+
+LEPTRIS_API char* leptris_plan_serialize_ext(
+    LeptrisPlan plan, const LeptrisPlanResult result,
+    const leptris_plan_serialize_options* options, size_t options_size,
+    LeptrisStatus* status);
+
+/* #426 (leptris-ruby#426): materialize a built result as a native
+ * document tree — build_result -> this -> the document writer,
+ * with no string round trip. Attributes carry verbatim (wire
+ * spellings); root namespace declarations ride as xmlns
+ * attributes. Only an ELEMENT root is accepted. Caller frees with
+ * leptris_document_free. */
+LEPTRIS_API LeptrisDocument leptris_document_from_plan_result(
+    LeptrisPlan plan, const LeptrisPlanResult result,
+    LeptrisStatus* status);
+
 /* ---- Result accessors (NULL-tolerant: NULL in, 0/NULL out) ------- */
 
 LEPTRIS_API LeptrisPlanValueKind leptris_plan_value_kind(const LeptrisPlanResult v);
