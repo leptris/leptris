@@ -771,14 +771,16 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                          loc);
                 char* canon = NULL;
                 if (xsd_path_visited(s, path, &canon)) continue;
+                /* Mark BEFORE the read and capture: a failed read
+                 * stays visited (no retry loop over a missing
+                 * file), and the referenced file's own imports
+                 * resolve into the same set, so a cycle
+                 * terminates at the second visit instead of the
+                 * depth cap. */
+                xsd_path_mark(s, canon);
                 size_t flen = 0;
                 char* text = xsd_read_file(path, &flen);
                 if (text) {
-                    /* Mark BEFORE the recursive capture: the
-                     * referenced file's own imports resolve into
-                     * the same set, so a cycle terminates at the
-                     * second visit instead of the depth cap. */
-                    xsd_path_mark(s, canon);
                     LeptrisDocument sub =
                         leptris_parse_string(text, flen, NULL);
                     if (sub) {
