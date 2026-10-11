@@ -2890,3 +2890,72 @@ TEST(DomCycleGuard, InsertIntoOwnSubtreeRejected) {
               LEPTRIS_ERROR_INVALID_ARG);
     leptris_document_free(d);
 }
+
+/* leptris-ruby#1636: add_child_addr is status-only — a foreign
+ * node is adopted by copy and the installed copy's address is
+ * dropped, so callers kept addressing the foreign original, which
+ * dies with its document. The installed twin reports the
+ * effective node: same-document attaches return the argument,
+ * foreign attaches return the copy (which survives the source
+ * document's free). */
+TEST(DomAttachInstalled, ForeignAttachReportsCopyAddress) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument frag =
+        leptris_parse_string("<f><item>t</item></f>", strlen("<f><item>t</item></f>"), &st);
+    ASSERT_NE(frag, nullptr);
+    LeptrisDocument target = leptris_parse_string("<doc/>", 6, &st);
+    ASSERT_NE(target, nullptr);
+    LeptrisElement troot = leptris_document_root(target);
+    LeptrisElement froot = leptris_document_root(frag);
+    LeptrisElement item = leptris_element_first_child_any(froot);
+    ASSERT_NE(item, nullptr);
+
+    uintptr_t installed = 0;
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  (uintptr_t)troot, (uintptr_t)item, &installed),
+              LEPTRIS_OK);
+    EXPECT_NE(installed, 0u);
+    /* the copy is a different node than the foreign original */
+    EXPECT_NE(installed, (uintptr_t)item);
+
+    /* the source document dies; the installed copy must not dangle */
+    leptris_document_free(frag);
+    char* out = leptris_element_serialize(troot, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<doc><item>t</item></doc>");
+    leptris_free_string(out);
+    leptris_document_free(target);
+}
+
+TEST(DomAttachInstalled, SameDocumentReturnsArgument) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+    LeptrisElement c = leptris_element_create(d, "c");
+    ASSERT_NE(c, nullptr);
+    uintptr_t installed = 0;
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  (uintptr_t)root, (uintptr_t)c, &installed),
+              LEPTRIS_OK);
+    EXPECT_EQ(installed, (uintptr_t)c);
+    leptris_document_free(d);
+}
+
+TEST(DomAttachInstalled, NullShapeAndStatusContract) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+    LeptrisElement c = leptris_element_create(d, "c");
+    ASSERT_NE(c, nullptr);
+    /* status-only overload */
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  (uintptr_t)root, (uintptr_t)c, NULL),
+              LEPTRIS_OK);
+    /* NULL-shaped errors */
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  0, (uintptr_t)c, NULL),
+              LEPTRIS_ERROR_NULL_ARG);
+    leptris_document_free(d);
+}

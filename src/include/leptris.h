@@ -2158,6 +2158,18 @@ LEPTRIS_API LeptrisStatus leptris_element_set_name(LeptrisElement elem, const ch
  * status contract as leptris_element_append_child. */
 LEPTRIS_API LeptrisStatus leptris_element_add_child_addr(uintptr_t parent_addr,
                                                         uintptr_t child_addr);
+
+/* #1636: add_child_addr twin returning the EFFECTIVE installed
+ * child address. A same-document attach installs the argument —
+ * installed_addr receives it unchanged; a foreign node is adopted
+ * by copy (#1528) and installed_addr receives the copy's address,
+ * which the caller must use for every later handle. installed_addr
+ * may be NULL (status-only). Same status contract as
+ * add_child_addr.
+ * Memory: the installed node is owned by parent's document. */
+LEPTRIS_API LeptrisStatus leptris_element_add_child_addr_installed(
+    uintptr_t parent_addr, uintptr_t child_addr,
+    uintptr_t* installed_addr);
 LEPTRIS_API LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child);
 
 /**
