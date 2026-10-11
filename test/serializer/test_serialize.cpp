@@ -802,6 +802,31 @@ TEST(SerializeOptions, IndentHtmlNestsBlockChildren) {
     leptris_document_free(doc);
 }
 
+/* Issue #1647: the LAST block child of its parent must nest like
+ * any other — the pending-indent flush at close-parent has to fire
+ * for the trailing block (a following sibling used to mask it). */
+TEST(SerializeOptions, IndentHtmlNestsLastBlockChild) {
+    const char xml[] = "<html><head><title>T</title></head><body>"
+        "<div id=\"a\"><p>x</p><span>y</span></div></body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = html_force_serialize(doc, 2, 1, 0);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+        "<html>\n"
+        "  <head><title>T</title></head>\n"
+        "  <body>\n"
+        "    <div id=\"a\">\n"
+        "      <p>x</p>\n"
+        "      <span>y</span>\n"
+        "    </div>\n"
+        "  </body>\n"
+        "</html>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
 TEST(SerializeOptions, IndentHtmlLegacyStaysNewlineOnly) {
     const char xml[] = "<html><body><div><p>one</p><p>two</p></div>"
         "</body></html>";
