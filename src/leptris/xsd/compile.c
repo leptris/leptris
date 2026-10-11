@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "../../include/leptris.h"
 #include "xsd_internal.h"
@@ -46,6 +47,14 @@ struct leptris_xsd_schema {
     int version_11;    /* xs:schema @version = "1.1" */
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth; /* include/import recursion guard */
+    /* #1644: canonical paths already captured. Without this the
+     * capture recursion visits the import DAG once per PATH (the
+     * diamond-heavy dml family re-expands shared schemas per edge,
+     * re-parses them, and re-appends their declarations — minutes
+     * and multi-GB where the file count is ~20). */
+    char** captured_paths;
+    size_t captured_n;
+    size_t captured_cap;
     void* validator; /* slice-4 parked error list */
     char* error;
 };
@@ -683,11 +692,59 @@ fail:
     return (LeptrisXsdSchema)s;
 }
 
+/* #1644: canonicalize a resolved schemaLocation (realpath /
+ * _fullpath) and report whether this schema already captured it.
+ * Non-canonicalizable paths (missing file, long path) are tracked
+ * as-is; dedup on the raw spelling still collapses the common
+ * same-spelling re-import. */
+static int xsd_path_visited(struct leptris_xsd_schema* s,
+                            const char* path, char** canon_out) {
+    char* canon = NULL;
+#ifdef _WIN32
+    char buf[4096];
+    if (_fullpath(buf, path, sizeof(buf))) canon = strdup(buf);
+#else
+    char buf[4096];
+    if (realpath(path, buf)) canon = strdup(buf);
+#endif
+    if (!canon) canon = strdup(path);
+    if (!canon) {
+        *canon_out = NULL;
+        return 1; /* OOM: treat as visited, skip the edge */
+    }
+    for (size_t i = 0; i < s->captured_n; i++) {
+        if (strcmp(s->captured_paths[i], canon) == 0) {
+            free(canon);
+            *canon_out = NULL;
+            return 1;
+        }
+    }
+    *canon_out = canon;
+    return 0;
+}
+
+static void xsd_path_mark(struct leptris_xsd_schema* s, char* canon) {
+    if (!canon) return;
+    if (s->captured_n == s->captured_cap) {
+        size_t cap = s->captured_cap ? s->captured_cap * 2 : 8;
+        char** grown =
+            (char**)realloc(s->captured_paths, cap * sizeof(char*));
+        if (!grown) {
+            free(canon);
+            return;
+        }
+        s->captured_paths = grown;
+        s->captured_cap = cap;
+    }
+    s->captured_paths[s->captured_n++] = canon;
+}
+
 /* Every top-level declaration under an xs:schema root. xs:include
  * / xs:import / xs:redefine resolve their schemaLocation against
  * the owning schema's base_dir (string-compiled schemas have none
  * and skip them); the referenced root's declarations merge into
- * the same tables. */
+ * the same tables. #1644: each resolved file captures ONCE per
+ * schema — repeated imports re-parse nothing. */
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
     for (LeptrisNodeRef n =
@@ -712,9 +769,16 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 char path[4096];
                 snprintf(path, sizeof(path), "%s/%s", s->base_dir,
                          loc);
+                char* canon = NULL;
+                if (xsd_path_visited(s, path, &canon)) continue;
                 size_t flen = 0;
                 char* text = xsd_read_file(path, &flen);
                 if (text) {
+                    /* Mark BEFORE the recursive capture: the
+                     * referenced file's own imports resolve into
+                     * the same set, so a cycle terminates at the
+                     * second visit instead of the depth cap. */
+                    xsd_path_mark(s, canon);
                     LeptrisDocument sub =
                         leptris_parse_string(text, flen, NULL);
                     if (sub) {
@@ -911,6 +975,8 @@ static void xsd_free_simple_one(XsdSimple* t) {
 LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return;
+    for (size_t i = 0; i < s->captured_n; i++) free(s->captured_paths[i]);
+    free(s->captured_paths);
     xsd_cm_free(s->complex_types);
     XsdElementIcs* slot = s->element_ics;
     while (slot) {

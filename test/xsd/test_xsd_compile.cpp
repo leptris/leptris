@@ -1555,6 +1555,93 @@ TEST(XsdImport1626, CrossNamespaceImportRegisters) {
     remove((dir + "x6main.xsd").c_str());
 }
 
+/* ---- #1644: the import DAG captures each file ONCE --------------
+ * Without the visited set, a diamond (main -> a,b -> shared)
+ * captured shared once per PATH: the dml family re-expanded for
+ * minutes into multi-GB and tens of millions of duplicate
+ * declarations. The diamond's declaration count must equal the
+ * single-import chain's. */
+TEST(XsdImport1644, DiamondImportsCaptureSharedOnce) {
+    std::string dir = ::testing::TempDir();
+    const char* shared =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:s1644\">"
+        "<xs:complexType name=\"S\">"
+        "<xs:attribute name=\"v\" type=\"xs:token\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"se\" type=\"S\"/>"
+        "</xs:schema>";
+    const char* mid =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:s=\"urn:s1644\" targetNamespace=\"urn:m1644\">"
+        "<xs:import namespace=\"urn:s1644\""
+        " schemaLocation=\"d1644shared.xsd\"/>"
+        "<xs:element name=\"me\" type=\"s:S\"/>"
+        "</xs:schema>";
+    const char* main_diamond =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:s=\"urn:s1644\" xmlns:m=\"urn:m1644\""
+        " targetNamespace=\"urn:t1644\">"
+        "<xs:import namespace=\"urn:m1644\""
+        " schemaLocation=\"d1644a.xsd\"/>"
+        "<xs:import namespace=\"urn:m1644\""
+        " schemaLocation=\"d1644b.xsd\"/>"
+        "<xs:element name=\"te\" type=\"s:S\"/>"
+        "</xs:schema>";
+    const char* main_single =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:s=\"urn:s1644\""
+        " targetNamespace=\"urn:t1644\">"
+        "<xs:import namespace=\"urn:s1644\""
+        " schemaLocation=\"d1644shared.xsd\"/>"
+        "<xs:element name=\"te\" type=\"s:S\"/>"
+        "</xs:schema>";
+
+    auto write = [&dir](const char* name, const char* body) {
+        FILE* f = fopen((dir + name).c_str(), "wb");
+        EXPECT_NE(f, nullptr);
+        if (!f) return;
+        fwrite(body, 1, strlen(body), f);
+        fclose(f);
+    };
+    write("d1644shared.xsd", shared);
+    write("d1644a.xsd", mid);
+    write("d1644b.xsd", mid);
+    write("d1644diamond.xsd", main_diamond);
+    write("d1644single.xsd", main_single);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema diamond = leptris_xsd_compile_file(
+        (dir + "d1644diamond.xsd").c_str(), &st);
+    ASSERT_NE(diamond, (LeptrisXsdSchema)0);
+    LeptrisXsdSchema single = leptris_xsd_compile_file(
+        (dir + "d1644single.xsd").c_str(), &st);
+    ASSERT_NE(single, (LeptrisXsdSchema)0);
+
+    size_t ddc = leptris_xsd_declaration_count(diamond);
+    size_t dsc = leptris_xsd_declaration_count(single);
+    /* shared captures once in both: the diamond adds the two mid
+     * schemas (import + element each) and one extra main-side
+     * import edge — 9 vs the single's 4. */
+    EXPECT_EQ(ddc, dsc + 5);
+
+    /* and the shared type still resolves through the diamond */
+    LeptrisDocument d = leptris_parse_string(
+        "<te xmlns=\"urn:t1644\" v=\"x\"/>",
+        strlen("<te xmlns=\"urn:t1644\" v=\"x\"/>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(diamond, d), 1);
+    leptris_document_free(d);
+
+    leptris_xsd_free(diamond);
+    leptris_xsd_free(single);
+    remove((dir + "d1644shared.xsd").c_str());
+    remove((dir + "d1644a.xsd").c_str());
+    remove((dir + "d1644b.xsd").c_str());
+    remove((dir + "d1644diamond.xsd").c_str());
+    remove((dir + "d1644single.xsd").c_str());
+}
+
 /* 3. prefixed type refs resolve by local name (uniword's
  * default-xmlns spelling always worked; the w: spelling did not) */
 TEST(XsdImport1626, PrefixedTypeRefsResolve) {
