@@ -1780,6 +1780,9 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 (op->row_index != UINT32_MAX &&
                  op->row_index >= pool->plans[op->plan_index]
                                       .child_count)) {
+                /* Mid-build failure: without this the partial
+                 * tree leaks (LSan on Linux CI catches it). */
+                if (root) dp_result_free_rec(root);
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1822,6 +1825,9 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             stack[sp++] = v;
         } else if (op->kind == LEPTRIS_PLAN_OP_SCALAR) {
             if (sp == 0) {
+                /* Mid-build failure: without this the partial
+                 * tree leaks (LSan on Linux CI catches it). */
+                if (root) dp_result_free_rec(root);
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1851,6 +1857,9 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             }
         } else if (op->kind == LEPTRIS_PLAN_OP_ATTR) {
             if (sp == 0 || !op->name) {
+                /* Mid-build failure: without this the partial
+                 * tree leaks (LSan on Linux CI catches it). */
+                if (root) dp_result_free_rec(root);
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1887,6 +1896,9 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             el->attr_count++;
         } else if (op->kind == LEPTRIS_PLAN_OP_END) {
             if (sp == 0) {
+                /* Mid-build failure: without this the partial
+                 * tree leaks (LSan on Linux CI catches it). */
+                if (root) dp_result_free_rec(root);
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
