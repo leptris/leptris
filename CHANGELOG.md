@@ -2,12 +2,24 @@
 
 ## [1.9.342] - 2026-10-11
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **XSD lexical families: octet lengths + pattern property
+  classes (leptris-ruby#434, PR #1655).** Two gaps behind the
+  uniword corpus rejections:
+  (1) the length family counted CHARACTERS for every base -
+  XML Schema Part 2 counts OCTETS for hexBinary/base64Binary,
+  so the wml ST_LongHexNumber shape (length 4 = 4 bytes = 8
+  hex digits) rejected every canonical 8-digit rsid. The
+  restriction chain's terminal builtin now reaches the facet
+  check (hex in digits/2, base64 decoded); string-family
+  semantics unchanged.
+  (2) the OPC ST_ContentType pattern failed to PARSE - and a
+  parse failure rejects everything - missing XSD-regex
+  property classes (\p{IsBasicLatin}, \p{IsLatin-1Supplement},
+  \p{Cc}), character-class subtraction ([A-[B]]), and the
+  \t/\n/\r control escapes. Verified against the corpus's own
+  wml.xsd and opc-contentTypes.xsd; red-first specs for both.
 
 
 ## [1.9.341] - 2026-10-11
