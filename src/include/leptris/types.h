@@ -360,6 +360,14 @@ typedef struct {
      * 1 = force HTML on any document, -1 = force XML (to_xml on an
      * HTML document). XSLT method="html" maps to 1. */
     int html_method;
+    /* 1 = the html-method layout NESTS with the indent machinery
+     * (spaces / unit) like libxml2 htmlNodeDumpFormatOutput
+     * format=1 (#1635): leads before block children and close tags,
+     * mixed follows actual text children, raw text stays verbatim.
+     * 0 = the historical §16.2 newline-only shape (XSLT
+     * method="html"). Meaningful only with html_method=1 and
+     * options->indent > 0. */
+    int indent_html;
 } LeptrisSerializeExtOptions;
 
 /* ============================================================================

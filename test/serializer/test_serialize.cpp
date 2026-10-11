@@ -760,6 +760,99 @@ TEST(SerializeOptions, IndentUnitOnTextBearingLeaves) {
     leptris_document_free(doc);
 }
 
+/* Issue #1635: indent_html — the html-method layout nests with
+ * the indent machinery (libxml2 htmlNodeDumpFormatOutput format=1):
+ * leads before block children and close tags, single-child
+ * elements stay inline, raw text verbatim. The §16.2 default
+ * (XSLT method="html") stays newline-only. */
+static char* html_force_serialize(LeptrisDocument doc, int indent,
+                                  int indent_html, int ext_bytes) {
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = indent;
+    opts.xml_declaration = 0;
+    LeptrisSerializeExtOptions ext = {0};
+    ext.html_method = 1;
+    ext.indent_html = indent_html;
+    return leptris_document_serialize_ext_sized(
+        doc, &opts, &ext,
+        ext_bytes > 0 ? (size_t)ext_bytes : sizeof(ext));
+}
+
+TEST(SerializeOptions, IndentHtmlNestsBlockChildren) {
+    const char xml[] = "<html><head><title>T</title></head><body>"
+        "<div id=\"a\"><p>x</p><span>y</span></div>"
+        "<script>if (a &lt; b) { c(); }</script></body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = html_force_serialize(doc, 2, 1, 0);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(std::string(s),
+        "<html>\n"
+        "  <head><title>T</title></head>\n"
+        "  <body>\n"
+        "    <div id=\"a\">\n"
+        "      <p>x</p>\n"
+        "      <span>y</span>\n"
+        "    </div>\n"
+        "    <script>if (a < b) { c(); }</script>\n"
+        "  </body>\n"
+        "</html>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+TEST(SerializeOptions, IndentHtmlLegacyStaysNewlineOnly) {
+    const char xml[] = "<html><body><div><p>one</p><p>two</p></div>"
+        "</body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* s = html_force_serialize(doc, 2, 0, 0);
+    ASSERT_NE(s, nullptr);
+    /* §16.2 byte shape: site-rule newlines, never a space lead —
+     * single-child wrappers (html>body>div) keep the inline chain,
+     * only multi-child blocks break. */
+    EXPECT_EQ(std::string(s),
+        "<html><body><div>\n"
+        "<p>one</p>\n"
+        "<p>two</p>\n"
+        "</div></body></html>");
+    leptris_free_string(s);
+    leptris_document_free(doc);
+}
+
+TEST(SerializeOptions, IndentHtmlNotReadPastCallerLayout) {
+    /* #644 shape: a caller compiled against the pre-#1635 layout
+     * covers exactly through html_method (24 bytes) — the appended
+     * field stays zeroed and the output keeps the legacy shape. */
+    const char xml[] = "<html><body><div><p>x</p></div></body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    const size_t legacy_size =
+        offsetof(LeptrisSerializeExtOptions, html_method) + sizeof(int);
+    unsigned char raw[64];
+    memset(raw, 0x5A, sizeof(raw));
+    LeptrisSerializeExtOptions* ext = (LeptrisSerializeExtOptions*)raw;
+    ext->indent_text = 0;
+    ext->indent_unit = nullptr;
+    ext->expand_empty = 0;
+    ext->html_method = 1;
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    opts.xml_declaration = 0;
+    char* s = leptris_document_serialize_ext_sized(
+        doc, &opts, ext, legacy_size);
+    ASSERT_NE(s, nullptr);
+    char* want = html_force_serialize(doc, 2, 0, 0);
+    ASSERT_NE(want, nullptr);
+    EXPECT_EQ(std::string(s), std::string(want));
+    leptris_free_string(s);
+    leptris_free_string(want);
+    leptris_document_free(doc);
+}
+
 /* Issue #644: FFI callers allocate only the fields they know — the
  * sized entry must not read past their buffer. The Ruby binding's
  * layout is exactly one int (indent_text): a 4-byte ext with garbage
