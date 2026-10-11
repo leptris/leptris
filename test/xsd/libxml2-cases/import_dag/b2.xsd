@@ -1,0 +1,4 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:include schemaLocation="s.xsd"/>
+  <xs:element name="b2" type="xs:string"/>
+</xs:schema>
