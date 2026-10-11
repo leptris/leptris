@@ -375,7 +375,8 @@ int xsd_builtin_valid(const char* type, const char* v) {
 
 /* ---- facet checking on a captured simpleType --------------------- */
 
-int xsd_simple_valid(const XsdSimple* simple, const char* v);
+int xsd_simple_valid(const XsdSimple* simple, const char* v,
+                     const char* terminal_base);
 
 /* The base chain resolves to a built-in reference: validate the
  * lexical against it first. */
@@ -385,7 +386,8 @@ static int base_valid(const char* base, const char* v) {
     return -1; /* local base — the resolver walks the chain */
 }
 
-static int facet_check(const XsdSimple* s, const char* v) {
+static int facet_check(const XsdSimple* s, const char* v,
+                       const char* terminal_base) {
     if (s->pattern && !rng_regex_matches(s->pattern, v)) return 0;
     if (s->enum_values) {
         int found = 0;
@@ -393,8 +395,27 @@ static int facet_check(const XsdSimple* s, const char* v) {
             if (strcmp(e->text, v) == 0) { found = 1; break; }
         if (!found) return 0;
     }
-    /* Length family: character count (string-family semantics). */
+    /* Length family: character count (string-family semantics) —
+     * except the binary types, where XML Schema Part 2 counts
+     * OCTETS (the wml ST_LongHexNumber shape: hexBinary + length 4
+     * accepts 8 hex digits; leptris-ruby#434). */
     size_t n = strlen(v);
+    if (terminal_base && (strcmp(terminal_base, "xs:hexBinary") == 0 ||
+                          strcmp(terminal_base, "xs:base64Binary") == 0)) {
+        if (strcmp(terminal_base, "xs:hexBinary") == 0) {
+            n = n / 2;
+        } else {
+            size_t pads = 0;
+            while (n > 0 && v[n - 1] == '=') {
+                pads++;
+                n--;
+            }
+            size_t octets = (n / 4) * 3;
+            if (n % 4 == 2) octets += 1;
+            else if (n % 4 == 3) octets += 2;
+            n = octets;
+        }
+    }
     if (s->length >= 0 && (long)n != s->length) return 0;
     if (s->min_length >= 0 && (long)n < s->min_length) return 0;
     if (s->max_length >= 0 && (long)n > s->max_length) return 0;
@@ -429,13 +450,14 @@ static int facet_check(const XsdSimple* s, const char* v) {
     return 1;
 }
 
-int xsd_simple_valid(const XsdSimple* simple, const char* v) {
+int xsd_simple_valid(const XsdSimple* simple, const char* v,
+                     const char* terminal_base) {
     if (!simple || !v) return 0;
     int base = base_valid(simple->base, v);
     if (base == 0) return 0;
     /* base == -1 (local base) delegates to the resolver's chain in
      * the caller; facets still apply here. */
-    return facet_check(simple, v);
+    return facet_check(simple, v, terminal_base);
 }
 
 /* Pattern/enumeration defaults for whitespace — slice 3 grows the

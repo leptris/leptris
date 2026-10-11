@@ -126,6 +126,41 @@ static RreNode* parse_class(RreParser* ps) {
     int first = 1;
     while (*ps->p && (*ps->p != ']' || first)) {
         first = 0;
+        if (*ps->p == '\\' && ps->p[1] == 'p' && ps->p[2] == '{') {
+            /* XSD property classes for the Latin-1 byte world —
+             * the byte-class matcher covers these exactly
+             * (leptris-ruby#434, ST_ContentType). Other blocks
+             * fail loudly as before. */
+            ps->p += 3;
+            const char* close = strchr(ps->p, '}');
+            if (!close) {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
+            size_t len = (size_t)(close - ps->p);
+            int hit = 0;
+            if (len == 12 && memcmp(ps->p, "IsBasicLatin", 12) == 0) {
+                for (int i = 0x00; i <= 0x7F; i++) cls_add(n, (unsigned char)i);
+                hit = 1;
+            } else if (len == 19 &&
+                       memcmp(ps->p, "IsLatin-1Supplement", 19) == 0) {
+                for (int i = 0x80; i <= 0xFF; i++) cls_add(n, (unsigned char)i);
+                hit = 1;
+            } else if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
+                for (int i = 0x00; i <= 0x1F; i++) cls_add(n, (unsigned char)i);
+                cls_add(n, 0x7F);
+                for (int i = 0x80; i <= 0x9F; i++) cls_add(n, (unsigned char)i);
+                hit = 1;
+            }
+            if (!hit) {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
+            ps->p = close + 1;
+            continue;
+        }
         if (*ps->p == '\\' && ps->p[1]) {
             ps->p++;
             char e = *ps->p++;
@@ -155,8 +190,36 @@ static RreNode* parse_class(RreParser* ps) {
                 node_free(tmp);
                 continue;
             }
+            /* XSD singleCharEsc covers the control escapes too
+             * (the OPC ST_ContentType pattern uses \t) —
+             * leptris-ruby#434. */
+            if (e == 't') { cls_add(n, '\t'); continue; }
+            if (e == 'n') { cls_add(n, '\n'); continue; }
+            if (e == 'r') { cls_add(n, '\r'); continue; }
             cls_add(n, (unsigned char)e);
             continue;
+        }
+        /* XSD charClassSub: `[ A - [ B ] ]` — the '-' followed by
+         * '[' subtracts the bracketed class (leptris-ruby#434, the
+         * OPC ST_ContentType shape). The subtraction is the last
+         * member of the class. */
+        if (*ps->p == '-' && ps->p[1] == '[') {
+            ps->p++;
+            RreNode* sub = parse_class(ps);
+            if (!sub) {
+                node_free(n);
+                return NULL;
+            }
+            for (int i = 0; i < 256; i++)
+                if ((sub->cls[i >> 3] >> (i & 7)) & 1)
+                    n->cls[i >> 3] &= (unsigned char)~(1u << (i & 7));
+            node_free(sub);
+            if (*ps->p != ']') {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
+            break;
         }
         unsigned char c = (unsigned char)*ps->p++;
         if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
@@ -228,9 +291,14 @@ static RreNode* parse_atom(RreParser* ps) {
         ps->p += 2;
         RreNode* n = node_new(RRE_CHAR);
         if (!n) return NULL;
-        /* Only punctuation may be escaped as a literal; other
-         * escapes (XSD \p{...}, backrefs, \n...) are outside the
-         * supported subset and must fail loudly at parse time. */
+        /* Only punctuation may be escaped as a literal, plus the
+         * XSD control escapes (the OPC ST_ContentType pattern uses
+         * \t) — other escapes (XSD \p{...} outside a class,
+         * backrefs) are outside the supported subset and must fail
+         * loudly at parse time (leptris-ruby#434). */
+        if (e == 't') { n->ch = '\t'; return n; }
+        if (e == 'n') { n->ch = '\n'; return n; }
+        if (e == 'r') { n->ch = '\r'; return n; }
         if (isalnum((unsigned char)e)) {
             free(n);
             ps->bad = 1;
