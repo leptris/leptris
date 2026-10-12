@@ -2,12 +2,23 @@
 
 ## [1.9.343] - 2026-10-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **plan_result_build: SCALAR ops validate plan_index
+  (leptris#1654, PR #1658).** The ELEMENT branch validated the
+  pool bounds; the SCALAR branch dereferenced first — an
+  out-of-pool index was an OOB read (segfault or fabricated
+  output). SCALAR now rejects with LEPTRIS_ERROR_INVALID_ARG
+  like ELEMENT. The red spec crashes on the pre-fix build; it
+  also exposed (and the PR fixes) that every mid-build failure
+  return leaked the partially built value tree — caught by
+  LSan on the Linux CI ASAN lane.
+- **GCC 14 compile fix (leptris#1656, PR #1658).**
+  dp_mint_element passed char** attribute arrays to the
+  const char** parameters of leptris_element_new_with_attributes
+  — GCC 14 errors (all manylinux/musllinux vendored builds);
+  clang only warned. Explicit casts at the call site; the
+  -Werror compile gate was red pre-fix, clean now.
 
 
 ## [1.9.342] - 2026-10-11
