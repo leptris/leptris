@@ -4,6 +4,7 @@
 
 #include "leptris.h"
 #include "leptris/error.h"
+#include "leptris/html.h"
 /* #1125 pristine-buffer gate: reach doc->xml_buffer directly. */
 #include "../leptris/leptris_internal.h"
 /* Internal root-doc-map surface (#1242 spec); C linkage. */
@@ -2157,6 +2158,70 @@ TEST(AttributeExpandedName, NsAccessorsAndLookup) {
     ASSERT_NE(a, nullptr);   /* plain */
     EXPECT_EQ(leptris_attribute_prefix(a), nullptr);
     EXPECT_EQ(leptris_attribute_namespace_uri(a), nullptr);
+    leptris_document_free(doc);
+}
+
+/* leptris#1664: the reserved xml prefix is bound by definition
+ * (XML Namespaces 3) - no declaration needed, on every tree flavor.
+ * HTML-parsed trees carry no xmlns declarations, so the namespace
+ * face must still answer the reserved binding (and a declared
+ * prefix on the XML tree keeps resolving as before). */
+TEST(DomAttributeNs, ReservedPrefixResolvesOnDeclarationFreeTrees) {
+    const char html[] =
+        "<html><body><span lang=\"en\" xml:lang=\"en\">t</span>"
+        "</body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_html_string(html, strlen(html), &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    /* WHATWG lane builds its own wrapper shape — search the
+     * subtree for the span. */
+    LeptrisElement stack[32];
+    int sp2 = 0;
+    LeptrisElement span = nullptr;
+    if (sp2 < 32) stack[sp2++] = root;
+    while (sp2 > 0 && !span) {
+        LeptrisElement e = stack[--sp2];
+        if (strcmp(leptris_element_name(e), "span") == 0) {
+            span = e;
+            break;
+        }
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c))
+            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+                sp2 < 32)
+                stack[sp2++] = (LeptrisElement)c;
+    }
+    ASSERT_NE(span, nullptr);
+    LeptrisAttribute found = nullptr;
+    for (LeptrisAttribute a = leptris_element_first_attribute(span); a;
+         a = leptris_attribute_next(a))
+        if (strcmp(leptris_attribute_get_name(a), "xml:lang") == 0)
+            found = a;
+    ASSERT_NE(found, nullptr);
+    EXPECT_STREQ(leptris_attribute_prefix(found), "xml");
+    EXPECT_STREQ(leptris_attribute_namespace_uri(found),
+                 "http://www.w3.org/XML/1998/namespace");
+    leptris_document_free(doc);
+}
+
+TEST(DomAttributeNs, ReservedPrefixOnMutationCreatedAttribute) {
+    /* The same unstamped-cache path: attributes created through the
+     * DOM API (no parse lane) must resolve the reserved prefix. */
+    LeptrisDocument doc = leptris_document_create();
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_element_create(doc, "r");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(doc, root), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_set_attribute(root, "xml:space", "preserve"),
+              LEPTRIS_OK);
+    LeptrisAttribute a = leptris_element_first_attribute(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_attribute_prefix(a), "xml");
+    EXPECT_STREQ(leptris_attribute_namespace_uri(a),
+                 "http://www.w3.org/XML/1998/namespace");
     leptris_document_free(doc);
 }
 

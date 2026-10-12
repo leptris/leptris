@@ -1422,6 +1422,36 @@ LeptrisStatus leptris_element_set_attribute(LeptrisElement elem, const char* nam
         attr->ns_cache_off = 0;  /* TODO 173 */
         leptris_attr_set_next(attr, NULL);
 
+        /* leptris#1664: prefixed names get their ns side-cache at
+         * creation (reserved prefixes then resolve on
+         * declaration-free/mutation trees). */
+        {
+            const char* colon = (const char*)memchr(
+                name_storage, ':', nlen);
+            if (colon) {
+                struct leptris_memory_pool* spool =
+                    leptris_element_get_pool(elem);
+                struct leptris_attr_ns_cache* c =
+                    (struct leptris_attr_ns_cache*)
+                        (spool ? leptris_pool_alloc(spool, sizeof(*c))
+                               : NULL);
+                if (c) {
+                    memset(c, 0, sizeof(*c));
+                    size_t pl = (size_t)(colon - name_storage);
+                    char* pfx = spool
+                        ? (char*)leptris_pool_alloc(spool, pl + 1)
+                        : NULL;
+                    if (pfx) {
+                        memcpy(pfx, name_storage, pl);
+                        pfx[pl] = '\0';
+                        c->prefix = pfx;
+                    }
+                    c->owner_elem = elem;
+                    attr_set_ns_cache(attr, c);
+                }
+            }
+        }
+
         /* Append via the doc-level attr-tail cache — O(1) for the
          * sequential case (the element struct carries no last-attr
          * edge by the 64-byte layout law; the walk is O(attr_count)

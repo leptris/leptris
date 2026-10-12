@@ -321,6 +321,33 @@ int leptris_element_add_attribute(LeptrisElement elem,
 
     leptris_attr_set_next(attr, NULL);
 
+    /* leptris#1664: prefixed names get their ns side-cache HERE
+     * (the parse lane stamps in its own fused loop; this path
+     * serves HTML-parsed and mutation-created attributes). The
+     * reserved xml prefix resolves by definition on
+     * declaration-free trees through elem_resolve_attr_prefix. */
+    {
+        const char* colon = (const char*)memchr(
+            attr->name_view.data, ':', attr->name_view.length);
+        if (colon) {
+            struct leptris_attr_ns_cache* c =
+                (struct leptris_attr_ns_cache*)leptris_pool_alloc(
+                    pool, sizeof(*c));
+            if (c) {
+                memset(c, 0, sizeof(*c));
+                size_t pl = (size_t)(colon - attr->name_view.data);
+                char* pfx = (char*)leptris_pool_alloc(pool, pl + 1);
+                if (pfx) {
+                    memcpy(pfx, attr->name_view.data, pl);
+                    pfx[pl] = '\0';
+                    c->prefix = pfx;
+                }
+                c->owner_elem = elem;
+                attr_set_ns_cache(attr, c);
+            }
+        }
+    }
+
     /* Append via cached last_attribute pointer (TODO 106).
      * Maintains the same invariant as leptris_element_set_attribute.
      * Decode the int32_t offset to access the struct, then update via
