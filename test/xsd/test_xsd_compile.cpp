@@ -167,6 +167,60 @@ TEST(XsdCompile, ImportDagCapturesEachUnitOnce) {
     leptris_xsd_free(s);
 }
 
+// leptris-ruby#440/#439: the merged-import schema is FLAT, so
+// same-name declarations from different namespaces collide. Every
+// lookup must key by (declaring targetNamespace, name) — a
+// resolving namespace in hand forbids a foreign-namespace fallback
+// (wml's CT_TcPr vs dml's, dml's global tcPr element hijacking
+// wml's local particle, r:id resolved through the import).
+TEST(XsdCompile, SameNameTypesAcrossImportsResolveByNamespace) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/ns_collision/w.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char doc[] =
+        "<w:r xmlns:w=\"urn:w\"><w:tcPr/></w:r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    // w's CT_T carries tcPr; d's same-name CT_T carries dOnly1/2 —
+    // a cross-namespace mis-resolution rejects this document.
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    // The d-namespace element resolves against d's model.
+    const char ddoc[] = "<d:r xmlns:d=\"urn:d\"><d:dOnly1/></d:r>";
+    LeptrisDocument dd = leptris_parse_string(ddoc, strlen(ddoc), &st);
+    ASSERT_NE(dd, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, dd), 1);
+    leptris_document_free(dd);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdCompile, QualifiedAttrFromImportedNamespaceValidates) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/ns_import_attrs/w.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    // r:id resolved through the import; kind required by w's own
+    // attribute row.
+    const char doc[] =
+        "<w:ref xmlns:w=\"urn:w\" xmlns:r=\"urn:r\""
+        " r:id=\"rId6\" kind=\"even\"/>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    // Negative control: an undeclared qualified attribute still
+    // fails strict.
+    const char bad[] =
+        "<w:ref xmlns:w=\"urn:w\" xmlns:r=\"urn:r\""
+        " r:undeclared=\"x\" kind=\"even\"/>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
 // leptris-ruby#434: the length family counts OCTETS for binary
 // bases (XML Schema Part 2: hexBinary/base64Binary length is in
 // bytes) — the wml ST_LongHexNumber shape (hexBinary + length 4)
