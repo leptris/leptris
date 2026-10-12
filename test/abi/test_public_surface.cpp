@@ -393,7 +393,11 @@ TEST(PublicSurface, RootlessWithPIsIsNotDropped) {
 /* Issue #547: ParseOptions.recover returns an empty document
  * instead of NULL on parse failure (moxml's libxml2 adapter does
  * the same; this makes the native API honest about it). */
-TEST(PublicSurface, RecoverReturnsEmptyDocument) {
+TEST(PublicSurface, RecoverKeepsBestEffortTree) {
+    /* leptris#1660 (supersedes the #547 empty-document contract):
+     * recover keeps the best-effort tree for structural errors —
+     * unclosed elements close at EOF, each recovery records a
+     * diagnostic. */
     LeptrisParseOptions opts = {LEPTRIS_PARSE_DEFAULT, 0, 0, 0};
     opts.recover = 1;
     LeptrisStatus st = LEPTRIS_OK;
@@ -403,10 +407,11 @@ TEST(PublicSurface, RecoverReturnsEmptyDocument) {
     memset(bad, 0, sizeof(bad));
     memcpy(bad, "<root><unclosed>", 16);
     LeptrisDocument d = leptris_parse_string_ex(bad, 16, &opts, &st);
-    ASSERT_NE(d, nullptr);   /* recover: empty doc, not NULL */
-    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
-    EXPECT_EQ(leptris_xpath_result_count(
-        leptris_xpath_eval(d, nullptr, "count(//node())")), 0);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    EXPECT_GE(leptris_document_parse_diag_count(d), 1u);
     leptris_document_free(d);
 }
 

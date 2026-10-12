@@ -646,8 +646,15 @@ LEPTRIS_API LeptrisDocument leptris_parse_string_ex(const char* xml,
     if (options->strict_mode >= 0) g_leptris_strict_mode = options->strict_mode;
     if (options->max_depth > 0) g_leptris_max_depth = options->max_depth;
 
+    /* #1660: recover maps to the RECOVER parse flag — structural
+     * errors keep the best-effort tree with per-recovery parse
+     * diagnostics (leptris_document_parse_diag). The empty-document
+     * fallback below now only covers still-unrecoverable failures
+     * (e.g. encoding), preserving the #547 contract for them. */
+    unsigned flags = options->flags;
+    if (options->recover) flags |= LEPTRIS_PARSE_RECOVER;
     LeptrisDocument doc = leptris_parse_string_flags(xml, length,
-                                                     options->flags, status);
+                                                     flags, status);
     g_leptris_strict_mode = saved_strict;
     g_leptris_max_depth = saved_depth;
     if (!doc && options->recover) {

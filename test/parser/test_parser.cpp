@@ -776,3 +776,77 @@ TEST(ParseDoctype, SecondDoctypeKeepsFirstModel) {
     EXPECT_STREQ(text, "first");
     leptris_document_free(d);
 }
+
+/* leptris#1660: XML_PARSE_RECOVER parity — structural errors keep
+ * the best-effort tree instead of an empty document. Mismatched
+ * close: an ancestor match closes the intermediates implicitly; a
+ * true stray close is dropped. Unclosed at EOF: everything open
+ * closes. Each recovery records a diagnostic; without the flag the
+ * parse still fails. */
+TEST(ParseRecover, MismatchedCloseKeepsTreeAndDropsStray) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a>x</b></root>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_element_name(a), "a");
+    ASSERT_NE(leptris_element_text(a), nullptr);
+    EXPECT_STREQ(leptris_element_text(a), "x");
+    /* Two recoveries: the stray </b> drops, and <a> closes
+     * implicitly when </root> names the ancestor (libxml2 reports
+     * both as well). */
+    EXPECT_EQ(leptris_document_parse_diag_count(doc), 2u);
+    leptris_document_free(doc);
+}
+
+TEST(ParseRecover, MismatchedCloseForAncestorClosesIntermediates) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a>x</root>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_element_name(a), "a");
+    ASSERT_NE(leptris_element_text(a), nullptr);
+    EXPECT_STREQ(leptris_element_text(a), "x");
+    leptris_document_free(doc);
+}
+
+TEST(ParseRecover, UnclosedAtEofClosesEverything) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a>x";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_element_name(a), "a");
+    /* Both open elements (root and a) closed implicitly. */
+    EXPECT_EQ(leptris_document_parse_diag_count(doc), 2u);
+    leptris_document_free(doc);
+}
+
+TEST(ParseRecover, WithoutFlagStillFails) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] = "<root><a>x</b></root>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_DEFAULT, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+    const char unclosed[] = "<root><a>x";
+    doc = leptris_parse_string_flags(unclosed, strlen(unclosed),
+                                     LEPTRIS_PARSE_DEFAULT, &st);
+    EXPECT_EQ(doc, nullptr);
+}

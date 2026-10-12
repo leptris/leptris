@@ -162,6 +162,9 @@ typedef struct {
      * as ENTITY_REF nodes; text runs split around them. Character
      * references (&#...;) still expand — they are not entities. */
     int keep_entity_refs;
+    /* LEPTRIS_PARSE_RECOVER (leptris#1660): structural errors keep
+     * the best-effort tree (XML_PARSE_RECOVER semantics). */
+    int recover;
     /* TODO 159 Phase G: parser-local last-attr cache for the element
      * currently being parsed. Eliminates the O(N) walk-to-find-tail
      * in dp_add_attr_inline — O(1) wiring per attr instead of O(N),
@@ -1379,7 +1382,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      int owns_buffer,
                                                      int drop_ws_text,
                                                      int apply_dtd_attrs,
-                                                     int keep_entity_refs) {
+                                                     int keep_entity_refs,
+                                                     int recover) {
 
     /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
@@ -1629,6 +1633,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.probe_slack = 1;  /* the scratch always carries zeroed slack */
     p.drop_ws_text = drop_ws_text;
     p.keep_entity_refs = keep_entity_refs;
+    p.recover = recover;
     p.dtd = NULL;
     /* Only ever set to 1 in the loop; without the zero here the
      * field rides the stack (MSVC C4701) and doc->has_namespaces
@@ -2028,7 +2033,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 close_local = colon + 1;
                 close_local_len = close_len - (colon + 1 - close_start);
             }
-            if (open_len != close_local_len) goto fail;
+            if (open_len != close_local_len) goto close_mismatch;
             /* Masked 64-bit compare for short names — one load
              * each side vs a libc memcmp call (the TODO 174 law:
              * setup dominates sub-8-byte compares; ~9% of the
@@ -2061,11 +2066,76 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 uint64_t a, b;
                 memcpy(&a, open_name, 8);
                 memcpy(&b, close_local, 8);
-                if ((a & mask) != (b & mask)) goto fail;
+                if ((a & mask) != (b & mask)) goto close_mismatch;
             } else if (memcmp(open_name, close_local,
                               close_local_len) != 0) {
-                goto fail;
+                goto close_mismatch;
             }
+            if (0) {
+            close_mismatch:
+                /* leptris#1660: RECOVER keeps the best-effort tree.
+                 * A close tag naming an open ANCESTOR closes the
+                 * intermediates implicitly (libxml2 semantics); a
+                 * close matching nothing open is dropped. Either way
+                 * the recovery records a diagnostic. */
+                if (!p.recover) goto fail;
+                {
+                    int anc = -1;
+                    for (int d = (int)p.depth - 1; d >= 0; d--) {
+                        LeptrisElement ae = p.open_stack[d];
+                        const char* an = elem_name(ae);
+                        size_t al = (ae->name_len != 0xFF)
+                            ? (size_t)ae->name_len : strlen(an);
+                        if (al == close_local_len &&
+                            memcmp(an, close_local,
+                                   close_local_len) == 0) {
+                            anc = d;
+                            break;
+                        }
+                    }
+                    if (anc >= 0) {
+                        while ((int)p.depth - 1 > anc) {
+                            LeptrisElement ce =
+                                p.open_stack[p.depth - 1];
+                            extern struct LeptrisDiag*
+                                leptris_diag_emit(
+                                    struct LeptrisDiag**, int*, int*,
+                                    LeptrisDiagKind, LeptrisNodeRef,
+                                    const char*, ...);
+                            leptris_diag_emit(
+                                &p.doc->parse_diags,
+                                &p.doc->parse_diag_count,
+                                &p.doc->parse_diag_cap,
+                                LEPTRIS_DIAG_UNCLOSED_ELEMENT, NULL,
+                                "Element %s closed implicitly by </%.*s>",
+                                elem_name(ce),
+                                (int)close_local_len, close_local);
+                            if (p.line_offsets_ok) {
+                                leptris_elem_pos_close_at(
+                                    p.doc,
+                                    p.pos_slot_stack[p.depth - 1],
+                                    (uint32_t)(p.pos - p.buf));
+                            }
+                            p.depth--;
+                            p.last_child_stack[p.depth] = NULL;
+                        }
+                        goto close_matched;
+                    }
+                    extern struct LeptrisDiag* leptris_diag_emit(
+                        struct LeptrisDiag**, int*, int*,
+                        LeptrisDiagKind, LeptrisNodeRef,
+                        const char*, ...);
+                    leptris_diag_emit(
+                        &p.doc->parse_diags,
+                        &p.doc->parse_diag_count,
+                        &p.doc->parse_diag_cap,
+                        LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
+                        "Stray close tag </%.*s> dropped",
+                        (int)close_local_len, close_local);
+                    continue;  /* p.pos is already past the '>' */
+                }
+            }
+            close_matched:
             if (p.line_offsets_ok) {
                 /* Round 10: fill the open element's journal slot in
                  * place — no hash probe, and the recorded start offset
@@ -2271,7 +2341,31 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         }
     }
 
-    if (p.depth != 0) goto fail;
+    if (p.depth != 0) {
+        if (!p.recover) goto fail;
+        /* leptris#1660: elements still open at EOF close
+         * implicitly; the tree commits. */
+        while (p.depth > 0) {
+            LeptrisElement ce = p.open_stack[p.depth - 1];
+            extern struct LeptrisDiag* leptris_diag_emit(
+                struct LeptrisDiag**, int*, int*,
+                LeptrisDiagKind, LeptrisNodeRef,
+                const char*, ...);
+            leptris_diag_emit(
+                &p.doc->parse_diags, &p.doc->parse_diag_count,
+                &p.doc->parse_diag_cap,
+                LEPTRIS_DIAG_UNCLOSED_ELEMENT, NULL,
+                "Element %s still open at end of document",
+                elem_name(ce));
+            if (p.line_offsets_ok) {
+                leptris_elem_pos_close_at(
+                    p.doc, p.pos_slot_stack[p.depth - 1],
+                    (uint32_t)(p.pos - p.buf));
+            }
+            p.depth--;
+            p.last_child_stack[p.depth] = NULL;
+        }
+    }
     if (!p.root) goto fail;
 
     /* 6. Commit to doc. */
@@ -3288,14 +3382,16 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
         struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
         if (d) return d;
     }
-    return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0);
+    return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
 struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                            unsigned parse_flags) {
     if (!xml || len == 0) return NULL;
-    {
+    /* The interleaved lane has no recovery support (#1660) — RECOVER
+     * parses take the default lane. */
+    if (!(parse_flags & LEPTRIS_PARSE_RECOVER)) {
         struct leptris_document* d = dp_il_try(
             xml, len,
             (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT) ? 1 : 0,
@@ -3312,6 +3408,8 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                  (parse_flags & LEPTRIS_PARSE_DTDATTR)
                                      ? 1 : 0,
                                  (parse_flags & LEPTRIS_PARSE_KEEP_ENTITY_REFS)
+                                     ? 1 : 0,
+                                 (parse_flags & LEPTRIS_PARSE_RECOVER)
                                      ? 1 : 0);
 }
 
@@ -3319,5 +3417,5 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
 struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
-    return direct_parse_internal(buf, len, 0, 0, 0, 0, 0);
+    return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0);
 }
