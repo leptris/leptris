@@ -2,12 +2,22 @@
 
 ## [1.9.346] - 2026-10-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **Reserved prefixes resolve on declaration-free trees
+  (leptris#1664, PR #1668).** leptris_attribute_namespace_uri
+  answered through the attribute's ns side-cache, but only the
+  XML parse lane stamped it - attributes created through
+  leptris_element_add_attribute (the HTML/WHATWG lane) and
+  leptris_element_set_attribute (the mutation API) carried no
+  cache, so xml:lang on an HTML-parsed tree resolved to no
+  namespace. Both creation paths now stamp the colon-gated
+  side-cache (owner element + pool-owned materialized prefix)
+  like the parse lane's fused loop; the reserved xml binding
+  then answers by definition (XML Namespaces 3) on every tree
+  flavor. moxml's wrapper-side fallback becomes dead weight.
+  Red-first specs for the WHATWG-parsed and mutation-created
+  shapes. Full suite 1990/1990.
 
 
 ## [1.9.345] - 2026-10-12
