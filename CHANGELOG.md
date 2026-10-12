@@ -2,12 +2,23 @@
 
 ## [1.9.344] - 2026-10-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **recover: structural errors keep the best-effort tree
+  (leptris#1660, PR #1661).** #547's recover mode returned an
+  EMPTY document on any parse failure - the opposite of
+  XML_PARSE_RECOVER, for exactly the malformations recovery
+  exists for. The new LEPTRIS_PARSE_RECOVER flag (which
+  leptris_parse_options.recover maps to) gives libxml2
+  semantics: a close tag naming an open ancestor closes the
+  intermediates implicitly, a stray close is dropped, and
+  elements still open at EOF close - the tree commits in every
+  case. Each recovery records a parse diagnostic (two new
+  append-only kinds: MISMATCHED_TAG, UNCLOSED_ELEMENT) through
+  the #1200 channel; without the flag parses fail exactly as
+  before. Red-first ParseRecover specs; the #547
+  empty-document contract spec superseded by
+  RecoverKeepsBestEffortTree. Full suite 1983/1983.
 
 
 ## [1.9.343] - 2026-10-12
