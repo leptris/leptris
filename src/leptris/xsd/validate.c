@@ -33,13 +33,18 @@ struct leptris_xsd_schema; /* opaque here; compile.c owns the struct */
 
 /* The validator reaches the compiled model through accessors the
  * compiler exports (compile.c defines the struct). */
+extern const XsdElementDecl* xsd_find_element_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern const XsdElementDecl* xsd_find_element(
     struct leptris_xsd_schema* s, const char* name);
-extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
-                               const char* type_name);
+extern XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
+                              const char* type_name, const char* uri);
+XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,                               const char* type_name);
 extern const XsdSimple* xsd_find_simple_pub(
     struct leptris_xsd_schema* s, const char* name);
 extern const char* xsd_target_ns(struct leptris_xsd_schema* s);
+extern const XsdTypeAttrs* xsd_find_type_attrs_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 extern const XsdElementIcs* xsd_find_element_ics(
@@ -309,7 +314,7 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
-        if (xsd_find_element(s, cl)) {
+        if (xsd_find_element_ns(s, cl, cu)) {
             validate_element(v, s, ce, 0);
             continue;
         }
@@ -466,7 +471,9 @@ static void validate_element(struct xsd_validator* v,
     const char* local = NULL, *prefix = NULL, *uri = NULL;
     leptris_element_expanded_name(elem, &local, &prefix, &uri);
     if (!local) return;
-    const XsdElementDecl* d = xsd_find_element(s, local);
+    const char* guri = NULL;
+    leptris_element_expanded_name(elem, NULL, NULL, &guri);
+    const XsdElementDecl* d = xsd_find_element_ns(s, local, guri);
     if (!d) {
         /* strict: the instance uses an element the schema never
          * declared (a local particle would have typed it) */
@@ -510,9 +517,16 @@ static void validate_local(struct xsd_validator* v,
                            LeptrisElement elem, const char* local,
                            const char* type) {
     if (!type) return;
-    XsdCm* ct = xsd_find_complex(s, type);
+    /* leptris-ruby#440: resolve the type in the ELEMENT's
+     * namespace — the merged-import schema carries same-name types
+     * from every imported namespace. */
+    const char* euri = NULL;
+    leptris_element_expanded_name(elem, NULL, NULL, &euri);
+    XsdCm* ct = xsd_find_complex_ns(s, type, euri);
     if (ct) {
-        validate_attributes(v, s, elem, xsd_find_type_attrs(s, type));
+        validate_attributes(
+            v, s, elem,
+            xsd_find_type_attrs_ns(s, type, euri));
         validate_children(v, s, elem, ct);
         /* XSD 1.1: the type's xs:assert list — context is the
          * element; evaluation errors are failures */

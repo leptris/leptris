@@ -138,6 +138,7 @@ typedef struct xsd_alternative {
 /* A top-level xs:element declaration (slice 3: name + type ref). */
 typedef struct xsd_element_decl {
     char* name;
+    char* ns;       /* leptris-ruby#440: declaring schema's targetNamespace */
     char* type;     /* "xs:string"-style builtin or a local type name */
     XsdAlternative* alternatives; /* XSD 1.1 conditional types */
     char* fixed;    /* fixed element content: text must string-equal it */
@@ -190,6 +191,7 @@ typedef struct xsd_attrgroup_def {
 
 typedef struct xsd_type_attrs {
     char* type_name;
+    char* ns;           /* leptris-ruby#440: declaring schema's tns */
     char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
     XsdAttrDecl* attrs;
     struct xsd_type_attrs* next;

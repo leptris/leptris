@@ -1,0 +1,11 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:d="urn:d" targetNamespace="urn:w">
+  <xs:import namespace="urn:d" schemaLocation="d.xsd"/>
+  <xs:complexType name="CT_T">
+    <xs:sequence>
+      <xs:element name="wOnly" minOccurs="0"/>
+      <xs:element name="tcPr" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="r" type="CT_T"/>
+</xs:schema>

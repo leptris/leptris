@@ -75,6 +75,8 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
 static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                                           LeptrisElement container,
                                           int depth);
+XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
+                           const char* type_name, const char* uri);
 extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
                                const char* type_name);
 extern const XsdTypeAttrs* xsd_find_type_attrs(
@@ -831,9 +833,18 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                                   strcmp(tns, s->target_ns) == 0);
                         if (subroot &&
                             (strcmp(local, "import") == 0 || same_ns)) {
+                            /* leptris-ruby#440/#439: each captured
+                             * unit stamps ITS OWN targetNamespace on
+                             * its declarations — chameleon includes
+                             * (no tns) adopt the includer's. */
+                            char* saved_ns = s->target_ns;
+                            char* sub_ns = tns ? xsd_strdup(tns) : NULL;
+                            if (sub_ns) s->target_ns = sub_ns;
                             s->include_depth++;
                             xsd_capture_root(s, subroot);
                             s->include_depth--;
+                            if (sub_ns) free(sub_ns);
+                            s->target_ns = saved_ns;
                         }
                         leptris_document_free(sub);
                     }
@@ -853,6 +864,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     (XsdElementDecl*)calloc(1, sizeof(*d));
                 if (d) {
                     d->name = xsd_strdup(nm);
+                    if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                     d->type = xsd_strdup(xsd_local_name(ty));
                     xsd_capture_alternatives(s, (LeptrisElement)n, d);
                     d->fixed = xsd_strdup(
@@ -881,6 +893,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                         (XsdElementDecl*)calloc(1, sizeof(*d));
                     if (d) {
                         d->name = xsd_strdup(nm);
+                        if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                         d->type = xsd_strdup(synth);
                         d->next = s->elements;
                         s->elements = d;
@@ -1026,6 +1039,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     XsdTypeAttrs* ta = s->type_attrs;
     while (ta) {
         XsdTypeAttrs* tn = ta->next;
+        free(ta->ns);
         XsdAttrDecl* a = ta->attrs;
         while (a) {
             XsdAttrDecl* an = a->next;
@@ -1043,6 +1057,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     XsdElementDecl* d = s->elements;
     while (d) {
         XsdElementDecl* dn = d->next;
+        free(d->ns);
         XsdAlternative* a = d->alternatives;
         while (a) {
             XsdAlternative* an = a->next;
@@ -1141,12 +1156,18 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  char* any_attr_ns) {
     if (!root) return;
     root->name = xsd_strdup(name);
+    /* leptris-ruby#440: the DECLARING file's targetNamespace — the
+     * merged-import schema is flat, so same-name types from
+     * different namespaces (wml CT_TcPr vs dml CT_TcPr) resolve by
+     * (ns, name). */
+    if (s->target_ns) root->ns = xsd_strdup(s->target_ns);
     root->next = s->complex_types;
     s->complex_types = root;
     if (attrs || any_attr_ns) {
         XsdTypeAttrs* ta = (XsdTypeAttrs*)calloc(1, sizeof(*ta));
         if (ta) {
             ta->type_name = xsd_strdup(name);
+            if (root->ns) ta->ns = xsd_strdup(root->ns);
             ta->attrs = attrs;
             ta->any_attr_ns = any_attr_ns;
             ta->next = s->type_attrs;
@@ -1282,7 +1303,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 const char* base = xsd_local_name(base_raw);
                 XsdCm* base_root =
                     (base && strncmp(base, "xs:", 3) != 0)
-                        ? xsd_find_complex(s, base)
+                        ? xsd_find_complex_ns(s, base, s->target_ns)
                         : NULL;
                 if (strcmp(dl, "extension") == 0) {
                     /* base content first, derived content after */
@@ -1814,12 +1835,53 @@ const XsdElementDecl* xsd_find_element(struct leptris_xsd_schema* s,
     return NULL;
 }
 
+/* leptris-ruby#440: prefer (ns, name); fall back to any match. */
+const XsdElementDecl* xsd_find_element_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri) {
+    if (!s || !name) return NULL;
+    if (uri && uri[0]) {
+        for (XsdElementDecl* d = s->elements; d; d = d->next)
+            if (d->ns && strcmp(d->name, name) == 0 &&
+                strcmp(d->ns, uri) == 0)
+                return d;
+        for (XsdElementDecl* d = s->elements; d; d = d->next)
+            if (!d->ns && strcmp(d->name, name) == 0)
+                return d;
+        return NULL;
+    }
+    return xsd_find_element(s, name);
+}
+
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
                         const char* type_name) {
     if (!s || !type_name) return NULL;
     for (XsdCm* c = s->complex_types; c; c = c->next)
         if (strcmp(c->name, type_name) == 0) return c;
     return NULL;
+}
+
+/* leptris-ruby#440: prefer the (ns, name) exact match — the flat
+ * merged list carries same-name types from every imported
+ * namespace. Falls back to name-only (single-namespace schemas
+ * and unresolvable contexts keep working). */
+XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
+                           const char* type_name, const char* uri) {
+    if (!s || !type_name) return NULL;
+    if (uri && uri[0]) {
+        for (XsdCm* c = s->complex_types; c; c = c->next)
+            if (c->ns && strcmp(c->name, type_name) == 0 &&
+                strcmp(c->ns, uri) == 0)
+                return c;
+        /* A resolving namespace is in hand: a DIFFERENT
+         * namespace's same-name decl must NOT win (wml CT_TcPr vs
+         * dml CT_TcPr — leptris-ruby#440). Only an unstamped
+         * (unknown-ns) entry may serve as the fallback. */
+        for (XsdCm* c = s->complex_types; c; c = c->next)
+            if (!c->ns && strcmp(c->name, type_name) == 0)
+                return c;
+        return NULL;
+    }
+    return xsd_find_complex(s, type_name);
 }
 
 const XsdSimple* xsd_find_simple_pub(struct leptris_xsd_schema* s,
@@ -1837,6 +1899,23 @@ const XsdTypeAttrs* xsd_find_type_attrs(struct leptris_xsd_schema* s,
     for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
         if (strcmp(t->type_name, type_name) == 0) return t;
     return NULL;
+}
+
+const XsdTypeAttrs* xsd_find_type_attrs_ns(
+    struct leptris_xsd_schema* s, const char* type_name,
+    const char* uri) {
+    if (!s || !type_name) return NULL;
+    if (uri && uri[0]) {
+        for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
+            if (t->ns && strcmp(t->type_name, type_name) == 0 &&
+                strcmp(t->ns, uri) == 0)
+                return t;
+        for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
+            if (!t->ns && strcmp(t->type_name, type_name) == 0)
+                return t;
+        return NULL;
+    }
+    return xsd_find_type_attrs(s, type_name);
 }
 
 /* ---- slice 4: instance validation (validate.c engine) ------------ */

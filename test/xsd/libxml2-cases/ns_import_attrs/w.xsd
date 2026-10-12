@@ -1,0 +1,9 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:r="urn:r" targetNamespace="urn:w">
+  <xs:import namespace="urn:r" schemaLocation="r.xsd"/>
+  <xs:complexType name="CT_Ref">
+    <xs:attribute ref="r:id" use="optional"/>
+    <xs:attribute name="kind" type="xs:string" use="required"/>
+  </xs:complexType>
+  <xs:element name="ref" type="CT_Ref"/>
+</xs:schema>

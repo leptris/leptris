@@ -1,0 +1,12 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="urn:d">
+  <!-- Same type/element NAMES as w.xsd, different namespace: the
+       merged-import compiler must resolve by (ns, name). -->
+  <xs:complexType name="CT_T">
+    <xs:sequence>
+      <xs:element name="dOnly1" minOccurs="0"/>
+      <xs:element name="dOnly2" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="r" type="CT_T"/>
+</xs:schema>
