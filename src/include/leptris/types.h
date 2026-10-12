@@ -238,7 +238,14 @@ typedef enum {
      * - SKIP_SOURCE_POSITIONS: element source columns degrade to
      *   zeros (line still resolves from the buffer). */
     LEPTRIS_PARSE_SKIP_DUP_DETECTION = 8u,
-    LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS = 16u
+    LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS = 16u,
+    /* XML_PARSE_RECOVER parity (leptris#1660): structural errors
+     * keep the best-effort tree — a close tag matching an open
+     * ANCESTOR closes the intermediates implicitly, a stray close
+     * is dropped, unclosed elements close at EOF. Each recovery
+     * records a parse diagnostic (mismatched-tag / unclosed-element
+     * kind). Without the bit the parse fails as before. */
+    LEPTRIS_PARSE_RECOVER = 32u
 } LeptrisParseFlags;
 
 /* ============================================================================
@@ -278,6 +285,11 @@ typedef enum {
      * was not conformant (duplicate attribute, ...). Not a model
      * error; SAX-lane "recover" parity (#1200). */
     LEPTRIS_DIAG_RECOVER,
+    /* leptris#1660: structural recoveries — a close tag did not
+     * match the open element (dropped, or closed ancestors
+     * implicitly), and an element still open at EOF. Append-only. */
+    LEPTRIS_DIAG_MISMATCHED_TAG,
+    LEPTRIS_DIAG_UNCLOSED_ELEMENT,
     LEPTRIS_DIAG_COUNT_
 } LeptrisDiagKind;
 
