@@ -1836,6 +1836,7 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
              * reads cp->child_count right after, so an out-of-pool
              * plan_index here is an OOB read (leptris#1654). */
             if (op->plan_index >= pool->plan_count) {
+                if (root) dp_result_free_rec(root);
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
