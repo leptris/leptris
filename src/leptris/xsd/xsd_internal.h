@@ -138,6 +138,7 @@ typedef struct xsd_alternative {
 /* A top-level xs:element declaration (slice 3: name + type ref). */
 typedef struct xsd_element_decl {
     char* name;
+    char* ns;       /* owning unit's targetNamespace (NULL = none) */
     char* type;     /* "xs:string"-style builtin or a local type name */
     XsdAlternative* alternatives; /* XSD 1.1 conditional types */
     char* fixed;    /* fixed element content: text must string-equal it */
@@ -149,6 +150,8 @@ typedef struct xsd_element_decl {
  * when its substitutionGroup chain (depth-capped) reaches head. */
 int xsd_is_substitute(struct leptris_xsd_schema* s,
                       const char* name, const char* head);
+const XsdElementDecl* xsd_find_element(
+    struct leptris_xsd_schema* s, const char* name, const char* ns);
 
 typedef struct xsd_attr_decl {
     char* name;  /* attribute local name */

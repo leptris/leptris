@@ -34,7 +34,7 @@ struct leptris_xsd_schema; /* opaque here; compile.c owns the struct */
 /* The validator reaches the compiled model through accessors the
  * compiler exports (compile.c defines the struct). */
 extern const XsdElementDecl* xsd_find_element(
-    struct leptris_xsd_schema* s, const char* name);
+    struct leptris_xsd_schema* s, const char* name, const char* ns);
 extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
                                const char* type_name);
 extern const XsdSimple* xsd_find_simple_pub(
@@ -309,7 +309,7 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
-        if (xsd_find_element(s, cl)) {
+        if (xsd_find_element(s, cl, cu)) {
             validate_element(v, s, ce, 0);
             continue;
         }
@@ -466,7 +466,7 @@ static void validate_element(struct xsd_validator* v,
     const char* local = NULL, *prefix = NULL, *uri = NULL;
     leptris_element_expanded_name(elem, &local, &prefix, &uri);
     if (!local) return;
-    const XsdElementDecl* d = xsd_find_element(s, local);
+    const XsdElementDecl* d = xsd_find_element(s, local, uri);
     if (!d) {
         /* strict: the instance uses an element the schema never
          * declared (a local particle would have typed it) */

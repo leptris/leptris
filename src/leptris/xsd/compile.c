@@ -81,7 +81,7 @@ extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 static XsdCm* xsd_cm_copy_list(const XsdCm* head);
 static void xsd_capture_root(struct leptris_xsd_schema* s,
-                             LeptrisElement root);
+                             LeptrisElement root, const char* unit_ns);
 static char* xsd_read_file(const char* path, size_t* out_len);
 static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src);
 static void xsd_register_complex(struct leptris_xsd_schema* s,
@@ -692,7 +692,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         goto fail;
     }
 
-    xsd_capture_root(s, root);
+    xsd_capture_root(s, root, s->target_ns);
 
     leptris_document_free(doc);
     return s;
@@ -775,7 +775,7 @@ static void xsd_visited_add(struct leptris_xsd_schema* s,
 }
 
 static void xsd_capture_root(struct leptris_xsd_schema* s,
-                             LeptrisElement root) {
+                             LeptrisElement root, const char* unit_ns) {
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -831,8 +831,13 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                                   strcmp(tns, s->target_ns) == 0);
                         if (subroot &&
                             (strcmp(local, "import") == 0 || same_ns)) {
+                            /* Declaration namespace: the sub unit's
+                             * own targetNamespace, or - chameleon
+                             * includes - the includer's. */
+                            const char* sub_ns =
+                                (tns && *tns) ? tns : s->target_ns;
                             s->include_depth++;
-                            xsd_capture_root(s, subroot);
+                            xsd_capture_root(s, subroot, sub_ns);
                             s->include_depth--;
                         }
                         leptris_document_free(sub);
@@ -853,6 +858,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     (XsdElementDecl*)calloc(1, sizeof(*d));
                 if (d) {
                     d->name = xsd_strdup(nm);
+                    d->ns = xsd_strdup(unit_ns);
                     d->type = xsd_strdup(xsd_local_name(ty));
                     xsd_capture_alternatives(s, (LeptrisElement)n, d);
                     d->fixed = xsd_strdup(
@@ -881,6 +887,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                         (XsdElementDecl*)calloc(1, sizeof(*d));
                     if (d) {
                         d->name = xsd_strdup(nm);
+                        d->ns = xsd_strdup(unit_ns);
                         d->type = xsd_strdup(synth);
                         d->next = s->elements;
                         s->elements = d;
@@ -1043,6 +1050,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     XsdElementDecl* d = s->elements;
     while (d) {
         XsdElementDecl* dn = d->next;
+        free(d->ns);
         XsdAlternative* a = d->alternatives;
         while (a) {
             XsdAlternative* an = a->next;
@@ -1806,9 +1814,25 @@ const XsdElementIcs* xsd_find_element_ics(struct leptris_xsd_schema* s,
 
 /* ---- validator accessors (validate.c) --------------------------- */
 
+/* Namespace-aware: a global declaration governs an instance name
+ * only in its own namespace. leptris-ruby#440: merged xs:import
+ * units contribute their own globals (dml's a:tbl against wml's
+ * local w:tbl particle), and a bare-name match let the foreign
+ * global type the instance - every same-named local particle then
+ * validated against the imported type's content model. A NULL ns
+ * argument keeps the legacy name-only match (public API callers
+ * that have no namespace in hand). */
 const XsdElementDecl* xsd_find_element(struct leptris_xsd_schema* s,
-                                       const char* name) {
+                                       const char* name, const char* ns) {
     if (!s || !name) return NULL;
+    if (ns) {
+        for (XsdElementDecl* d = s->elements; d; d = d->next)
+            if (strcmp(d->name, name) == 0 &&
+                ((d->ns && strcmp(d->ns, ns) == 0) ||
+                 (!d->ns && !*ns)))
+                return d;
+        return NULL;
+    }
     for (XsdElementDecl* d = s->elements; d; d = d->next)
         if (strcmp(d->name, name) == 0) return d;
     return NULL;

@@ -1203,6 +1203,82 @@ TEST(XsdCompileFile, IncludeResolvesRelativeSchemaLocation) {
     remove(main.c_str());
 }
 
+/* leptris-ruby#440: merged xs:import units contribute their own
+ * global element declarations, and the validator's child typing
+ * matched globals by bare local name - dml's global a:tbl typed
+ * every w:tbl instance, so wml's local tblPr/tcPr content models
+ * were never applied (hundreds of false content-model errors per
+ * real Word document). A global governs an instance name only in
+ * its own namespace. */
+TEST(XsdCompileFile, ImportedGlobalDoesNotShadowLocalParticle) {
+    std::string dir = ::testing::TempDir();
+    std::string foreign = dir + "xsd_foreign.xsd";
+    std::string main = dir + "xsd_main_ns.xsd";
+    FILE* f1 = fopen(foreign.c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* foreign_text =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:foreign\">"
+        "<xs:complexType name=\"FTblT\">"
+        "<xs:sequence><xs:element name=\"fill\""
+        " type=\"xs:token\"/></xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"tbl\" type=\"FTblT\"/>"
+        "</xs:schema>";
+    fwrite(foreign_text, 1, strlen(foreign_text), f1);
+    fclose(f1);
+    FILE* f2 = fopen(main.c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* main_text =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:main\""
+        " xmlns:f=\"urn:foreign\">"
+        "<xs:import namespace=\"urn:foreign\""
+        " schemaLocation=\"xsd_foreign.xsd\"/>"
+        "<xs:complexType name=\"MTblT\">"
+        "<xs:sequence><xs:element name=\"cell\""
+        " type=\"xs:token\"/></xs:sequence>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"DocT\">"
+        "<xs:sequence><xs:element name=\"tbl\""
+        " type=\"MTblT\"/></xs:sequence>"
+        "</xs:complexType>"
+        "<xs:element name=\"doc\" type=\"DocT\"/>"
+        "</xs:schema>";
+    fwrite(main_text, 1, strlen(main_text), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(main.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* the main namespace's local tbl particle (cell model) types the
+     * instance - not the imported global's fill model */
+    const char* good =
+        "<doc xmlns=\"urn:main\"><tbl><cell>x</cell></tbl></doc>";
+    LeptrisDocument d = leptris_parse_string(good, strlen(good), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    /* the foreign global still governs its own namespace */
+    const char* fg =
+        "<tbl xmlns=\"urn:foreign\"><fill>y</fill></tbl>";
+    LeptrisDocument fd = leptris_parse_string(fg, strlen(fg), &st);
+    ASSERT_NE(fd, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, fd), 1);
+    leptris_document_free(fd);
+    /* ...and only its own namespace: the fill model must not type a
+     * main-namespace tbl (pre-fix this validated the wrong model) */
+    const char* bad =
+        "<doc xmlns=\"urn:main\"><tbl><fill>y</fill></tbl></doc>";
+    LeptrisDocument bd = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(bd, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, bd), 0);
+    leptris_document_free(bd);
+    leptris_xsd_free(s);
+    remove(foreign.c_str());
+    remove(main.c_str());
+}
+
 TEST(XsdCompileFile, MissingFileIsNullWithStatus) {
     LeptrisStatus st = LEPTRIS_OK;
     EXPECT_EQ(leptris_xsd_compile_file("/no/such/schema.xsd", &st),
