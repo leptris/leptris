@@ -2,12 +2,28 @@
 
 ## [1.9.345] - 2026-10-12
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **XSD: namespace-keyed lookups in the merged-import schema
+  (leptris-ruby#440, leptris-ruby#439, PR #1665).** The
+  import/include merge flattened every unit's declarations
+  into one name-keyed table - and OOXML declares the same
+  names across namespaces (wml CT_TcPr vs dml CT_TcPr, dml's
+  global tcPr/tbl elements vs wml's local particles), so
+  validation resolved to the wrong unit's declarations:
+  hundreds of false content-model errors per real document
+  (#440's tcPr/tcW and tblBorders shapes) and the r:id
+  "not declared (strict)" false positive (#439).
+  Declarations now carry their declaring targetNamespace
+  (threaded per-file through the include/import recursion;
+  chameleon includes adopt the includer's) and every lookup
+  keys by (ns, name) - a foreign-namespace fallback is
+  forbidden once a resolving namespace is in hand. Verified
+  against the real wml.xsd: both #440 repro documents and the
+  #439 headerReference r:id document validate with 0 errors
+  (Nokogiri parity). Red-first specs with checked-in
+  ns_collision/ and ns_import_attrs/ fixtures. Full suite
+  1988/1988.
 
 
 ## [1.9.344] - 2026-10-12
