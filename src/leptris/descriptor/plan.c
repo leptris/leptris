@@ -1899,14 +1899,15 @@ LEPTRIS_API LeptrisDocument leptris_document_from_plan_result(
     return doc;
 }
 
-LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
+/* #1677: the WRAPPER owns the TLS window and the arena — the
+ * windowed body never restores or frees either, so no return path
+ * can leave the thread-local stuck on a leaked arena. (The
+ * multiple-roots early return did exactly that: every later
+ * malloc-lane mint on the thread then rode the dead arena, and
+ * freeing those interior pointers corrupted the heap.) */
+static struct leptris_plan_result* plan_result_build_windowed(
     LeptrisPlan plan, const leptris_plan_row_op* ops, size_t count,
-    LeptrisStatus* status) {
-    if (status) *status = LEPTRIS_OK;
-    if (!plan || !ops || count == 0) {
-        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
-        return NULL;
-    }
+    LeptrisStatus* status, struct dp_arena* arena) {
     const struct leptris_plan* pool =
         (const struct leptris_plan*)plan;
     /* op stack of open elements; depth is program-bounded */
@@ -1917,16 +1918,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;
     }
-    /* #1670: every value/string/array minted below rides this
-     * arena; the wholesale free releases all chunks at once. */
-    struct dp_arena* arena = dp_arena_new(DP_ARENA_CHUNK);
-    if (!arena) {
-        free(stack);
-        if (status) *status = LEPTRIS_ERROR_MEMORY;
-        return NULL;
-    }
-    struct dp_arena* saved_arena = dp_cur_arena;
-    dp_cur_arena = arena;
     int sp = 0;
     struct leptris_plan_result* root = NULL;
     for (size_t i = 0; i < count; i++) {
@@ -1939,8 +1930,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 /* Mid-build failure: the arena holds every minted
                  * value — release the chunks wholesale (the owner
                  * flag isn't set on failure paths). */
-                dp_arena_free_all(arena);
-                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1963,8 +1952,9 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 v->ns_uri = dp_strdup(cr->ns_uri);
             }
             if (sp == 0) {
-                if (root) { /* multiple roots */
-                    dp_result_free_rec(v);
+                if (root) {
+                    /* multiple roots: the partial tree rides the
+                     * arena — the WRAPPER frees it (#1677). */
                     free(stack);
                     if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                     return NULL;
@@ -1986,8 +1976,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 /* Mid-build failure: the arena holds every minted
                  * value — release the chunks wholesale (the owner
                  * flag isn't set on failure paths). */
-                dp_arena_free_all(arena);
-                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1996,8 +1984,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
              * reads cp->child_count right after, so an out-of-pool
              * plan_index here is an OOB read (leptris#1654). */
             if (op->plan_index >= pool->plan_count) {
-                dp_arena_free_all(arena);
-                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -2022,8 +2008,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 /* Mid-build failure: the arena holds every minted
                  * value — release the chunks wholesale (the owner
                  * flag isn't set on failure paths). */
-                dp_arena_free_all(arena);
-                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -2090,8 +2074,6 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 /* Mid-build failure: the arena holds every minted
                  * value — release the chunks wholesale (the owner
                  * flag isn't set on failure paths). */
-                dp_arena_free_all(arena);
-                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -2100,23 +2082,48 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
         }
     }
     int balanced = (sp == 0 && root != NULL);
-    dp_cur_arena = saved_arena;
     free(stack);
     if (!balanced) {
-        dp_arena_free_all(arena);
         if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
         return NULL;
     }
-    /* The build root owns the chunks. */
-    if (root->arena == arena) root->arena_owner = 1;
     return (LeptrisPlanResult)root;
 
 oom:
-    dp_cur_arena = saved_arena;
-    dp_arena_free_all(arena);
     free(stack);
     if (status) *status = LEPTRIS_ERROR_MEMORY;
     return NULL;
+}
+
+LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
+    LeptrisPlan plan, const leptris_plan_row_op* ops, size_t count,
+    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!plan || !ops || count == 0) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    /* #1670: every value/string/array minted below rides this
+     * arena; the wholesale free releases all chunks at once.
+     * #1677: window + arena owned HERE — restored/freed on every
+     * exit, including the NULL paths the body takes. */
+    struct dp_arena* arena = dp_arena_new(DP_ARENA_CHUNK);
+    if (!arena) {
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    struct dp_arena* saved_arena = dp_cur_arena;
+    dp_cur_arena = arena;
+    struct leptris_plan_result* r =
+        plan_result_build_windowed(plan, ops, count, status, arena);
+    dp_cur_arena = saved_arena;
+    if (!r) {
+        dp_arena_free_all(arena);
+        return NULL;
+    }
+    /* The build root owns the chunks. */
+    if (r->arena == arena) r->arena_owner = 1;
+    return (LeptrisPlanResult)r;
 }
 
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result) {
