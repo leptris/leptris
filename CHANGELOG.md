@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.348] - 2026-10-13
+
+<!-- Edit this section with the actual release notes. -->
+<!-- See https://keepachangelog.com for format guidance. -->
+
+### Changed
+
+- (describe changes here)
+
+
 ## [1.9.347] - 2026-10-13
 
 ### Changed
