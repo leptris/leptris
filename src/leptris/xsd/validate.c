@@ -40,6 +40,8 @@ extern const XsdElementDecl* xsd_find_element(
 extern XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                               const char* type_name, const char* uri);
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,                               const char* type_name);
+extern const XsdSimple* xsd_find_simple_ns_pub(
+    struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern const XsdSimple* xsd_find_simple_pub(
     struct leptris_xsd_schema* s, const char* name);
 extern const char* xsd_target_ns(struct leptris_xsd_schema* s);
@@ -130,15 +132,16 @@ static int simple_is_numeric(struct leptris_xsd_schema* s,
 
 static int text_valid(struct xsd_validator* v,
                       struct leptris_xsd_schema* s, const char* type,
-                      const char* lexical, const char* what,
-                      const char* name, LeptrisElement elem) {
+                      const char* lexical, const char* ns,
+                      const char* what, const char* name,
+                      LeptrisElement elem) {
     if (!type) return 1;
     int r;
     const XsdSimple* st = NULL;
     if (strncmp(type, "xs:", 3) == 0)
         r = xsd_builtin_valid(type, lexical);
     else {
-        st = xsd_find_simple_pub(s, type);
+        st = xsd_find_simple_ns_pub(s, type, ns);
         if (!st) return 1; /* unresolved: accept */
         r = xsd_simple_valid_chain(s, st, lexical);
     }
@@ -430,7 +433,8 @@ static void validate_attributes(struct xsd_validator* v,
                          "required but absent");
             continue;
         }
-        text_valid(v, s, a->type, val, "attribute", a->name, elem);
+        text_valid(v, s, a->type, val, ta->ns, "attribute",
+                   a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0)
             verrf_at(v, elem, "attribute", a->name,
                      "value does not match the fixed value");
@@ -547,8 +551,8 @@ static void validate_local(struct xsd_validator* v,
         if (ct->text_type) {
             const char* text = leptris_element_text(elem);
             if (text && *text)
-                text_valid(v, s, ct->text_type, text, "element",
-                           local, elem);
+                text_valid(v, s, ct->text_type, text, ct->ns,
+                           "element", local, elem);
         }
         return;
     }
@@ -558,7 +562,8 @@ static void validate_local(struct xsd_validator* v,
         xsd_find_simple_pub(s, type)) {
         const char* text = leptris_element_text(elem);
         if (text && *text)
-            text_valid(v, s, type, text, "element", local, elem);
+            text_valid(v, s, type, text, euri, "element", local,
+                       elem);
         return;
     }
     /* neither complex nor simple nor builtin: the schema is

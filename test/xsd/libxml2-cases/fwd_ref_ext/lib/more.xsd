@@ -1,0 +1,8 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:a" targetNamespace="urn:a">
+  <xs:complexType name="CT_Base">
+    <xs:sequence>
+      <xs:element name="fromBase"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

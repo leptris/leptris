@@ -38,6 +38,7 @@ typedef enum {
  * anonymous captures riding this type (freed with it). */
 typedef struct xsd_simple {
     char* name;
+    char* ns;    /* leptris-ruby#440: declaring schema's targetNamespace */
     char* base;
     XsdSimpleDeriv deriv;
     char* item_type;         /* LIST: builtin or local type name */
@@ -96,6 +97,9 @@ typedef struct xsd_cm {
     char* name;   /* CM_ELEMENT: child element local name */
     char* type;   /* CM_ELEMENT: the particle's type ref, if any */
     char* ns;     /* CM_ELEMENT: expected namespace (NULL = unqualified) */
+    char* ext_base; /* extension whose base was not yet captured at
+                     * capture time (forward ref) — folded by the
+                     * post-capture resolver (leptris-ruby#440 A) */
     char* any_ns; /* CM_ANY: the namespace attribute grammar */
     int process_skip; /* CM_ANY: processContents="skip" or "lax" */
     int min, max; /* occurrence bounds; max < 0 = unbounded */
