@@ -2648,3 +2648,63 @@ TEST(Plan1670, AttributesSnapshotOneCrossing) {
     leptris_plan_free(plan);
     leptris_document_free(doc);
 }
+
+/* leptris#1677: the arena window must survive EVERY return path.
+ * The multiple-roots early return in the build used to leave the
+ * thread-local stuck on the leaked arena — every later serialize
+ * in the SAME process then rode the dead arena and freed interior
+ * pointers (heap corruption, garbage/UTF-8 crashes at ~50%). One
+ * process, interleaved sequencing — the shape per-test isolation
+ * hides. */
+TEST(Plan1677, WindowSurvivesMultipleRootsBuildFailure) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<r><i>x</i></r>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "i";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "r";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    for (int round = 0; round < 50; round++) {
+        /* 1. the poisoner: a TWO-root op program — the build must
+         *    fail INVALID_ARG and restore the window. */
+        leptris_plan_row_op two_roots[] = {
+            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+            {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+            {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+            {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+        };
+        st = LEPTRIS_OK;
+        EXPECT_EQ(leptris_plan_result_build(plan, two_roots, 4, &st),
+                  nullptr);
+        EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+        /* 2. the victim: walk + serialize in the SAME process —
+         *    with the window stuck this rides the leaked arena and
+         *    corrupts (pre-fix: ASAN invalid-free + garbage). */
+        st = LEPTRIS_OK;
+        LeptrisPlanResult r =
+            leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+        ASSERT_NE(r, nullptr) << "round " << round;
+        char* out = leptris_plan_serialize(plan, r, &st);
+        ASSERT_NE(out, nullptr) << "round " << round;
+        EXPECT_STREQ(out, "<r><i>x</i></r>") << "round " << round;
+        leptris_free_string(out);
+        leptris_plan_result_free(r);
+    }
+
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
