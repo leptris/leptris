@@ -1369,7 +1369,6 @@ static struct leptris_xpath_result* xslt_fn_function_available(
             avail = xpath_function_registry_get(
                 (XPathFunctionRegistry*)ctx->function_registry, name) != NULL;
         } else {
-            extern XPathFunctionRegistry* xpath_function_registry_get_standard(void);
             avail = xpath_function_registry_get(
                 xpath_function_registry_get_standard(), name) != NULL;
         }
@@ -1562,7 +1561,6 @@ void xslt_register_bridge_static(XPathFunctionRegistry* r, void* exec) {
      * str:tokenize…). Their entries get the exec as user_data so
      * handlers needing context resolve it. */
     {
-        extern void leptris_exslt_register(XPathFunctionRegistry*);
         size_t before = r->count;
         leptris_exslt_register(r);
         for (size_t i = before; i < r->count; i++)

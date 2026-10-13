@@ -207,4 +207,8 @@ typedef struct xsd_type_attrs {
 
 /* ---- slice 4: attribute declarations + instance validation ------- */
 
+/* Datatype facet gate (datatypes.c): is `v` a valid lexical value
+ * for builtin type `type`? */
+int xsd_builtin_valid(const char* type, const char* v);
+
 #endif /* LEPTRIS_XSD_INTERNAL_H */

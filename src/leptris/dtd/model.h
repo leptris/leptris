@@ -166,8 +166,6 @@ LeptrisDTD* leptris_dtd_create(LeptrisMemoryPool* pool);
  * @param dtd DTD to free (NULL is safe)
  */
 void ttdtd_free(LeptrisDTD* dtd);
-/* Parser-side DTD container free (dtd/parser.c). */
-void leptris_dtd_free(LeptrisDTD* dtd);
 
 /* Entity management */
 

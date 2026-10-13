@@ -486,6 +486,11 @@ extern LEPTRIS_API int leptris_get_strict_mode(void);
 extern LEPTRIS_THREAD_LOCAL int g_leptris_strict_mode;
 extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
 
+/* Quasi-internal document constructor used by the HTML tree
+ * builder (content-derived arena span sizing, #1218). */
+struct leptris_document* leptris_document_create_with_arena_size(
+    size_t arena_size);
+
 /* Namespace structure - Matches ext/leptris/leptris.h _namespace */
 struct leptris_namespace {
     char* prefix;                /* Namespace prefix (NULL = default namespace) */

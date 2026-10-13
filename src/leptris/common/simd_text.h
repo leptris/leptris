@@ -90,6 +90,25 @@ extern unsigned char leptris_dp_class_table[256];
  * rely on leptris_text_scan_events to call it). */
 void leptris_dp_class_table_init(void);
 
+/* Per-arch kernels (simd_text_avx2.c / simd_text_neon.c): declared
+ * unconditionally, defined only under their platform gates. */
+int leptris_text_contains_avx2(const char* s, size_t len, char c);
+ptrdiff_t leptris_text_find3_avx2(const char* s, size_t len,
+                                  char a, char b, char c);
+size_t leptris_text_count_char_avx2(const char* s, size_t len, char c);
+int leptris_text_contains_neon(const char* s, size_t len, char c);
+ptrdiff_t leptris_text_find3_neon(const char* s, size_t len,
+                                  char a, char b, char c);
+size_t leptris_text_count_char_neon(const char* s, size_t len, char c);
+void leptris_text_count3_neon(const char* s, size_t len,
+                              char a, char b, char c,
+                              size_t* ca, size_t* cb, size_t* cc);
+void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
+                              char a, char b, char c,
+                              size_t* ca, size_t* cb, size_t* cc);
+size_t leptris_text_scan_events_neon(const char* buf, size_t len,
+                                     LeptrisScanEvent* events, size_t max);
+
 /* Append events for every structural byte to out (capacity max).
  * Returns the number of events written; returns max unchanged as
  * an overflow signal (caller must detect return == max and treat

@@ -2020,8 +2020,6 @@ static struct leptris_xpath_result* xq_fn_thunk(XPathContext* ctx,
                     v[2] = 0;
                 }
             } else {
-                extern char* xpath_seq_carrier_of(
-                    struct leptris_xpath_result*);
                 v = xpath_seq_carrier_of(r);
                 if (!v) {
                     /* Single marked member: keep the RAW content —

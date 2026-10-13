@@ -5526,8 +5526,6 @@ static LeptrisDocument html_parse_shared(
      * extension blocks in a different malloc region, pushing every
      * borrowed pointer out of the int32 compact range (measured
      * 776k overflow-table inserts on the 2.6 MB table shape). */
-    extern struct leptris_document* leptris_document_create_with_arena_size(
-        size_t arena_size);
     struct leptris_document* doc =
         (struct leptris_document*)leptris_document_create_with_arena_size(
             len * 10 + (1u << 18));

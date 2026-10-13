@@ -23,6 +23,29 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(
     struct leptris_document* doc);
 void leptris_xpath_free_custom_fns(struct leptris_document* doc);
 
+/* XSLT/Schematron bridge registrations — defined in the xslt/sch
+ * TUs; the declaration lives here (the registry is an xpath type)
+ * so no TU needs a block-scope extern (leptris#1681). */
+void xslt_register_bridge_static(XPathFunctionRegistry*, void*);
+void xslt_register_ufn_handlers(XPathFunctionRegistry*, void*);
+void xslt_register_bridge_handlers(XPathFunctionRegistry*, void*);
+void leptris_sch_register_key_bridge(XPathFunctionRegistry*, void*);
+
+/* EXSLT function pack (functions_exslt.c). */
+void leptris_exslt_register(XPathFunctionRegistry* registry);
+
+/* XPath 3.1 pack (functions_ext31.c) + helpers shared with the
+ * evaluator/xquery TUs. */
+void xpath_register_fn31(XPathFunctionRegistry* registry);
+char* ctor_member_markup(void* node);
+char* xpath_seq_carrier_of(struct leptris_xpath_result* vr);
+char* xpath_item_arg_string(struct leptris_xpath_result* vr);
+int xpath_array_members_of(const char* content, char*** out,
+                           size_t* out_n);
+void* xpath_map_builder_new(void);
+void xpath_map_builder_add(void* b, const char* k, const char* v);
+struct leptris_xpath_result* xpath_map_builder_finish(void* b);
+
 /* ============================================================================
  * Function Handler Type
  * ============================================================================ */

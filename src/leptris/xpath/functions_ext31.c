@@ -50,7 +50,6 @@ extern struct leptris_xpath_result* xpath_evaluate(XPathContext* context,
                                                    XPathASTNode* ast);
 extern char* get_node_text(void* node);
 /* evaluator_operators.c — element members keep their markup (#181). */
-extern char* ctor_member_markup(void* node);
 /* carrier-by-pointer decode (fold-left-009/016); defined below. */
 
 /* ---- sequence plumbing ---- */
@@ -135,7 +134,6 @@ static char* scalar_str(const struct leptris_xpath_result* r) {
 }
 
 static void free_items(char** items, size_t n);
-int xpath_array_members_of(const char* content, char*** out, size_t* out_n);
 
 /* Evaluate args[i] into a malloc'd array of malloc'd item strings.
  * Nodesets contribute one item per node; scalars one item.
@@ -4913,7 +4911,6 @@ static struct leptris_xpath_result* fn_json_to_xml(
 
 /* ---- registration (OCP: one call from the standard init) ---- */
 
-void xpath_register_fn31(XPathFunctionRegistry* registry);
 
 /* xml-to-json (08): walk the canonical fn: vocabulary back into
  * the shared map representation — members add under @key; nested
@@ -5659,11 +5656,6 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
         return NULL;
     XPathNodeSet* mns = vr->value.nodeset_value;
     void* b = NULL;
-    extern void* xpath_map_builder_new(void);
-    extern void xpath_map_builder_add(void* b, const char* k,
-                                      const char* v);
-    extern struct leptris_xpath_result* xpath_map_builder_finish(
-        void* b);
     b = xpath_map_builder_new();
     if (!b) return NULL;
     for (size_t j = 0; j < mns->count; j++) {

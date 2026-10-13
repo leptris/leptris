@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include "functions.h"
 #include "xpath_carrier.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
@@ -793,7 +794,6 @@ static int op_relational_cmp(XPathOperatorType op, double a, double b) {
  * `instance of` and XQuery typeswitch. */
 int xpath_result_matches_type(struct leptris_xpath_result* v,
                               const char* base) {
-    extern const char* leptris_element_get_name(LeptrisElement e);
     int is_string_ty = strcmp(base, "xs:string") == 0 ||
                        strcmp(base, "xs:anyURI") == 0 ||
                        strncmp(base, "xs:date", 7) == 0 ||
@@ -1817,8 +1817,6 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         r->value.nodeset_value = out;
         return r;
     }
-    extern int xpath_array_members_of(const char* content, char*** out,
-                                      size_t* out_n);
     if (op == XPATH_OP_DYN_CALL) {
         struct leptris_xpath_result* callee =
             evaluate_expr(ctx, ast->children[0]);
@@ -1901,8 +1899,6 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                      * sequences ride the member carrier) — the
                      * recursive declared folds pass $zero through
                      * here (fold-left/right-103/104). */
-                    extern char* xpath_item_arg_string(
-                        struct leptris_xpath_result*);
                     char* sv = ar ? xpath_item_arg_string(ar) : NULL;
                     if (ar) xpath_result_free(ar);
                     char** mem = NULL;
@@ -2261,8 +2257,6 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             LeptrisDocument pdoc =
                 blen ? leptris_parse_string(buf, blen, &pst) : NULL;
             if (pdoc && leptris_document_root(pdoc)) {
-                extern LeptrisNode* leptris_document_get_node(
-                    struct leptris_document* doc);
                 LeptrisNode* dn = leptris_document_get_node(pdoc);
                 if (dn) {
                     /* get_node's lazy creation registers the node

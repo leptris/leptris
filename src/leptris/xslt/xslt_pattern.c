@@ -217,7 +217,6 @@ static int steps_fast_match(const XsltPattern* p, LeptrisElement node,
         int undet = (r->type == XPATH_RESULT_NUMBER);
         int truth = 0;
         if (!undet) {
-            extern int xpath_to_boolean(struct leptris_xpath_result*);
             truth = xpath_to_boolean(r);
         }
         leptris_xpath_result_free(r);
