@@ -1652,6 +1652,100 @@ TEST(Plan1565, NestedContentRowEmitsInlineText) {
     leptris_document_free(doc);
 }
 
+/* leptris#1673: nested-capture + serialize_EXT (the #425 indent
+ * form) under the #1670 walk arenas — the binding's descriptor
+ * suite segfaults here on Ruby 3.3 linux/PGO builds. Regression
+ * pin at the C level. */
+TEST(Plan1673, NestedCaptureSerializeExtStaysAlive) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<w:fonts xmlns:w=\"urn:w\">"
+        "<w:font name=\"A\"><w:sz>12</w:sz></w:font>"
+        "<w:font name=\"B\"><w:sz>14</w:sz></w:font>"
+        "</w:fonts>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_child_plan font_row[1] = {};
+    font_row[0].wire_name = "font";
+    font_row[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    font_row[0].child_plan_index = 1;
+    font_row[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    font_row[0].ns_uri = "urn:w";
+    font_row[0].ns_prefix = "w";
+
+    leptris_element_plan font_plan[1] = {};
+    font_plan[0].element_name = "font";
+    font_plan[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    font_plan[0].ns_uri = "urn:w";
+    font_plan[0].ns_prefix = "w";
+    leptris_child_plan sz_row[1] = {};
+    sz_row[0].wire_name = "sz";
+    sz_row[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    sz_row[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    sz_row[0].ns_uri = "urn:w";
+    sz_row[0].ns_prefix = "w";
+    font_plan[0].child_count = 1;
+    font_plan[0].child_plans = sz_row;
+
+    leptris_child_plan fonts_row[1] = {};
+    fonts_row[0].wire_name = "font";
+    fonts_row[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    fonts_row[0].child_plan_index = 1;
+    fonts_row[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    fonts_row[0].ns_uri = "urn:w";
+    fonts_row[0].ns_prefix = "w";
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "fonts";
+    plans[0].child_count = 1;
+    plans[0].child_plans = fonts_row;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+    plans[1].element_name = "font";
+    plans[1].child_count = 1;
+    plans[1].child_plans = sz_row;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:w";
+    plans[1].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* compact form */
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+        "<w:fonts xmlns:w=\"urn:w\">"
+        "<w:font><w:sz>12</w:sz></w:font>"
+        "<w:font><w:sz>14</w:sz></w:font>"
+        "</w:fonts>");
+    leptris_free_string(out);
+
+    /* EXT form (the #425 crash path): indent > 0 */
+    leptris_plan_serialize_options opts = {};
+    opts.indent = 2;
+    char* pretty = leptris_plan_serialize_ext(plan, r, &opts,
+                                              sizeof(opts), &st);
+    ASSERT_NE(pretty, nullptr);
+    EXPECT_NE(strstr(pretty, "<w:sz>14</w:sz>"), nullptr);
+    EXPECT_NE(strstr(pretty, "<w:font>"), nullptr);
+    leptris_free_string(pretty);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 TEST(Plan1551, TextAndAttributeValuesAreEscaped) {
     LeptrisStatus st = LEPTRIS_OK;
     const char* xml =
