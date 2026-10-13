@@ -2,12 +2,25 @@
 
 ## [1.9.347] - 2026-10-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
-
 ### Changed
 
-- (describe changes here)
+- **Plan walk: arena-backed results + batch attribute face
+  (leptris#1670, PR #1671).** The ordered plan-lane walk
+  minted ~33K more allocations per parse than the
+  interpretive lane (the walk-side sibling of #408). The walk
+  and build lanes now mint every value struct, name/value
+  string, kids array, and attribute array from a root-owned
+  chunked bump arena (threaded via a TLS current-arena slot;
+  plan capture and serialization stay on malloc), and
+  leptris_plan_result_free releases the chunks wholesale.
+  Measured: 0 allocations inside the walk window on a
+  5000-row walk + 10K-attribute read pass (malloc_logger).
+  New ABI: leptris_plan_value_attribute_count sizes the
+  buffers and leptris_plan_value_attributes_snapshot returns
+  ALL attribute names + values in ONE crossing (two-phase
+  capacity/retry contract) - a node with N attributes costs
+  O(1) crossings instead of O(N) mints. Red-first spec;
+  full suite 1990/1991-total green; descriptor ASAN-clean.
 
 
 ## [1.9.346] - 2026-10-12
