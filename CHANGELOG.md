@@ -4,12 +4,19 @@
 
 ### Fixed
 
-- keep xpath_carrier_node_of resolvable under GCC LTO (xpath)
-- MSVC strndup shim and restore base_dir when the subfile is unreadable (xsd)
-- fold forward-ref extension bases post-capture, subfile dirs, ns-keyed attr types (xsd)
-
-
-### Fixed
+- **GCC LTO: the XPath carrier decode survives link
+  internalization (leptris#1681, PR #1683).** The binding's
+  ppc64le (qemu, gcc-12), s390x (qemu, alpine) and truffleruby
+  source-install legs failed the engine link with `undefined
+  reference to xpath_carrier_node_of`: with Release LTO on, GCC
+  internalizes a hidden out-of-line definition when the only
+  cross-TU references are block-scope externs. The decode is now
+  `static inline` in a shared internal header
+  (xpath/xpath_carrier.h) — the definition travels with every
+  referencing TU, so internalization cannot orphan the externs.
+  The interim definition-side attributes (9985185d) stay and
+  remain no-ops for clang. Verified under gcc-16 -flto: the full
+  build (shared + CLI + tests) links clean, test_xquery 72/72.
 
 - **Chain-compiled XSD: forward-referenced extension bases fold
   after the schema merges, and subfiles resolve their own
