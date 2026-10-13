@@ -173,6 +173,10 @@ int leptris_pool_is_arena_backed(const LeptrisMemoryPool* pool);
  */
 void leptris_pool_destroy(LeptrisMemoryPool* pool);
 
+/* Release this thread's recycler pages back to the global pool
+ * (leptris_thread_cleanup). */
+void leptris_pool_drain_recycler(void);
+
 /**
  * Get the base pointer for compact pointer decoding
  *

@@ -39,6 +39,9 @@
 /* StringView for zero-copy string handling */
 #include "common/string_view.h"
 
+/* LEPTRIS_THREAD_LOCAL for the parse-default TLS below. */
+#include "common/port.h"
+
 /* Forward declarations - actual typedefs in respective headers */
 struct leptris_element;  /* typedef in dom/element.h */
 struct leptris_compact_overflow_entry;  /* typedef in dom/compact.h */
@@ -476,6 +479,12 @@ extern void leptris_document_ensure_promoted(struct leptris_document* doc);
 
 /* Get current strict parsing mode */
 extern LEPTRIS_API int leptris_get_strict_mode(void);
+
+/* Thread-local parse defaults, defined in core.c: the strict-mode
+ * default read at document creation and the custom element-depth
+ * gate read by the parser. */
+extern LEPTRIS_THREAD_LOCAL int g_leptris_strict_mode;
+extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
 
 /* Namespace structure - Matches ext/leptris/leptris.h _namespace */
 struct leptris_namespace {

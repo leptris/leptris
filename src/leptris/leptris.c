@@ -26,16 +26,17 @@
  * is the sole parser. */
 #include "common/entities.h"
 #include "common/port.h"
+#include "leptris/flat/direct_parse.h"
+#include "leptris/memory/pool.h"
+#include "leptris/dom/root_doc_map.h"
+#include "leptris/dom/diag.h"
+#include "leptris/dom/compact.h"
+#include "leptris/xpath/functions.h"
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
-
-/* Thread-local globals defined in core.c — extern so leptris_parse can
- * read the strict-mode default at document creation time. */
-extern LEPTRIS_THREAD_LOCAL int g_leptris_strict_mode;
-extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
 
 
 /* ============================================================================
@@ -69,13 +70,6 @@ extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
 /* ============================================================================
  * Forward Declarations
  * ============================================================================ */
-
-/* Forward declarations for new parser/serializer */
-/* Legacy parser (parser_new.c) deleted — direct_parse + flat_parse
- * cover the full XML feature set. These extern declarations are
- * retained as a marker; the functions no longer exist. */
-extern void leptris_element_free(LeptrisElement elem);
-extern void leptris_doctype_free(LeptrisDoctypeNode* doctype);
 
 /* ============================================================================
  * Internal Parse Function Implementation
@@ -125,7 +119,6 @@ struct leptris_document* leptris_parse(const char* xml, size_t len) {
      * parser (parser_new.c) have been removed. One parser, like
      * pugixml. If direct_parse returns NULL, the input is genuinely
      * malformed. */
-    extern struct leptris_document* direct_parse(const char*, size_t);
     return direct_parse(xml, len);
 }
 
@@ -139,7 +132,6 @@ struct leptris_document* leptris_parse(const char* xml, size_t len) {
  * outlives the document.
  */
 static struct leptris_document* leptris_parse_inplace(char* xml, size_t len) {
-    extern struct leptris_document* direct_parse_inplace(char*, size_t);
     return direct_parse_inplace(xml, len);
 }
 
@@ -185,12 +177,6 @@ void leptris_parse_options_init(leptris_parse_options* opts) {
  * contiguous region. */
 struct leptris_document* leptris_document_create_with_arena_size(
     size_t arena_size) {
-    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
-        LeptrisArena*, int);
-    extern void* leptris_pool_alloc(LeptrisMemoryPool* pool, size_t size);
-    extern void* leptris_pool_get_base(LeptrisMemoryPool* pool);
-    extern LeptrisArena* leptris_arena_create(size_t);
-    extern void leptris_arena_destroy(LeptrisArena*);
 
     /* #1127: every document owns exactly one arena — created
      * documents take the same arena-backed pool the parser uses
@@ -210,7 +196,6 @@ struct leptris_document* leptris_document_create_with_arena_size(
     struct leptris_document* doc =
         (struct leptris_document*)leptris_pool_alloc(pool, sizeof(struct leptris_document));
     if (!doc) {
-        extern void leptris_pool_destroy(LeptrisMemoryPool* pool);
         leptris_pool_destroy(pool);
         return NULL;
     }
@@ -247,8 +232,6 @@ LEPTRIS_API LeptrisDocument leptris_document_create_html(void) {
  * destroy cycle per element. */
 struct leptris_document* leptris_document_create_on_arena(
         LeptrisArena* arena) {
-    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
-        LeptrisArena*, int);
     if (!arena) return NULL;
     LeptrisMemoryPool* pool =
         leptris_pool_create_arena_backed(arena, 0);
@@ -257,7 +240,6 @@ struct leptris_document* leptris_document_create_on_arena(
         (struct leptris_document*)leptris_pool_alloc(
             pool, sizeof(struct leptris_document));
     if (!doc) {
-        extern void leptris_pool_destroy(LeptrisMemoryPool*);
         leptris_pool_destroy(pool);
         return NULL;
     }
@@ -316,11 +298,7 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
      * loses the element (Nokogiri steal observability); the
      * installed root is a new handle, reported through
      * out_installed for bindings to wrap. */
-    extern struct leptris_document* leptris_element_get_document(
-        LeptrisElement elem);
     if (leptris_element_get_document(root) != doc) {
-        extern LeptrisElement leptris_element_copy(
-            LeptrisElement src, LeptrisDocument dest_doc);
         LeptrisElement copy = leptris_element_copy(root, doc);
         if (!copy) {
             leptris_set_error(LEPTRIS_ERROR_MEMORY,
@@ -361,8 +339,6 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
 
     doc->root = root;
     doc->new_dom_root = root;
-    extern void leptris_root_doc_register(LeptrisElement root,
-                                          struct leptris_document* doc);
     leptris_root_doc_register(root, doc);
     /* #612: keep the document-child chain coherent — the document
      * node's view must list the NEW root at the old root's slot
@@ -671,9 +647,6 @@ LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,
                                                     LeptrisParseFlags flags,
                                                     LeptrisStatus* status) {
-    extern struct leptris_document* direct_parse_flags(const char* xml,
-                                                      size_t len,
-                                                      unsigned parse_flags);
     LeptrisDocument doc = direct_parse_flags(xml, length, (unsigned)flags);
     if (status) {
         *status = doc ? LEPTRIS_OK : LEPTRIS_ERROR_PARSE;
@@ -937,8 +910,6 @@ LEPTRIS_API void leptris_document_adopt_child(LeptrisDocument parent,
 
 LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     {
-        extern void leptris_root_doc_memo_invalidate(
-            const struct leptris_document* doc);
         leptris_root_doc_memo_invalidate(doc);
     }
     if (!doc) return;
@@ -968,7 +939,6 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
 
     /* Parse diagnostics (#1200): the recover-channel list. */
     {
-        extern void leptris_diag_free(struct LeptrisDiag**, int*, int*);
         leptris_diag_free(&doc->parse_diags, &doc->parse_diag_count,
                           &doc->parse_diag_cap);
     }
@@ -988,7 +958,6 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
     }
 
     /* Free custom XPath function registrations (TODO 148 Phase 5). */
-    extern void leptris_xpath_free_custom_fns(struct leptris_document*);
     leptris_xpath_free_custom_fns(doc);
 
     /* Constructed-node anchors (#691): snapshot copies and
@@ -1066,12 +1035,10 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
      * down; a programmatic root set via leptris_document_set_root
      * was read after its block was freed — ASAN use-after-free.) */
     if (doc->ref_count == 0) {
-        extern void leptris_compact_cleanup_document(struct leptris_document* doc);
         leptris_compact_cleanup_document(doc);
     }
 
     if (doc->new_dom_root) {
-        extern void leptris_root_doc_unregister(LeptrisElement);
         leptris_root_doc_unregister((LeptrisElement)doc->new_dom_root);
     }
     /* #1038: fallback-path registrations (detached elements) die
@@ -1079,8 +1046,6 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
      * declaration must match root_doc_map.c's size_t return or the
      * amalgamated single-TU build fails (#1217). */
     {
-        extern size_t leptris_root_doc_unregister_doc(
-            struct leptris_document*);
         leptris_root_doc_unregister_doc(doc);
     }
 

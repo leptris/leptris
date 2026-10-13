@@ -12,6 +12,8 @@
 #include "../../include/leptris.h"
 #include "../leptris_internal.h"
 #include "common/port.h"
+#include "memory/arena.h"
+#include "dom/compact.h"
 
 /* Library version.  Single source of truth; CMakeLists.txt should
  * keep this in sync with project(leptris VERSION ...). */
@@ -71,10 +73,6 @@ LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch) 
 }
 
 LEPTRIS_API void leptris_thread_cleanup(void) {
-    extern void leptris_xpath_drain_thread_caches(void);
-    extern void leptris_root_doc_drain_thread_caches(void);
-    extern void leptris_pool_drain_recycler(void);
-    extern void leptris_arena_retain_drain(void);
     leptris_xpath_drain_thread_caches();
     leptris_root_doc_drain_thread_caches();
     leptris_pool_drain_recycler();
@@ -155,7 +153,6 @@ LEPTRIS_API int leptris_document_get_strict(LeptrisDocument doc) {
 }
 
 LEPTRIS_API void leptris_explicit_cleanup(void) {
-    extern void leptris_compact_cleanup(void);
     leptris_compact_cleanup();
 }
 

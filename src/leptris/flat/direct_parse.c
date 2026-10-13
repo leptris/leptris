@@ -37,11 +37,17 @@
 #include "../common/port.h"
 #include "../common/simd_text.h"
 #include "../dtd/model.h"
-
+#include "../dom/diag.h"
+#include "../memory/pool.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 
+/* File-scope externs: engine config TLS defined in core.c (declared
+ * in leptris_internal.h; this TU reads it without the umbrella) and
+ * a compact-mode hook. File scope, not block scope — block-scope
+ * externs break GCC LTO (leptris#1681). */
+extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
 extern LEPTRIS_THREAD_LOCAL int g_leptris_strict_mode;
 extern void leptris_compact_set_current_document(struct leptris_document* doc);
 int leptris_element_add_namespace(struct leptris_element* elem,
@@ -636,10 +642,6 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
         }
         if (dup) {
             if (p->doc) {
-                extern struct LeptrisDiag* leptris_diag_emit(
-                    struct LeptrisDiag**, int*, int*,
-                    LeptrisDiagKind, LeptrisNodeRef,
-                    const char*, ...);
                 char qname[130];
                 size_t ql = attr->name_view.length < 129
                                 ? attr->name_view.length : 129;
@@ -889,7 +891,6 @@ static LEPTRIS_NOINLINE int dp_parse_doctype(char** pos_io, char* end,
             subset_start, (size_t)(subset_end - subset_start),
             pool);
         if (parsed) {
-            extern void leptris_dtd_free(struct LeptrisDTD*);
             if (dtd) {
                 /* a second <!DOCTYPE: the first model wins (the
                  * duplicate-attribute keep-first rule); the
@@ -1597,7 +1598,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.pool = pool;
     p.doc = doc;
     {
-        extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
         size_t dcap = g_leptris_max_depth > 0
             ? (size_t)g_leptris_max_depth : (size_t)DP_MAX_DEPTH;
         if (!dp_stacks_init(&p, dcap)) goto fail;
@@ -1979,7 +1979,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 /* Respect custom depth limit (g_leptris_max_depth)
                  * when set by the caller; fall back to the
                  * compile-time default otherwise. */
-                extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
                 int max_depth = g_leptris_max_depth > 0
                     ? g_leptris_max_depth : DP_MAX_DEPTH;
                 if (p.depth >= max_depth) goto fail;
@@ -2097,11 +2096,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         while ((int)p.depth - 1 > anc) {
                             LeptrisElement ce =
                                 p.open_stack[p.depth - 1];
-                            extern struct LeptrisDiag*
-                                leptris_diag_emit(
-                                    struct LeptrisDiag**, int*, int*,
-                                    LeptrisDiagKind, LeptrisNodeRef,
-                                    const char*, ...);
                             leptris_diag_emit(
                                 &p.doc->parse_diags,
                                 &p.doc->parse_diag_count,
@@ -2121,10 +2115,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         }
                         goto close_matched;
                     }
-                    extern struct LeptrisDiag* leptris_diag_emit(
-                        struct LeptrisDiag**, int*, int*,
-                        LeptrisDiagKind, LeptrisNodeRef,
-                        const char*, ...);
                     leptris_diag_emit(
                         &p.doc->parse_diags,
                         &p.doc->parse_diag_count,
@@ -2347,10 +2337,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
          * implicitly; the tree commits. */
         while (p.depth > 0) {
             LeptrisElement ce = p.open_stack[p.depth - 1];
-            extern struct LeptrisDiag* leptris_diag_emit(
-                struct LeptrisDiag**, int*, int*,
-                LeptrisDiagKind, LeptrisNodeRef,
-                const char*, ...);
             leptris_diag_emit(
                 &p.doc->parse_diags, &p.doc->parse_diag_count,
                 &p.doc->parse_diag_cap,
@@ -2493,7 +2479,6 @@ fail:
      * RECOVER diag (e.g. duplicate attribute) can precede the
      * failure — nightly-fuzz leak-75e0ee81, 2304 bytes. */
     {
-        extern void leptris_diag_free(struct LeptrisDiag**, int*, int*);
         leptris_diag_free(&doc->parse_diags, &doc->parse_diag_count,
                           &doc->parse_diag_cap);
     }
@@ -2503,7 +2488,6 @@ fail:
      * assigns doc->dtd; without this free the model leaks
      * (nightly-fuzz leak-e3246602, 8 bytes). */
     {
-        extern void leptris_dtd_free(struct LeptrisDTD*);
         if (p.dtd) leptris_dtd_free(p.dtd);
     }
     free(doc->line_breaks);
@@ -2746,7 +2730,6 @@ static int il_scan_body(char* s, size_t len, int drop_ws, IlCtx* c,
         c->last_child[c->depth - 1] = ri;
 
         if (!r.self_closing) {
-            extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
             int max_depth = g_leptris_max_depth > 0
                 ? g_leptris_max_depth : DP_MAX_DEPTH;
             if (c->depth >= max_depth) return 0;
@@ -2856,7 +2839,6 @@ static int il_scan_body(char* s, size_t len, int drop_ws, IlCtx* c,
 int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
                     uint32_t* root_out, size_t* trail_off,
                     size_t* trail_len) {
-    extern LEPTRIS_THREAD_LOCAL int g_leptris_max_depth;
     size_t dcap = g_leptris_max_depth > 0
         ? (size_t)g_leptris_max_depth : (size_t)LEPTRIS_IL_MAX_DEPTH;
     if (!il_stacks_init(c, dcap)) return 0;
@@ -2872,10 +2854,6 @@ int leptris_il_scan(char* s, size_t len, int drop_ws, IlCtx* c,
 static struct leptris_document* dp_il_build(
     char* scratch, size_t len, IlCtx* c, uint32_t root_rec,
     size_t trail_off, size_t trail_len, int drop_ws) {
-    extern LeptrisArena* leptris_arena_create(size_t);
-    extern LeptrisMemoryPool* leptris_pool_create_arena_backed(
-        LeptrisArena*, int);
-    extern void leptris_arena_destroy(LeptrisArena*);
 
     /* scratch (with its NUL runway) is caller-built and becomes the
      * document's parse_scratch; pristine is the immutable copy. */
@@ -3113,10 +3091,6 @@ static struct leptris_document* dp_il_build(
                     }
                     if (dup) {
                         if (doc) {
-                            extern struct LeptrisDiag* leptris_diag_emit(
-                                struct LeptrisDiag**, int*, int*,
-                                LeptrisDiagKind, LeptrisNodeRef,
-                                const char*, ...);
                             char qn[130];
                             size_t ql = a->name_len < 129
                                 ? a->name_len : 129;

@@ -17,6 +17,12 @@
 
 typedef struct xpath_function_registry XPathFunctionRegistry;
 
+/* Document-scoped custom function registry (TODO 148): built lazily
+ * per evaluation, freed with the document. */
+XPathFunctionRegistry* leptris_xpath_build_custom_registry(
+    struct leptris_document* doc);
+void leptris_xpath_free_custom_fns(struct leptris_document* doc);
+
 /* ============================================================================
  * Function Handler Type
  * ============================================================================ */
