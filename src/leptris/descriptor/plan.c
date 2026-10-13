@@ -680,8 +680,16 @@ static int dp_ns_binds(LeptrisElement elem, uint8_t ns_form,
 /* #1551: "prefix:local" join for emission spellings. */
 static char* dp_join_colon(const char* pfx, const char* local) {
     size_t pl = strlen(pfx), ll = strlen(local);
-    char* j = (char*)malloc(pl + 1 + ll + 1);
-    if (!j) return NULL;
+    char* j;
+    if (dp_cur_arena) {
+        /* #1670: walk-window joins ride the arena (LSan on Linux CI
+         * catches the malloc escape). */
+        j = (char*)dp_arena_alloc(&dp_cur_arena, pl + 1 + ll + 1);
+        if (!j) return NULL;
+    } else {
+        j = (char*)malloc(pl + 1 + ll + 1);
+        if (!j) return NULL;
+    }
     memcpy(j, pfx, pl);
     j[pl] = ':';
     memcpy(j + pl + 1, local, ll + 1);
@@ -872,7 +880,10 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
     unsigned char* claimed = NULL;
     /* #1552: bound[] marks every element a named row actually
      * bound (claimed[] is the #1272 predicate-partition subset).
-     * Wildcard rows consult it after all named rows ran. */
+     * Wildcard rows consult it after all named rows ran.
+     * #1670 note: this per-element scratch stays malloc/free (its
+     * frees interleave with tree hand-offs) — only the RESULT TREE
+     * rides the walk arena. */
     unsigned char* bound = NULL;
     if (element_count > 0 && (plan->child_count > 0)) {
         claimed = (unsigned char*)calloc(
