@@ -15,6 +15,9 @@ extern "C" {
 
 void leptris_root_doc_register(LeptrisElement root, struct leptris_document* doc);
 void leptris_root_doc_unregister(LeptrisElement root);
+/* #1038: unregister every element registered for this document
+ * (fallback-path registrations). Returns the number removed. */
+size_t leptris_root_doc_unregister_doc(struct leptris_document* doc);
 struct leptris_document* leptris_root_doc_lookup(LeptrisElement root);
 void leptris_root_doc_memo_invalidate(const struct leptris_document* doc);
 /* Test hook (#1242): the memo's current root, or NULL. */

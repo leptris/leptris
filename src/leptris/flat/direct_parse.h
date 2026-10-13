@@ -38,4 +38,8 @@ struct leptris_document* direct_parse(const char* xml, size_t len);
  */
 struct leptris_document* direct_parse_inplace(char* buf, size_t len);
 
+/* Flags variant — carries LEPTRIS_PARSE_* flags (recover mode #1660). */
+struct leptris_document* direct_parse_flags(const char* xml, size_t len,
+                                            unsigned parse_flags);
+
 #endif /* LEPTRIS_FLAT_DIRECT_PARSE_H */
