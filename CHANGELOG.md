@@ -2,12 +2,29 @@
 
 ## [1.9.351] - 2026-10-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
-
 ### Changed
 
-- (describe changes here)
+- **Block-scope externs removed engine-wide (leptris#1681,
+  PR #1684).** #1683 fixed the one symbol GCC LTO internalized
+  out from under a function-scope reference; this removes the
+  class — the count of block-scope extern declarations is now
+  zero across all 18 TUs that carried them (84 sites). Every
+  cross-TU symbol resolves through a shared internal header:
+  most declarations already existed and the TUs just didn't
+  include them; new homes were added where none existed (the
+  XSLT/Schematron bridge registrations, EXSLT pack, fn31 pack
+  and shared helpers in xpath/functions.h; per-arch simd
+  kernels in common/simd_text.h; xsd_builtin_valid in
+  xsd/xsd_internal.h; the HTML tree-builder document
+  constructor and the parse-default TLS in leptris_internal.h;
+  direct_parse_flags in flat/direct_parse.h;
+  leptris_root_doc_unregister_doc in dom/root_doc_map.h;
+  leptris_pool_drain_recycler in memory/pool.h). No ABI
+  change: symbols keep their definitions and visibility; only
+  the declaration home moved. Verified under gcc-16 -flto
+  (the configuration where the class manifests): shared +
+  CLI + tests link with zero errors; full suite 1996/1996 on
+  clang Release.
 
 
 ## [1.9.350] - 2026-10-13
