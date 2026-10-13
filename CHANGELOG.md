@@ -2,12 +2,22 @@
 
 ## [1.9.348] - 2026-10-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **Plan walk: zero the arena-routed attribute arrays
+  (leptris#1673, PR #1675).** The #1670 walk arena returns
+  non-zeroed memory, but the walk's fixed-capacity attribute
+  arrays relied on calloc's NULL-fill: unbound attribute rows
+  left their slots unwritten, and the serialize lane's
+  declaration walk then read malloc-fill garbage through
+  attr_ns_prefixes - the segfault the 1.9.347 ride's
+  nested-capture specs hit (segv at 0x0 on Ruby 3.3/Linux/PGO
+  legs; allocation layout decided what landed in the
+  unwritten slots). The four arrays memset to zero at
+  allocation, restoring the calloc contract; dp_arena_alloc
+  stays raw by design. ASAN repro faulted pre-fix and passes
+  clean post-fix. Red-first spec pins both serialize faces on
+  the binding's nested-capture shape. Full suite 1992/1992.
 
 
 ## [1.9.347] - 2026-10-13
