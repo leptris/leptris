@@ -1,4 +1,14 @@
 ## [Unreleased]
+
+## [1.9.350] - 2026-10-13
+
+### Fixed
+
+- keep xpath_carrier_node_of resolvable under GCC LTO (xpath)
+- MSVC strndup shim and restore base_dir when the subfile is unreadable (xsd)
+- fold forward-ref extension bases post-capture, subfile dirs, ns-keyed attr types (xsd)
+
+
 ### Fixed
 
 - **Chain-compiled XSD: forward-referenced extension bases fold
