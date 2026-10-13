@@ -37,6 +37,7 @@
 #include "../common/port.h"
 #include "../common/simd_text.h"
 #include "../dtd/model.h"
+#include "../include/leptris/dtd.h"  /* leptris_dtd_free is LEPTRIS_API */
 #include "../dom/diag.h"
 #include "../memory/pool.h"
 #include <string.h>

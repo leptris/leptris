@@ -1137,7 +1137,6 @@ static char* value_of_string(XsltExec* ex,
         XPathNodeSet* ns = r->value.nodeset_value;
         size_t total = 1;   /* NUL; + separators below */
         for (size_t i = 0; i < ns->count; i++) {
-            extern char* get_node_text(void* n);
             char* t = get_node_text(ns->nodes[i]);
             if (t) { total += strlen(t); free(t); }
             if (i + 1 < ns->count) total += 1;   /* " " */
@@ -1208,7 +1207,6 @@ static int op_sequence(XsltExec* ex, const XsltInstr* in,
             (void)0;
         } else {
             /* Atomic/textual item: space-joined text. */
-            extern char* get_node_text(void* n);
             char* piece = get_node_text(it);
             if (i && piece && piece[0]) out_append_text(ex, ex->pending_parent, " ");
             if (piece) {
@@ -1255,7 +1253,6 @@ static int op_value_of(XsltExec* ex, const XsltInstr* in,
                     node);
             return 0;
         }
-        extern char* get_node_text(void* n);
         sv = get_node_text(node);
     } else if (in->select_attr_name) {
         /* #682: one unprefixed attribute step — same string as the
@@ -1881,7 +1878,6 @@ static void xslt_sort_items(XsltExec* ex, const XsltInstr* in,
                 /* Synthetic sequence items carry no deep value —
                  * their text IS the sort key (perform-sort on
                  * atomic sequences). */
-                extern char* get_node_text(void* n);
                 kp = get_node_text(items[i]);
                 if (!kp) kp = string_value_deep(items[i]);
             }
@@ -3252,8 +3248,6 @@ static struct leptris_xpath_result* tunnel_result_copy(
                         if (one) {
                             xpath_nodeset_add(one, n);
                             /* synth via evaluator export */
-                            extern XPathTextNode* xpath_synth_text(
-                                const char*, size_t);
                             XPathTextNode* tn =
                                 xpath_synth_text(t ? t : "", tl);
                             free(t);

@@ -234,9 +234,7 @@ XPathFunctionDef* xpath_function_registry_get(
 /* Get text content from typed node (handles elements and attributes)
  * This is declared in evaluator_internal.h and implemented in evaluator_types.c
  */
-extern char* get_node_text(void* node);
 /* evaluator_operators.c — element markup discipline (#181). */
-extern char* ctor_member_markup(void* node);
 extern char* xpath_number_to_string(double number);
 extern char* xpath_int_to_string(long long v);
 
@@ -1127,7 +1125,6 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                      * strings (real elements collect as markup in
                      * the element branch below); the markup compare
                      * reparses into de_node_equal. */
-                    extern char* ctor_member_markup(void* node);
                     void* cn = xpath_carrier_node_of(c);
                     if (cn) {
                         out[i].kind = 2;
@@ -3603,7 +3600,6 @@ void xpath_function_registry_init_standard(XPathFunctionRegistry* registry) {
 
     /* XPath 2.0/3.1 extension families (TODO.xslt-full 01/02/03):
      * sequences, math:, the regex trio. */
-    extern void xpath_register_fn31(XPathFunctionRegistry*);
     xpath_register_fn31(registry);
     xpath_function_registry_register(registry, "local-name", xpath_func_local_name, 0, 1);
     xpath_function_registry_register(registry, "namespace-uri", xpath_func_namespace_uri, 0, 1);

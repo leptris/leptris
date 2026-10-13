@@ -126,7 +126,6 @@ void xpath_context_init(XPathContext* context,
     context->input = NULL;
     context->input_len = 0;
 
-    extern XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_document*);
     /* The borrow flag MUST be established on every init: the
      * context is stack storage and cleanup's registry-free is
      * gated on this flag — stale stack bytes read as borrowed=1
@@ -180,7 +179,6 @@ void xpath_context_cleanup(XPathContext* context) {
      * doc's custom XPath functions (TODO 148 Phase 5) is freed
      * here; a registry BORROWED from the document cache stays with
      * the document. */
-    extern XPathFunctionRegistry* xpath_function_registry_get_standard(void);
     if (context->function_registry && !context->registry_borrowed &&
         context->function_registry != xpath_function_registry_get_standard()) {
         xpath_function_registry_free((XPathFunctionRegistry*)context->function_registry);

@@ -12,6 +12,7 @@
 #include "../../include/leptris.h"
 #include "../common/port.h" /* strndup shim for MSVC's CRT */
 #include "xsd_internal.h"
+#include "xsd_internal.h"
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
 
@@ -1817,7 +1818,6 @@ static char* xsd_capture_any_attr_ns(LeptrisElement container) {
 
 LEPTRIS_API int leptris_xsd_builtin_valid(const char* builtin,
                                           const char* lexical) {
-    extern int xsd_builtin_valid(const char* type, const char* v);
     return xsd_builtin_valid(builtin, lexical);
 }
 

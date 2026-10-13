@@ -97,9 +97,6 @@ static void dispatch_init(void) {
     leptris_cpu_level lvl = leptris_cpu_detect();
 #if defined(LEPTRIS_ARCH_X86) && defined(LEPTRIS_HAS_AVX2_BUILD)
     if (lvl >= LEPTRIS_CPU_AVX2) {
-        extern int leptris_text_contains_avx2(const char*, size_t, char);
-        extern ptrdiff_t leptris_text_find3_avx2(const char*, size_t, char, char, char);
-        extern size_t leptris_text_count_char_avx2(const char*, size_t, char);
         g_contains_fn = leptris_text_contains_avx2;
         g_find3_fn = leptris_text_find3_avx2;
         g_count_fn = leptris_text_count_char_avx2;
@@ -108,13 +105,6 @@ static void dispatch_init(void) {
 #endif
 #if defined(LEPTRIS_ARCH_ARM) && defined(__aarch64__)
     if (lvl >= LEPTRIS_CPU_NEON) {
-        extern int leptris_text_contains_neon(const char*, size_t, char);
-        extern ptrdiff_t leptris_text_find3_neon(const char*, size_t, char, char, char);
-        extern size_t leptris_text_count_char_neon(const char*, size_t, char);
-        extern void leptris_text_count3_neon(const char*, size_t, char, char, char,
-                                            size_t*, size_t*, size_t*);
-        extern void leptris_copy_count3_neon(char*, const char*, size_t, char, char, char,
-                                            size_t*, size_t*, size_t*);
         g_contains_fn = leptris_text_contains_neon;
         g_find3_fn = leptris_text_find3_neon;
         g_count_fn = leptris_text_count_char_neon;
@@ -227,8 +217,6 @@ size_t leptris_text_scan_events(const char* buf, size_t len,
         g_scan_fn = scan_events_scalar;
 #if defined(LEPTRIS_ARCH_ARM) && defined(__aarch64__)
         if (leptris_cpu_detect() >= LEPTRIS_CPU_NEON) {
-            extern size_t leptris_text_scan_events_neon(const char*, size_t,
-                                                       LeptrisScanEvent*, size_t);
             g_scan_fn = leptris_text_scan_events_neon;
         }
 #endif

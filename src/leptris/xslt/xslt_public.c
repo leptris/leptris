@@ -6,6 +6,7 @@
  * document. Output honors xsl:output (method xml|text, indent,
  * omit-xml-declaration, encoding declaration). */
 #include "xslt_internal.h"
+#include "../dom/root_doc_map.h"
 #include "../dom/text.h"
 #include "../dom/pi.h"
 #include "../serialize/serialize.h"
@@ -179,8 +180,6 @@ static LeptrisDocument apply_doc_ex(LeptrisXslt xslt,
             n = nx;
         }
         if (stamped) {
-            extern void leptris_root_doc_register(
-                LeptrisElement, struct leptris_document*);
             leptris_root_doc_register(pd->root, pd);
         }
         xslt_exec_free(ex);

@@ -508,7 +508,6 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
                  * children before the root element's subtree. Shared
                  * walker lives in evaluator_types.c. */
                 if ((int)XPATH_NODE_TYPE(first) == LEPTRIS_NODE_TYPE_DOCUMENT) {
-                    extern char* get_node_text(void* node);
                     char* dsv = get_node_text(first);
                     return dsv ? dsv : leptris_strdup("");
                 }
@@ -802,8 +801,6 @@ static struct leptris_xpath_result* custom_xpath_thunk(
         (struct leptris_custom_fn_state*)context->current_fn_user_data;
     if (!state || !state->fn) return NULL;
 
-    extern struct leptris_xpath_result* evaluate_expr(XPathContext*, XPathASTNode*);
-
     const char** str_args = NULL;
     char** owned = NULL;
     size_t owned_count = 0;
@@ -943,12 +940,8 @@ static const FnRegistryTemplate* fn_registry_template(int with_exslt) {
             }
             if (r->functions) {
                 if (with_exslt) {
-                    extern void leptris_exslt_register(
-                        XPathFunctionRegistry*);
                     leptris_exslt_register(r);
                 }
-                extern void xslt_register_bridge_static(
-                    XPathFunctionRegistry*, void*);
                 xslt_register_bridge_static(r, FN_UD_SENTINEL);
                 /* register()'s fresh-append path leaves user_data
                  * unwritten (realloc memory) — normalize everything
@@ -1015,8 +1008,6 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
             reg->count = reg->capacity = t->count;
             for (size_t i = 0; i < t->n_ud_slots; i++)
                 reg->functions[t->ud_slots[i]].user_data = doc->xslt_state;
-            extern void xslt_register_ufn_handlers(
-                XPathFunctionRegistry*, void*);
             xslt_register_ufn_handlers(reg, doc->xslt_state);
             doc->cached_fn_registry = reg;
             return reg;
@@ -1053,7 +1044,6 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
     /* EXSLT pack (TODO.concurrency/06): native handlers registered
      * alongside (and after) the standard library. */
     if (doc->exslt_enabled) {
-        extern void leptris_exslt_register(XPathFunctionRegistry*);
         leptris_exslt_register(reg);
     }
 
@@ -1066,8 +1056,6 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
      * stays with the eval context that built it (init → cleanup),
      * so no lifecycle juggling here. */
     if (doc->xslt_state) {
-        extern void xslt_register_bridge_handlers(XPathFunctionRegistry*,
-                                                  void*);
         xslt_register_bridge_handlers(reg, doc->xslt_state);
     }
 
@@ -1076,8 +1064,6 @@ XPathFunctionRegistry* leptris_xpath_build_custom_registry(struct leptris_docume
      * xsl:key declarations. Same save/restore + invalidation
      * discipline as the XSLT bridge above. */
     if (doc->sch_state) {
-        extern void leptris_sch_register_key_bridge(
-            XPathFunctionRegistry*, void*);
         leptris_sch_register_key_bridge(reg, doc->sch_state);
     }
 

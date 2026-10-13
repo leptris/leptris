@@ -15,6 +15,7 @@
 
 #include "../../include/leptris.h"
 #include "xsd_internal.h"
+#include "../dom/element.h"
 
 extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
@@ -638,8 +639,6 @@ static void validate_ics(struct xsd_validator* v,
     (void)v;
     const XsdElementIcs* ics = xsd_find_element_ics(s, elem_name);
     if (!ics) return;
-    extern struct leptris_document* leptris_element_get_document(
-        LeptrisElement elem);
     LeptrisDocument doc = leptris_element_get_document(elem);
     for (XsdIc* ic = ics->constraints; ic; ic = ic->next) {
         int is_ref = ic->kind == 2;
