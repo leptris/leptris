@@ -1,0 +1,23 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:a" targetNamespace="urn:a">
+  <xs:import namespace="urn:a" schemaLocation="more.xsd"/>
+  <!-- forward reference: CT_Outer extends CT_Inner, defined after -->
+  <xs:complexType name="CT_Outer">
+    <xs:complexContent>
+      <xs:extension base="CT_Inner">
+        <xs:sequence>
+          <xs:element name="ownOuter"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CT_Inner">
+    <xs:complexContent>
+      <xs:extension base="CT_Base">
+        <xs:sequence>
+          <xs:element name="fromInner"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>

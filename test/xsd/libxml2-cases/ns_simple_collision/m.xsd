@@ -1,0 +1,14 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:m" targetNamespace="urn:m">
+  <xs:simpleType name="ST_Jc">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="a"/>
+      <xs:enumeration value="b"/>
+      <xs:enumeration value="centerGroup"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="CT_MJc">
+    <xs:attribute name="val" type="ST_Jc"/>
+  </xs:complexType>
+  <xs:element name="mDef" type="CT_MJc"/>
+</xs:schema>

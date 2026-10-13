@@ -1,0 +1,10 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:a" targetNamespace="urn:a">
+  <xs:import namespace="urn:wrap" schemaLocation="sub/wrap.xsd"/>
+  <xs:complexType name="CT_App">
+    <xs:sequence>
+      <xs:element name="outer" type="CT_Outer"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="app" type="CT_App"/>
+</xs:schema>

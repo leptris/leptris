@@ -221,6 +221,76 @@ TEST(XsdCompile, QualifiedAttrFromImportedNamespaceValidates) {
     leptris_xsd_free(s);
 }
 
+// leptris-ruby#440 shape A: the whole chain-compile face — a
+// subfile's own schemaLocations resolve against ITS directory
+// (sub/wrap.xsd reaching ../lib/base.xsd, and base.xsd's same-dir
+// more.xsd), and extension bases defined AFTER their derived types
+// (forward references) fold after the whole schema merges. The
+// visited memo (#1644) removed the accidental double capture that
+// masked both, truncating every model through a forward-ref chain
+// (tcPr tcW shape).
+TEST(XsdCompile, ForwardRefExtensionFoldsAndSubDirsResolve) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/fwd_ref_ext/root.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    // Model = base chain fromBase <- fromInner <- ownOuter: base
+    // content first, derived content after, at every hop.
+    const char doc[] =
+        "<a:app xmlns:a=\"urn:a\"><outer><fromBase/>"
+        "<fromInner/><ownOuter/></outer></a:app>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    // Strictness survives: an undeclared child still fails.
+    const char bad[] =
+        "<a:app xmlns:a=\"urn:a\"><outer><fromBase/>"
+        "<bogus/></outer></a:app>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+// leptris-ruby#440 shape B: attribute type names resolve in the
+// DECLARING unit's namespace first — imported namespaces carry
+// same-name simpleTypes with different value spaces (the wml
+// ST_Jc / shared-math ST_Jc shape: only the math variant lists
+// centerGroup).
+TEST(XsdValidate, AttrTypeResolvesInDeclaringNamespace) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/ns_simple_collision/w.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    // m's ST_Jc lists centerGroup — the (urn:m, ST_Jc) entry must
+    // serve m's attribute row, not w's same-name type.
+    const char mdoc[] =
+        "<m:mDef xmlns:m=\"urn:m\" m:val=\"centerGroup\"/>";
+    LeptrisDocument m = leptris_parse_string(mdoc, strlen(mdoc), &st);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, m), 1);
+    leptris_document_free(m);
+    // w's ST_Jc does NOT list centerGroup — ns-keying must not
+    // become a free-for-all.
+    const char wbad[] =
+        "<w:wDef xmlns:w=\"urn:w\" w:val=\"centerGroup\"/>";
+    LeptrisDocument wb =
+        leptris_parse_string(wbad, strlen(wbad), &st);
+    ASSERT_NE(wb, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, wb), 0);
+    leptris_document_free(wb);
+    // ...while w's own value space stays valid.
+    const char wok[] =
+        "<w:wDef xmlns:w=\"urn:w\" w:val=\"a\"/>";
+    LeptrisDocument wo = leptris_parse_string(wok, strlen(wok), &st);
+    ASSERT_NE(wo, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, wo), 1);
+    leptris_document_free(wo);
+    leptris_xsd_free(s);
+}
+
 // leptris-ruby#434: the length family counts OCTETS for binary
 // bases (XML Schema Part 2: hexBinary/base64Binary length is in
 // bytes) — the wml ST_LongHexNumber shape (hexBinary + length 4)

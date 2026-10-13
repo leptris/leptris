@@ -79,9 +79,13 @@ XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                            const char* type_name, const char* uri);
 extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
                                const char* type_name);
+extern const XsdTypeAttrs* xsd_find_type_attrs_ns(
+    struct leptris_xsd_schema* s, const char* type_name,
+    const char* uri);
 extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 static XsdCm* xsd_cm_copy_list(const XsdCm* head);
+static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s);
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root);
 static char* xsd_read_file(const char* path, size_t* out_len);
@@ -159,6 +163,7 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->name);
         free(cm->type);
         free(cm->ns);
+        free(cm->ext_base);
         free(cm->any_ns);
         free(cm->text_type);
         free(cm);
@@ -199,6 +204,7 @@ static int xsd_capture_inline(struct leptris_xsd_schema* s,
             if (!captured) return 0;
             free(captured->name);
             captured->name = xsd_strdup(synth);
+            if (s->target_ns) captured->ns = xsd_strdup(s->target_ns);
             captured->next = s->simple_types;
             s->simple_types = captured;
             return 1;
@@ -453,6 +459,31 @@ static const XsdSimple* xsd_find_simple(struct leptris_xsd_schema* s,
     return NULL;
 }
 
+/* leptris-ruby#440 shape B: prefer the (ns, name) exact match —
+ * imported namespaces carry same-name simpleTypes whose value
+ * spaces differ (shared-math ST_Jc has centerGroup, wml ST_Jc
+ * does not). A resolving namespace is in hand: a DIFFERENT
+ * namespace's same-name type must not win; but prefix-stripped
+ * type names legitimately cross namespaces (CT_TwipsMeasure in
+ * math types its val with sharedTypes' ST_TwipsMeasure), so the
+ * name-only match remains the last resort. */
+const XsdSimple* xsd_find_simple_ns_pub(
+    struct leptris_xsd_schema* s, const char* name, const char* uri) {
+    if (!s || !name) return NULL;
+    if (uri && uri[0]) {
+        for (XsdSimple* t = s->simple_types; t; t = t->next)
+            if (t->ns && strcmp(t->name, name) == 0 &&
+                strcmp(t->ns, uri) == 0)
+                return t;
+        for (XsdSimple* t = s->simple_types; t; t = t->next)
+            if (!t->ns && strcmp(t->name, name) == 0)
+                return t;
+        /* cross-namespace reference: any spelling of the name */
+        return xsd_find_simple(s, name);
+    }
+    return xsd_find_simple(s, name);
+}
+
 extern int xsd_builtin_valid(const char* type, const char* v);
 extern int rng_regex_matches(const char* pat, const char* text);
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
@@ -695,6 +726,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     }
 
     xsd_capture_root(s, root);
+    xsd_resolve_extension_bases(s);
 
     leptris_document_free(doc);
     return s;
@@ -716,6 +748,78 @@ fail:
  * ".." segments (and duplicate separators) so the same file reached
  * through different relative spellings yields one dedup key.
  * Purely lexical: no filesystem access, portable. */
+/* leptris-ruby#440 shape A: extensions whose base was not yet
+ * captured fold here, after every unit has merged into the tables
+ * — the correct place in XSD terms, since type references resolve
+ * against the WHOLE schema, not the preceding slice of it.
+ * Iterates to a fixpoint so extension chains resolve regardless of
+ * file order; unresolved leftovers keep their deferral marker. */
+static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
+    int progressed = 1;
+    while (progressed) {
+        progressed = 0;
+        for (XsdCm* c = s->complex_types; c; c = c->next) {
+            if (!c->ext_base) continue;
+            XsdCm* base = xsd_find_complex_ns(s, c->ext_base, c->ns);
+            if (!base || base->ext_base) continue;
+            XsdCm* copied = xsd_cm_copy_list(base->first_child);
+            if (copied) {
+                XsdCm* tail = copied;
+                while (tail->next) tail = tail->next;
+                tail->next = c->first_child;
+                c->first_child = copied;
+                /* capture wraps a multi-particle splice under one
+                 * sequence (the NFA consumes ONE root particle) —
+                 * the deferred fold owes the same normalization */
+                if (c->first_child->next) {
+                    XsdCm* seq = xsd_cm_new(XSD_CM_SEQ);
+                    if (seq) {
+                        seq->first_child = c->first_child;
+                        c->first_child = seq;
+                    }
+                }
+            }
+            const XsdTypeAttrs* bt =
+                xsd_find_type_attrs_ns(s, c->ext_base, c->ns);
+            if (bt) {
+                XsdTypeAttrs* mine = NULL;
+                for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
+                    if (strcmp(t->type_name, c->name) == 0 &&
+                        ((!c->ns && !t->ns) ||
+                         (c->ns && t->ns &&
+                          strcmp(t->ns, c->ns) == 0))) {
+                        mine = t;
+                        break;
+                    }
+                XsdAttrDecl* prepend =
+                    xsd_copy_attr_rows(bt->attrs);
+                if (mine) {
+                    XsdAttrDecl* tail_a = prepend;
+                    while (tail_a && tail_a->next)
+                        tail_a = tail_a->next;
+                    if (tail_a) {
+                        tail_a->next = mine->attrs;
+                        mine->attrs = prepend;
+                    }
+                } else if (prepend) {
+                    XsdTypeAttrs* row =
+                        (XsdTypeAttrs*)calloc(1, sizeof(*row));
+                    if (row) {
+                        row->type_name = xsd_strdup(c->name);
+                        if (c->ns) row->ns = xsd_strdup(c->ns);
+                        row->attrs = prepend;
+                        row->next = s->type_attrs;
+                        s->type_attrs = row;
+                    }
+                }
+            }
+            free(c->ext_base);
+            c->ext_base = NULL;
+            progressed = 1;
+        }
+    }
+}
+
 static void xsd_path_normalize(const char* in, char* out, size_t outsz) {
     struct {
         const char* p;
@@ -807,6 +911,20 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 xsd_path_normalize(path, canon, sizeof(canon));
                 if (xsd_visited_has(s, canon)) continue;
                 xsd_visited_add(s, canon);
+                /* The SUBFILE's own schemaLocations resolve
+                 * against ITS directory, not the compiled
+                 * file's (#440 shape A): wml-2010 -> word12 ->
+                 * ../iso/wml.xsd, and wml.xsd's same-dir
+                 * shared-*.xsd siblings would resolve against
+                 * microsoft/ and silently vanish — truncating
+                 * every content model referencing them. */
+                char* saved_dir = s->base_dir;
+                char* sub_dir = NULL;
+                const char* lslash = strrchr(canon, '/');
+                if (lslash) {
+                    sub_dir = strndup(canon, lslash - canon);
+                    if (sub_dir) s->base_dir = sub_dir;
+                }
                 size_t flen = 0;
                 char* text = xsd_read_file(path, &flen);
                 if (text) {
@@ -847,6 +965,15 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             s->target_ns = saved_ns;
                         }
                         leptris_document_free(sub);
+                    }
+                    /* base_dir is restored on EVERY exit path — a
+                     * skipped capture (unreadable file, foreign
+                     * include) must not leave the parent's
+                     * subsequent imports resolving against the
+                     * subfile's directory. */
+                    if (sub_dir) {
+                        s->base_dir = saved_dir;
+                        free(sub_dir);
                     }
                     free(text);
                 }
@@ -978,6 +1105,11 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         } else if (strcmp(local, "simpleType") == 0 && uri && !strcmp(uri, XSD_NS)) {
             XsdSimple* captured = xsd_capture_simple((LeptrisElement)n);
             if (captured) {
+                /* leptris-ruby#440: stamp the declaring unit's
+                 * targetNamespace — same-name simpleTypes across
+                 * imported namespaces resolve by (ns, name)
+                 * (shared-math ST_Jc vs wml ST_Jc). */
+                if (s->target_ns) captured->ns = xsd_strdup(s->target_ns);
                 captured->next = s->simple_types;
                 s->simple_types = captured;
             }
@@ -988,6 +1120,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
 static void xsd_free_simple_one(XsdSimple* t) {
     if (!t) return;
     free(t->name);
+    free(t->ns);
     free(t->base);
     free(t->pattern);
     XsdFacetValue* fv = t->enum_values;
@@ -1305,10 +1438,29 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     (base && strncmp(base, "xs:", 3) != 0)
                         ? xsd_find_complex_ns(s, base, s->target_ns)
                         : NULL;
+                /* leptris-ruby#440 shape A: a base that is not
+                 * captured YET (forward reference — CT_TcPr extends
+                 * CT_TcPrInner defined later in the same file) or
+                 * that is itself still deferred folds in the
+                 * post-capture resolver, not here: folding a
+                 * half-captured base silently truncates the model.
+                 * The visited memo means each file merges once, so
+                 * the double capture that used to mask this is
+                 * gone. */
+                int defer_base =
+                    base_root
+                        ? base_root->ext_base != NULL
+                        : (base && strncmp(base, "xs:", 3) != 0);
+                if (defer_base && base) {
+                    free(root->ext_base);
+                    root->ext_base = xsd_strdup(base);
+                }
                 if (strcmp(dl, "extension") == 0) {
                     /* base content first, derived content after */
                     root->first_child = xsd_cm_copy_list(
-                        base_root ? base_root->first_child : NULL);
+                        (base_root && !defer_base)
+                            ? base_root->first_child
+                            : NULL);
                     XsdCm* own_tail = root->first_child;
                     while (own_tail && own_tail->next)
                         own_tail = own_tail->next;
@@ -1317,7 +1469,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         own_tail->next = own;
                     else if (!root->first_child)
                         root->first_child = own;
-                    if (base_root) {
+                    if (base_root && !defer_base) {
                         const XsdTypeAttrs* bt = xsd_find_type_attrs(
                             s, base);
                         attrs = xsd_copy_attr_rows(bt ? bt->attrs
@@ -1390,6 +1542,8 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                      "complex:%s", name);
                             free(captured->name);
                             captured->name = xsd_strdup(synth);
+                            if (s->target_ns)
+                                captured->ns = xsd_strdup(s->target_ns);
                             captured->next = s->simple_types;
                             s->simple_types = captured;
                             root->text_type = xsd_strdup(synth);

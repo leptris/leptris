@@ -1,4 +1,40 @@
 ## [Unreleased]
+### Fixed
+
+- **Chain-compiled XSD: forward-referenced extension bases fold
+  after the schema merges, and subfiles resolve their own
+  schemaLocations (leptris-ruby#440, PR #1679).** Two defects in
+  the flat merged-import compile, both masked until the #1644
+  visited memo made each file capture exactly once. (A) The
+  content-model extension fold ran at CAPTURE time, so a base
+  defined AFTER its derived type in the same file (CT_TcPr
+  extends CT_TcPrInner, wml.xsd:2339 -> :2351) resolved to
+  nothing and its content was silently dropped - the direct
+  compile of wml.xsd had been saved only by dml's re-import
+  capturing the file twice. Extensions whose base is not yet
+  captured (or is itself still deferred) now record the base
+  name and fold in a post-capture resolver that iterates to a
+  fixpoint, splicing base content first and inherited attribute
+  rows before the derived type's own - with the same one-root-
+  particle sequence normalization capture applies. (B) The
+  subfile's OWN relative schemaLocations resolved against the
+  COMPILED file's directory: wml-2010 -> word12 -> ../iso/
+  wml.xsd worked, but wml.xsd's same-dir shared-*.xsd imports
+  then resolved against microsoft/ and silently vanished,
+  truncating every model referencing them. Each import unit now
+  threads base_dir to the subfile's directory for its own
+  capture and restores it on every exit path. (C) Attribute
+  type names resolved by bare local name, so same-name
+  simpleTypes across namespaces shadowed each other - wml's
+  ST_Jc (no centerGroup) beat shared-math's ST_Jc (centerGroup)
+  and m:defJc's val="centerGroup" failed lexical validation.
+  XsdSimple now carries the declaring unit's targetNamespace and
+  the lexical checks resolve (ns, name)-first, falling back to
+  unstamped and then cross-namespace spellings (prefix-stripped
+  names legitimately cross namespaces). Fixtures:
+  fwd_ref_ext/ (forward-ref chain through chameleon + subfile
+  dirs), ns_simple_collision/ (ST_Jc shadowing both ways).
+
 
 ## [1.9.349] - 2026-10-13
 

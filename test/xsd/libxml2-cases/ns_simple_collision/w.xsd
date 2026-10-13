@@ -1,0 +1,14 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:w" targetNamespace="urn:w">
+  <xs:import namespace="urn:m" schemaLocation="m.xsd"/>
+  <xs:simpleType name="ST_Jc">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="a"/>
+      <xs:enumeration value="b"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="CT_WJc">
+    <xs:attribute name="val" type="ST_Jc"/>
+  </xs:complexType>
+  <xs:element name="wDef" type="CT_WJc"/>
+</xs:schema>
