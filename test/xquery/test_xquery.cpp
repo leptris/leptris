@@ -11,7 +11,7 @@
 
 /* carrier-by-pointer (fold-left-009/016): synth members may carry a
  * node pointer — decode for markup rendering. */
-extern "C" void* xpath_carrier_node_of(const char* s);
+#include "../../src/leptris/xpath/xpath_carrier.h"
 
 namespace {
 

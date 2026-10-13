@@ -5,6 +5,7 @@
  */
 
 #include "evaluator_internal.h"
+#include "xpath_carrier.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include "../dom/document_node.h"  /* document-node handle + ->doc */
@@ -148,7 +149,6 @@ extern char* get_node_text(void* node);
 extern int xq_anchor_on_source(XPathContext* ctx,
                                struct leptris_document* anchored);
 /* carrier-by-pointer decode (fold-left-009/016). */
-extern void* xpath_carrier_node_of(const char* s);
 
 /* #181: a materialized ctor node splices its MARKUP into a
  * parent's serialized content — get_node_text would yield only its

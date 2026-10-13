@@ -6,6 +6,7 @@
  */
 
 #include "functions.h"
+#include "xpath_carrier.h"
 #include "collation.h"
 #include "evaluator.h"
 #include "evaluator_internal.h"
@@ -1126,7 +1127,6 @@ static size_t de_collect(struct leptris_xpath_result* r, DeItem* out,
                      * strings (real elements collect as markup in
                      * the element branch below); the markup compare
                      * reparses into de_node_equal. */
-                    extern void* xpath_carrier_node_of(const char*);
                     extern char* ctor_member_markup(void* node);
                     void* cn = xpath_carrier_node_of(c);
                     if (cn) {
