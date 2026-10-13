@@ -2389,6 +2389,87 @@ TEST(PlanBuild, ScalarOpRejectsOutOfPoolPlanIndex) {
  * attribute names + values of a node (the per-name
  * leptris_plan_value_attribute walk mints one FFI/wrapper round
  * trip per attribute per node). */
+/* leptris#1673: the #1670 walk arena returns NON-zeroed memory —
+ * the walk's fixed-capacity attribute arrays relied on calloc's
+ * NULL-fill for UNBOUND rows, so the serializer's declaration walk
+ * read 0xbe garbage through attr_ns_prefixes. Zeroed at allocation
+ * now; this spec pins both serialize faces on a prefixed nested
+ * plan (the binding's "nested-capture serialization" shape). */
+TEST(Plan1673, SerializeFacesOnPrefixedNestedPlan) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<w:fonts xmlns:w=\"urn:w\">"
+        "<w:font name=\"A\"><w:sz>12</w:sz></w:font></w:fonts>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_attr_plan font_attrs[1] = {};
+    font_attrs[0].wire_name = "name";
+    font_attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    leptris_child_plan font_kids[1] = {};
+    font_kids[0].wire_name = "sz";
+    font_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    font_kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    font_kids[0].ns_uri = "urn:w";
+    font_kids[0].ns_prefix = "w";
+    leptris_child_plan root_kids[1] = {};
+    root_kids[0].wire_name = "font";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[0].child_plan_index = 1;
+    root_kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    root_kids[0].ns_uri = "urn:w";
+    root_kids[0].ns_prefix = "w";
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "fonts";
+    plans[0].child_count = 1;
+    plans[0].child_plans = root_kids;
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = "w";
+    plans[1].element_name = "font";
+    plans[1].attribute_count = 1;
+    plans[1].attribute_plans = font_attrs;
+    plans[1].child_count = 1;
+    plans[1].child_plans = font_kids;
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:w";
+    plans[1].ns_prefix = "w";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    LeptrisPlanResult r =
+        leptris_plan_walk(doc, leptris_document_root(doc), plan, &st);
+    ASSERT_NE(r, nullptr);
+
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(
+        out, "<w:fonts xmlns:w=\"urn:w\">"
+             "<w:font name=\"A\"><w:sz>12</w:sz></w:font></w:fonts>");
+    leptris_free_string(out);
+
+    leptris_plan_serialize_options opts = {};
+    opts.indent = 2;
+    char* pretty = leptris_plan_serialize_ext(plan, r, &opts,
+                                              sizeof(opts), &st);
+    ASSERT_NE(pretty, nullptr);
+    EXPECT_STREQ(pretty,
+                 "<w:fonts xmlns:w=\"urn:w\">\n"
+                 "  <w:font name=\"A\">\n"
+                 "    <w:sz>12</w:sz>\n"
+                 "  </w:font>\n"
+                 "</w:fonts>\n");
+    leptris_free_string(pretty);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 TEST(Plan1670, AttributesSnapshotOneCrossing) {
     LeptrisStatus st = LEPTRIS_OK;
     const char* xml =
