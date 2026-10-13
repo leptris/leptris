@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "../../include/leptris.h"
+#include "../common/port.h" /* strndup shim for MSVC's CRT */
 #include "xsd_internal.h"
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
@@ -966,16 +967,16 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                         }
                         leptris_document_free(sub);
                     }
-                    /* base_dir is restored on EVERY exit path — a
-                     * skipped capture (unreadable file, foreign
-                     * include) must not leave the parent's
-                     * subsequent imports resolving against the
-                     * subfile's directory. */
-                    if (sub_dir) {
-                        s->base_dir = saved_dir;
-                        free(sub_dir);
-                    }
                     free(text);
+                }
+                /* base_dir is restored on EVERY exit path — an
+                 * unreadable subfile must not leave the parent's
+                 * base_dir lost (and its strdup leaked) while the
+                 * later imports resolve against the subfile's
+                 * directory. */
+                if (sub_dir) {
+                    s->base_dir = saved_dir;
+                    free(sub_dir);
                 }
             }
             continue;
