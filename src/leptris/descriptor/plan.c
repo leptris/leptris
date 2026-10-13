@@ -62,25 +62,104 @@ struct leptris_plan_result {
      * NULL; arrays NULL when the element has no attribute plan). */
     char** attr_ns_prefixes;
     char** attr_ns_uris;
+    /* #1670: the root-owned bump arena backing this subtree's
+     * memory. owner=1 marks the walk root — the only handle whose
+     * release frees the chunks (subtree handles share the arena). */
+    struct dp_arena* arena;
+    unsigned arena_owner : 1;
 };
+
+/* ---- #1670: walk-result bump arena ------------------------------
+ * The walk + build lanes mint EVERYTHING a result tree owns (value
+ * structs, name/value strings, kids arrays, attribute arrays) from
+ * a chunked bump arena owned by the ROOT value; the wholesale
+ * leptris_plan_result_free releases the chunks. 33K calloc/strdup/
+ * realloc pairs per parse collapse to O(chunks). The arena is
+ * carried in a thread-local "current" slot set for the duration of
+ * leptris_plan_walk / leptris_plan_result_build, so the ~48 mint
+ * sites route through the same dp_strdup_n / calloc call shapes
+ * without per-site threading. Non-result lanes (plan capture,
+ * serialization) run outside the window and keep malloc. */
+struct dp_arena {
+    struct dp_arena* next;
+    size_t used, cap;
+    /* char data[] follows the header */
+};
+#define DP_ARENA_CHUNK (16u * 1024u)
+
+static struct dp_arena* dp_arena_new(size_t cap) {
+    struct dp_arena* a = (struct dp_arena*)malloc(sizeof(*a) + cap);
+    if (!a) return NULL;
+    a->next = NULL;
+    a->used = 0;
+    a->cap = cap;
+    return a;
+}
+
+static void dp_arena_free_all(struct dp_arena* head) {
+    while (head) {
+        struct dp_arena* n = head->next;
+        free(head);
+        head = n;
+    }
+}
+
+static void* dp_arena_alloc(struct dp_arena** head, size_t n) {
+    n = (n + 15u) & ~(size_t)15u; /* 16-aligned */
+    if (!n) n = 16;
+    for (struct dp_arena* a = *head; a; a = a->next)
+        if (a->cap - a->used >= n) {
+            void* p = (char*)(a + 1) + a->used;
+            a->used += n;
+            return p;
+        }
+    size_t cap = DP_ARENA_CHUNK;
+    if (n > cap) cap = n;
+    struct dp_arena* a = dp_arena_new(cap);
+    if (!a) return NULL;
+    a->next = *head;
+    *head = a;
+    void* p = (char*)(a + 1) + a->used;
+    a->used += n;
+    return p;
+}
+
+static LEPTRIS_THREAD_LOCAL struct dp_arena* dp_cur_arena;
 
 /* ---- string + node helpers ------------------------------------- */
 
 static char* dp_strdup_n(const char* s, size_t n) {
-    char* p = (char*)malloc(n + 1);
-    if (!p) return NULL;
+    char* p;
+    if (dp_cur_arena) {
+        p = (char*)dp_arena_alloc(&dp_cur_arena, n + 1);
+        if (!p) return NULL;
+    } else {
+        p = (char*)malloc(n + 1);
+        if (!p) return NULL;
+    }
     memcpy(p, s, n);
     p[n] = '\0';
     return p;
 }
 
+
 static char* dp_strdup(const char* s) {
     return s ? dp_strdup_n(s, strlen(s)) : NULL;
 }
 
+
 static struct leptris_plan_result* dp_value_new(LeptrisPlanValueKind k) {
-    struct leptris_plan_result* v =
-        (struct leptris_plan_result*)calloc(1, sizeof(*v));
+    struct leptris_plan_result* v;
+    if (dp_cur_arena) {
+        v = (struct leptris_plan_result*)
+            dp_arena_alloc(&dp_cur_arena, sizeof(*v));
+        if (!v) return NULL;
+        memset(v, 0, sizeof(*v));
+        v->arena = dp_cur_arena;
+    } else {
+        v = (struct leptris_plan_result*)calloc(1, sizeof(*v));
+        if (!v) return NULL;
+    }
     return v ? (v->kind = k, v) : NULL;
 }
 
@@ -88,9 +167,20 @@ static int dp_value_push(struct leptris_plan_result* parent,
                          struct leptris_plan_result* kid) {
     if (parent->kid_count == parent->kid_cap) {
         size_t cap = parent->kid_cap ? parent->kid_cap * 2 : 4;
-        struct leptris_plan_result** grown = (struct leptris_plan_result**)
-            realloc(parent->kids, cap * sizeof(*grown));
-        if (!grown) return 0;
+        struct leptris_plan_result** grown;
+        if (parent->arena) {
+            /* #1670: arena-backed growth — the old block stays in
+             * its chunk until the wholesale release. */
+            grown = (struct leptris_plan_result**)
+                dp_arena_alloc(&parent->arena, cap * sizeof(*grown));
+            if (!grown) return 0;
+            memcpy(grown, parent->kids,
+                   parent->kid_count * sizeof(*grown));
+        } else {
+            grown = (struct leptris_plan_result**)
+                realloc(parent->kids, cap * sizeof(*grown));
+            if (!grown) return 0;
+        }
         parent->kids = grown;
         parent->kid_cap = cap;
     }
@@ -107,6 +197,13 @@ static int dp_value_set_str(struct leptris_plan_result* v,
 
 static void dp_result_free_rec(struct leptris_plan_result* v) {
     if (!v) return;
+    /* #1670: arena-backed subtrees release wholesale — only the
+     * walk ROOT frees the chunks; subtree handles share the arena
+     * and are dropped with it. */
+    if (v->arena) {
+        if (v->arena_owner) dp_arena_free_all(v->arena);
+        return;
+    }
     for (size_t i = 0; i < v->kid_count; i++) dp_result_free_rec(v->kids[i]);
     free(v->kids);
     for (size_t i = 0; i < v->attr_count; i++) {
@@ -668,14 +765,24 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
 
     /* Attribute channel */
     if (plan->attribute_count) {
-        v->attr_names = (char**)calloc(plan->attribute_count,
-                                       sizeof(char*));
-        v->attr_values = (char**)calloc(plan->attribute_count,
-                                        sizeof(char*));
-        v->attr_ns_prefixes = (char**)calloc(plan->attribute_count,
-                                             sizeof(char*));
-        v->attr_ns_uris = (char**)calloc(plan->attribute_count,
-                                         sizeof(char*));
+        /* #1670: fixed-capacity — arena-backed when the walk runs
+         * in its arena window. */
+        v->attr_names = (char**)(dp_cur_arena
+            ? dp_arena_alloc(&dp_cur_arena,
+                             plan->attribute_count * sizeof(char*))
+            : calloc(plan->attribute_count, sizeof(char*)));
+        v->attr_values = (char**)(dp_cur_arena
+            ? dp_arena_alloc(&dp_cur_arena,
+                             plan->attribute_count * sizeof(char*))
+            : calloc(plan->attribute_count, sizeof(char*)));
+        v->attr_ns_prefixes = (char**)(dp_cur_arena
+            ? dp_arena_alloc(&dp_cur_arena,
+                             plan->attribute_count * sizeof(char*))
+            : calloc(plan->attribute_count, sizeof(char*)));
+        v->attr_ns_uris = (char**)(dp_cur_arena
+            ? dp_arena_alloc(&dp_cur_arena,
+                             plan->attribute_count * sizeof(char*))
+            : calloc(plan->attribute_count, sizeof(char*)));
         if (!v->attr_names || !v->attr_values || !v->attr_ns_prefixes ||
             !v->attr_ns_uris) {
             dp_result_free_rec(v);
@@ -891,9 +998,13 @@ static int dp_walk_children(LeptrisElement elem, const dp_plan* plan,
                 if (row->ns_prefix) {
                     /* The inner walk's own #1551 stamp may already
                      * hold this pair — free before overwriting or
-                     * the first strdup orphans. */
-                    free(v->ns_prefix);
-                    free(v->ns_uri);
+                     * the first strdup orphans. Arena-backed values
+                     * skip the free: the old strings ride their
+                     * chunks until the wholesale release (#1670). */
+                    if (!v->arena) {
+                        free(v->ns_prefix);
+                        free(v->ns_uri);
+                    }
                     v->ns_prefix = dp_strdup(row->ns_prefix);
                     v->ns_uri = dp_strdup(row->ns_uri ? row->ns_uri
                                                       : target->ns_uri);
@@ -1207,12 +1318,23 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc, LeptrisElem
         if (status) *status = LEPTRIS_ERROR_NULL_ARG;
         return NULL;
     }
-    struct leptris_plan_result* r =
-        dp_walk_element(ctx, &plan->plans[0], plan);
-    if (!r) {
+    struct dp_arena* arena = dp_arena_new(DP_ARENA_CHUNK);
+    if (!arena) {
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;
     }
+    struct dp_arena* saved = dp_cur_arena;
+    dp_cur_arena = arena;
+    struct leptris_plan_result* r =
+        dp_walk_element(ctx, &plan->plans[0], plan);
+    dp_cur_arena = saved;
+    if (!r) {
+        dp_arena_free_all(arena);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    /* The walk root owns the chunks; subtree handles ride them. */
+    if (r->arena == arena) r->arena_owner = 1;
     return r;
 }
 
@@ -1771,6 +1893,16 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
         if (status) *status = LEPTRIS_ERROR_MEMORY;
         return NULL;
     }
+    /* #1670: every value/string/array minted below rides this
+     * arena; the wholesale free releases all chunks at once. */
+    struct dp_arena* arena = dp_arena_new(DP_ARENA_CHUNK);
+    if (!arena) {
+        free(stack);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    struct dp_arena* saved_arena = dp_cur_arena;
+    dp_cur_arena = arena;
     int sp = 0;
     struct leptris_plan_result* root = NULL;
     for (size_t i = 0; i < count; i++) {
@@ -1780,9 +1912,11 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
                 (op->row_index != UINT32_MAX &&
                  op->row_index >= pool->plans[op->plan_index]
                                       .child_count)) {
-                /* Mid-build failure: without this the partial
-                 * tree leaks (LSan on Linux CI catches it). */
-                if (root) dp_result_free_rec(root);
+                /* Mid-build failure: the arena holds every minted
+                 * value — release the chunks wholesale (the owner
+                 * flag isn't set on failure paths). */
+                dp_arena_free_all(arena);
+                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1825,9 +1959,11 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             stack[sp++] = v;
         } else if (op->kind == LEPTRIS_PLAN_OP_SCALAR) {
             if (sp == 0) {
-                /* Mid-build failure: without this the partial
-                 * tree leaks (LSan on Linux CI catches it). */
-                if (root) dp_result_free_rec(root);
+                /* Mid-build failure: the arena holds every minted
+                 * value — release the chunks wholesale (the owner
+                 * flag isn't set on failure paths). */
+                dp_arena_free_all(arena);
+                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1836,7 +1972,8 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
              * reads cp->child_count right after, so an out-of-pool
              * plan_index here is an OOB read (leptris#1654). */
             if (op->plan_index >= pool->plan_count) {
-                if (root) dp_result_free_rec(root);
+                dp_arena_free_all(arena);
+                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1858,28 +1995,57 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             }
         } else if (op->kind == LEPTRIS_PLAN_OP_ATTR) {
             if (sp == 0 || !op->name) {
-                /* Mid-build failure: without this the partial
-                 * tree leaks (LSan on Linux CI catches it). */
-                if (root) dp_result_free_rec(root);
+                /* Mid-build failure: the arena holds every minted
+                 * value — release the chunks wholesale (the owner
+                 * flag isn't set on failure paths). */
+                dp_arena_free_all(arena);
+                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
             }
             struct leptris_plan_result* el = stack[sp - 1];
-            char** gn = (char**)realloc(
-                el->attr_names,
-                (el->attr_count + 1) * sizeof(char*));
-            char** gv = (char**)realloc(
-                el->attr_values,
-                (el->attr_count + 1) * sizeof(char*));
-            char** gp = (char**)realloc(
-                el->attr_ns_prefixes,
-                (el->attr_count + 1) * sizeof(char*));
-            char** gu = (char**)realloc(
-                el->attr_ns_uris,
-                (el->attr_count + 1) * sizeof(char*));
+            char** gn;
+            char** gv;
+            char** gp;
+            char** gu;
+            if (el->arena) {
+                /* #1670: arena growth — alloc new, copy, waste old
+                 * until the wholesale release. */
+                gn = (char**)dp_arena_alloc(
+                    &el->arena, (el->attr_count + 1) * sizeof(char*));
+                gv = (char**)dp_arena_alloc(
+                    &el->arena, (el->attr_count + 1) * sizeof(char*));
+                gp = (char**)dp_arena_alloc(
+                    &el->arena, (el->attr_count + 1) * sizeof(char*));
+                gu = (char**)dp_arena_alloc(
+                    &el->arena, (el->attr_count + 1) * sizeof(char*));
+                if (gn) memcpy(gn, el->attr_names,
+                               el->attr_count * sizeof(char*));
+                if (gv) memcpy(gv, el->attr_values,
+                               el->attr_count * sizeof(char*));
+                if (gp) memcpy(gp, el->attr_ns_prefixes,
+                               el->attr_count * sizeof(char*));
+                if (gu) memcpy(gu, el->attr_ns_uris,
+                               el->attr_count * sizeof(char*));
+            } else {
+                gn = (char**)realloc(
+                    el->attr_names,
+                    (el->attr_count + 1) * sizeof(char*));
+                gv = (char**)realloc(
+                    el->attr_values,
+                    (el->attr_count + 1) * sizeof(char*));
+                gp = (char**)realloc(
+                    el->attr_ns_prefixes,
+                    (el->attr_count + 1) * sizeof(char*));
+                gu = (char**)realloc(
+                    el->attr_ns_uris,
+                    (el->attr_count + 1) * sizeof(char*));
+            }
             if (!gn || !gv || !gp || !gu) {
-                free(gn); free(gv); free(gp); free(gu);
+                if (!el->arena) {
+                    free(gn); free(gv); free(gp); free(gu);
+                }
                 goto oom;
             }
             el->attr_names = gn;
@@ -1897,9 +2063,11 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
             el->attr_count++;
         } else if (op->kind == LEPTRIS_PLAN_OP_END) {
             if (sp == 0) {
-                /* Mid-build failure: without this the partial
-                 * tree leaks (LSan on Linux CI catches it). */
-                if (root) dp_result_free_rec(root);
+                /* Mid-build failure: the arena holds every minted
+                 * value — release the chunks wholesale (the owner
+                 * flag isn't set on failure paths). */
+                dp_arena_free_all(arena);
+                dp_cur_arena = saved_arena;
                 free(stack);
                 if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
                 return NULL;
@@ -1908,16 +2076,20 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
         }
     }
     int balanced = (sp == 0 && root != NULL);
+    dp_cur_arena = saved_arena;
     free(stack);
     if (!balanced) {
-        dp_result_free_rec(root);
+        dp_arena_free_all(arena);
         if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
         return NULL;
     }
+    /* The build root owns the chunks. */
+    if (root->arena == arena) root->arena_owner = 1;
     return (LeptrisPlanResult)root;
 
 oom:
-    if (root) dp_result_free_rec(root);
+    dp_cur_arena = saved_arena;
+    dp_arena_free_all(arena);
     free(stack);
     if (status) *status = LEPTRIS_ERROR_MEMORY;
     return NULL;
@@ -2011,6 +2183,45 @@ LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
         if (strcmp(v->attr_names[i], wire_name) == 0)
             return v->attr_values[i];
     return NULL;
+}
+
+LEPTRIS_API size_t leptris_plan_value_attribute_count(
+    const LeptrisPlanResult v) {
+    return v ? v->attr_count : 0;
+}
+
+LEPTRIS_API size_t leptris_plan_value_attributes_snapshot(
+    const LeptrisPlanResult v,
+    char* names_blob, size_t names_cap, size_t* name_offsets,
+    char* values_blob, size_t values_cap, size_t* value_offsets) {
+    if (!v) return 0;
+    size_t nneed = 0, vneed = 0;
+    for (size_t i = 0; i < v->attr_count; i++) {
+        nneed += strlen(v->attr_names[i]) + 1;
+        vneed += strlen(v->attr_values[i]) + 1;
+    }
+    size_t need = nneed > vneed ? nneed : vneed;
+    /* Sizing call: NULL blobs (or zero caps) report the required
+     * per-blob capacity — both blobs need the same. */
+    if (!names_blob || !names_cap || !values_blob || !values_cap)
+        return need;
+    if (!name_offsets || !value_offsets) return (size_t)-1;
+    if (nneed > names_cap || vneed > values_cap)
+        return (size_t)-1;
+    size_t noff = 0, voff = 0;
+    for (size_t i = 0; i < v->attr_count; i++) {
+        size_t nl = strlen(v->attr_names[i]);
+        memcpy(names_blob + noff, v->attr_names[i], nl + 1);
+        name_offsets[i] = noff;
+        noff += nl + 1;
+        size_t vl = strlen(v->attr_values[i]);
+        memcpy(values_blob + voff, v->attr_values[i], vl + 1);
+        value_offsets[i] = voff;
+        voff += vl + 1;
+    }
+    name_offsets[v->attr_count] = noff;
+    value_offsets[v->attr_count] = voff;
+    return 0;
 }
 
 /* ---- #1269a typed accessors ------------------------------------- */
