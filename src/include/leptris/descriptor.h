@@ -257,6 +257,10 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_walk(LeptrisDocument doc,
                                                 LeptrisElement ctx,
                                                 LeptrisPlan plan,
                                                 LeptrisStatus* status);
+/* Release a walk result. Pass the ROOT handle the walk returned —
+ * #1670 backs the whole tree with one root-owned bump arena, so
+ * the wholesale release is O(chunks); subtree handles share the
+ * arena and are dropped with it. */
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result);
 
 /* #408 ask 2: build a standalone result natively from a flat op
@@ -375,6 +379,28 @@ LEPTRIS_API size_t leptris_plan_value_children_snapshot(
 /* ELEMENT: attribute value by wire_name; NULL when absent. */
 LEPTRIS_API const char* leptris_plan_value_attribute(const LeptrisPlanResult v,
                                                      const char* wire_name);
+
+/* #1670: number of attributes carried on an ELEMENT value (0 for
+ * non-ELEMENT values and NULL). Sizes the attributes_snapshot
+ * buffers. */
+LEPTRIS_API size_t leptris_plan_value_attribute_count(
+    const LeptrisPlanResult v);
+
+/* #1670: ALL attribute names + values in ONE crossing (the
+ * per-name `leptris_plan_value_attribute` walk mints one
+ * FFI/wrapper round trip per attribute per node). ParallelArrays
+ * contract mirrors children_snapshot: call once with NULL blobs /
+ * caps 0 to size (returns the required per-blob byte capacity;
+ * both blobs need the same capacity), then call again with
+ * buffers of at least that capacity — 0 on success,
+ * (size_t)-1 when either buffer is still too small. Offsets are
+ * byte offsets into the respective blobs; entries are
+ * NUL-terminated. Attribute ORDER is the plan's attribute-row
+ * order (only bound attributes appear). NULL v returns 0. */
+LEPTRIS_API size_t leptris_plan_value_attributes_snapshot(
+    const LeptrisPlanResult v,
+    char* names_blob, size_t names_cap, size_t* name_offsets,
+    char* values_blob, size_t values_cap, size_t* value_offsets);
 
 /* #1269a in-pass type execution (#1269a): for SCALAR/RAW values
  * whose producing row carried type_tag in {1=int, 2=float, 3=bool},

@@ -2384,3 +2384,92 @@ TEST(PlanBuild, ScalarOpRejectsOutOfPoolPlanIndex) {
 }
 
 }  // namespace
+
+/* leptris#1670: the batch attribute face — one crossing for ALL
+ * attribute names + values of a node (the per-name
+ * leptris_plan_value_attribute walk mints one FFI/wrapper round
+ * trip per attribute per node). */
+TEST(Plan1670, AttributesSnapshotOneCrossing) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml =
+        "<r w:a=\"1\" w:b=\"2\" w:c=\"3\""
+        " xmlns:w=\"urn:w\"/>";
+    LeptrisDocument doc = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_attr_plan attrs[3] = {};
+    attrs[0].wire_name = "a";
+    attrs[1].wire_name = "b";
+    attrs[2].wire_name = "c";
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "i";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "r";
+    plans[0].attribute_count = 3;
+    plans[0].attribute_plans = attrs;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    plans[1].element_name = "i";
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ATTR, 0, 0, "a", "1", 1},
+        {LEPTRIS_PLAN_OP_ATTR, 0, 0, "b", "2", 1},
+        {LEPTRIS_PLAN_OP_ATTR, 0, 0, "c", "3", 1},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "x", 1},
+        {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 6, &st);
+    ASSERT_NE(r, nullptr);
+
+    /* The count sizes the buffers. */
+    ASSERT_EQ(leptris_plan_value_attribute_count(r), 3u);
+
+    /* Two-phase: NULL buffers report the per-blob capacity. */
+    size_t need = leptris_plan_value_attributes_snapshot(
+        r, NULL, 0, NULL, NULL, 0, NULL);
+    EXPECT_GT(need, 0u);
+
+    std::vector<char> names(need), values(need);
+    std::vector<size_t> noffs(4), voffs(4);
+    EXPECT_EQ(leptris_plan_value_attributes_snapshot(
+                  r, names.data(), need, noffs.data(),
+                  values.data(), need, voffs.data()), 0u);
+    /* Third phase retry with small caps -> the sentinel. */
+    EXPECT_EQ(leptris_plan_value_attributes_snapshot(
+                  r, names.data(), 2, noffs.data(),
+                  values.data(), 2, voffs.data()),
+              (size_t)-1);
+
+    /* Entries: plan row order, NUL-terminated, offset-addressed. */
+    const char* expect_n[3] = {"a", "b", "c"};
+    const char* expect_v[3] = {"1", "2", "3"};
+    for (size_t i = 0; i < 3; i++) {
+        EXPECT_STREQ(names.data() + noffs[i], expect_n[i]);
+        EXPECT_STREQ(values.data() + voffs[i], expect_v[i]);
+        /* The per-name face agrees with the snapshot. */
+        EXPECT_STREQ(leptris_plan_value_attribute(r, expect_n[i]),
+                     expect_v[i]);
+    }
+    EXPECT_EQ(noffs[3], need);
+    EXPECT_EQ(voffs[3], need);
+
+    /* A non-ELEMENT value reports zero attributes. */
+    LeptrisPlanResult kid = leptris_plan_value_at(r, 0);
+    ASSERT_NE(kid, nullptr);
+    EXPECT_EQ(leptris_plan_value_attribute_count(kid), 0u);
+    EXPECT_EQ(leptris_plan_value_attributes_snapshot(
+                  kid, names.data(), need, noffs.data(),
+                  values.data(), need, voffs.data()), 0u);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
