@@ -15,6 +15,7 @@
 #include "../../include/leptris.h"
 #include "../../include/leptris/xquery/xquery.h"
 #include "../leptris_internal.h"
+#include "../xpath/xpath_carrier.h"
 #include "../xpath/evaluator.h"
 #include "../xpath/evaluator_internal.h"
 #include "../xpath/functions.h"

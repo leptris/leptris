@@ -12,6 +12,7 @@
  * FnMath / FnRegex).
  */
 #include "functions.h"
+#include "xpath_carrier.h"
 #include "collation.h"
 #include "evaluator.h"
 
@@ -51,7 +52,6 @@ extern char* get_node_text(void* node);
 /* evaluator_operators.c — element members keep their markup (#181). */
 extern char* ctor_member_markup(void* node);
 /* carrier-by-pointer decode (fold-left-009/016); defined below. */
-void* xpath_carrier_node_of(const char* s);
 
 /* ---- sequence plumbing ---- */
 
@@ -5711,26 +5711,6 @@ char* xpath_seq_carrier_of(struct leptris_xpath_result* vr) {
     }
     if (subr) xpath_result_free(subr);
     return out;
-}
-
-/* carrier-by-pointer decode (fold-left-009/016): a "\x03P" +
- * 16-hex carrier resolves to its node, valid for the whole eval
- * (ctor docs anchor on the source document, #691). NULL when the
- * string is not a pointer carrier. */
-/* leptris#1681: GCC LTO (default-on for Release) fails the link on
- * gcc-12 legs with "undefined reference to xpath_carrier_node_of" —
- * the only cross-TU references are block-scope externs inside
- * function bodies, and the definition gets internalized before the
- * referencing partition resolves. The #1204 pattern: `used` keeps
- * the body, `externally_visible` stops the internalization (GCC
- * only; clang ignores it with a warning). */
-#if defined(__GNUC__) && !defined(__clang__)
-__attribute__((used, externally_visible))
-#endif
-void* xpath_carrier_node_of(const char* s) {
-    if (!s || s[0] != '\x03' || s[1] != 'P' || strlen(s) != 18)
-        return NULL;
-    return (void*)(uintptr_t)strtoull(s + 2, NULL, 16);
 }
 
 static struct leptris_xpath_result* fn_apply(XPathContext* ctx,

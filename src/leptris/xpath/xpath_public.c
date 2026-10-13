@@ -6,6 +6,7 @@
  */
 
 #include "../dom/pi.h"
+#include "xpath_carrier.h"
 #include "../include/leptris.h"
 #include "../leptris_internal.h"
 #include "parser.h"
@@ -527,7 +528,6 @@ LEPTRIS_API char* leptris_xpath_result_string(LeptrisXPathResult result) {
                  * string-value (the same contract as a real
                  * element). */
                 {
-                    extern void* xpath_carrier_node_of(const char* s);
                     const char* raw =
                         leptris_xpath_result_node_value(result, 0);
                     if (raw && (unsigned char)raw[0] == 0x03 &&

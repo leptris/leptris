@@ -8,6 +8,7 @@
  */
 
 #include "../cli.h"
+#include "../../src/leptris/xpath/xpath_carrier.h"
 #include "../options.h"
 #include "../error.h"
 #include "../src/include/leptris.h"
@@ -121,7 +122,6 @@ static cli_result_t xquery_run(int argc, char** argv) {
     } else if (leptris_xpath_result_type(r) == LEPTRIS_XPATH_NODESET) {
         /* carrier-by-pointer (fold-left-009/016): synth members may
          * carry a node pointer — render its markup. */
-        extern void* xpath_carrier_node_of(const char* s);
         size_t n = leptris_xpath_result_count(r);
         for (size_t k = 0; k < n; k++) {
             if (k) putchar(' ');
