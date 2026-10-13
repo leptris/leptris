@@ -774,7 +774,10 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
     /* Attribute channel */
     if (plan->attribute_count) {
         /* #1670: fixed-capacity — arena-backed when the walk runs
-         * in its arena window. */
+         * in its arena window. Arena memory is NOT zeroed: unbound
+         * attribute rows leave their slots unwritten and the
+         * serializers/lookup expect NULL there (#1673) — memset
+         * preserves the calloc contract. */
         v->attr_names = (char**)(dp_cur_arena
             ? dp_arena_alloc(&dp_cur_arena,
                              plan->attribute_count * sizeof(char*))
@@ -791,6 +794,16 @@ static struct leptris_plan_result* dp_walk_element(LeptrisElement elem,
             ? dp_arena_alloc(&dp_cur_arena,
                              plan->attribute_count * sizeof(char*))
             : calloc(plan->attribute_count, sizeof(char*)));
+        if (dp_cur_arena) {
+            memset(v->attr_names, 0,
+                   plan->attribute_count * sizeof(char*));
+            memset(v->attr_values, 0,
+                   plan->attribute_count * sizeof(char*));
+            memset(v->attr_ns_prefixes, 0,
+                   plan->attribute_count * sizeof(char*));
+            memset(v->attr_ns_uris, 0,
+                   plan->attribute_count * sizeof(char*));
+        }
         if (!v->attr_names || !v->attr_values || !v->attr_ns_prefixes ||
             !v->attr_ns_uris) {
             dp_result_free_rec(v);
