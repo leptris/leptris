@@ -2,12 +2,24 @@
 
 ## [1.9.349] - 2026-10-13
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **Plan arena: the window is owned by a wrapper
+  (leptris#1677, PR #1678).** The "multiple roots" early
+  return in leptris_plan_result_build neither restored the
+  thread-local current-arena window nor freed the arena -
+  the only return path that missed both. After it,
+  dp_cur_arena stayed pointing at the leaked arena for the
+  rest of the thread: every later malloc-lane mint (serialize
+  joins, dp_decls tables) rode the dead arena, and freeing
+  those interior pointers corrupted the heap - the ~50%
+  intermittent garbage/segfault the leptris-py suite hit
+  (in-process sequencing; ASAN-per-test could not see it).
+  The window and arena are now owned by a WRAPPER - restored
+  and freed unconditionally on every exit; the windowed body
+  touches neither. In-process regression spec: 50 rounds of
+  failing two-root build then walk + serialize, aborts at
+  round 0 pre-fix. Full suite 1994/1994.
 
 
 ## [1.9.348] - 2026-10-13
