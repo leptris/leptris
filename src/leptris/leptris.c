@@ -275,7 +275,7 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
     LeptrisElement* out_installed) {
     if (out_installed) *out_installed = NULL;
     if (!doc || !root) {
-        leptris_set_error(LEPTRIS_ERROR_NULL_ARG,
+        leptris_set_error((leptris_error_code)LEPTRIS_ERROR_NULL_ARG,
                           "set_root: NULL document or element");
         return LEPTRIS_ERROR_NULL_ARG;
     }
@@ -283,7 +283,7 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
     /* Already attached under a parent? (parent_off == 0 encodes NULL;
      * leptris_elem_parent is the static inline accessor from dom/element.h) */
     if (leptris_elem_parent(root)) {
-        leptris_set_error(LEPTRIS_ERROR_INVALID_ARG,
+        leptris_set_error((leptris_error_code)LEPTRIS_ERROR_INVALID_ARG,
                           "set_root: element is attached to a parent");
         return LEPTRIS_ERROR_INVALID_ARG;
     }
@@ -301,7 +301,7 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
     if (leptris_element_get_document(root) != doc) {
         LeptrisElement copy = leptris_element_copy(root, doc);
         if (!copy) {
-            leptris_set_error(LEPTRIS_ERROR_MEMORY,
+            leptris_set_error((leptris_error_code)LEPTRIS_ERROR_MEMORY,
                               "set_root: adoption copy failed");
             return LEPTRIS_ERROR_MEMORY;
         }

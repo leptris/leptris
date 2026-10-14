@@ -1,5 +1,6 @@
 #include "../memory/pool.h"
 #include "string_view.h"
+#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -133,15 +134,17 @@ int leptris_sv_equals_cstr(const LeptrisStringView* sv, const char* str) {
 size_t leptris_sv_hash(const LeptrisStringView* sv) {
     if (!sv || !sv->data) return 0;
 
-    const size_t FNV_offset_basis = 14695981039346656037ULL;
-    const size_t FNV_prime = 1099511628211ULL;
-
-    size_t hash = FNV_offset_basis;
+    /* FNV-1a 64: the accumulator stays uint64_t — size_t is
+     * 32-bit on wasm32/ILP32, and truncating the basis/prime
+     * silently changes the algorithm. Fold once at the return. */
+    uint64_t hash = 14695981039346656037ULL;
+    const uint64_t FNV_prime = 1099511628211ULL;
     for (size_t i = 0; i < sv->length; i++) {
         hash ^= (unsigned char)sv->data[i];
         hash *= FNV_prime;
     }
-    return hash;
+    hash ^= hash >> 32;
+    return (size_t)hash;
 }
 
 /* Convert to NULL-terminated C string (allocates!) */

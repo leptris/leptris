@@ -1129,7 +1129,8 @@ LEPTRIS_API LeptrisSchematron leptris_schematron_parse_phase(
                       &err);
     leptris_document_free(doc);
     if (!s) {
-        leptris_set_error(LEPTRIS_ERROR_PARSE, err ? err : "bad");
+        leptris_set_error((leptris_error_code)LEPTRIS_ERROR_PARSE,
+                          err ? err : "bad");
         free(err);
         if (status) *status = LEPTRIS_ERROR_PARSE;
         return NULL;
