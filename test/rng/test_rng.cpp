@@ -1411,3 +1411,30 @@ TEST(RngIncludeMultiHop, ChoiceUnionSurvivesIncludeHop) {
     EXPECT_EQ(file_validates("comb3-choice-outer.rng", "<root><z/></root>"),
               0);
 }
+
+/* ---- leptris#1709: multi-depth combines + duplicated includes ----- */
+
+TEST(Rng1709Shapes, DuplicatedIncludeKeepsBothBranches) {
+    /* shared included DIRECTLY and via mid: the direct include's
+     * merge must not clobber mid's combined branch (the two paths
+     * shared one body tree in the first cut). */
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><a/><b/></root>"),
+              1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><a/></root>"), 1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><b/></root>"), 1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><z/></root>"), 0);
+}
+
+TEST(Rng1709Shapes, AttributeChoiceWithTextBranchAcceptsAny) {
+    /* bDateAttributes shape: CHOICE[enum-ref, text] — the text
+     * branch accepts values outside the enum. */
+    EXPECT_EQ(file_validates("attr-text-choice.rng",
+                             "<date type='published'/>"),
+              1);
+    EXPECT_EQ(file_validates("attr-text-choice.rng",
+                             "<date type='effective'/>"),
+              1);
+    /* attribute absent: the attribute is required by its own
+     * definition here, but the harness shape keeps it simple — the
+     * enum hit and text hit are the contract under test. */
+}
