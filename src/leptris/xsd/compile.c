@@ -1264,6 +1264,217 @@ static int xsd_check_derivation(struct leptris_xsd_schema* s,
     return 0;
 }
 
+/* ---- #1691 slice 5: element/attribute/group ref resolution -------
+ *
+ * The oracle (libxml2 2.9.13) rejects a schema whose xs:element/@ref
+ * (or attribute, group, attributeGroup) QName does not resolve to a
+ * declaration (import1_0: the import's schemaLocation file is
+ * missing, so {http://BAR}bar.B resolves to nothing). Resolution is
+ * by DECLARATION, not by namespace: the available set records every
+ * loaded document's root-level declarations keyed by that
+ * document's effective target namespace (chameleon includes adopt
+ * the includer's). A namespace-only import or a missing file
+ * provides nothing. type=/base= QNames stay out of scope: the
+ * oracle fails to resolve spec-valid xs: builtins (length3_0's
+ * xs:non-positive-integer), so its type verdicts are not
+ * byte-matchable without codifying that gap. */
+
+struct xsd_decl {
+    char uri[256];
+    char name[128];
+};
+
+
+
+static void xsd_decls_add(struct xsd_decl* decls, int* n, int max,
+                          const char* uri, const char* name) {
+    if (!name || !name[0] || *n >= max) return;
+    for (int i = 0; i < *n; i++) {
+        if (strcmp(decls[i].name, name) == 0 &&
+            strcmp(decls[i].uri, uri ? uri : "") == 0)
+            return;
+    }
+    snprintf(decls[*n].uri, sizeof(decls[*n].uri), "%s", uri ? uri : "");
+    snprintf(decls[*n].name, sizeof(decls[*n].name), "%s", name);
+    (*n)++;
+}
+
+static int xsd_decls_contain(struct xsd_decl* decls, int n,
+                             const char* uri, const char* name) {
+    if (!name || !name[0]) return 0;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(decls[i].name, name) == 0 &&
+            strcmp(decls[i].uri, uri ? uri : "") == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void xsd_dirname_into(const char* path, char* out, size_t outsz) {
+    const char* slash = strrchr(path, '/');
+    const char* bslash = strrchr(path, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+    if (!slash) {
+        out[0] = 0;
+        return;
+    }
+    size_t bl = (size_t)(slash - path);
+    if (bl >= outsz) bl = outsz - 1;
+    memcpy(out, path, bl);
+    out[bl] = 0;
+}
+
+/* claimed[] tracks the namespaces an import already served — the
+ * oracle serves the FIRST import whose schemaLocation loads per
+ * namespace and skips the rest ("already imported with the schema
+ * located at ..."), so later docs' declarations must not
+ * resolve. */
+static void xsd_collect_decls_doc(LeptrisElement root, const char* eff_tns,
+                                  const char* base_dir,
+                                  struct xsd_decl* decls, int* n, int max,
+                                  char (*claimed)[256], int* nclaimed,
+                                  int cmax, int depth) {
+    if (!root || depth > 8 || *n >= max) return;
+    for (LeptrisNodeRef k = leptris_node_first_child(
+             leptris_element_as_node(root));
+         k; k = leptris_node_next_sibling(k)) {
+        if (leptris_node_get_type(k) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* kl = NULL;
+        const char* kp = NULL;
+        const char* ku = NULL;
+        leptris_element_expanded_name((LeptrisElement)k, &kl, &kp, &ku);
+        if (!kl || !ku || strcmp(ku, XSD_NS) != 0) continue;
+        if (strcmp(kl, "element") == 0 || strcmp(kl, "attribute") == 0 ||
+            strcmp(kl, "group") == 0 ||
+            strcmp(kl, "attributeGroup") == 0) {
+            const char* nm = leptris_element_attribute(
+                (LeptrisElement)k, "name");
+            xsd_decls_add(decls, n, max, eff_tns, nm);
+        }
+    }
+    /* cn, not n: the count pointer `n` is live across this loop —
+     * shadowing it passed the loop node as the decls count and the
+     * decls_add increment wrote node memory (#1717). */
+    for (LeptrisNodeRef cn = leptris_node_first_child(
+             leptris_element_as_node(root));
+         cn; cn = leptris_node_next_sibling(cn)) {
+        if (leptris_node_get_type(cn) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)cn;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(c, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0)
+            continue;
+        int is_inc = (strcmp(l, "include") == 0 ||
+                      strcmp(l, "redefine") == 0);
+        int is_imp = (strcmp(l, "import") == 0);
+        if (!is_inc && !is_imp) continue;
+        const char* loc = leptris_element_attribute(c, "schemaLocation");
+        if (!loc || !base_dir) continue; /* provides nothing */
+        /* The import-namespace claim: the first LOADABLE import
+         * per namespace wins; later ones are skipped. */
+        char imp_ns[256];
+        imp_ns[0] = 0;
+        if (is_imp) {
+            const char* ns = leptris_element_attribute(c, "namespace");
+            snprintf(imp_ns, sizeof(imp_ns), "%s", ns ? ns : "");
+            int seen = 0;
+            for (int ci = 0; ci < *nclaimed; ci++)
+                if (strcmp(claimed[ci], imp_ns) == 0) seen = 1;
+            if (seen) continue; /* skipped import: provides nothing */
+        }
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", base_dir, loc);
+        size_t flen = 0;
+        char* text = xsd_read_file(path, &flen);
+        if (!text) continue; /* missing file: provides nothing */
+        LeptrisDocument sub = leptris_parse_string(text, flen, NULL);
+        free(text);
+        if (!sub) continue;
+        LeptrisElement subroot = leptris_document_root(sub);
+        if (is_imp && *nclaimed < cmax) {
+            int seen = 0;
+            for (int ci = 0; ci < *nclaimed; ci++)
+                if (strcmp(claimed[ci], imp_ns) == 0) seen = 1;
+            if (!seen)
+                snprintf(claimed[(*nclaimed)++], 256, "%s", imp_ns);
+        }
+        if (subroot) {
+            const char* sub_tns = leptris_element_attribute(
+                subroot, "targetNamespace");
+            const char* eff = is_inc ? (sub_tns ? sub_tns : eff_tns)
+                                     : sub_tns;
+            char sub_base[4096];
+            xsd_dirname_into(path, sub_base, sizeof(sub_base));
+            xsd_collect_decls_doc(subroot, eff, sub_base, decls, n, max,
+                                  claimed, nclaimed, cmax, depth + 1);
+        }
+        leptris_document_free(sub);
+    }
+}
+
+static int xsd_check_refs_walk(LeptrisElement root,
+                               struct leptris_xsd_schema* s,
+                               struct xsd_decl* decls, int ndecls) {
+    if (!root) return 0;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(c, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0)
+            continue;
+        int is_ref_holder =
+            (strcmp(l, "element") == 0 || strcmp(l, "attribute") == 0 ||
+             strcmp(l, "group") == 0 || strcmp(l, "attributeGroup") == 0);
+        if (!is_ref_holder) {
+            if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+            continue;
+        }
+        const char* ref = leptris_element_attribute(c, "ref");
+        if (!ref || !ref[0]) {
+            if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+            continue;
+        }
+        char ruri[256], rlocal[128];
+        xsd_resolve_qname(c, ref, ruri, sizeof(ruri), rlocal,
+                          sizeof(rlocal));
+        if (!xsd_decls_contain(decls, ndecls, ruri, rlocal)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-element.2: The QName value '{%s}%s' does not "
+                     "resolve to a(n) %s declaration",
+                     ruri, rlocal,
+                     strcmp(l, "attribute") == 0 ? "attribute"
+                                                 : "element");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+    }
+    return 0;
+}
+
+static int xsd_check_refs(struct leptris_xsd_schema* s,
+                          LeptrisElement root) {
+    if (!root) return 0;
+    struct xsd_decl decls[512];
+    int ndecls = 0;
+    char claimed[32][256];
+    int nclaimed = 0;
+    xsd_collect_decls_doc(root, s->target_ns, s->base_dir, decls,
+                          &ndecls, 512, claimed, &nclaimed, 32, 0);
+    return xsd_check_refs_walk(root, s, decls, ndecls);
+}
+
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                                          size_t len,
                                          const char* base_dir,
@@ -1327,6 +1538,12 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * extension (cos-ct-derived-ok) and the attribute-wildcard
      * subset rules on restriction (derivation-ok-restriction-4-1). */
     if (xsd_check_derivation(s, root) != 0)
+        goto fail;
+
+    /* Ref resolution (#1691 slice 5): element/attribute/group
+     * ref QNames must resolve to a declaration in an available
+     * document. */
+    if (xsd_check_refs(s, root) != 0)
         goto fail;
 
     /* Schema Component Constraint: xsi: Not Allowed — the schema's
