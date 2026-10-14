@@ -40,6 +40,8 @@ extern const XsdElementDecl* xsd_find_element(
     struct leptris_xsd_schema* s, const char* name);
 extern XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                               const char* type_name, const char* uri);
+extern XsdCm* xsd_find_complex_ref(struct leptris_xsd_schema* s,
+                              const char* type_name, const char* uri);
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,                               const char* type_name);
 extern const XsdSimple* xsd_find_simple_ns_pub(
     struct leptris_xsd_schema* s, const char* name, const char* uri);
@@ -527,11 +529,15 @@ static void validate_local(struct xsd_validator* v,
      * from every imported namespace. */
     const char* euri = NULL;
     leptris_element_expanded_name(elem, NULL, NULL, &euri);
-    XsdCm* ct = xsd_find_complex_ns(s, type, euri);
+    /* the type ref may name a FOREIGN namespace's type (OOXML:
+     * wp:extent -> a:CT_PositiveSize2D) — resolve through the
+     * reference ladder, not the element-ns-strict lookup */
+    XsdCm* ct = xsd_find_complex_ref(s, type, euri);
     if (ct) {
-        validate_attributes(
-            v, s, elem,
-            xsd_find_type_attrs_ns(s, type, euri));
+        const XsdTypeAttrs* rows =
+            xsd_find_type_attrs_ns(s, type, euri);
+        if (!rows) rows = xsd_find_type_attrs(s, type);
+        validate_attributes(v, s, elem, rows);
         validate_children(v, s, elem, ct);
         /* XSD 1.1: the type's xs:assert list — context is the
          * element; evaluation errors are failures */

@@ -1,0 +1,12 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:a" targetNamespace="urn:a">
+  <xs:complexType name="CT_PositiveSize2D">
+    <xs:attribute name="cx" type="xs:unsignedLong" use="required"/>
+    <xs:attribute name="cy" type="xs:unsignedLong" use="required"/>
+  </xs:complexType>
+  <xs:complexType name="CT_NonVisualDrawingProps">
+    <xs:attribute name="id" type="xs:unsignedInt" use="required"/>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+  <xs:complexType name="CT_ShapeProperties"/>
+</xs:schema>

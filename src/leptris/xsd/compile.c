@@ -2039,6 +2039,25 @@ XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
     return xsd_find_complex(s, type_name);
 }
 
+/* leptris-ruby#440 (follow-up): a TYPE REFERENCE on an instance
+ * element resolves against the namespace the REFERENCE declares —
+ * OOXML's dml family types every wp:/pic: particle with
+ * a:-prefixed main-namespace types (wp:extent -> a:CT_PositiveSize2D).
+ * The capture strips prefixes (xsd_local_name), so the element's
+ * own namespace is only the FIRST guess: try (element ns, name),
+ * then unstamped entries, then the name-only spelling across the
+ * merged table. The priority order keeps the #1665 guarantee where
+ * it matters — when the element's own namespace declares the type,
+ * a foreign same-name decl cannot win. Compile-side lookups
+ * (extension bases, group refs) stay STRICT: derivation is
+ * same-namespace by XSD rules. */
+XsdCm* xsd_find_complex_ref(struct leptris_xsd_schema* s,
+                            const char* type_name, const char* uri) {
+    XsdCm* ct = xsd_find_complex_ns(s, type_name, uri);
+    if (ct) return ct;
+    return xsd_find_complex(s, type_name);
+}
+
 const XsdSimple* xsd_find_simple_pub(struct leptris_xsd_schema* s,
                                      const char* name) {
     return xsd_find_simple(s, name);

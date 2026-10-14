@@ -1,0 +1,13 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:wp" targetNamespace="urn:wp"
+           xmlns:a="urn:a">
+  <xs:import namespace="urn:a" schemaLocation="main.xsd"/>
+  <xs:complexType name="CT_Inline">
+    <xs:sequence>
+      <xs:element name="extent" type="a:CT_PositiveSize2D"/>
+      <xs:element name="docPr" type="a:CT_NonVisualDrawingProps"/>
+      <xs:element name="spPr" type="a:CT_ShapeProperties" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="inline" type="CT_Inline"/>
+</xs:schema>

@@ -1,0 +1,11 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="urn:doc" targetNamespace="urn:doc"
+           xmlns:x="urn:wp">
+  <xs:import namespace="urn:wp" schemaLocation="wp.xsd"/>
+  <xs:complexType name="CT_Doc">
+    <xs:sequence>
+      <xs:element ref="x:inline"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="doc" type="CT_Doc"/>
+</xs:schema>
