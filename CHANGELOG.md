@@ -2,8 +2,43 @@
 
 ## [1.9.353] - 2026-10-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
+
+- **Element-attribute batch face (leptris#1689, PR #1690).**
+  `leptris_element_attributes_snapshot` — the object-face sibling
+  of #1670's plan-value snapshot: ALL attribute names, values, and
+  optionally ns prefixes/URIs in ONE crossing, two-phase
+  capacity/retry, per-lane totals in the +1 offset slots, SIZE_MAX
+  ns markers for no-namespace attributes. Values ride the lazy
+  entity expansion; URIs the #1664 in-scope resolution. The count
+  half (`leptris_element_attribute_count`) shipped with TODO 138 —
+  the pair is complete. Binding wire-up: one PR on leptris-ruby
+  (the #447 harness carries over).
+
+### Changed
+
+- **XSD conformance lane: differential manifest + measured floor
+  (leptris#1075, PR #1692).** Every (schema, instance) pair in
+  libxml2-cases now carries the libxml2 oracle's verdict
+  (`MANIFEST.tsv`, 1056 rows: 187 valid / 663 invalid / 206
+  schema-error), and
+  `XsdConformance.ManifestExpectationsMatchOracle` runs the engine
+  against all of them in ~80ms. First measured baseline: **769/1056
+  (72.8%)** — 36 false rejections, 45 false acceptances, 206
+  lax-constraint compiles. The burn-down began immediately: the
+  schema-structure check (name XOR ref on xs:attribute/xs:element,
+  minOccurs <= maxOccurs) retires 26 rows, **795/1056**, with
+  per-class monotonic floors. The 287-divergence queue tracks in
+  #1691.
+
+- **XSD reference-resolution chokepoint (PR #1693).** Five
+  declaration-table lookup families — each previously a hand-rolled
+  copy of the (ns,name)/unstamped/name-only walk — collapse onto
+  one generated `XSD_DEFINE_NS_LADDER` with explicit policies:
+  STRICT for compile-side derivation, LADDER for instance-side
+  type references (#1687's cross-namespace case). Pure refactor,
+  1997/1997 unchanged; `XsdGroupDef` queues until group definitions
+  carry ns stamps.
 
 ### Changed
 
