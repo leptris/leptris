@@ -3947,6 +3947,59 @@ LEPTRIS_API LeptrisStatus leptris_document_set_allocators(
 LEPTRIS_API LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url);
 
 /**
+ * Resource fetch hook for xi:include (TODO.assemble 04).
+ *
+ * Return 1 and fill out_content/out_len to serve the resource yourself;
+ * the engine takes ownership of the buffer and releases it with
+ * free() — allocate it with malloc() (or an allocator compatible
+ * with it).
+ * Return 0 to fall through to the default file loader. Return -1 to
+ * force a resource error (the xi:fallback applies).
+ *
+ * The uri is the resolved include target (no fragment). It is never a
+ * network scheme while no_network is set (the default).
+ */
+typedef int (*leptris_xinclude_resolver_fn)(const char* uri, void* user,
+                                            char** out_content,
+                                            size_t* out_len);
+
+/**
+ * Per-call options for XInclude processing (TODO.assemble 03/04).
+ * Zero-initialize for the defaults: no resolver, no catalog,
+ * no_network = 1 (remote schemes refuse with a resource error).
+ *
+ * Memory: the strings and the resolver are borrowed for the duration
+ * of the call; nothing here is freed by the engine.
+ */
+typedef struct leptris_xinclude_opts {
+    leptris_xinclude_resolver_fn resolver; /**< NULL = file loader only */
+    void* resolver_user;                   /**< passed to the resolver   */
+    const char* catalog_path;              /**< XML catalog file or NULL */
+    int no_network;                        /**< default 1 (SSRF posture) */
+} leptris_xinclude_opts;
+
+/**
+ * Process XInclude with explicit resolver policy.
+ *
+ * Extends leptris_xinclude_process with:
+ *   - xml:base inheritance: relative hrefs resolve against the
+ *     nearest xml:base ancestor (RFC 3986 merge), and nested
+ *     includes inside an included document resolve against that
+ *     document's own location;
+ *   - an optional resolver hook (see leptris_xinclude_resolver_fn);
+ *   - an optional XML Catalog file (<uri name= uri=> exact mappings);
+ *     catalog lookups rewrite the URI before the resolver/loader runs;
+ *   - the network policy: with no_network (the default), hrefs whose
+ *     resolved URI carries http/https/ftp(s)/file-remote schemes are
+ *     resource errors (xi:fallback applies).
+ *
+ * Memory: opts is borrowed for the call; pass NULL for the defaults.
+ */
+LEPTRIS_API LeptrisStatus leptris_xinclude_process_opts(
+    LeptrisDocument doc, const char* base_url,
+    const leptris_xinclude_opts* opts);
+
+/**
  * Check if element is an XInclude include element
  *
  * @param elem Element to check

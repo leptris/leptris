@@ -4,7 +4,9 @@
 #include "leptris.h"
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <sys/stat.h>
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -411,6 +413,248 @@ TEST(XIncludeProcess, ParseXmlRecursiveIncludesNestedXi) {
     leptris_document_free(doc);
     remove(inner_path);
     remove(outer_path);
+}
+
+// ---- TODO.assemble 03: xml:base chains ---------------------------------
+
+TEST(XIncludeXmlBase, AncestorXmlBaseResolvesRelativeHref) {
+    /* The include rides the NEAREST xml:base ancestor merged over
+     * the document base — RFC 3986 §5.2 — not the document location
+     * alone. */
+    const char inner_xml[] = "<inner>base-dir-content</inner>";
+    const char* dir = "/tmp/leptris_xi_base";
+    char target[256];
+    snprintf(target, sizeof(target), "%s/inner.xml", dir);
+    remove(dir);
+    mkdir(dir, 0755);
+    FILE* f = fopen(target, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(inner_xml, 1, std::strlen(inner_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <wrapper xml:base='/tmp/leptris_xi_base/'>"
+        "    <xi:include href='inner.xml'/>"
+        "  </wrapper>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement wrapper = leptris_element_first_child_any(root);
+    ASSERT_NE(wrapper, nullptr);
+    LeptrisElement inner = leptris_element_first_child_any(wrapper);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_STREQ(leptris_element_name(inner), "inner");
+    EXPECT_STREQ(leptris_element_text(inner), "base-dir-content");
+
+    leptris_document_free(doc);
+    remove(target);
+    rmdir(dir);
+}
+
+TEST(XIncludeXmlBase, RelativeXmlBaseMergesOverDocBase) {
+    /* A RELATIVE xml:base resolves against the document's base_url
+     * before the href resolves against it. */
+    const char inner_xml[] = "<inner>rel</inner>";
+    const char* dir = "/tmp/leptris_xi_rel/sub";
+    char target[256];
+    snprintf(target, sizeof(target), "%s/inner.xml", dir);
+    char mk[128];
+    snprintf(mk, sizeof(mk), "mkdir -p %s", dir);
+    if (system(mk) != 0) FAIL() << "mkdir failed";
+    FILE* f = fopen(target, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(inner_xml, 1, std::strlen(inner_xml), f);
+    fclose(f);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='inner.xml' xml:base='sub/'/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_xinclude_process_opts(doc, "/tmp/leptris_xi_rel/",
+                                            nullptr),
+              LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement inner = leptris_element_first_child_any(root);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_STREQ(leptris_element_text(inner), "rel");
+
+    leptris_document_free(doc);
+    remove(target);
+}
+
+TEST(XIncludeXmlBase, NestedIncludeResolvesAgainstIncludedDocDir) {
+    /* A doc included from dirA includes 'peer.xml' relatively — the
+     * peer resolves against dirA (the included doc's own location),
+     * not the includer's directory. */
+    const char* dir = "/tmp/leptris_xi_nested";
+    char mk[128];
+    snprintf(mk, sizeof(mk), "mkdir -p %s", dir);
+    if (system(mk) != 0) FAIL() << "mkdir failed";
+    char peer_path[256];
+    snprintf(peer_path, sizeof(peer_path), "%s/peer.xml", dir);
+    const char peer_xml[] = "<peer>from-dir</peer>";
+    FILE* fp = fopen(peer_path, "wb");
+    ASSERT_NE(fp, nullptr);
+    fwrite(peer_xml, 1, std::strlen(peer_xml), fp);
+    fclose(fp);
+
+    /* mid.xml lives in dir/ and includes peer.xml relatively */
+    char mid_path[256];
+    snprintf(mid_path, sizeof(mid_path), "%s/mid.xml", dir);
+    const char mid_xml[] =
+        "<mid xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='peer.xml'/>"
+        "</mid>";
+    FILE* fm = fopen(mid_path, "wb");
+    ASSERT_NE(fm, nullptr);
+    fwrite(mid_xml, 1, std::strlen(mid_xml), fm);
+    fclose(fm);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='/tmp/leptris_xi_nested/mid.xml'/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement mid = leptris_element_first_child_any(root);
+    ASSERT_NE(mid, nullptr);
+    LeptrisElement peer = leptris_element_first_child_any(mid);
+    ASSERT_NE(peer, nullptr);
+    EXPECT_STREQ(leptris_element_name(peer), "peer");
+    EXPECT_STREQ(leptris_element_text(peer), "from-dir");
+
+    leptris_document_free(doc);
+    remove(peer_path);
+    remove(mid_path);
+}
+
+// ---- TODO.assemble 04: resolver policy ---------------------------------
+
+TEST(XIncludePolicy, NoNetworkRefusesRemoteWithFallback) {
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='http://example.invalid/data.xml'>"
+        "    <xi:fallback>offline</xi:fallback>"
+        "  </xi:include>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* no_network defaults to 1 — the remote fetch is a resource
+     * error and the fallback applies. */
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    const char* rt = leptris_element_text(root);
+    ASSERT_NE(rt, nullptr);
+    EXPECT_NE(strstr(rt, "offline"), nullptr);
+
+    leptris_document_free(doc);
+}
+
+TEST(XIncludePolicy, ResolverServesContent) {
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='mem://thing'/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_xinclude_opts opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.no_network = 1;
+    opts.resolver = [](const char* uri, void* user, char** out_content,
+                       size_t* out_len) -> int {
+        static const char inner_xml[] = "<served>by-resolver</served>";
+        (void)user;
+        if (strcmp(uri, "mem://thing") != 0) return 0;
+        size_t n = strlen(inner_xml) + 1;
+        *out_content = (char*)malloc(n);
+        if (!*out_content) return -1;
+        memcpy(*out_content, inner_xml, n);
+        *out_len = n - 1;
+        return 1;
+    };
+
+    EXPECT_EQ(leptris_xinclude_process_opts(doc, nullptr, &opts),
+              LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement served = leptris_element_first_child_any(root);
+    ASSERT_NE(served, nullptr);
+    EXPECT_STREQ(leptris_element_name(served), "served");
+    EXPECT_STREQ(leptris_element_text(served), "by-resolver");
+
+    leptris_document_free(doc);
+}
+
+TEST(XIncludePolicy, CatalogMapsRemoteToLocal) {
+    /* A catalog entry rewrites a REMOTE name onto a local file —
+     * the network gate runs on the post-catalog URI, so the include
+     * resolves offline. */
+    const char target_xml[] = "<catalogued>local-copy</catalogued>";
+    const char* target_path = "/tmp/leptris_xi_cat_target.xml";
+    FILE* ft = fopen(target_path, "wb");
+    ASSERT_NE(ft, nullptr);
+    fwrite(target_xml, 1, std::strlen(target_xml), ft);
+    fclose(ft);
+
+    const char* cat_path = "/tmp/leptris_xi_catalog.xml";
+    const char cat_xml[] =
+        "<?xml version='1.0'?>"
+        "<catalog xmlns='urn:oasis:names:tc:entity:xmlns:xml:catalog'>"
+        "  <uri name='http://example.invalid/catalogued.xml'"
+        "       uri='/tmp/leptris_xi_cat_target.xml'/>"
+        "</catalog>";
+    FILE* fc = fopen(cat_path, "wb");
+    ASSERT_NE(fc, nullptr);
+    fwrite(cat_xml, 1, std::strlen(cat_xml), fc);
+    fclose(fc);
+
+    const char xml[] =
+        "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
+        "  <xi:include href='http://example.invalid/catalogued.xml'/>"
+        "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    leptris_xinclude_opts opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.no_network = 1;
+    opts.catalog_path = cat_path;
+
+    EXPECT_EQ(leptris_xinclude_process_opts(doc, nullptr, &opts),
+              LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement got = leptris_element_first_child_any(root);
+    ASSERT_NE(got, nullptr);
+    EXPECT_STREQ(leptris_element_name(got), "catalogued");
+    EXPECT_STREQ(leptris_element_text(got), "local-copy");
+
+    leptris_document_free(doc);
+    remove(target_path);
+    remove(cat_path);
 }
 
 // ---- Phase 4: xpointer fragment selection (TODO 92) ------------------
