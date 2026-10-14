@@ -155,9 +155,9 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     RecordProperty("failed", std::to_string(failed));
     // 150 -> 147 (slice 4: transitive include-tns, content-type
     // mismatch, attribute-wildcard restriction) -> 142 (slice 5:
-    // ref QNames must resolve to a declaration across the
-    // include/import graph, first-import-per-namespace wins).
-    EXPECT_GE(ok, 142u) << "compile-success floor regressed";
+    // ref QNames must resolve) -> 139 (slice 6: UPA —
+    // non-deterministic content models rejected).
+    EXPECT_GE(ok, 139u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -1995,6 +1995,42 @@ TEST(XsdConformanceClauses, RestrictionWildcardNeedsBaseWildcard) {
     leptris_xsd_free(s);
 }
 
+TEST(XsdConformanceClauses, NonDeterministicSequenceRejected) {
+    /* deter0_0: (odd,even)* followed by odd? — after the loop, the
+     * trailing odd? collides with the loop restart. UPA violation. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/deter0_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK) << "UPA violation must be rejected";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, WildcardChoiceOverlapRejected) {
+    /* any4_0: a choice branch wildcard whose namespace covers the
+     * other branch's explicit element — ambiguous. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/any4_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK) << "ambiguous wildcard choice must be rejected";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, DeterministicRepeatStillLoads) {
+    /* (a, a) is DETERMINISTIC (both required); the UPA check must
+     * not fire on required adjacency, and ##other must not cover
+     * targetNamespace elements (any5_1's (boo, other*, boo)). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p =
+        std::string(LEPTRIS_XSD_CASES_DIR) + "/seq-dubl-elem1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_xsd_free(s);
+    std::string p2 = std::string(LEPTRIS_XSD_CASES_DIR) + "/any5_1.xsd";
+    LeptrisXsdSchema s2 = leptris_xsd_compile_file(p2.c_str(), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_xsd_free(s2);
+}
+
 TEST(XsdConformanceClauses, UnresolvableRefQNameRejected) {
     /* import1_0 (src-element.2): an xs:element/@ref whose QName
      * resolves to no declaration (the import target file is
@@ -2097,10 +2133,10 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
      * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 870) << "conformance floor regressed";
+    EXPECT_GE(pass, 898) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 151);
     EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 101);
+    EXPECT_GE(pass_schema_error, 129);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

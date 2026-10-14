@@ -1264,6 +1264,303 @@ static int xsd_check_derivation(struct leptris_xsd_schema* s,
     return 0;
 }
 
+/* ---- #1691 slice 6: UPA (Unique Particle Attribution) -------------
+ *
+ * The oracle rejects non-deterministic content models at load
+ * (deter0_0: (odd,even)* followed by odd?; any4_0: a wildcard
+ * choice branch overlapping an explicit element). The check that
+ * catches the real-world shapes without building a full derivative
+ * machine:
+ *   - choice/all branches: pairwise FIRST-set overlap;
+ *   - sequences: a child that can repeat or be skipped may not have
+ *     a FIRST overlap with the union of its siblings' FIRSTs
+ *     ((a,a) stays deterministic; (a?,a) and (a*,a) do not).
+ * FIRST entries are (name, wildcard-ns-class) pairs; a wildcard
+ * overlaps a name when its namespace set covers the name's
+ * namespace (the schema's targetNamespace for bare names). */
+
+#define XSD_UPA_MAX 64
+
+struct xsd_upa_first {
+    const char* name;   /* local name; NULL for a pure wildcard */
+    char ns[256];       /* the name's namespace ("" unqualified) */
+    char wc[256];       /* wildcard namespace spec ("" if not wc) */
+};
+
+static int xsd_upa_ns_covers(const char* wc, const char* ns,
+                             const char* tns) {
+    if (!wc || !wc[0]) return 0;
+    if (strcmp(wc, "##any") == 0) return 1;
+    if (strcmp(wc, "##other") == 0)
+        /* any namespace OTHER than the schema's targetNamespace and
+         * absent from no-namespace */
+        return ns && ns[0] && (!tns || !tns[0] || strcmp(ns, tns) != 0);
+    if (strcmp(wc, "##targetNamespace") == 0)
+        return ns && ns[0] && tns && strcmp(ns, tns) == 0;
+    if (strcmp(wc, "##local") == 0) return !ns || !ns[0];
+    return ns && ns[0] && strstr(wc, ns) != NULL;
+}
+
+static int xsd_upa_first_overlap(const struct xsd_upa_first* a,
+                                 const struct xsd_upa_first* b,
+                                 const char* tns) {
+    if (a->wc[0] && b->wc[0]) {
+        /* two wildcards overlap unless their sets are disjoint —
+         * conservatively report any pair carrying ##any, or equal
+         * specs */
+        if (strcmp(a->wc, "##any") == 0 || strcmp(b->wc, "##any") == 0 ||
+            strcmp(a->wc, b->wc) == 0)
+            return 1;
+        return 0;
+    }
+    if (a->wc[0])
+        return b->name ? xsd_upa_ns_covers(a->wc, b->ns, tns) : 0;
+    if (b->wc[0])
+        return a->name ? xsd_upa_ns_covers(b->wc, a->ns, tns) : 0;
+    if (!a->name || !b->name) return 0;
+    if (strcmp(a->name, b->name) != 0) return 0;
+    const char* ans = a->ns[0] ? a->ns : (tns ? tns : "");
+    const char* bns = b->ns[0] ? b->ns : (tns ? tns : "");
+    return strcmp(ans, bns) == 0;
+}
+
+static int xsd_upa_nullable(LeptrisElement e, int depth);
+static int xsd_upa_first(LeptrisElement e, struct xsd_upa_first* out,
+                         int max, int* n, const char* tns, int depth);
+
+static void xsd_upa_name_of(LeptrisElement e, const char* tns,
+                            struct xsd_upa_first* f) {
+    memset(f, 0, sizeof(*f));
+    const char* ref = leptris_element_attribute(e, "ref");
+    const char* nm = leptris_element_attribute(e, "name");
+    f->name = (ref && ref[0]) ? strrchr(ref, ':') ? strrchr(ref, ':') + 1
+                                                  : ref
+              : (nm ? nm : NULL);
+    (void)tns;
+    if (f->name && strchr(f->name, ':')) {
+        /* prefixed literal name — strip for the local compare */
+        f->name = strrchr(f->name, ':') + 1;
+    }
+}
+
+static int xsd_upa_first(LeptrisElement e, struct xsd_upa_first* out,
+                         int max, int* n, const char* tns, int depth) {
+    if (!e || depth > 24 || *n >= max) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+
+    if (strcmp(l, "element") == 0) {
+        struct xsd_upa_first f;
+        xsd_upa_name_of(e, tns, &f);
+        /* the element's namespace: the schema's targetNamespace for
+         * qualified globals/locals (form=qualified is the corpus
+         * shape); unqualified names carry "" */
+        const char* form = leptris_element_attribute(e, "form");
+        snprintf(f.ns, sizeof(f.ns), "%s",
+                 (form && strcmp(form, "unqualified") == 0)
+                     ? ""
+                     : (tns ? tns : ""));
+        if (f.name && *n < max) out[(*n)++] = f;
+        return 0;
+    }
+    if (strcmp(l, "any") == 0) {
+        struct xsd_upa_first f;
+        memset(&f, 0, sizeof(f));
+        const char* ns = leptris_element_attribute(e, "namespace");
+        snprintf(f.wc, sizeof(f.wc), "%s",
+                 (ns && ns[0]) ? ns : "##any");
+        if (*n < max) out[(*n)++] = f;
+        return 0;
+    }
+    if (strcmp(l, "sequence") == 0 || strcmp(l, "group") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            xsd_upa_first((LeptrisElement)c, out, max, n, tns, depth + 1);
+            if (!xsd_upa_nullable((LeptrisElement)c, depth + 1)) break;
+        }
+        return 0;
+    }
+    if (strcmp(l, "choice") == 0 || strcmp(l, "all") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            xsd_upa_first((LeptrisElement)c, out, max, n, tns, depth + 1);
+        }
+        return 0;
+    }
+    /* optional wrappers (xs already models minOccurs on the particle
+     * itself; xs:element with minOccurs=0 is handled by callers) */
+    return 0;
+}
+
+static int xsd_upa_nullable(LeptrisElement e, int depth) {
+    if (!e || depth > 24) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+    int mn = 1;
+    const char* mn_s = leptris_element_attribute(e, "minOccurs");
+    if (mn_s && strcmp(mn_s, "0") == 0) return 1;
+    if (strcmp(l, "choice") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c))
+            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+                xsd_upa_nullable((LeptrisElement)c, depth + 1))
+                return 1;
+        return 0;
+    }
+    if (strcmp(l, "sequence") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            if (!xsd_upa_nullable((LeptrisElement)c, depth + 1))
+                return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int xsd_upa_check_node(struct leptris_xsd_schema* s,
+                              LeptrisElement e, const char* tns,
+                              int depth);
+
+static int xsd_upa_collect_children(LeptrisElement e, LeptrisElement* kids,
+                                    int max) {
+    int n = 0;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             leptris_element_as_node(e));
+         c && n < max; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* kl = NULL;
+        const char* kp = NULL;
+        const char* ku = NULL;
+        leptris_element_expanded_name((LeptrisElement)c, &kl, &kp, &ku);
+        if (!kl || !ku || strcmp(ku, XSD_NS) != 0) continue;
+        if (strcmp(kl, "annotation") == 0) continue;
+        kids[n++] = (LeptrisElement)c;
+    }
+    return n;
+}
+
+static int xsd_upa_particle_can_repeat_or_skip(LeptrisElement c) {
+    const char* mn = leptris_element_attribute(c, "minOccurs");
+    const char* mx = leptris_element_attribute(c, "maxOccurs");
+    if (mn && strcmp(mn, "0") == 0) return 1;
+    if (mx && strcmp(mx, "unbounded") == 0) return 1;
+    if (mx && mx[0] && strcmp(mx, "1") != 0) {
+        long v = strtol(mx, NULL, 10);
+        if (v != 1) return 1;
+    }
+    /* an optional GROUP: its restart can collide with the sibling */
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(c, &l, &p2, &u);
+    return 0;
+}
+
+static int xsd_upa_check_node(struct leptris_xsd_schema* s,
+                              LeptrisElement e, const char* tns,
+                              int depth) {
+    if (!e || depth > 24) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+    int is_choice = (strcmp(l, "choice") == 0);
+    int is_all = (strcmp(l, "all") == 0);
+    int is_seq = (strcmp(l, "sequence") == 0);
+
+    LeptrisElement kids[64];
+    int nk = xsd_upa_collect_children(e, kids, 64);
+
+    if ((is_choice || is_all) && nk >= 2) {
+        for (int i = 0; i < nk; i++) {
+            struct xsd_upa_first fi[XSD_UPA_MAX];
+            int ni = 0;
+            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            for (int j = i + 1; j < nk; j++) {
+                struct xsd_upa_first fj[XSD_UPA_MAX];
+                int nj = 0;
+                xsd_upa_first(kids[j], fj, XSD_UPA_MAX, &nj, tns,
+                              depth + 1);
+                for (int a = 0; a < ni; a++)
+                    for (int b = 0; b < nj; b++) {
+                        if (xsd_upa_first_overlap(&fi[a], &fj[b], tns)) {
+                            xsd_set_error(
+                                s,
+                                "upa: the content model is not "
+                                "deterministic: ambiguous choice "
+                                "branches");
+                            return -1;
+                        }
+                    }
+            }
+        }
+    }
+    if (is_seq) {
+        for (int i = 0; i + 1 < nk; i++) {
+            if (!xsd_upa_particle_can_repeat_or_skip(kids[i])) continue;
+            struct xsd_upa_first fi[XSD_UPA_MAX];
+            int ni = 0;
+            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            /* the union of every LATER sibling's FIRST — after the
+             * repeating/skippable child, any of them may come next */
+            struct xsd_upa_first rest[XSD_UPA_MAX];
+            int nr = 0;
+            for (int j = i + 1; j < nk; j++)
+                xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
+                              depth + 1);
+            for (int a = 0; a < ni; a++)
+                for (int b = 0; b < nr; b++) {
+                    if (xsd_upa_first_overlap(&fi[a], &rest[b], tns)) {
+                        xsd_set_error(
+                            s,
+                            "upa: the content model is not "
+                            "deterministic: an optional or repeating "
+                            "particle overlaps a following particle");
+                        return -1;
+                    }
+                }
+        }
+    }
+    for (int i = 0; i < nk; i++)
+        if (xsd_upa_check_node(s, kids[i], tns, depth + 1) != 0)
+            return -1;
+    return 0;
+}
+
+static int xsd_check_upa(struct leptris_xsd_schema* s,
+                         LeptrisElement root) {
+    if (!root) return 0;
+    const char* tns = s->target_ns;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        if (xsd_upa_check_node(s, (LeptrisElement)n, tns, 0) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 /* ---- #1691 slice 5: element/attribute/group ref resolution -------
  *
  * The oracle (libxml2 2.9.13) rejects a schema whose xs:element/@ref
@@ -1544,6 +1841,11 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * ref QNames must resolve to a declaration in an available
      * document. */
     if (xsd_check_refs(s, root) != 0)
+        goto fail;
+
+    /* UPA (#1691 slice 6): choice-branch FIRST overlap and the
+     * optional/repeating-sequence adjacency rule. */
+    if (xsd_check_upa(s, root) != 0)
         goto fail;
 
     /* Schema Component Constraint: xsi: Not Allowed — the schema's
