@@ -547,8 +547,14 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
         RngPattern* wrap = pat_new(RNG_GROUP);
         /* COPY, not move: the included grammar may be reachable
          * through another include path whose defines still walk
-         * this tree (leptris#1709, adoption-by-copy). */
+         * this tree (leptris#1709, adoption-by-copy). The original
+         * tree is solely owned by THIS include-parse instance —
+         * free it, or every include hop leaks its define bodies
+         * (Linux-ASAN/LSan: 80-byte RngPattern trees per merged
+         * define). */
         wrap->first_child = rng_pattern_deep_copy(d->body);
+        rng_pattern_free(d->body);
+        d->body = NULL;
         if (!add_define(g, leptris_strdup(d->name),
                         d->combine ? leptris_strdup(d->combine) : NULL,
                         wrap, err, errsz)) {
@@ -557,6 +563,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
             free(d);
             while (next) {
                 RngDefine* n2 = next->next;
+                rng_pattern_free(next->body);
                 free(next->name);
                 free(next->combine);
                 free(next);
