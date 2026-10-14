@@ -152,6 +152,14 @@ void leptris_element_set_next_sibling(LeptrisElement elem, LeptrisElement siblin
 
 /* Get first attribute — decodes the int32_t offset (TODO 90 Phase 2d). */
 struct leptris_attribute* leptris_element_get_first_attribute(LeptrisElement elem) {
+    /* #1712: FFI consumers hand wrong-type handles to element faces
+     * (duck-typed remediation code passes text nodes). The compact
+     * overlay puts first_attribute_off 4 bytes past a 32-byte text
+     * struct — the next node's type word — so an unchecked decode
+     * hands out a dangling attribute handle that kills string
+     * readers. Internal callers pass elements by construction; the
+     * inline fast path skips this check. */
+    if (!LEPTRIS_NODE_IS_ELEMENT((LeptrisNode*)elem)) return NULL;
     return leptris_elem_first_attribute(elem);
 }
 

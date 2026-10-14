@@ -352,6 +352,33 @@ TEST(DomBasics, AttributeHandleIterationEmptyAndNullContracts) {
     leptris_document_free(doc);
 }
 
+TEST(DomBasics, AttributeFacesRejectNonElementHandles) {
+    /* leptris#1712: a text node handed to an element attribute face
+     * must not decode pool neighbours as an attribute chain — the
+     * compact overlays put element.first_attribute_off 4 bytes past
+     * the 32-byte text struct, i.e. on the NEXT node's type word
+     * (=1 for a following text node), yielding the dangling
+     * handle+1 that kills string readers (svg_conform segfault). */
+    const char xml[] = "<r a='1'>x<!--c-->y</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    LeptrisNodeRef text = leptris_node_first_child((LeptrisNodeRef)root);
+    ASSERT_NE(text, nullptr);
+    ASSERT_EQ(leptris_node_get_type(text), kNodeTypeText);
+    LeptrisNodeRef comment = leptris_node_next_sibling(text);
+    ASSERT_EQ(leptris_node_get_type(comment), kNodeTypeComment);
+    LeptrisNodeRef second_text = leptris_node_next_sibling(comment);
+    ASSERT_EQ(leptris_node_get_type(second_text), kNodeTypeText);
+
+    EXPECT_EQ(leptris_element_first_attribute((LeptrisElement)text),
+              nullptr);
+
+    leptris_document_free(doc);
+}
+
 TEST(DomBasics, AttributeHandleValueExpandsEntities) {
     const char xml[] = "<r t='a &amp; b &lt; c'/>";
     LeptrisStatus st = LEPTRIS_OK;
