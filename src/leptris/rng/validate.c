@@ -1719,6 +1719,17 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
         "element \"%s\" not allowed anywhere; expected %s",
                  x, expected);
         }
+        /* leptris#1704 (Jing parity): the skipped element still
+         * gets its attributes validated — against its OWN
+         * definition — or schema-attribute constraints (align
+         * enums) go invisible exactly where documents are most
+         * broken. Jing reports both, position first. */
+        {
+            RngDefine* own = find_define(v->g, x);
+            if (own && own->body)
+                diagnose_attrs(v, dpat_new(v, RNG_ELEMENT, own->body),
+                               kid);
+        }
         /* Skip the offending child; position unchanged. */
     }
     if (!nullable_state(v, state)) {

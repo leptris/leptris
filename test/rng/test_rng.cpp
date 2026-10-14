@@ -672,6 +672,44 @@ TEST(RngRegression, AttrValueConstraintBehindRefIsEnforcedAndEnumerated) {
     leptris_rng_free(rng);
 }
 
+TEST(RngRegression, PositionErrorStillReportsAttributeErrors) {
+    /* leptris#1704 (Jing parity): an element that fails its
+     * position (p under sections) must STILL get its attributes
+     * validated — against its own definition — or schema-attribute
+     * constraints (align enums) go invisible exactly where
+     * documents are most broken. Jing reports both, position
+     * first. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<element name='clause'><text/></element>"
+        "</element></start>"
+        "<define name='p'>"
+        "<optional><attribute name='align'><ref name='vals'/></attribute>"
+        "</optional><text/></define>"
+        "<define name='vals'><choice>"
+        "<value>right</value><value>left</value>"
+        "<value>center</value><value>justified</value>"
+        "</choice></define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r><p align='mid-air'>t</p></r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GE(n, 2u) << "expected position AND attribute errors";
+    EXPECT_NE(strstr(rep[0].message, "element \"p\" not allowed"),
+              nullptr) << rep[0].message;
+    EXPECT_NE(strstr(rep[1].message,
+        "value of attribute \"align\" is invalid"),
+        nullptr) << rep[1].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngRegression, IncompleteNamesTheFirstRequiredElement) {
     /* Jing matchEndTag: requiredElementNames() - the first
      * non-nullable position's names (choice intersects, group
