@@ -291,6 +291,41 @@ TEST(XsdValidate, AttrTypeResolvesInDeclaringNamespace) {
     leptris_xsd_free(s);
 }
 
+// leptris-ruby#440 (follow-up): a type reference on an instance
+// element resolves in the namespace the REFERENCE declares, not
+// the element's own — OOXML types every wp:/pic: particle with
+// a:-prefixed main-namespace types (wp:extent ->
+// a:CT_PositiveSize2D), and the strict (ns, name) lookup answered
+// "type not found in the schema" for all six drawing particles.
+// The reference ladder (element ns -> unstamped -> name-only)
+// keeps #1665's priority: the element's own namespace still wins.
+TEST(XsdValidate, CrossNamespaceTypeRefsResolve) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/xns_type_refs/root.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char doc[] =
+        "<d:doc xmlns:d=\"urn:doc\" xmlns:x=\"urn:wp\">"
+        "<x:inline><x:extent cx=\"990600\" cy=\"792480\"/>"
+        "<x:docPr id=\"1\" name=\"pic\"/>"
+        "<x:spPr/></x:inline></d:doc>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    // Strictness survives: a bad lexical still fails through the
+    // foreign-namespace type.
+    const char bad[] =
+        "<d:doc xmlns:d=\"urn:doc\" xmlns:x=\"urn:wp\">"
+        "<x:inline><x:extent cx=\"nope\" cy=\"792480\"/>"
+        "<x:docPr id=\"1\" name=\"pic\"/></x:inline></d:doc>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
 // leptris-ruby#434: the length family counts OCTETS for binary
 // bases (XML Schema Part 2: hexBinary/base64Binary length is in
 // bytes) — the wml ST_LongHexNumber shape (hexBinary + length 4)
