@@ -4,6 +4,30 @@
 
 ### Fixed
 
+- **XSD: instance type references resolve across namespaces
+  (leptris-ruby#440, PR #1687).** The 1.9.351.0 regression report
+  (6 "type not found" errors validating a WordprocessingML document
+  with an inline image, identical under chain and direct compile)
+  was not the fold — the referenced types ARE captured and stamped;
+  the LOOKUP was namespace-blind. The particles are typed by
+  a:-prefixed references into the drawingml main namespace
+  (wp:extent type="a:CT_PositiveSize2D", pic:cNvPr
+  type="a:CT_NonVisualDrawingProps", ...); capture strips prefixes,
+  and instance validation resolved the bare name with the strict
+  (ns, name) pair keyed on the ELEMENT's namespace, missing every
+  cross-namespace reference — which #1665's no-foreign-fallback
+  turns into the loud error. Reference resolution now walks a
+  namespace ladder: exact (ns, name) from the DECLARING unit's
+  targetNamespace first (the type reference lives in the schema's
+  namespace, not the element's), then the element's namespace, then
+  the unstamped fallback — never a foreign namespace that merely
+  declares the same local name. Same unmasking pattern as the
+  original #440: #1679's base_dir threading made the dml units load
+  in chain compiles, so their cross-namespace references became
+  checked for the first time.
+
+### Fixed
+
 - instance type refs resolve across namespaces (reference ladder) (xsd)
 
 
