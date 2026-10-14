@@ -1925,6 +1925,50 @@ LEPTRIS_API const char* leptris_element_attribute_string(LeptrisElement elem, co
 LEPTRIS_API size_t leptris_element_attribute_count(LeptrisElement elem);
 
 /**
+ * ALL attribute names, values, and namespace data in ONE crossing
+ * (leptris#1689 — the element-face sibling of the #1670 plan-value
+ * snapshot; two-phase capacity/retry contract).
+ *
+ * Phase 1 (sizing): pass NULL for the names and values blobs — the
+ * return value is the maximum byte capacity any single lane
+ * requires (names, values, and, when requested, the ns lanes; every
+ * lane sized to the returned capacity is always sufficient).
+ * Buffers are untouched.
+ *
+ * Phase 2 (read): pass buffers of at least the returned capacity.
+ * Returns 0 on success; (size_t)-1 when any PROVIDED buffer is
+ * smaller than its lane requires (retry at the phase-1 capacity —
+ * (size_t)-1 on an element whose attributes were mutated between
+ * calls).
+ *
+ * Each lane is a NUL-terminated string blob with a parallel offset
+ * array of attribute_count+1 entries: entry i is the byte offset of
+ * attribute i's string, entry [attribute_count] is that lane's total
+ * byte length. A lane is written only when its blob is non-NULL
+ * (the ns lanes are optional — bindings that only need names/values
+ * pass NULL for all four ns arguments).
+ *
+ * Namespace lanes: a no-namespace attribute records SIZE_MAX in its
+ * prefix/uri offset slot and writes nothing to the blob. Prefixed
+ * attributes carry the prefix as spelled and the URI resolved
+ * through the element's in-scope declarations (the same semantics
+ * as leptris_attribute_namespace_uri, #1664/#542).
+ *
+ * Names/values are the element's own strings (document-lifetime);
+ * the snapshot copies them into the caller's buffers.
+ *
+ * @param elem Element (NULL returns 0)
+ * @return 0 on success, required capacity when sizing, (size_t)-1
+ *         when a provided buffer is too small
+ */
+LEPTRIS_API size_t leptris_element_attributes_snapshot(
+    LeptrisElement elem,
+    char* names, size_t names_cap, size_t* name_offsets,
+    char* values, size_t values_cap, size_t* value_offsets,
+    char* ns_prefixes, size_t prefixes_cap, size_t* prefix_offsets,
+    char* ns_uris, size_t uris_cap, size_t* uri_offsets);
+
+/**
  * Get name of attribute by index
  *
  * @param elem Element

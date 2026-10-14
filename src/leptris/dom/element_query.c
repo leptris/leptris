@@ -1373,6 +1373,106 @@ LEPTRIS_API size_t leptris_element_attribute_count(LeptrisElement elem) {
     return elem->attr_count;
 }
 
+/* ---- #1689: element-attribute batch face --------------------------
+ *
+ * One crossing per element: names, values, and the optional ns
+ * lanes come back as parallel NUL-terminated blobs with offset
+ * arrays, sized by the two-phase contract (#1670 plan-value
+ * template). Values ride leptris_attribute_get_value so the lazy
+ * entity expansion applies exactly once; ns URIs ride the #1664
+ * in-scope resolution. */
+LEPTRIS_API size_t leptris_element_attributes_snapshot(
+    LeptrisElement elem,
+    char* names, size_t names_cap, size_t* name_offsets,
+    char* values, size_t values_cap, size_t* value_offsets,
+    char* ns_prefixes, size_t prefixes_cap, size_t* prefix_offsets,
+    char* ns_uris, size_t uris_cap, size_t* uri_offsets) {
+    if (!elem) return 0;
+
+    size_t nneed = 0, vneed = 0, pneed = 0, uneed = 0;
+    struct leptris_attribute* a;
+    for (a = leptris_element_get_first_attribute(elem); a;
+         a = leptris_attr_next(a)) {
+        nneed += strlen(leptris_attribute_get_name((LeptrisAttribute)a)) + 1;
+        vneed += strlen(leptris_attribute_get_value(elem,
+                                                    (LeptrisAttribute)a)) + 1;
+        const char* p = leptris_attribute_prefix((LeptrisAttribute)a);
+        const char* u = leptris_attribute_namespace_uri((LeptrisAttribute)a);
+        if (p) pneed += strlen(p) + 1;
+        if (u) uneed += strlen(u) + 1;
+    }
+    size_t need = nneed;
+    if (vneed > need) need = vneed;
+    if (pneed > need) need = pneed;
+    if (uneed > need) need = uneed;
+
+    /* Phase 1 (sizing): the required lanes are NULL — report the
+     * per-lane capacity and touch nothing. */
+    if (!names || !names_cap || !values || !values_cap)
+        return need;
+    if (!name_offsets || !value_offsets)
+        return (size_t)-1;
+
+    /* The ns lanes are independently optional; a provided lane must
+     * have its offsets and fit its requirement. */
+    int want_p = ns_prefixes && prefixes_cap;
+    int want_u = ns_uris && uris_cap;
+    if ((want_p && !prefix_offsets) || (want_u && !uri_offsets))
+        return (size_t)-1;
+    if (nneed > names_cap || vneed > values_cap)
+        return (size_t)-1;
+    if (want_p && pneed > prefixes_cap)
+        return (size_t)-1;
+    if (want_u && uneed > uris_cap)
+        return (size_t)-1;
+
+    size_t count = elem->attr_count;
+    size_t no = 0, vo = 0, po = 0, uo = 0, i = 0;
+    for (a = leptris_element_get_first_attribute(elem); a;
+         a = leptris_attr_next(a), i++) {
+        const char* n = leptris_attribute_get_name((LeptrisAttribute)a);
+        const char* v = leptris_attribute_get_value(elem,
+                                                    (LeptrisAttribute)a);
+        size_t nl = strlen(n) + 1;
+        size_t vl = strlen(v) + 1;
+        name_offsets[i] = no;
+        memcpy(names + no, n, nl);
+        no += nl;
+        value_offsets[i] = vo;
+        memcpy(values + vo, v, vl);
+        vo += vl;
+        if (want_p) {
+            const char* p = leptris_attribute_prefix((LeptrisAttribute)a);
+            if (p) {
+                size_t pl = strlen(p) + 1;
+                prefix_offsets[i] = po;
+                memcpy(ns_prefixes + po, p, pl);
+                po += pl;
+            } else {
+                prefix_offsets[i] = (size_t)-1;  /* no namespace */
+            }
+        }
+        if (want_u) {
+            const char* u =
+                leptris_attribute_namespace_uri((LeptrisAttribute)a);
+            if (u) {
+                size_t ul = strlen(u) + 1;
+                uri_offsets[i] = uo;
+                memcpy(ns_uris + uo, u, ul);
+                uo += ul;
+            } else {
+                uri_offsets[i] = (size_t)-1;  /* no namespace */
+            }
+        }
+    }
+    name_offsets[count] = no;
+    value_offsets[count] = vo;
+    if (want_p) prefix_offsets[count] = po;
+    if (want_u) uri_offsets[count] = uo;
+    (void)i;
+    return 0;
+}
+
 /* Handle-based attribute iteration (TODO.remaining/06). The _at
  * accessors above re-walk the list from the head per call — index
  * iteration is O(n^2); the handle pair is O(n) total and gives

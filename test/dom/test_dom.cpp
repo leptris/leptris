@@ -3101,3 +3101,143 @@ TEST(DomAbsorbSurvival, CopyAttachSurvivesSourceFree) {
     ReadAllViews(droot);
     leptris_document_free(dst);
 }
+
+/* ---- #1689: element-attribute batch face ------------------------- */
+
+#ifndef _WIN32
+#include <vector>
+#endif
+
+/* One crossing per element: names, values, and the ns lanes come
+ * back in parallel NUL-terminated entries sized by the two-phase
+ * contract (the #1670 plan-value template, element face). */
+TEST(DomBasics, AttributesSnapshotOneCrossingPerElement) {
+    const char xml[] =
+        "<e a='1' b='two' ns:p='3' xmlns:ns='urn:n'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_element_attribute_count(root), 3u);
+
+    /* Sizing call: all blobs NULL -> required per-lane capacity. */
+    size_t need = leptris_element_attributes_snapshot(
+        root, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+    EXPECT_GT(need, 0u);
+
+    std::vector<char> names(need), values(need), prefs(need), uris(need);
+    std::vector<size_t> no(4), vo(4), po(4), uo(4);
+    ASSERT_EQ(leptris_element_attributes_snapshot(
+                  root, names.data(), need, no.data(), values.data(), need,
+                  vo.data(), prefs.data(), need, po.data(), uris.data(),
+                  need, uo.data()),
+              0u)
+        << "snapshot failed at capacity " << need;
+
+    for (size_t i = 0; i < 3; i++) {
+        const char* name = names.data() + no[i];
+        const char* value = values.data() + vo[i];
+        EXPECT_STREQ(value, leptris_element_attribute(root, name))
+            << "value mismatch for " << name;
+    }
+
+    /* No-namespace attributes mark their ns-lane entries SIZE_MAX;
+     * ns:p carries prefix ns resolved to urn:n. */
+    for (size_t i = 0; i < 3; i++) {
+        const char* name = names.data() + no[i];
+        if (std::strcmp(name, "ns:p") == 0) {
+            EXPECT_STREQ(prefs.data() + po[i], "ns");
+            EXPECT_STREQ(uris.data() + uo[i], "urn:n");
+        } else {
+            EXPECT_EQ(po[i], (size_t)-1);
+            EXPECT_EQ(uo[i], (size_t)-1);
+        }
+    }
+    /* Totals ride the +1 offset slots: the total is the last
+     * entry's offset + its length + 1 (the NUL). */
+    EXPECT_EQ(no[3], no[2] + strlen(names.data() + no[2]) + 1);
+    EXPECT_EQ(vo[3], vo[2] + strlen(values.data() + vo[2]) + 1);
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributesSnapshotTooSmallLaneRetries) {
+    const char xml[] = "<e alpha='1111111111' beta='2222222222'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    size_t need = leptris_element_attributes_snapshot(
+        root, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+    EXPECT_GT(need, 0u);
+
+    std::vector<char> names(4), values(need);
+    std::vector<size_t> no(3), vo(3);
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  root, names.data(), names.size(), no.data(),
+                  values.data(), need, vo.data(), NULL, 0, NULL, NULL, 0,
+                  NULL),
+              (size_t)-1);
+
+    names.resize(need);
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  root, names.data(), need, no.data(), values.data(), need,
+                  vo.data(), NULL, 0, NULL, NULL, 0, NULL),
+              0u);
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributesSnapshotNullNsLanesSkip) {
+    const char xml[] = "<e ns:x='1' xmlns:ns='urn:n'/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    size_t need = leptris_element_attributes_snapshot(
+        root, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL);
+    std::vector<char> names(need), values(need);
+    std::vector<size_t> no(2), vo(2);
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  root, names.data(), need, no.data(), values.data(), need,
+                  vo.data(), NULL, 0, NULL, NULL, 0, NULL),
+              0u);
+    EXPECT_STREQ(names.data() + no[0], "ns:x");
+    EXPECT_STREQ(values.data() + vo[0], "1");
+
+    leptris_document_free(doc);
+}
+
+TEST(DomBasics, AttributesSnapshotEmptyAndNullContracts) {
+    const char xml[] = "<e/>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  root, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL,
+                  0, NULL),
+              0u);
+    char blob[16] = {0};
+    size_t off[1] = {7};
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  root, blob, sizeof(blob), off, blob, sizeof(blob), off,
+                  NULL, 0, NULL, NULL, 0, NULL),
+              0u);
+    /* count == 0: the only offset slot is the total, and it is 0. */
+    EXPECT_EQ(off[0], 0u);
+
+    EXPECT_EQ(leptris_element_attributes_snapshot(
+                  NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL,
+                  0, NULL),
+              0u);
+
+    leptris_document_free(doc);
+}
