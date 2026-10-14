@@ -336,6 +336,36 @@ TEST(CliValidate, RngRound) {
     EXPECT_NE(r.out.find("rng: valid"), std::string::npos);
 }
 
+TEST(CliValidate, RngReportCarriesAllDiagnostics) {
+    /* #1704: a misplaced element that ALSO carries an invalid
+     * attribute reports BOTH diagnostics (Jing parity), plus the
+     * incompleteness note — the CLI prints the whole report. */
+    write_file("leptris_cli_val_rng_both.rng",
+               "<grammar ns='https://example.org/s'"
+               " xmlns='http://relaxng.org/ns/structure/1.0'>"
+               "<start><element name='doc'>"
+               "<element name='ok'><text/></element>"
+               "</element></start>"
+               "<define name='p'><optional>"
+               "<attribute name='align'><choice>"
+               "<value>left</value><value>right</value>"
+               "</choice></attribute></optional><text/></define>"
+               "</grammar>");
+    write_file("leptris_cli_val_rng_both.xml",
+               "<doc xmlns='https://example.org/s'>"
+               "<p align='mid-air'>t</p></doc>");
+    auto r = run_cli({"validate", "--rng", "leptris_cli_val_rng_both.rng",
+                      "leptris_cli_val_rng_both.xml"});
+    EXPECT_NE(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("rng: invalid"), std::string::npos);
+    EXPECT_NE(r.out.find("element \"p\" not allowed"),
+              std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("value of attribute \"align\" is invalid"),
+              std::string::npos)
+        << r.out;
+}
+
 TEST(CliValidate, MissingSchemaIsIoError) {
     write_file("leptris_cli_val_schmissing_ok.xml", "<r/>");
     auto r = run_cli({"validate", "--schematron",
