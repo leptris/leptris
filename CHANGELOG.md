@@ -2,8 +2,45 @@
 
 ## [1.9.355] - 2026-10-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
+
+- **RelaxNG: combine=interleave/choice merge across multi-hop
+  include chains (leptris#1703, PR #1705).** A nested
+  `<define combine=...>` inside `<include>` replaced the included
+  definition unconditionally and dropped its combine — every hop of
+  a multi-hop chain (relaton-ieee: compile -> flavor -> standoc ->
+  biblio -> basicdoc, basicdoc reachable through two paths) lost the
+  accumulated body: interleaved cardinalities collapsed to the
+  outermost branch (the 2nd/3rd `<ics>` rejections) and choice
+  unions collapsed to one alternative (the BIPM locality type
+  enumeration). Jing accepts both documents; leptris now does too.
+  The merge keeps the combinator wrapper as the define body and
+  flattens same-kind combinators at each merge (both associative),
+  so the validator's single-pass interleave walk judges one flat
+  scope. The absorb helper frees the absorbed wrapper fully
+  detached — the first cut's use-after-scope was caught by the
+  Linux ASAN lane.
+
+- **Strict parse: tag-mismatch failures name the tags
+  (leptris#1700, PR #1702).** A stray or mismatched closing tag on
+  the strict path failed with "XML parse error at byte N: malformed
+  input" — reading like encoding corruption. The failure now
+  carries "Opening and ending tag mismatch: expected </x>, got
+  </y>" (the Nokogiri/Jing convention) with the byte offset and
+  line:column retained; every other strict failure stays generic,
+  and depth-0 stray closes match the oracle's two-message behavior.
+
+### Changed
+
+- **XSD conformance slice 2: src-include.1 + xsi reservation
+  (PR #1698).** The included/redefined schema's targetNamespace
+  must equal the includer's — or be absent (the chameleon form
+  adopts the includer's) — and a schema whose own targetNamespace
+  is the xsi namespace fails at load. Conformance floor
+  795 -> 803/1056 (schema-error class 34/206); the compile floor is
+  now the cross-platform minimum after the Linux ASAN run showed
+  case-sensitive schemaLocation resolution rejecting 4 fixtures
+  macOS silently accepted (finding noted in #1691).
 
 ### Changed
 
