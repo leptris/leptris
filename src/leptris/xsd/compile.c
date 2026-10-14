@@ -726,6 +726,72 @@ static int xsd_uint_attr(LeptrisElement e, const char* name, int* out) {
     return 1;
 }
 
+/* src-include.1 (conformance lane schema-error class, #1691):
+ * the included/redefined schema's targetNamespace must equal the
+ * includer's — or be absent. Checked on the root's top-level
+ * include/redefine instructions; the subfile is parsed once here
+ * purely for the tns verdict (the capture pass re-reads it). */
+static int xsd_check_include_tns(struct leptris_xsd_schema* s,
+                                 LeptrisElement root) {
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* local = NULL;
+        const char* prefix = NULL;
+        const char* uri = NULL;
+        leptris_element_expanded_name(c, &local, &prefix, &uri);
+        if (!local || !uri || strcmp(uri, XSD_NS) != 0)
+            continue;
+        if (strcmp(local, "include") != 0 && strcmp(local, "redefine") != 0)
+            continue;
+        const char* loc =
+            leptris_element_attribute(c, "schemaLocation");
+        if (!loc || !s->base_dir)
+            continue;
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", s->base_dir, loc);
+        size_t flen = 0;
+        char* text = xsd_read_file(path, &flen);
+        if (!text) continue;
+        LeptrisDocument sub = leptris_parse_string(text, flen, NULL);
+        free(text);
+        if (!sub) continue;
+        LeptrisElement subroot = leptris_document_root(sub);
+        const char* sub_tns =
+            subroot ? leptris_element_attribute(subroot,
+                                                "targetNamespace")
+                    : NULL;
+        int err = 0;
+        char msg[512];
+        if (s->target_ns && sub_tns && s->target_ns[0] && sub_tns[0] &&
+            strcmp(sub_tns, s->target_ns) != 0) {
+            snprintf(msg, sizeof(msg),
+                     "src-include.1: the target namespace '%s' of the "
+                     "included/redefined schema '%s' differs from '%s' "
+                     "of the including schema",
+                     sub_tns, loc, s->target_ns);
+            err = 1;
+        } else if ((!s->target_ns || !s->target_ns[0]) && sub_tns &&
+                   sub_tns[0]) {
+            snprintf(msg, sizeof(msg),
+                     "src-include.1: the target namespace '%s' of the "
+                     "included/redefined schema '%s' has to be absent, "
+                     "since the including schema has no target namespace",
+                     sub_tns, loc);
+            err = 1;
+        }
+        leptris_document_free(sub);
+        if (err) {
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
 /* Schema-structure constraints (the conformance lane's schema-error
  * class, #1691): the xs:-vocabulary rules the oracle enforces at
  * load. First violation wins; the message names the rule. */
@@ -852,6 +918,25 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * occurrence ordering, checked at the document level exactly
      * where the oracle raises them — before capture. */
     if (xsd_check_structure(s, root) != 0)
+        goto fail;
+
+    /* Schema Component Constraint: xsi: Not Allowed — the schema's
+     * own targetNamespace must never be the xsi namespace
+     * (scc-no-xsi). */
+    if (s->target_ns &&
+        strcmp(s->target_ns,
+               "http://www.w3.org/2001/XMLSchema-instance") == 0) {
+        xsd_set_error(
+            s,
+            "scc-no-xsi: the target namespace must not be "
+            "'http://www.w3.org/2001/XMLSchema-instance'");
+        goto fail;
+    }
+
+    /* src-include.1: the included/redefined schema's
+     * targetNamespace must equal the includer's — or be absent
+     * (the chameleon form adopts the includer's at capture). */
+    if (xsd_check_include_tns(s, root) != 0)
         goto fail;
 
     xsd_capture_root(s, root);
