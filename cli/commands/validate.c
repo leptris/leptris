@@ -259,8 +259,21 @@ static cli_result_t validate_execute(int argc, char** argv) {
             printf("rng: valid\n");
         } else {
             printf("rng: invalid\n");
-            const char* e = leptris_rng_error(rng);
-            if (e && e[0]) printf("  %s\n", e);
+            /* the full report: position AND attribute diagnostics ride
+             * separate records (#1704 — Jing reports both) */
+            const LeptrisRngErrorRecord* rep = NULL;
+            size_t n = leptris_rng_error_report(rng, &rep);
+            for (size_t i = 0; i < n; i++) {
+                if (rep[i].line > 0)
+                    printf("  %u:%u: error: %s\n", rep[i].line,
+                           rep[i].column, rep[i].message);
+                else
+                    printf("  error: %s\n", rep[i].message);
+            }
+            if (n == 0) {
+                const char* e = leptris_rng_error(rng);
+                if (e && e[0]) printf("  %s\n", e);
+            }
             invalid = 1;
         }
         leptris_rng_free(rng);
