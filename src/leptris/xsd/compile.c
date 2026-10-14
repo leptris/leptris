@@ -454,6 +454,56 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
 /* Depth-capped local-base resolution with a cycle guard: the
  * restriction chain walks to its built-in, facets of EVERY hop
  * apply (XSD semantics). */
+/* ---- the reference-resolution chokepoint (the #440 family) --------
+ *
+ * Every declaration table lookup rides ONE generated ladder instead
+ * of a per-table copy of the same three loops. The ladder, in order:
+ *   1. exact (declaring targetNamespace, name)
+ *   2. unstamped entries (unknown-namespace declarations)
+ *   3. name-only across the merged table — ONLY when the policy
+ *      allows it (allow_name_only)
+ * Policy: STRICT (allow_name_only = 0) for compile-side derivation
+ * lookups — extension bases and group refs are same-namespace by
+ * XSD rules, and a foreign same-name decl must never win
+ * (leptris-ruby#440). LADDER (allow_name_only = 1) for instance-
+ * side type references — OOXML types wp:/pic: particles with
+ * a:-prefixed main-namespace types, and prefix-stripped names
+ * legitimately cross namespaces (#1687). */
+#define XSD_DEFINE_NS_LADDER(ret_type, fn_name, list_field, name_field,    \
+                             ns_field)                                     \
+static ret_type fn_name(struct leptris_xsd_schema* s, const char* name,    \
+                        const char* uri, int allow_name_only) {            \
+    if (!s || !name)                                                       \
+        return NULL;                                                       \
+    if (uri && uri[0]) {                                                   \
+        for (ret_type t = s->list_field; t; t = t->next)                   \
+            if (t->ns_field && strcmp(t->name_field, name) == 0 &&         \
+                strcmp(t->ns_field, uri) == 0)                             \
+                return t;                                                  \
+        for (ret_type t = s->list_field; t; t = t->next)                   \
+            if (!t->ns_field && strcmp(t->name_field, name) == 0)          \
+                return t;                                                  \
+        if (!allow_name_only)                                              \
+            return NULL;                                                   \
+        for (ret_type t = s->list_field; t; t = t->next)                   \
+            if (strcmp(t->name_field, name) == 0)                          \
+                return t;                                                  \
+        return NULL;                                                       \
+    }                                                                      \
+    for (ret_type t = s->list_field; t; t = t->next)                       \
+        if (strcmp(t->name_field, name) == 0)                              \
+            return t;                                                      \
+    return NULL;                                                           \
+}
+
+XSD_DEFINE_NS_LADDER(const XsdElementDecl*, xsd_ladder_element, elements,
+                     name, ns)
+XSD_DEFINE_NS_LADDER(XsdCm*, xsd_ladder_complex, complex_types, name, ns)
+XSD_DEFINE_NS_LADDER(const XsdSimple*, xsd_ladder_simple, simple_types,
+                     name, ns)
+XSD_DEFINE_NS_LADDER(const XsdTypeAttrs*, xsd_ladder_type_attrs,
+                     type_attrs, type_name, ns)
+
 static const XsdSimple* xsd_find_simple(struct leptris_xsd_schema* s,
                                         const char* name) {
     for (XsdSimple* t = s->simple_types; t; t = t->next)
@@ -471,19 +521,9 @@ static const XsdSimple* xsd_find_simple(struct leptris_xsd_schema* s,
  * name-only match remains the last resort. */
 const XsdSimple* xsd_find_simple_ns_pub(
     struct leptris_xsd_schema* s, const char* name, const char* uri) {
-    if (!s || !name) return NULL;
-    if (uri && uri[0]) {
-        for (XsdSimple* t = s->simple_types; t; t = t->next)
-            if (t->ns && strcmp(t->name, name) == 0 &&
-                strcmp(t->ns, uri) == 0)
-                return t;
-        for (XsdSimple* t = s->simple_types; t; t = t->next)
-            if (!t->ns && strcmp(t->name, name) == 0)
-                return t;
-        /* cross-namespace reference: any spelling of the name */
-        return xsd_find_simple(s, name);
-    }
-    return xsd_find_simple(s, name);
+    /* LADDER: prefix-stripped type names legitimately cross
+     * namespaces (sharedTypes' ST_TwipsMeasure under a math prefix). */
+    return xsd_ladder_simple(s, name, uri, 1);
 }
 
 extern int xsd_builtin_valid(const char* type, const char* v);
@@ -2080,18 +2120,7 @@ const XsdElementDecl* xsd_find_element(struct leptris_xsd_schema* s,
 /* leptris-ruby#440: prefer (ns, name); fall back to any match. */
 const XsdElementDecl* xsd_find_element_ns(
     struct leptris_xsd_schema* s, const char* name, const char* uri) {
-    if (!s || !name) return NULL;
-    if (uri && uri[0]) {
-        for (XsdElementDecl* d = s->elements; d; d = d->next)
-            if (d->ns && strcmp(d->name, name) == 0 &&
-                strcmp(d->ns, uri) == 0)
-                return d;
-        for (XsdElementDecl* d = s->elements; d; d = d->next)
-            if (!d->ns && strcmp(d->name, name) == 0)
-                return d;
-        return NULL;
-    }
-    return xsd_find_element(s, name);
+    return xsd_ladder_element(s, name, uri, 0);
 }
 
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
@@ -2108,22 +2137,8 @@ XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
  * and unresolvable contexts keep working). */
 XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                            const char* type_name, const char* uri) {
-    if (!s || !type_name) return NULL;
-    if (uri && uri[0]) {
-        for (XsdCm* c = s->complex_types; c; c = c->next)
-            if (c->ns && strcmp(c->name, type_name) == 0 &&
-                strcmp(c->ns, uri) == 0)
-                return c;
-        /* A resolving namespace is in hand: a DIFFERENT
-         * namespace's same-name decl must NOT win (wml CT_TcPr vs
-         * dml CT_TcPr — leptris-ruby#440). Only an unstamped
-         * (unknown-ns) entry may serve as the fallback. */
-        for (XsdCm* c = s->complex_types; c; c = c->next)
-            if (!c->ns && strcmp(c->name, type_name) == 0)
-                return c;
-        return NULL;
-    }
-    return xsd_find_complex(s, type_name);
+    /* STRICT: derivation is same-namespace by XSD rules. */
+    return xsd_ladder_complex(s, type_name, uri, 0);
 }
 
 /* leptris-ruby#440 (follow-up): a TYPE REFERENCE on an instance
@@ -2140,9 +2155,9 @@ XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
  * same-namespace by XSD rules. */
 XsdCm* xsd_find_complex_ref(struct leptris_xsd_schema* s,
                             const char* type_name, const char* uri) {
-    XsdCm* ct = xsd_find_complex_ns(s, type_name, uri);
-    if (ct) return ct;
-    return xsd_find_complex(s, type_name);
+    /* LADDER: instance-side type references cross namespaces
+     * (wp:extent -> a:CT_PositiveSize2D — #1687). */
+    return xsd_ladder_complex(s, type_name, uri, 1);
 }
 
 const XsdSimple* xsd_find_simple_pub(struct leptris_xsd_schema* s,
@@ -2165,18 +2180,7 @@ const XsdTypeAttrs* xsd_find_type_attrs(struct leptris_xsd_schema* s,
 const XsdTypeAttrs* xsd_find_type_attrs_ns(
     struct leptris_xsd_schema* s, const char* type_name,
     const char* uri) {
-    if (!s || !type_name) return NULL;
-    if (uri && uri[0]) {
-        for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
-            if (t->ns && strcmp(t->type_name, type_name) == 0 &&
-                strcmp(t->ns, uri) == 0)
-                return t;
-        for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
-            if (!t->ns && strcmp(t->type_name, type_name) == 0)
-                return t;
-        return NULL;
-    }
-    return xsd_find_type_attrs(s, type_name);
+    return xsd_ladder_type_attrs(s, type_name, uri, 0);
 }
 
 /* ---- slice 4: instance validation (validate.c engine) ------------ */
