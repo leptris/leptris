@@ -1378,3 +1378,36 @@ TEST(RngRegex, ExactQuantifierIsClosed) {
     EXPECT_EQ(rng_regex_matches("a{2}", "aa"), 1);
     EXPECT_EQ(rng_regex_matches("a{2}", "aaa"), 0);
 }
+
+/* ---- leptris#1703: combine across multi-hop include chains ------- */
+
+TEST(RngIncludeMultiHop, InterleaveSurvivesThreeHops) {
+    /* inner defines a; mid's nested include-define interleave-adds b,
+     * mid's own define interleave-adds c; outer's nested include-
+     * define interleave-adds d, outer's own define interleave-adds
+     * e. The first cut dropped every accumulated body at each
+     * include's nested-define REPLACE — permissions vanished. */
+    EXPECT_EQ(file_validates("comb3-outer.rng",
+                             "<root><a/><b/><c/><d/><e/></root>"),
+              1);
+    /* Every member must also be accepted alone (cardinality is
+     * zeroOrMore per branch, not singleton). */
+    EXPECT_EQ(file_validates("comb3-outer.rng", "<root><b/><d/></root>"),
+              1);
+}
+
+TEST(RngIncludeMultiHop, InterleaveRejectsUnknownElement) {
+    EXPECT_EQ(file_validates("comb3-outer.rng", "<root><z/></root>"),
+              0);
+}
+
+TEST(RngIncludeMultiHop, ChoiceUnionSurvivesIncludeHop) {
+    /* inner allows a; the include's nested define choice-adds b —
+     * the union must hold both. */
+    EXPECT_EQ(file_validates("comb3-choice-outer.rng", "<root><a/></root>"),
+              1);
+    EXPECT_EQ(file_validates("comb3-choice-outer.rng", "<root><b/></root>"),
+              1);
+    EXPECT_EQ(file_validates("comb3-choice-outer.rng", "<root><z/></root>"),
+              0);
+}
