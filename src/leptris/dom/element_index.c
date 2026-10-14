@@ -43,11 +43,15 @@ typedef struct {
 
 static size_t index_key_hash(const char* s1, size_t l1,
                              const char* s2, size_t l2) {
-    size_t h = 1469598103934665603ull;
+    /* uint64 accumulator: size_t is 32-bit on wasm32/ILP32 and the
+     * 64-bit constants would truncate (the multiply lane collapses).
+     * Fold once at the return. */
+    uint64_t h = 1469598103934665603ull;
     for (size_t i = 0; i < l1; i++) { h ^= (unsigned char)s1[i]; h *= 1099511628211ull; }
     for (size_t i = 0; i < l2; i++) { h ^= (unsigned char)s2[i]; h *= 1099511628211ull; }
     h ^= l1; h *= 1099511628211ull;
-    return h;
+    h ^= h >> 32;
+    return (size_t)h;
 }
 
 static void index_key_table_free(IndexKeyTable* t) {

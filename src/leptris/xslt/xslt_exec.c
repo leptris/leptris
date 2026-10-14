@@ -2582,7 +2582,8 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     /* §7.5: copying an ATTRIBUTE (re)binds it on the pending
      * parent — later copies override earlier xsl:attribute values
      * (execution order wins, §7.1.3). */
-    if (node && ((LeptrisNode*)node)->type == LEPTRIS_NODE_ATTRIBUTE) {
+    if (node && (int)((LeptrisNode*)node)->type ==
+        (int)LEPTRIS_NODE_ATTRIBUTE) {
         LeptrisAttributeNode* a = (LeptrisAttributeNode*)node;
         if (ex->pending_parent && a->name)
             leptris_element_set_attribute(ex->pending_parent,
@@ -2592,7 +2593,8 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     }
     /* §7.5: copy of a NAMESPACE node declares it on the pending
      * parent (the classic copy-the-namespaces idiom). */
-    if (node && ((LeptrisNode*)node)->type == LEPTRIS_NODE_NAMESPACE) {
+    if (node && (int)((LeptrisNode*)node)->type ==
+        (int)LEPTRIS_NODE_NAMESPACE) {
         LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
         /* The implicit xml prefix is always in scope — copying it
          * would emit a redundant xmlns:xml (libxslt omits it). */

@@ -512,8 +512,8 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
         case RNG_REF: {
             RngDefine* d = find_define(v->g, p->name);
             if (!d || !d->body) {
-                diag(v, LEPTRIS_DIAG_INVALID,  NULL,
-        "reference to undefined pattern", p->name, NULL);
+                diag(v, LEPTRIS_DIAG_INVALID, NULL,
+                     "reference to undefined pattern '%s'", p->name);
                 return (size_t)-1;
             }
             if (v->depth > 200) {
@@ -1854,9 +1854,9 @@ int rng_validate_document(struct leptris_relaxng* rng, LeptrisDocument doc) {
             RngDefine* d = find_define(v.g, start->name);
             if (!d || !d->body) {
                 v.quiet = 0;
-                diag(&v, LEPTRIS_DIAG_INVALID,  root,
-        "reference to undefined pattern",
-                     start->name, NULL);
+                diag(&v, LEPTRIS_DIAG_INVALID, root,
+                     "reference to undefined pattern '%s'",
+                     start->name);
                 rng->error = leptris_strdup(v.err);
                 return 0;
             }

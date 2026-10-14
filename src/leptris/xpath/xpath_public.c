@@ -89,7 +89,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_versioned(
     if (version == LEPTRIS_XPATH_10 &&
         x10_has_3x_syntax(expression)) {
         leptris_set_error(
-            LEPTRIS_ERROR_INVALID_ARG,
+            (leptris_error_code)LEPTRIS_ERROR_INVALID_ARG,
             "XPath 3.x syntax rejected in LEPTRIS_XPATH_10 mode");
         if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
         return NULL;
@@ -1133,7 +1133,8 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval_nodeset(
         struct leptris_xpath_result* r =
             leptris_xpath_compiled_eval(compiled, doc, contexts[i]);
         if (!r) continue;
-        if (r->type == LEPTRIS_XPATH_NODESET && r->value.nodeset_value) {
+        if ((int)r->type == (int)LEPTRIS_XPATH_NODESET &&
+        r->value.nodeset_value) {
             XPathNodeSet* ns = r->value.nodeset_value;
             for (size_t j = 0; j < ns->count; j++)
                 xpath_nodeset_add(merged, ns->nodes[j]);

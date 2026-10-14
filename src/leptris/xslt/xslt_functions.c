@@ -609,10 +609,13 @@ static struct leptris_xpath_result* acc_result_copy(
 }
 
 static size_t acc_ptr_hash(const void* p) {
-    uintptr_t h = (uintptr_t)p;
+    /* 64-bit promote: uintptr_t is 32-bit on wasm32/ILP32 and the
+     * >> 33 shift was UB there (the avalanche assumes 64 bits). */
+    uint64_t h = (uint64_t)(uintptr_t)p;
     h ^= h >> 33;
-    h *= (uintptr_t)0x9E3779B97F4A7C15ULL;
+    h *= 0x9E3779B97F4A7C15ULL;
     h ^= h >> 29;
+    h ^= h >> 32;
     return (size_t)h;
 }
 

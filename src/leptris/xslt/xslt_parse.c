@@ -1857,9 +1857,11 @@ static void free_instr_list(XsltInstr* list) {
  * full linear scan produced. Mode buckets: candidate arrays per
  * distinct mode, preserving sheet order. */
 static size_t tpl_name_hash(const char* s) {
-    size_t h = 1469598103934665603ull;
+    /* uint64 accumulator: size_t is 32-bit on wasm32/ILP32. */
+    uint64_t h = 1469598103934665603ull;
     while (*s) { h ^= (unsigned char)*s++; h *= 1099511628211ull; }
-    return h;
+    h ^= h >> 32;
+    return (size_t)h;
 }
 
 void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {

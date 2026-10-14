@@ -769,7 +769,7 @@ struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm
     for (size_t i = 0; i < input->count; i++) {
         LeptrisNode* in = input->nodes[i];
         LeptrisElement parent;
-        if (in && in->type == LEPTRIS_NODE_NAMESPACE) {
+        if (in && (int)in->type == (int)LEPTRIS_NODE_NAMESPACE) {
             /* Namespace nodes' parent is the OWNER element (63). */
             parent = ((LeptrisNamespaceNode*)in)->owner;
         } else if (node_is_element(in)) {

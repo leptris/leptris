@@ -904,8 +904,8 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                     DEBUG_LOG("      Axis '%s' cannot operate on attribute nodes, skipping", axis_name);
                     continue;  /* Skip non-element nodes for other axes */
                 }
-            } else if (node_ptr && ((LeptrisNode*)node_ptr)->type ==
-                       LEPTRIS_NODE_NAMESPACE) {
+            } else if (node_ptr && (int)((LeptrisNode*)node_ptr)->type ==
+                       (int)LEPTRIS_NODE_NAMESPACE) {
                 /* Synthetic namespace nodes: parent/ancestor axes
                  * resolve through the OWNER element (bug-63); self
                  * is the ns node itself. */
