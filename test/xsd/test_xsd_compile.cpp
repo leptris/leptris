@@ -142,12 +142,16 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
         leptris_xsd_free(s);
     }
     EXPECT_GE(ok + failed, 160u) << "fixture set shrank";
-    // Slice-1 floor: every vendored fixture's schema root compiles
-    // (163/163 on the first run). Lowering this is a regression;
-    // later slices keep it monotonically rising.
+    // Compile floor: was 163/163 when compile was unconditional —
+    // the structure check (#1691) now legitimately rejects the
+    // schema-error fixtures (bad required attrs, occurrence
+    // ordering), so the floor is 159. The differential expectations
+    // live in XsdConformance (MANIFEST.tsv); this floor still
+    // catches crashes/shrinking sets. Monotonic per structure-check
+    // coverage.
     RecordProperty("ok", std::to_string(ok));
     RecordProperty("failed", std::to_string(failed));
-    EXPECT_GE(ok, 160u) << "compile-success floor regressed";
+    EXPECT_GE(ok, 159u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -2010,10 +2014,10 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
      * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 769) << "conformance floor regressed";
+    EXPECT_GE(pass, 795) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 151);
     EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 0);
+    EXPECT_GE(pass_schema_error, 26);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
