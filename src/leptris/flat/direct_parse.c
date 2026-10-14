@@ -115,6 +115,11 @@ typedef struct {
      * documents >= 2 GiB (offsets don't fit; line reads return
      * unknown, matching the pre-#223 behavior). */
     int line_offsets_ok;
+    /* leptris#1700: a strict-path failure may carry a specific
+     * diagnostic (tag mismatch) instead of the generic message.
+     * Points at a stack buffer in the fail-goto's caller frame —
+     * valid until the function returns. */
+    const char* strict_fail_msg;
     int had_declaration;
     /* Bulk-allocated attribute block. Pre-allocated from pool so the
      * common case is a bump-pointer off the block — no per-attr
@@ -1635,6 +1640,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.drop_ws_text = drop_ws_text;
     p.keep_entity_refs = keep_entity_refs;
     p.recover = recover;
+    p.strict_fail_msg = NULL;
     p.dtd = NULL;
     /* Only ever set to 1 in the loop; without the zero here the
      * field rides the stack (MSVC C4701) and doc->has_namespaces
@@ -2077,8 +2083,20 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                  * A close tag naming an open ANCESTOR closes the
                  * intermediates implicitly (libxml2 semantics); a
                  * close matching nothing open is dropped. Either way
-                 * the recovery records a diagnostic. */
-                if (!p.recover) goto fail;
+                 * the recovery records a diagnostic.
+                 * leptris#1700: the STRICT path fails with the same
+                 * mismatch named — tag names + line:column ride the
+                 * error message, not a bare byte offset. */
+                if (!p.recover) {
+                    char mmsg[192];
+                    snprintf(mmsg, sizeof(mmsg),
+                             "Opening and ending tag mismatch: expected "
+                             "</%.*s>, got </%.*s>",
+                             (int)open_len, open_name,
+                             (int)close_local_len, close_local);
+                    p.strict_fail_msg = mmsg;
+                    goto fail;
+                }
                 {
                     int anc = -1;
                     for (int d = (int)p.depth - 1; d >= 0; d--) {
@@ -2447,9 +2465,16 @@ fail:
      * thread-local slot so bindings can read leptris_last_error()
      * when leptris_parse_string returns NULL. */
     {
-        char msg[80];
+        char msg[256];
         long off = (long)(p.pos ? p.pos - p.buf : 0);
-        snprintf(msg, sizeof(msg), "XML parse error at byte %ld: malformed input", off);
+        if (p.strict_fail_msg) {
+            snprintf(msg, sizeof(msg),
+                     "XML parse error at byte %ld: %s",
+                     off, p.strict_fail_msg);
+        } else {
+            snprintf(msg, sizeof(msg),
+                     "XML parse error at byte %ld: malformed input", off);
+        }
         leptris_set_error(LEPTRIS_ERROR_PARSE_FAILED, msg);
         /* 1-based line/column of the failure (issue #510). */
         int line = 1, column = 1;

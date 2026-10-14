@@ -850,3 +850,53 @@ TEST(ParseRecover, WithoutFlagStillFails) {
                                      LEPTRIS_PARSE_DEFAULT, &st);
     EXPECT_EQ(doc, nullptr);
 }
+
+/* ---- leptris#1700: strict-path mismatch diagnostics -------------- */
+
+TEST(ParseErrorPosition, StrictMismatchNamesTheTags) {
+    /* A close naming nothing open INSIDE an element: the message
+     * names the expected close and the one received, not a bare
+     * "malformed input" at a byte offset. (A stray close at depth 0
+     * — extra content after a complete document — fails the
+     * depth-0 check before the mismatch path and stays generic.) */
+    const char xml[] = "<r><a></b></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(std::strstr(err, "expected </a>"), nullptr) << err;
+    EXPECT_NE(std::strstr(err, "got </b>"), nullptr) << err;
+
+    int line = -1, column = -1;
+    leptris_last_error_position(&line, &column);
+    EXPECT_EQ(line, 1);
+    EXPECT_GT(column, 1);
+}
+
+TEST(ParseErrorPosition, StrictMismatchNamesTheAncestor) {
+    /* The close names an ancestor: the message names the open
+     * element and the close that didn't match it. */
+    const char xml[] = "<bibdata><ext>t</bibdata>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(std::strstr(err, "expected </ext>"), nullptr) << err;
+    EXPECT_NE(std::strstr(err, "got </bibdata>"), nullptr) << err;
+}
+
+TEST(ParseErrorPosition, GenericFailuresStayGeneric) {
+    const char xml[] = "<r><a/></r";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+
+    const char* err = leptris_last_error();
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(std::strstr(err, "malformed input"), nullptr) << err;
+}
