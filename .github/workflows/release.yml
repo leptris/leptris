@@ -252,11 +252,38 @@ jobs:
   # from THIS repo runs the reusable workflow under the CALLER's
   # identity (repository: leptris/leptris), which can never match —
   # every wheel publish since v1.9.164 failed on that mismatch.
-  # Instead, trigger the publish from leptris-py itself after this
-  # release lands:
+  # Instead, THIS workflow's final step dispatches the binding
+  # release workflows from their OWN repositories (that dispatch
+  # mints repository: leptris/leptris-py / leptris-ruby and matches
+  # the registrations; the pin bumps live in the binding repos).
+  # Cross-repo workflow_dispatch needs a token with actions:write on
+  # the binding repos — set the BINDING_DISPATCH_TOKEN secret
+  # (fine-grained PAT, Actions: read+write on leptris-py,
+  # leptris-ruby, leptris-ts). Without the secret the step is
+  # skipped and the dispatch stays manual:
   #
   #   gh workflow run release.yml -R leptris/leptris-py --ref main
-  #
-  # (that dispatch mints repository: leptris/leptris-py and matches
-  # the registration; the pin bump lives in leptris-py.)
+  #   gh workflow run release.yml -R leptris/leptris-ruby -f next_version=X.Y.Z.0
+  #   gh workflow run publish.yml  -R leptris/leptris-ts  --ref main
   # ─────────────────────────────────────────────────────────────────────────
+
+  dispatch-bindings:
+    name: Dispatch binding releases (ruby / py / ts)
+    needs: tag-and-release
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      needs.publish.result == 'success'
+    steps:
+      - name: Dispatch binding publish flows
+        env:
+          GH_TOKEN: ${{ secrets.BINDING_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::BINDING_DISPATCH_TOKEN not set — dispatch the binding releases manually"
+            exit 0
+          fi
+          gh workflow run release.yml -R leptris/leptris-py --ref main
+          gh workflow run release.yml -R leptris/leptris-ruby -f next_version="${VERSION}.0"
+          gh workflow run publish.yml  -R leptris/leptris-ts  --ref main
+          echo "::notice::binding releases dispatched (py, ruby, ts)
