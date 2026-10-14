@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <include href="comb3-inner.rng">
+    <define name="content" combine="interleave">
+      <zeroOrMore><element name="b"><empty/></element></zeroOrMore>
+    </define>
+  </include>
+  <define name="content" combine="interleave">
+    <zeroOrMore><element name="c"><empty/></element></zeroOrMore>
+  </define>
+</grammar>

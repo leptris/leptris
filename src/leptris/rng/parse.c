@@ -255,6 +255,32 @@ static void merge_start(RngGrammar* g, RngPattern* body) {
     g->start = ch;
 }
 
+/* INTERLEAVE and CHOICE are associative: a merge wrapper whose
+ * child list already carries a same-kind combinator flattens into
+ * the parent scope. The validator's single-pass interleave walk has
+ * no backtracking across nested scopes, so a nested combinator from
+ * a multi-hop chain would reject documents the flat form accepts
+ * (leptris#1703). */
+static void rng_flatten_combinator(RngPattern* wrap) {
+    RngPattern** link = &wrap->first_child;
+    while (*link) {
+        RngPattern* c = *link;
+        if (c->kind == wrap->kind && c->first_child) {
+            RngPattern* tail = c->first_child;
+            while (tail->next) tail = tail->next;
+            tail->next = c->next;
+            *link = c->first_child;
+            /* detach fully — rng_pattern_free recurses into next,
+             * which here is the REST of the sibling chain */
+            c->first_child = NULL;
+            c->next = NULL;
+            rng_pattern_free(c);
+            continue;  /* re-check the spliced head */
+        }
+        link = &c->next;
+    }
+}
+
 /* Add/merge a <define>. Takes ownership of name, combine and the
  * GROUP wrapper body. Returns 0 with err set on an uncombined
  * redefinition. */
@@ -307,6 +333,7 @@ static int add_define(RngGrammar* g, char* name, char* combine,
     pat_append(wrap, body->first_child);
     body->first_child = NULL;
     rng_pattern_free(body);
+    rng_flatten_combinator(wrap);
     d->body = wrap;
     return 1;
 }
@@ -436,10 +463,42 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
                 rng_grammar_free(ig);
                 return 0;
             }
-            rng_pattern_free(d->body);
-            d->body = body->first_child;
-            body->first_child = NULL;
-            rng_pattern_free(body);
+            /* leptris#1703: @combine on the nested define merges with
+             * the included definition (spec §4.2) — replace only when
+             * NEITHER side carries a combine. The first cut replaced
+             * unconditionally, so every multi-hop include chain lost
+             * the accumulated body at each hop: interleaved
+             * cardinalities collapsed to the outermost branch and
+             * choice unions collapsed to one alternative. The merged
+             * define KEEPS the combine value so further hops keep
+             * merging. */
+            char* ncombine = dup_attr(ce, "combine");
+            if (ncombine && ncombine[0]) {
+                /* The WRAPPER stays as the define's body — same shape
+                 * add_define produces — the combinator node is what
+                 * the validator walks; unwrapping leaves bare
+                 * siblings with no interleave/choice between them. */
+                RngPattern* wrap =
+                    pat_new(strcmp(ncombine, "interleave") == 0
+                                ? RNG_INTERLEAVE
+                                : RNG_CHOICE);
+                pat_append(wrap, d->body);
+                pat_append(wrap, body->first_child);
+                body->first_child = NULL;
+                rng_pattern_free(body);
+                rng_flatten_combinator(wrap);
+                free(d->combine);
+                d->combine = ncombine;
+                d->body = wrap;
+            } else {
+                free(ncombine);
+                free(d->combine);
+                d->combine = NULL;
+                rng_pattern_free(d->body);
+                d->body = body->first_child;
+                body->first_child = NULL;
+                rng_pattern_free(body);
+            }
         } else {
             snprintf(err, errsz, "include %s: unexpected <%s>", href,
                      leptris_element_name(ce));
