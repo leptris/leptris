@@ -2,12 +2,41 @@
 
 ## [1.9.356] - 2026-10-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- **DOM: type-guard the public first-attribute face
+  (leptris#1712, PR #1713).** A wrong-type node handle — a text
+  node passed where an element is expected, which duck-typed
+  consumers do (svg_conform's NamespaceRemediation probes
+  `element?` via `#name`, and the Ruby binding's NativeNode text
+  wrapper answers it Nokogiri-compatibly) — decoded the pool word
+  at the `element.first_attribute_off` overlay offset. That offset
+  sits 4 bytes past a 32-byte text struct: the next pool node's
+  type word. A following text node (type == 1) yielded
+  `attr == node + 1`, and the first string read on that handle
+  segfaulted — deterministically on svg corpora with adjacent
+  `<text>` nodes (3.6 MB `fig-a1.svg`: 3064 rects, 170 paths).
+  `leptris_element_first_attribute` now answers the empty contract
+  (`NULL`) for non-element handles; internal callers keep the
+  unchecked inline fast path. Red spec:
+  `DomBasics.AttributeFacesRejectNonElementHandles` (parse-carved
+  adjacent text nodes reproduce the dangling handle).
+- **RelaxNG: free the include-merge originals (PR #1711
+  follow-up).** The define-body deep copy (adoption-by-copy) left
+  the included grammar's original pattern trees unreachable but
+  unfreed — one 80-byte `RngPattern` tree leaked per merged define
+  on every include hop (Linux-ASAN/LSan, `RngInclude.*` aborts).
+  The merge now frees the original after the copy, on both the
+  success and the failure paths.
 
-- (describe changes here)
+### ruby binding (leptris-ruby 1.9.356.0, PR leptris-ruby#453)
+
+- Type-guard every native attribute face (`nn_attributes`,
+  `nn_attribute`, `nf_fast_attribute2`, `nf_attribute`,
+  `nf_bulk_attr_faces`): non-element handles answer the empty
+  contract (`{}` / `nil`), matching `nf_attribute_rows`' existing
+  check. The svg_conform remediation now completes on the crash
+  corpus with byte-identical output to the nokogiri adapter.
 
 
 ## [1.9.355] - 2026-10-14
