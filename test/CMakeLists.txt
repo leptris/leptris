@@ -82,13 +82,15 @@ function(leptris_add_cli_test name)
     target_compile_definitions(${name} PRIVATE
         LEPTRIS_CLI_BIN="${CMAKE_BINARY_DIR}/cli/leptris"
         LEPTRIS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    # WORKING_DIRECTORY is a first-class keyword in the modern
+    # gtest_discover_tests signature. Passing it inside PROPERTIES
+    # made the parser eat RUN_SERIAL as an unparsed argument, so the
+    # CLI cases were never actually serialized (ctest -j4 then races
+    # the shared fixture cwd — the schematron/rng flakes).
     gtest_discover_tests(${name}
         DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE}
-        PROPERTIES
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        # CLI cases spawn subprocesses; fork/exec contention under
-        # parallel ctest flakes them — run serially.
-        RUN_SERIAL TRUE
+        PROPERTIES RUN_SERIAL TRUE
     )
     add_dependencies(check_all ${name} leptris-cli)
 endfunction()
