@@ -13,6 +13,7 @@
 #include "../common/port.h" /* strndup shim for MSVC's CRT */
 #include "xsd_internal.h"
 #include "xsd_internal.h"
+#include "../dom/element.h" /* attribute walk for the clause checks */
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
 
@@ -795,8 +796,32 @@ static int xsd_check_include_tns(struct leptris_xsd_schema* s,
 /* Schema-structure constraints (the conformance lane's schema-error
  * class, #1691): the xs:-vocabulary rules the oracle enforces at
  * load. First violation wins; the message names the rule. */
+/* Attribute allowlists for the xs: vocabulary (conformance lane
+ * schema-error class, #1691 slice 3): the src-attribute.* /
+ * src-element.* clauses the oracle enforces at load. */
+static int xsd_attr_allowed(const char* local, int toplevel,
+                            const char* attr) {
+    if (strcmp(attr, "id") == 0) return 1;
+    if (strcmp(local, "attribute") == 0) {
+        if (strcmp(attr, "use") == 0 || strcmp(attr, "form") == 0)
+            return !toplevel;
+        /* ref form: ref + use only. name form: the rest. */
+        return 1;  /* name/type/default/fixed allowed in name form */
+    }
+    if (strcmp(local, "element") == 0) {
+        if (strcmp(attr, "minOccurs") == 0 ||
+            strcmp(attr, "maxOccurs") == 0)
+            return !toplevel;
+        if (strcmp(attr, "form") == 0) return !toplevel;
+        return 1;  /* name/ref/type/default/fixed/nillable/block/... */
+    }
+    if (strcmp(local, "annotation") == 0)
+        return strcmp(attr, "id") == 0;
+    return 1;
+}
+
 static int xsd_check_structure(struct leptris_xsd_schema* s,
-                               LeptrisElement e) {
+                               LeptrisElement e, int depth) {
     if (!e) return 0;
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(e));
          n; n = leptris_node_next_sibling(n)) {
@@ -809,8 +834,26 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
         leptris_element_expanded_name(c, &local, &prefix, &uri);
         if (!local || !uri || strcmp(uri, XSD_NS) != 0) {
             /* foreign-namespace content: recurse only */
-            if (xsd_check_structure(s, c) != 0) return -1;
+            if (xsd_check_structure(s, c, depth + 1) != 0) return -1;
             continue;
+        }
+        int toplevel = (depth == 0);
+        /* Unknown attributes on the xs: vocabulary (annot-err: a
+         * 'death' attribute on xs:annotation). */
+        for (LeptrisAttribute a = leptris_element_get_first_attribute(c);
+             a; a = leptris_attr_next(a)) {
+            const char* an = leptris_attribute_get_name(
+                (LeptrisAttribute)a);
+            if (strncmp(an, "xmlns", 5) == 0) continue;
+            if (!xsd_attr_allowed(local, toplevel, an)) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "src-%s: The attribute '%s' is not allowed on "
+                         "xs:%s",
+                         local, an, local);
+                xsd_set_error(s, msg);
+                return -1;
+            }
         }
         if (strcmp(local, "attribute") == 0 ||
             strcmp(local, "element") == 0) {
@@ -834,18 +877,79 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 xsd_set_error(s, msg);
                 return -1;
             }
+            /* name == "xmlns" reserves the namespace declaration
+             * name (scc-no-xmlns). */
+            if (strcmp(local, "attribute") == 0 && nm &&
+                strcmp(nm, "xmlns") == 0) {
+                xsd_set_error(
+                    s,
+                    "scc-no-xmlns: an attribute declaration must not "
+                    "be named 'xmlns'");
+                return -1;
+            }
+            const char* dv = leptris_element_attribute(c, "default");
+            const char* fx = leptris_element_attribute(c, "fixed");
+            if (dv && dv[0] && fx && fx[0]) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "src-element.1: xs:%s cannot carry both "
+                         "'default' and 'fixed'",
+                         local);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+        if (strcmp(local, "element") == 0) {
+            /* type attribute and an inline type child are mutually
+             * exclusive (src-element.3 / src-attribute.4). */
+            const char* ty = leptris_element_attribute(c, "type");
+            int has_type_child = 0;
+            for (LeptrisNodeRef k = leptris_node_first_child(
+                     leptris_element_as_node(c));
+                 k; k = leptris_node_next_sibling(k)) {
+                if (leptris_node_get_type(k) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                const char* kl = NULL;
+                const char* kp = NULL;
+                const char* ku = NULL;
+                leptris_element_expanded_name((LeptrisElement)k, &kl,
+                                              &kp, &ku);
+                if (kl && ku && strcmp(ku, XSD_NS) == 0 &&
+                    (strcmp(kl, "complexType") == 0 ||
+                     strcmp(kl, "simpleType") == 0))
+                    has_type_child = 1;
+            }
+            if (ty && ty[0] && has_type_child) {
+                xsd_set_error(
+                    s,
+                    "src-element.3: xs:element cannot carry both a "
+                    "'type' attribute and an inline type child");
+                return -1;
+            }
         }
         if (strcmp(local, "element") == 0 ||
             strcmp(local, "sequence") == 0 ||
             strcmp(local, "choice") == 0 ||
             strcmp(local, "all") == 0) {
-            int mn = -1, mx = -1;
+            int mn = 1, mx = 1;
             int has_mn = xsd_uint_attr(c, "minOccurs", &mn);
             int has_mx = xsd_uint_attr(c, "maxOccurs", &mx);
             const char* mx_raw =
                 leptris_element_attribute(c, "maxOccurs");
             int unbounded =
                 (mx_raw && strcmp(mx_raw, "unbounded") == 0);
+            /* Absent minOccurs defaults to 1: maxOccurs="0" alone is
+             * a violation (src-element.2.2's maxOccurs=0 shape). */
+            if (has_mn && !has_mx && !unbounded && mn > mx) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "occurrence: xs:%s minOccurs (%d) exceeds "
+                         "maxOccurs (%d)",
+                         local, mn, mx);
+                xsd_set_error(s, msg);
+                return -1;
+            }
             if (has_mn && has_mx && !unbounded && mn > mx) {
                 char msg[160];
                 snprintf(msg, sizeof(msg),
@@ -856,7 +960,7 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 return -1;
             }
         }
-        if (xsd_check_structure(s, c) != 0) return -1;
+        if (xsd_check_structure(s, c, depth + 1) != 0) return -1;
     }
     return 0;
 }
@@ -917,7 +1021,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * required/allowed attributes on the xs: vocabulary and
      * occurrence ordering, checked at the document level exactly
      * where the oracle raises them — before capture. */
-    if (xsd_check_structure(s, root) != 0)
+    if (xsd_check_structure(s, root, 0) != 0)
         goto fail;
 
     /* Schema Component Constraint: xsi: Not Allowed — the schema's

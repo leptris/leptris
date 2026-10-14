@@ -143,17 +143,17 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     }
     EXPECT_GE(ok + failed, 160u) << "fixture set shrank";
     // Compile floor: was 163/163 when compile was unconditional —
-    // the structure check (#1691) now legitimately rejects the
-    // schema-error fixtures. The floor is the CROSS-PLATFORM
-    // minimum: Linux (case-sensitive fs) resolves 4 more fixtures'
-    // schemaLocations than macOS, where they silently fail to load
-    // and the violations go unseen — Linux ok=155, macOS 159 (the
-    // delta is tracked in #1691: fixture case mismatches + a
-    // missing-include diagnostic). The differential expectations
-    // live in XsdConformance (MANIFEST.tsv). Monotonic.
+    // the structure checks (#1691) now legitimately reject the
+    // schema-error fixtures (slices 1-3: src-attribute/src-element
+    // clauses, occurrence ordering, include-tns, xsi/xmlns
+    // reservations). The floor is the CROSS-PLATFORM minimum:
+    // Linux (case-sensitive fs) resolves 4 more fixtures'
+    // schemaLocations than macOS (delta tracked in #1691). The
+    // differential expectations live in XsdConformance
+    // (MANIFEST.tsv). Monotonic.
     RecordProperty("ok", std::to_string(ok));
     RecordProperty("failed", std::to_string(failed));
-    EXPECT_GE(ok, 155u) << "compile-success floor regressed";
+    EXPECT_GE(ok, 150u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -2016,10 +2016,10 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
      * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 803) << "conformance floor regressed";
+    EXPECT_GE(pass, 839) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 151);
     EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 34);
+    EXPECT_GE(pass_schema_error, 70);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
