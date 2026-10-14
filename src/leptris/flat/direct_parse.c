@@ -117,9 +117,10 @@ typedef struct {
     int line_offsets_ok;
     /* leptris#1700: a strict-path failure may carry a specific
      * diagnostic (tag mismatch) instead of the generic message.
-     * Points at a stack buffer in the fail-goto's caller frame —
-     * valid until the function returns. */
-    const char* strict_fail_msg;
+     * Storage lives IN the parser struct: the fail goto jumps out
+     * of the setting block's scope, so a stack pointer there would
+     * be use-after-scope (the Linux ASAN lane caught exactly that). */
+    char strict_fail_msg[192];
     int had_declaration;
     /* Bulk-allocated attribute block. Pre-allocated from pool so the
      * common case is a bump-pointer off the block — no per-attr
@@ -1640,7 +1641,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     p.drop_ws_text = drop_ws_text;
     p.keep_entity_refs = keep_entity_refs;
     p.recover = recover;
-    p.strict_fail_msg = NULL;
+    p.strict_fail_msg[0] = '\0';
     p.dtd = NULL;
     /* Only ever set to 1 in the loop; without the zero here the
      * field rides the stack (MSVC C4701) and doc->has_namespaces
@@ -2088,13 +2089,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                  * mismatch named — tag names + line:column ride the
                  * error message, not a bare byte offset. */
                 if (!p.recover) {
-                    char mmsg[192];
-                    snprintf(mmsg, sizeof(mmsg),
+                    snprintf(p.strict_fail_msg,
+                             sizeof(p.strict_fail_msg),
                              "Opening and ending tag mismatch: expected "
                              "</%.*s>, got </%.*s>",
                              (int)open_len, open_name,
                              (int)close_local_len, close_local);
-                    p.strict_fail_msg = mmsg;
                     goto fail;
                 }
                 {
@@ -2467,7 +2467,7 @@ fail:
     {
         char msg[256];
         long off = (long)(p.pos ? p.pos - p.buf : 0);
-        if (p.strict_fail_msg) {
+        if (p.strict_fail_msg[0]) {
             snprintf(msg, sizeof(msg),
                      "XML parse error at byte %ld: %s",
                      off, p.strict_fail_msg);
