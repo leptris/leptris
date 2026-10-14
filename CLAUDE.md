@@ -66,7 +66,7 @@ Core (src/leptris/)    →  DOM, parser, XPath engine, SAX, DTD, encoding, memor
 - `encoding/` — UTF-16 always compiled; `encoding.c` (iconv) only when `LEPTRIS_ENABLE_ICONV` is on.
 - `unicode/unicode.c` — only compiled when `LEPTRIS_ENABLE_UTF8PROC` is on.
 - `memory/` — `pool.c` (O(1) arena allocator used pervasively) and `compact_allocator.c`.
-- `xinclude/` — built and shipping. `parse="text"` with `xi:fallback` works end-to-end. `parse="xml"` and xpointer are TODO 92.
+- `xinclude/` — built and shipping. `parse="text"` and `parse="xml"` with `xi:fallback`, the element()/xpointer() schemes, and depth-bounded loop protection work end-to-end (28-spec suite). Remaining: xml:base chain resolution and the pluggable resolver/catalog policy (TODO.assemble phases 03/04).
 
 ### Public API surface (`src/include/leptris/`)
 The public contract. Don't break ABI without a major bump. Headers split by subsystem: `dom/{document,element,serialize}.h`, `xpath/xpath.h`, `sax/sax.h`, `html.h`, plus `types.h`, `error.h`, `dtd.h` at the top level. All handles are opaque typedefs (`LeptrisDocument`, `LeptrisElement`, `LeptrisNodeRef`, …); callers never see struct definitions.
