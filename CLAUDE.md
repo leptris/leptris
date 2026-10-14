@@ -101,6 +101,20 @@ The public contract. Don't break ABI without a major bump. Headers split by subs
 - `VALIDATION.md` — exact commands to run individual test suites and benchmarks, plus expected results.
 - `benchmarks/README.{md,adoc}` — benchmark methodology and reference comparisons.
 
+## Binding version sync — ruby / python / ts always ride together
+
+The binding repos (`leptris-ruby`, `leptris-py`, `leptris-ts`) pin the
+engine by version (gem `1.9.x.y.0`, npm `ENGINE_VERSION`, py wheel pin).
+**The pins move in the same wave as the engine release they need** — a
+binding pin never lags main by more than one engine release. When the
+engine cuts X.Y.Z, every binding that needs the content bumps its pin to
+X.Y.Z in the same session (branch → CI → PR → merge; gem/npm publication
+stays owner-gated).
+
+Agent sessions for leptris-ruby and leptris-py are consolidated into the
+engine session — the same session drives engine fix → release → binding
+pin rides, so a binding never ships a stale engine.
+
 ## Releasing — ALWAYS use the automated workflow
 
 **NEVER create git tags or GitHub releases manually.** No `git tag`, no
