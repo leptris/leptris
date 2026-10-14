@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.352] - 2026-10-14
+
+### Fixed
+
+- instance type refs resolve across namespaces (reference ladder) (xsd)
+
+
+
 ## [1.9.351] - 2026-10-13
 
 ### Changed
