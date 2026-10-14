@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <start><element name="date"><ref name="bDateAttributes"/></element></start>
+  <define name="BibliographicDateType">
+    <choice>
+      <value>published</value>
+      <value>accessed</value>
+    </choice>
+  </define>
+  <define name="bDateAttributes">
+    <attribute name="type">
+      <choice>
+        <ref name="BibliographicDateType"/>
+        <text/>
+      </choice>
+    </attribute>
+  </define>
+</grammar>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <include href="dup-inc-shared.rng"/>
+  <define name="content" combine="interleave">
+    <zeroOrMore><element name="b"><empty/></element></zeroOrMore>
+  </define>
+</grammar>

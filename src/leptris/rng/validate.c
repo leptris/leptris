@@ -241,6 +241,12 @@ static int attr_leaves_satisfied(RngVal* v, RngPattern* head,
                 *has_leaf = 1;
                 if (token_matches_leaf(value, c)) return 1;
                 continue;
+            case RNG_TEXT:
+                /* <text/> in an attribute's content matches ANY
+                 * value (bDateAttributes: enum OR open text —
+                 * leptris#1709's bipm half). */
+                *has_leaf = 1;
+                return 1;
             case RNG_REF: {
                 RngDefine* d = find_define(v->g, c->name);
                 if (d && d->body &&
@@ -435,30 +441,55 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
             return i;
         }
         case RNG_INTERLEAVE: {
-            /* Any order; each child pattern is used exactly once and
-             * all of them must match. */
-            size_t count = 0;
-            for (RngPattern* c = p->first_child; c; c = c->next) count++;
-            int used[32] = {0};
-            for (size_t k = 0; k < count; k++) {
-                int matched_any = 0;
-                size_t ci = 0;
-                for (RngPattern* c = p->first_child; c;
-                     c = c->next, ci++) {
-                    if (ci < 32 && used[ci]) continue;
-                    size_t r = match_seq(v, c, kids, n, idx);
-                    if (r != (size_t)-1) {
-                        matched_any = 1;
-                        idx = r;
-                        if (ci < 32) used[ci] = 1;
-                        break;
+            /* Any order; every branch must be satisfied. A single
+             * assignment pass is unsound against interleaved
+             * zeroOrMore branches: a branch whose turn precedes the
+             * elements it matches zero-widths, gets marked used, and
+             * strands them (leptris#1709: relaton-ieee's 2nd/3rd
+             * <ics>). Consume to a fixpoint — branches take turns
+             * while ANY of them advances — then the remainder must
+             * be zero-width satisfiable. */
+            RngPattern* ch[64];
+            size_t cn = 0;
+            for (RngPattern* c = p->first_child; c && cn < 64;
+                 c = c->next)
+                ch[cn++] = c;
+            int used[64] = {0};
+            int progressed = 1;
+            size_t i = idx;
+            while (progressed) {
+                progressed = 0;
+                for (size_t b = 0; b < cn; b++) {
+                    if (used[b]) continue;
+                    size_t r = match_seq(v, ch[b], kids, n, i);
+                    if (r != (size_t)-1 && r > i) {
+                        used[b] = 1;
+                        i = r;
+                        progressed = 1;
+                    } else if (r != (size_t)-1) {
+                        /* zero-width here: leave the branch unused so
+                         * a later position can still feed it. */
+                        v->failed = 0;
+                        v->err[0] = 0;
+                    } else {
+                        v->failed = 0;
+                        v->err[0] = 0;
                     }
-                    v->failed = 0;
-                    v->err[0] = 0;
                 }
-                if (!matched_any) return (size_t)-1;
             }
-            return idx;
+            for (size_t b = 0; b < cn; b++) {
+                if (used[b]) continue;
+                size_t r = match_seq(v, ch[b], kids, n, i);
+                if (r == (size_t)-1 || r != i) {
+                    /* A branch that consumes here contradicts the
+                     * fixpoint above — treat as unsatisfied. */
+                    return (size_t)-1;
+                }
+                v->failed = 0;
+                v->err[0] = 0;
+                used[b] = 1;
+            }
+            return i;
         }
         case RNG_OPTIONAL: {
             size_t r = match_seq(v, p->first_child, kids, n, idx);

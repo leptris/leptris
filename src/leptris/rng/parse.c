@@ -255,6 +255,35 @@ static void merge_start(RngGrammar* g, RngPattern* body) {
     g->start = ch;
 }
 
+/* Deep-copy a pattern subtree. The include merge used to MOVE the
+ * included grammar's body into the including grammar — but an
+ * include reachable through TWO paths (relaton's basicdoc: direct
+ * AND via biblio) leaves both grammars' define entries pointing at
+ * ONE shared tree; the second path's merge then mutates/frees nodes
+ * the first path still walks (leptris#1709). Name-based ref
+ * resolution (find_define at validate time) makes the copy safe —
+ * REF patterns carry only their name. */
+static char* rng_strdup_or_null(const char* s) {
+    return s ? leptris_strdup(s) : NULL;
+}
+static RngPattern* rng_pattern_deep_copy(const RngPattern* p) {
+    if (!p) return NULL;
+    RngPattern* c = pat_new(p->kind);
+    c->first_child = rng_pattern_deep_copy(p->first_child);
+    c->next = rng_pattern_deep_copy(p->next);
+    c->name = rng_strdup_or_null(p->name);
+    c->ns = rng_strdup_or_null(p->ns);
+    c->datatype = rng_strdup_or_null(p->datatype);
+    c->datatype_lib = rng_strdup_or_null(p->datatype_lib);
+    c->value = rng_strdup_or_null(p->value);
+    /* define: name-based resolution at validate time relinks; the
+     * copied subtree must not share the source grammar's (freed)
+     * define entries. */
+    c->define = NULL;
+    c->any_name = p->any_name;
+    return c;
+}
+
 /* INTERLEAVE and CHOICE are associative: a merge wrapper whose
  * child list already carries a same-kind combinator flattens into
  * the parent scope. The validator's single-pass interleave walk has
@@ -516,7 +545,10 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     while (d) {
         RngDefine* next = d->next;
         RngPattern* wrap = pat_new(RNG_GROUP);
-        wrap->first_child = d->body;
+        /* COPY, not move: the included grammar may be reachable
+         * through another include path whose defines still walk
+         * this tree (leptris#1709, adoption-by-copy). */
+        wrap->first_child = rng_pattern_deep_copy(d->body);
         if (!add_define(g, leptris_strdup(d->name),
                         d->combine ? leptris_strdup(d->combine) : NULL,
                         wrap, err, errsz)) {
