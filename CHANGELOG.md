@@ -2,8 +2,24 @@
 
 ## [1.9.354] - 2026-10-14
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
+
+- **wasm32/ILP32 portability: 64-bit hash accumulators + enum
+  discipline (PR #1697).** The emscripten build (wasm32: size_t and
+  uintptr_t are 32-bit) exposed a class the LP64 host lanes never
+  see — 17 warnings, all real. The 64-bit FNV-1a basis/prime
+  constants sat in size_t, so on 32-bit targets the hash silently
+  stopped being FNV-1a (string_view, element_index, xslt_parse);
+  accumulators are now uint64_t with one fold at the return.
+  acc_ptr_hash shifted a uintptr_t by 33 — UB on 32-bit pointers;
+  promoted to 64-bit with the full avalanche. The leptris_set_error
+  call sites passed LeptrisStatus constants into the internal
+  error-code channel (TODO 98's boundary) — the implicit enum
+  casts are explicit at the five sites. LeptrisNodeKind vs
+  LeptrisNodeType compares (and the result-type compare) cast
+  through int where the same-valued members meet. rng diag calls
+  passed arguments the format string never used. emcc: 17 warnings
+  -> 0; wasm test gate 5/5; host suite green.
 
 ### Changed
 
