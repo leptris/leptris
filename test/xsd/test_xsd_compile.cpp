@@ -2014,10 +2014,10 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
      * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 795) << "conformance floor regressed";
+    EXPECT_GE(pass, 803) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 151);
     EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 26);
+    EXPECT_GE(pass_schema_error, 34);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
