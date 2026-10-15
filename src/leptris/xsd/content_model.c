@@ -158,16 +158,28 @@ static int any_ns_matches(XsdCm* any, const char* uri,
     if (strcmp(f, "##other") == 0)
         return uri != NULL &&
                !(target_ns && strcmp(uri, target_ns) == 0);
-    /* space-separated URI list (+##local) */
+    /* whitespace-separated URI list (+##local): the attribute value
+     * may span lines (pretty-printed schemas indent the continuation),
+     * so token separators are all XML whitespace, not just spaces. */
     const char* p = f;
     while (*p) {
-        while (*p == ' ') p++;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
         const char* start = p;
-        while (*p && *p != ' ') p++;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
         size_t len = (size_t)(p - start);
         if (len == 0) break;
         if (strncmp(start, "##local", len) == 0 && len == 7) {
             if (uri == NULL) return 1;
+            continue;
+        }
+        if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            if (target_ns && uri && strcmp(uri, target_ns) == 0) return 1;
+            continue;
+        }
+        if (strncmp(start, "##other", len) == 0 && len == 7) {
+            if (uri != NULL &&
+                !(target_ns && strcmp(uri, target_ns) == 0))
+                return 1;
             continue;
         }
         if (uri && strlen(uri) == len && strncmp(start, uri, len) == 0)
