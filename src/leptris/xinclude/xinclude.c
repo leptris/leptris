@@ -948,6 +948,43 @@ fallback:
         /* Resource error: try xi:fallback before giving up. */
         LeptrisElement fb = find_fallback(elem);
         if (fb) {
+            /* XInclude §4.5: the fallback's CHILDREN replace the
+             * include — element children splice as-is (same pool,
+             * moved, not copied; ruby#478's <offline/> shape), and
+             * a text-only fallback keeps the historical single
+             * text node. The old path read only TEXT content, so
+             * an element fallback silently vanished together with
+             * the include. */
+            LeptrisNodeRef fbchild =
+                leptris_node_first_child(leptris_element_as_node(fb));
+            LeptrisNodeRef fb_elem_child = NULL;
+            int fb_elem_count = 0;
+            for (LeptrisNodeRef c = fbchild; c;
+                 c = leptris_node_next_sibling(c)) {
+                if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
+                    if (!fb_elem_child) fb_elem_child = c;
+                    fb_elem_count++;
+                }
+            }
+            if (fb_elem_child) {
+                LeptrisElement parent = leptris_element_get_parent(elem);
+                if (parent) {
+                    LeptrisNodeRef c = fbchild;
+                    while (c) {
+                        LeptrisNodeRef next =
+                            leptris_node_next_sibling(c);
+                        if (leptris_node_get_type(c) ==
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            leptris_element_insert_before(
+                                elem, (LeptrisElement)c);
+                        c = next;
+                    }
+                    leptris_node_unlink((LeptrisNodeRef)elem);
+                    leptris_element_set_document_tree(
+                        (LeptrisElement)fb_elem_child, doc);
+                    return 1;
+                }
+            }
             char* fb_text = leptris_element_get_text_content(fb);
             if (fb_text) {
                 substitute = (LeptrisNode*)leptris_text_create(fb_text, strlen(fb_text), doc->pool, doc);

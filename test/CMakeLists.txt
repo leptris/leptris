@@ -231,6 +231,7 @@ add_test(
 leptris_add_test(test_dtd        dtd/test_dtd_validate.cpp)
 leptris_add_test(test_dtd_w3c    dtd/test_w3c_conformance.cpp)
 leptris_add_test(test_xinclude   xinclude/test_xinclude.cpp)
+leptris_add_test(test_xinclude_fb xinclude/test_xinclude_fallback_elem.cpp)
 leptris_add_cli_test(test_cli    cli/test_cli.cpp)
 
 # FFI mirror drift gate (architecture review D): the Ruby/Python
