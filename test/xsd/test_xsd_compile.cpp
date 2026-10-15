@@ -2068,6 +2068,38 @@ TEST(XsdConformanceClauses, ChameleonIncludeDeclaresResolve) {
  * oracle. The pass floor is pinned from the first measured run and
  * is monotonic: raising it is progress, lowering it is a regression.
  */
+TEST(XsdConformanceClauses, ImplicitXmlPrefixRefResolves) {
+    /* leptris-ruby#478 repro 1: the slice-5 ref check resolved
+     * QNames strictly through in-scope declarations, but the xml
+     * prefix is PREDECLARED (XML Namespaces §3) — OOXML schemas
+     * carry <xs:attribute ref="xml:lang"/> (dc.xsd, dcterms.xsd,
+     * wml.xsd's xml:space) with only a locationless
+     * <xs:import namespace="...XML/1998/namespace"/>. The failed
+     * resolution aborted the ref check mid-graph and left the
+     * schema poisoned: the doc's own root then reported "not
+     * declared (strict)". */
+    const char schema[] =
+        "<?xml version=\"1.0\"?>"
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns=\"urn:t\""
+        " xmlns:xml=\"http://www.w3.org/XML/1998/namespace\""
+        " elementFormDefault=\"qualified\">"
+        " <xs:import namespace=\"http://www.w3.org/XML/1998/namespace\"/>"
+        " <xs:complexType name=\"T\">"
+        "  <xs:sequence><xs:element name=\"t\" type=\"xs:string\"/></xs:sequence>"
+        "  <xs:attribute ref=\"xml:lang\" use=\"optional\"/>"
+        " </xs:complexType>"
+        " <xs:element name=\"root\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(leptris_xsd_error_count(s), 0u)
+        << leptris_xsd_error_at(s, 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdConformance, ManifestExpectationsMatchOracle) {
     const std::string manifest_path =
         std::string(LEPTRIS_XSD_CASES_DIR) + "/MANIFEST.tsv";
