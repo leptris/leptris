@@ -1180,6 +1180,37 @@ TEST(XPathResults, NullContextIsDocumentNode) {
     leptris_document_free(doc);
 }
 
+TEST(XPathResults, DocumentContextDescendantAxes) {
+    /* leptris-ruby#458 follow-up: from the document node (the
+     * NULL-context default), descendant and descendant-or-self
+     * axes must reach the whole tree — the root element is a
+     * descendant of the document. The VM's relative descendant
+     * opcodes skipped non-element inputs, so `.//a` and
+     * descendant::a came back empty while `//a` worked. */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "//a", 1 },
+        { ".//a", 1 },
+        { "descendant::a", 1 },
+        { "descendant-or-self::r", 1 },
+        { ".//b", 1 },
+        { "a", 0 },
+        { "descendant::z", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0) << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r), (size_t)tc.expect_count)
+            << tc.expr;
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
 TEST(XPathResults, AttributeTerminalPathShapes) {
     /* leptris-ruby#458: the final step being an ATTRIBUTE works for
      * //a/@id and //@id but must work for every relative-path shape
