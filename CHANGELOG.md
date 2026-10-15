@@ -2,12 +2,21 @@
 
 ## [1.9.360] - 2026-10-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xsd: predeclare the xml prefix and its built-in attribute refs**
+  (leptris-ruby#478, #1736). The slice-5 ref-resolution check resolved
+  QNames strictly through in-scope declarations, but the `xml` prefix
+  is predeclared (Namespaces in XML §3) and OOXML schemas lean on it:
+  `ref="xml:lang"` in dc.xsd/dcterms.xsd, `xml:space` in wml.xsd,
+  backed only by a locationless xml-namespace import that loads
+  nothing. Resolution returned `{}`, the src-element.2 check aborted
+  mid-graph, and the poisoned schema reported the document's own root
+  "not declared (strict)" — a poison scan hit every core OOXML schema
+  on the unfixed tree. The resolver now predeclares xml/xmlns and the
+  ref check accepts the XML namespace's built-in attribute
+  declarations (lang/space/base/id). Spec pins the shape; the
+  898-row XSD manifest oracle gate stays green.
 
 
 ## [1.9.359] - 2026-10-15
