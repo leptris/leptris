@@ -1211,6 +1211,77 @@ TEST(XPathResults, DocumentContextDescendantAxes) {
     leptris_document_free(doc);
 }
 
+TEST(XPathResults, XmlnsPrefixResolvesDefaultNamespace) {
+    /* leptris-ruby#469: the reserved xmlns: prefix in an expression
+     * resolves to the in-scope DEFAULT namespace of the evaluation
+     * context — the libxml2/nokogiri idiom for default-namespaced
+     * documents. Explicit bindings win first; unprefixed tests stay
+     * spec-strict (no-namespace only). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<svgmap xmlns='http://example.org/doc'>"
+        "<target href='a'/><sub xmlns='http://example.org/other'>"
+        "<target href='b'/></sub></svgmap>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    // Element context: child xmlns:target matches the default-ns child
+    LeptrisXPathResult r = leptris_xpath_eval(doc, root, "./xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // Absolute form from document level (the nokogiri idiom spells
+    // every step xmlns:)
+    r = leptris_xpath_eval(doc, nullptr, "//xmlns:svgmap/xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // The INNER default declaration wins inside <sub>: its target
+    // child is in the 'other' namespace, not the root's default.
+    // (And xmlns:sub from the root correctly does NOT match — the
+    // element carrying xmlns='other' is in 'other'.)
+    r = leptris_xpath_eval(doc, root, "./xmlns:sub");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(doc, root, ".//xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // Unprefixed name tests stay spec-strict: no-namespace only
+    r = leptris_xpath_eval(doc, root, "./target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    // An explicit binding overrides the quirk
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, (LeptrisXPathNsSet)0);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "x", "http://example.org/doc"),
+              LEPTRIS_OK);
+    r = leptris_xpath_eval_ns(doc, root, "./x:target", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+    leptris_xpath_ns_set_free(ns);
+
+    // No default declaration in scope: xmlns: matches nothing
+    LeptrisDocument plain = leptris_parse_string("<r><t/></r>", 11, &st);
+    ASSERT_NE(plain, nullptr);
+    r = leptris_xpath_eval(plain, nullptr, "//xmlns:t");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    leptris_document_free(plain);
+
+    leptris_document_free(doc);
+}
+
 TEST(XPathResults, AttributeTerminalPathShapes) {
     /* leptris-ruby#458: the final step being an ATTRIBUTE works for
      * //a/@id and //@id but must work for every relative-path shape

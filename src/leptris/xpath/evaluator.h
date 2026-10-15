@@ -48,6 +48,17 @@ typedef struct leptris_xsd_schema* LeptrisXsdSchema;
 XPathContext* xpath_context_new(struct leptris_document* document,
                                 LeptrisElement context_node);
 
+/* Resolve an EXPRESSION name-test prefix to a namespace URI:
+ * explicit bindings first; then the libxml2/nokogiri quirk — the
+ * reserved xmlns: prefix resolves to the in-scope DEFAULT
+ * namespace of the evaluation context (leptris-ruby#469). Safe to
+ * hijack: no valid document carries an element literally prefixed
+ * xmlns:, so a conformant query can never need it for anything
+ * else. NULL when the prefix is unbound and not xmlns:. */
+const char* xpath_expr_prefix_uri(XPathContext* ctx,
+                                  const char* prefix,
+                                  size_t prefix_len);
+
 /**
  * Free XPath context
  *

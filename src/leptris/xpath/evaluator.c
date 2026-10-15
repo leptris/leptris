@@ -10,6 +10,7 @@
 #include "functions.h"
 #include "xpath_variables.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../dom/document_node.h"
 #include "../common/port.h"  /* LEPTRIS_THREAD_LOCAL */
 #include "lexer.h"
 #include "parser.h"
@@ -99,6 +100,35 @@ XPathContext* xpath_context_new(struct leptris_document* document,
  * that hold the context for the duration of one eval (the common
  * case — both leptris_xpath_eval and leptris_xpath_eval_with_vars)
  * skip the malloc/free pair. */
+const char* xpath_expr_prefix_uri(XPathContext* ctx,
+                                  const char* prefix,
+                                  size_t prefix_len) {
+    if (!prefix || prefix_len == 0) return NULL;
+    const char* bound = ctx
+        ? leptris_xpath_ns_lookup(
+              (const struct leptris_xpath_ns_map*)ctx->ns_set,
+              prefix, prefix_len)
+        : NULL;
+    if (bound) return bound;
+    if (prefix_len != 5 || memcmp(prefix, "xmlns", 5) != 0)
+        return NULL;
+    /* In-scope default namespace: the innermost declaration with no
+     * prefix, walking ancestor-or-self from the context element. */
+    LeptrisElement cur = ctx ? ctx->context_node : NULL;
+    if (cur && ((LeptrisNode*)cur)->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+        struct leptris_document* dd = ((LeptrisDocumentNode*)cur)->doc;
+        cur = (LeptrisElement)dd->new_dom_root;
+        if (!cur) cur = dd->root;
+    }
+    for (; cur; cur = leptris_element_get_parent(cur)) {
+        for (struct leptris_namespace* decl = leptris_elem_namespaces(cur);
+             decl; decl = decl->next)
+            if (!decl->prefix && decl->uri && decl->uri[0])
+                return decl->uri;
+    }
+    return NULL;
+}
+
 void xpath_context_init(XPathContext* context,
                         struct leptris_document* document,
                         LeptrisElement context_node) {
