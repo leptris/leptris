@@ -1180,6 +1180,42 @@ static int file_validates(const char* schema_name, const char* doc) {
     return ok;
 }
 
+TEST(RngInclude, BareRelativeSchemaFilenameResolvesSiblingIncludes) {
+    /* A schema given as a BARE relative filename (no separator)
+     * resolves its <include href="sibling.rng"> against the working
+     * directory — not against the filename as a directory (#1709
+     * follow-up: rng_dir_of left the filename in place). */
+    const char* frag_path = "leptris_rng_bare_frag.rng";
+    const char* main_path = "leptris_rng_bare_main.rng";
+    const char frag_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<define name='shared'><element name='e'><empty/></element>"
+        "</define></grammar>";
+    const char main_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<include href='leptris_rng_bare_frag.rng'/>"
+        "<start><ref name='shared'/></start></grammar>";
+    FILE* f = fopen(frag_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(frag_xml, 1, sizeof(frag_xml) - 1, f);
+    fclose(f);
+    f = fopen(main_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(main_xml, 1, sizeof(main_xml) - 1, f);
+    fclose(f);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse_file(main_path, &st);
+    ASSERT_NE(rng, nullptr) << leptris_status_string(st);
+    LeptrisDocument d = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    remove(frag_path);
+    remove(main_path);
+}
+
 TEST(RngInclude, MergesDefinesFromIncludedGrammar) {
     EXPECT_EQ(file_validates("main.rng", "<e/>"), 1);
     EXPECT_EQ(file_validates("main.rng", "<x/>"), 0);
