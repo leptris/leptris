@@ -1064,8 +1064,23 @@ static void xsd_resolve_qname(LeptrisElement e, const char* qname,
         char u[256];
         xsd_ns_for_prefix(e, prefix, u, sizeof(u));
         if (!u[0]) {
-            local[0] = 0;
-            return;
+            /* XML Namespaces: the prefixes xml and xmlns are
+             * PREDECLARED for every document — xs:import of
+             * http://www.w3.org/XML/1998/namespace (the dc.xsd
+             * shape: <xs:attribute ref="xml:lang"/>) resolves
+             * without any in-scope declaration. An empty uri here
+             * failed the slice-5 ref check and poisoned the whole
+             * schema graph (leptris#478 repro 1). */
+            if (strcmp(prefix, "xml") == 0)
+                snprintf(u, sizeof(u), "%s",
+                         "http://www.w3.org/XML/1998/namespace");
+            else if (strcmp(prefix, "xmlns") == 0)
+                snprintf(u, sizeof(u), "%s",
+                         "http://www.w3.org/2000/xmlns/");
+            else {
+                local[0] = 0;
+                return;
+            }
         }
         snprintf(uri, urisz, "%s", u);
     } else {
@@ -1744,7 +1759,16 @@ static int xsd_check_refs_walk(LeptrisElement root,
         char ruri[256], rlocal[128];
         xsd_resolve_qname(c, ref, ruri, sizeof(ruri), rlocal,
                           sizeof(rlocal));
-        if (!xsd_decls_contain(decls, ndecls, ruri, rlocal)) {
+        /* The XML namespace's attribute declarations are BUILT IN
+         * (XSD 1.0 §3.15 / the xml.xsd the spec normatively
+         * provides): xml:lang/space/base/id resolve without any
+         * loaded declaration — a locationless
+         * <xs:import namespace="...XML/1998/namespace"/> provides
+         * nothing by design (leptris-ruby#478). */
+        if (!(strcmp(ruri, "http://www.w3.org/XML/1998/namespace") == 0 &&
+              (strcmp(rlocal, "lang") == 0 || strcmp(rlocal, "space") == 0 ||
+               strcmp(rlocal, "base") == 0 || strcmp(rlocal, "id") == 0)) &&
+            !xsd_decls_contain(decls, ndecls, ruri, rlocal)) {
             char msg[512];
             snprintf(msg, sizeof(msg),
                      "src-element.2: The QName value '{%s}%s' does not "
