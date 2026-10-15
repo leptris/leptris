@@ -399,6 +399,21 @@ static int any_attr_matches(const char* grammar, const char* uri,
         const char* start = p;
         while (*p && *p != ' ' && *p != '\t') p++;
         size_t len = (size_t)(p - start);
+        if (len == 7 && strncmp(start, "##local", 7) == 0) {
+            if (uri == NULL) return 1;
+            continue;
+        }
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (uri && target_ns && strcmp(uri, target_ns) == 0)
+                return 1;
+            continue;
+        }
+        if (len == 7 && strncmp(start, "##other", 7) == 0) {
+            if (uri && target_ns && strcmp(uri, target_ns) != 0)
+                return 1;
+            continue;
+        }
         if (uri && strlen(uri) == len && strncmp(uri, start, len) == 0)
             return 1;
     }
@@ -457,15 +472,18 @@ static void validate_attributes(struct xsd_validator* v,
                 strcmp(a->name, qn) == 0)
                 declared = 1;
         if (declared) continue;
-        if (ta->any_attr_ns) {
-            /* namespace of the attribute: engine-side attributes
-             * carry their uri through the expanded form */
-            const char* auri =
-                leptris_attribute_namespace_uri(at);
-            if (any_attr_matches(ta->any_attr_ns, auri,
-                                 xsd_target_ns(s)))
-                continue;
-        }
+        /* namespace of the attribute: engine-side attributes
+         * carry their uri through the expanded form */
+        const char* auri = leptris_attribute_namespace_uri(at);
+        /* extension union: an attribute is allowed when it matches the
+         * derived type's wildcard OR the base type's (the spec's
+         * attribute-wildcard union; #1691 anyAttr-derive family) */
+        if ((ta->any_attr_ns &&
+             any_attr_matches(ta->any_attr_ns, auri, xsd_target_ns(s))) ||
+            (ta->any_attr_base_ns &&
+             any_attr_matches(ta->any_attr_base_ns, auri,
+                              xsd_target_ns(s))))
+            continue;
         verrf_at(v, elem, "attribute", local,
                  "not declared (strict)");
     }
