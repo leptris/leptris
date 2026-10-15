@@ -3311,7 +3311,10 @@ static XPathASTNode* parse_location_path(XPathParser* parser) {
 
             ast_node_add_child(node, desc_step);
 
-            return node;
+            /* Continue the path after the fused star step: the
+             * fast path used to return bare, leaving a following
+             * SLASH unconsumed (parse error at expression end). */
+            return parse_path_continuation(parser, node);
         }
 
         /* General case: Add descendant-or-self::node() step */

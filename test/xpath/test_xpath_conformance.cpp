@@ -216,7 +216,14 @@ TEST(XPathConformanceBoolean, TrueAndFalseAreConstants) {
 
 TEST(XPathConformanceBoolean, LangMatchesLanguage) {
     auto doc = Parse("<r xml:lang='en'><a/></r>");
-    EXPECT_TRUE(Bool(doc, "lang('en')"));
+    // lang() inspects the context node's ancestors — evaluate on the
+    // root element (a document-node context has no xml:lang ancestor,
+    // the doc-level default from the XPathResults parity spec).
+    LeptrisXPathResult r =
+        leptris_xpath_eval(doc, leptris_document_root(doc), "lang('en')");
+    ASSERT_NE(r, nullptr);
+    EXPECT_TRUE(leptris_xpath_result_boolean(r));
+    leptris_xpath_result_free(r);
     leptris_document_free(doc);
 }
 
