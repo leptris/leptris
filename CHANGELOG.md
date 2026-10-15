@@ -2,12 +2,22 @@
 
 ## [1.9.359] - 2026-10-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xpath: descendant axes from document-node contexts walk the tree**
+  (leptris-ruby#458 follow-up, #1728). The VM's relative descendant
+  opcodes skipped non-element inputs — a document-typed context (the
+  NULL-context default) produced empty results for `.//a` and
+  `descendant::a` while `//a` kept working. Document inputs now walk
+  the root subtree with include-self (the root element IS a
+  descendant of the document, the AST walker's rule).
+- **xpath: the reserved xmlns: prefix resolves to the in-scope
+  default namespace** (leptris-ruby#469, #1729). The libxml2/nokogiri
+  idiom for default-namespaced documents — `doc.xpath("./xmlns:target")`
+  now matches. One helper wired into all seven prefixed name-test
+  sites; explicit bindings win first; the innermost prefixless
+  declaration wins per context node; unprefixed name tests stay
+  spec-strict (XPath 1.0 §2.3, no-namespace only).
 
 
 ## [1.9.358] - 2026-10-15
