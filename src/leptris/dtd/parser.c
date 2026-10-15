@@ -251,7 +251,6 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
                 depth--;
                 dtd_advance(p);
                 if (depth == 0) { closed = 1; break; }
-                dtd_advance(p);
                 continue;
             }
             dtd_advance(p);
@@ -259,6 +258,15 @@ static DTDElementDecl* dtd_parse_element(DTDParser* p) {
         /* #1211: running out of input before the model closes is a
          * malformed declaration — the NULL-on-error contract. */
         if (!closed) return NULL;
+
+        /* The occurrence modifier rides the group: `(a|b)*` stored
+         * WITHOUT the * made every mixed/repeated model validate as
+         * required-once (#1709-follow-up probe). */
+        if (!dtd_at_end(p) &&
+            (dtd_peek(p) == '*' || dtd_peek(p) == '+' ||
+             dtd_peek(p) == '?')) {
+            dtd_advance(p);
+        }
 
         size_t len = p->pos - start;
         elem->content_model = (char*)leptris_pool_alloc(p->pool, len + 1);
@@ -583,9 +591,14 @@ static void dtd_parse_into(LeptrisDTD* dtd, const char* dtd_content,
          * content models, ATTLIST lists — legal in external subsets,
          * accepted leniently everywhere). ENTITY declarations are
          * excluded: their VALUES may legitimately contain '%'. */
-        if (dtd_match(&parser, "<!ELEMENT") ||
-            dtd_match(&parser, "<!ATTLIST") ||
-            dtd_match(&parser, "<!NOTATION")) {
+        /* PEEK (do not consume): the substitution path re-parses the
+         * FULL declaration text — capturing decl_start after dtd_match
+         * would cut off the keyword and the reparse would register a
+         * garbage model (mixed models via %pe; validated as if
+         * #PCDATA were required). */
+        if (strncmp(parser.pos, "<!ELEMENT", 9) == 0 ||
+            strncmp(parser.pos, "<!ATTLIST", 9) == 0 ||
+            strncmp(parser.pos, "<!NOTATION", 10) == 0) {
             const char* decl_start = parser.pos;
             const char* scan = parser.pos;
             while (scan < parser.end && *scan != '>') scan++;

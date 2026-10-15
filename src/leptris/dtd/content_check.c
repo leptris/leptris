@@ -107,170 +107,292 @@ static int cm_peek_token(CMLexer* lx, CMTokenType* type, char name_buf[64]) {
     return 0;
 }
 
-/* Forward decls for the recursive matcher. */
-static int match_seq(CMLexer* lx, const char** child_names, size_t* child_idx,
-                      size_t child_count, const char* model_name,
-                      char* out_msg, size_t msg_size);
+/* ---- the matcher (TODO.hygiene/02 closeout) --------------------------
+ *
+ * A backtracking recursive-descent evaluator over the model with the
+ * child list as input stream. State = (lexer position, child index);
+ * every trial saves/restores both, so choices and repetitions reject
+ * a branch without consuming children:
+ *
+ *   expr     := sequence ('|' sequence)*        — first match wins
+ *   sequence := term (',' term)*
+ *   term     := ( NAME | '(' expr ')' ) occurrence?
+ *   occurrence := '' | '?' | '*' | '+'
+ *
+ * Mixed models (`(#PCDATA | a | b)*`) are validated separately: the
+ * alternation names form a SET, every element child must belong to
+ * it, text is always allowed; `(#PCDATA)` without `*` allows no
+ * element children at all (XML 1.0 §3.2.2, the mixed grammar). */
 
-/* Match a single particle (NAME?occurrence) against one or more
- * children, advancing *child_idx as needed. Returns 1 on success,
- * 0 on mismatch. */
-static int match_particle(CMLexer* lx, const char** child_names,
-                           size_t* child_idx, size_t child_count,
-                           int allow_empty, const char* model_name,
-                           char* out_msg, size_t msg_size) {
-    CMTokenType tok;
-    char name[64];
-    if (!cm_peek_token(lx, &tok, name) || tok != CMT_NAME) {
-        snprintf(out_msg, msg_size,
-                 "Content model of '%s' expected a name", model_name);
+typedef struct {
+    const char** names;   /* element children only */
+    size_t count;
+    size_t idx;
+    CMLexer lx;
+    const char* model_name;
+    char* out_msg;
+    size_t msg_size;
+} CMState;
+
+static int cm_match_expr(CMState* st);
+
+/* Match ONE instance of the group whose '(' sits at group_start.
+ * On success the lexer lands just past the group's ')'; on failure
+ * the state is restored. */
+static int cm_try_group_once(CMState* st, const char* group_start) {
+    CMLexer save_lx = st->lx;
+    size_t save_idx = st->idx;
+
+    st->lx.src = group_start + 1;  /* past '(' */
+    if (!cm_match_expr(st)) goto fail;
+    cm_skip_ws(&st->lx);
+    if (st->lx.src >= st->lx.end || *st->lx.src != ')') {
+        if (st->out_msg && st->msg_size)
+            snprintf(st->out_msg, st->msg_size,
+                     "Content model of '%s' expected ')'",
+                     st->model_name);
+        goto fail;
+    }
+    st->lx.src++;
+    return 1;
+fail:
+    st->lx = save_lx;
+    st->idx = save_idx;
+    return 0;
+}
+
+/* term := ( NAME | '(' expr ')' ) occurrence? */
+static int cm_match_term(CMState* st) {
+    cm_skip_ws(&st->lx);
+    int c = cm_peek(&st->lx);
+    if (c < 0) return 0;
+
+    if (c == '(') {
+        const char* group_start = st->lx.src;
+        /* occurrence needs the token AFTER ')': peek the balanced
+         * close by trying once first — the occurrence layer below
+         * re-enters via cm_try_group_once, so this match consumes
+         * exactly one instance. */
+        if (!cm_try_group_once(st, group_start)) return 0;
+        cm_skip_ws(&st->lx);
+        char occurrence = 1;
+        if (st->lx.src < st->lx.end) {
+            if (*st->lx.src == '?') { st->lx.src++; occurrence = '?'; }
+            else if (*st->lx.src == '*') { st->lx.src++; occurrence = '*'; }
+            else if (*st->lx.src == '+') { st->lx.src++; occurrence = '+'; }
+        }
+        if (occurrence == 1 || occurrence == '?') return 1;
+        /* '*' / '+': trial further instances while they match and
+         * make progress (a zero-width body terminates the loop) */
+        for (;;) {
+            CMLexer save_lx = st->lx;
+            size_t save_idx = st->idx;
+            if (!cm_try_group_once(st, group_start)) {
+                st->lx = save_lx;   /* the trailing occurrence token? no —
+                                       try_group_once restores to before
+                                       the retry; keep the successful
+                                       state from before this trial */
+                st->lx = save_lx;
+                st->idx = save_idx;
+                return 1;
+            }
+            if (st->idx == save_idx) {
+                /* zero-width instance: stop, state stays at the last
+                 * successful position (already equal) */
+                return 1;
+            }
+        }
+    }
+
+    if (c == '#') {
+        /* #PCDATA handled by the mixed path; a bare one here is a
+         * malformed model for element-only matching */
+        if (st->out_msg && st->msg_size)
+            snprintf(st->out_msg, st->msg_size,
+                     "Content model of '%s' mixes #PCDATA with element "
+                     "content", st->model_name);
         return 0;
     }
-    cm_skip_ws(lx);
-    /* Consume the name token by advancing past it. */
-    while (lx->src < lx->end && !isspace((unsigned char)*lx->src) &&
-           *lx->src != '(' && *lx->src != ')' && *lx->src != ',' &&
-           *lx->src != '|' && *lx->src != '?' && *lx->src != '*' &&
-           *lx->src != '+') {
-        lx->src++;
+
+    char name[64];
+    CMTokenType tok;
+    if (!cm_peek_token(&st->lx, &tok, name) || tok != CMT_NAME) {
+        if (st->out_msg && st->msg_size)
+            snprintf(st->out_msg, st->msg_size,
+                     "Content model of '%s' expected a name",
+                     st->model_name);
+        return 0;
     }
-    /* Optional occurrence modifier. */
-    cm_skip_ws(lx);
-    int occurrence = 1;  /* default: exactly one */
-    if (lx->src < lx->end) {
-        if (*lx->src == '?') { lx->src++; occurrence = '?'; }
-        else if (*lx->src == '*') { lx->src++; occurrence = '*'; }
-        else if (*lx->src == '+') { lx->src++; occurrence = '+'; }
+    while (st->lx.src < st->lx.end &&
+           !isspace((unsigned char)*st->lx.src) &&
+           *st->lx.src != '(' && *st->lx.src != ')' &&
+           *st->lx.src != ',' && *st->lx.src != '|' &&
+           *st->lx.src != '?' && *st->lx.src != '*' &&
+           *st->lx.src != '+') {
+        st->lx.src++;
+    }
+    cm_skip_ws(&st->lx);
+    char occurrence = 1;
+    if (st->lx.src < st->lx.end) {
+        if (*st->lx.src == '?') { st->lx.src++; occurrence = '?'; }
+        else if (*st->lx.src == '*') { st->lx.src++; occurrence = '*'; }
+        else if (*st->lx.src == '+') { st->lx.src++; occurrence = '+'; }
     }
 
-    int matched_any = 0;
-    /* * and + consume EVERY run of matching children — a single
-     * compare left the run's tail unconsumed and failed valid
-     * documents like <r><item/><item/></r> against (item+). */
-    while (*child_idx < child_count &&
-           strcmp(child_names[*child_idx], name) == 0) {
-        (*child_idx)++;
-        matched_any = 1;
+    size_t matched = 0;
+    while (st->idx < st->count &&
+           strcmp(st->names[st->idx], name) == 0) {
+        st->idx++;
+        matched++;
         if (occurrence == 1 || occurrence == '?') break;
     }
-
     switch (occurrence) {
         case '?':
         case '*':
-            return 1;  /* optional / zero-or-more — match even if missing */
+            return 1;
         case '+':
-            if (matched_any) return 1;
-            snprintf(out_msg, msg_size,
-                     "Element '%s' content model requires one or more '%s'",
-                     model_name, name);
+            if (matched) return 1;
+            if (st->out_msg && st->msg_size)
+                snprintf(st->out_msg, st->msg_size,
+                         "Element '%s' content model requires one or "
+                         "more '%s'", st->model_name, name);
             return 0;
-        default:  /* exactly one */
-            if (matched_any) return 1;
-            if (allow_empty && *child_idx >= child_count) {
-                /* The next child would have been missing, but the
-                 * caller is OK with empty if optional follows. */
-                return 1;
-            }
-            snprintf(out_msg, msg_size,
-                     "Element '%s' content model requires '%s'",
-                     model_name, name);
+        default:
+            if (matched) return 1;
+            if (st->out_msg && st->msg_size)
+                snprintf(st->out_msg, st->msg_size,
+                         "Element '%s' content model requires '%s'",
+                         st->model_name, name);
             return 0;
     }
 }
 
-/* Match a parenthesized group: ( seq | choice )?occurrence. */
-static int match_group(CMLexer* lx, const char** child_names,
-                        size_t* child_idx, size_t child_count,
-                        int allow_empty, const char* model_name,
-                        char* out_msg, size_t msg_size) {
-    /* Consume '(' */
-    if (lx->src >= lx->end || *lx->src != '(') {
-        snprintf(out_msg, msg_size,
-                 "Content model of '%s' expected '('", model_name);
-        return 0;
-    }
-    lx->src++;
-    cm_skip_ws(lx);
-
-    /* Parse sequence/choice. We support both via recursive descent
-     * over particles separated by `,` or `|`. */
-    /* First term */
-    if (!match_particle(lx, child_names, child_idx, child_count,
-                         allow_empty, model_name, out_msg, msg_size)) {
-        return 0;
-    }
-    /* Following terms (sequence or choice) */
+/* sequence := term (',' term)* */
+static int cm_match_sequence(CMState* st) {
+    if (!cm_match_term(st)) return 0;
     for (;;) {
-        cm_skip_ws(lx);
-        if (lx->src >= lx->end) break;
-        if (*lx->src == ')') break;
-        if (*lx->src == ',') {
-            lx->src++;
-            cm_skip_ws(lx);
-            if (!match_particle(lx, child_names, child_idx, child_count,
-                                 0, model_name, out_msg, msg_size)) {
-                return 0;
+        cm_skip_ws(&st->lx);
+        if (st->lx.src >= st->lx.end || *st->lx.src != ',') return 1;
+        st->lx.src++;
+        if (!cm_match_term(st)) return 0;
+    }
+}
+
+/* Lexically walk past one unmatched alternative (balanced parens,
+ * stopping at the depth-0 '|' or ')'). */
+static void cm_skip_alternative(CMLexer* lx) {
+    int depth = 0;
+    while (lx->src < lx->end) {
+        char c = *lx->src;
+        if (c == '(') depth++;
+        else if (c == ')') {
+            if (depth == 0) return;
+            depth--;
+        } else if (c == '|' && depth == 0) return;
+        lx->src++;
+    }
+}
+
+/* expr := sequence ('|' sequence)* — first match wins; failed
+ * alternatives restore the state, and after a SUCCESS the remaining
+ * alternatives are skipped lexically so the enclosing group's ')'
+ * check lands on the real close. */
+static int cm_match_expr(CMState* st) {
+    CMLexer save_lx = st->lx;
+    size_t save_idx = st->idx;
+    if (cm_match_sequence(st)) {
+        for (;;) {
+            cm_skip_ws(&st->lx);
+            if (st->lx.src >= st->lx.end || *st->lx.src != '|') break;
+            st->lx.src++;
+            cm_skip_alternative(&st->lx);
+        }
+        return 1;
+    }
+    for (;;) {
+        cm_skip_ws(&st->lx);
+        if (st->lx.src >= st->lx.end || *st->lx.src != '|') {
+            st->lx = save_lx;
+            st->idx = save_idx;
+            return 0;
+        }
+        st->lx.src++;
+        if (cm_match_sequence(st)) {
+            for (;;) {
+                cm_skip_ws(&st->lx);
+                if (st->lx.src >= st->lx.end || *st->lx.src != '|') break;
+                st->lx.src++;
+                cm_skip_alternative(&st->lx);
             }
-        } else if (*lx->src == '|') {
-            /* Choice: try to match the current alternative; if it
-             * doesn't match the current child, backtrack to before
-             * THIS particle and try the alternative. For chained `|`,
-             * the matcher already accepted one of the earlier alts. */
-            lx->src++;
-            cm_skip_ws(lx);
-            /* Save BEFORE the current particle (we already consumed
-             * it, so we need to track from where we entered this
-             * iteration). Since match_particle always advances on
-             * success even for `?`/`*`, we instead check: if the
-             * child at the current position did NOT match the
-             * previous particle, roll back by re-running the alt. */
-            CMLexer save = *lx;
-            size_t save_idx = *child_idx;
-            int alt_ok = match_particle(lx, child_names, child_idx,
-                                       child_count, allow_empty,
-                                       model_name, out_msg, msg_size);
-            if (!alt_ok) {
-                /* Alternative didn't match — try skipping it (treat
-                 * as optional). This happens when the previous
-                 * alternative matched. */
-                *lx = save;
-                *child_idx = save_idx;
-                while (lx->src < lx->end && *lx->src != ')') lx->src++;
-            }
-        } else {
-            break;
+            return 1;
+        }
+        /* this alternative failed — restore and try the next one */
+    }
+}
+
+/* Mixed model: `(#PCDATA)` or `(#PCDATA|n1|n2...)*`. */
+static int cm_match_mixed(const char* model, CMState* st) {
+    /* collect the allowed element names between '(' and ')' */
+    struct { const char* s; size_t len; } names[64];
+    size_t n = 0;
+    const char* p = strchr(model, '(');
+    const char* close = strrchr(model, ')');
+    if (!p || !close || close < p) {
+        if (st->out_msg && st->msg_size)
+            snprintf(st->out_msg, st->msg_size,
+                     "Content model of '%s' is malformed",
+                     st->model_name);
+        return 0;
+    }
+    int star = 0;
+    {
+        const char* q = close + 1;
+        while (*q && isspace((unsigned char)*q)) q++;
+        star = (*q == '*');
+    }
+    p++;
+    while (p < close) {
+        while (p < close && (isspace((unsigned char)*p) || *p == '|')) p++;
+        if (p >= close) break;
+        const char* s = p;
+        while (p < close && *p != '|' && !isspace((unsigned char)*p)) p++;
+        size_t len = (size_t)(p - s);
+        if (len == 7 && strncmp(s, "#PCDATA", 7) == 0) continue;
+        if (n < 64) {
+            /* borrowed (ptr,len): model text is not NUL-terminated
+             * at the name boundary */
+            names[n].s = s;
+            names[n].len = len;
+            n++;
         }
     }
-    /* Consume ')' */
-    if (lx->src >= lx->end || *lx->src != ')') {
-        snprintf(out_msg, msg_size,
-                 "Content model of '%s' expected ')'", model_name);
+    for (size_t i = 0; i < st->count; i++) {
+        int allowed = 0;
+        for (size_t j = 0; j < n; j++) {
+            if (strlen(st->names[i]) == names[j].len &&
+                strncmp(st->names[i], names[j].s, names[j].len) == 0) {
+                allowed = 1;
+                break;
+            }
+        }
+        if (!allowed) {
+            if (st->out_msg && st->msg_size)
+                snprintf(st->out_msg, st->msg_size,
+                         "Element '%s' child '%s' is not allowed by the "
+                         "mixed content model", st->model_name,
+                         st->names[i]);
+            return 0;
+        }
+    }
+    if (!star && st->count > 0) {
+        if (st->out_msg && st->msg_size)
+            snprintf(st->out_msg, st->msg_size,
+                     "Element '%s' mixed content model allows no element "
+                     "children", st->model_name);
         return 0;
     }
-    lx->src++;
-    /* Optional outer-group occurrence modifier. */
-    cm_skip_ws(lx);
-    if (lx->src < lx->end) {
-        if (*lx->src == '?') { lx->src++; return 1; }  /* outer (a|b)? — allowed */
-        if (*lx->src == '*') { lx->src++; return 1; }  /* outer (a|b)* */
-        if (*lx->src == '+') { lx->src++; return 1; }  /* outer (a|b)+ — at least one alt */
-    }
+    st->idx = st->count;
     return 1;
-}
-
-/* Top-level: parse the model and match against children. */
-static int match_seq(CMLexer* lx, const char** child_names, size_t* child_idx,
-                      size_t child_count, const char* model_name,
-                      char* out_msg, size_t msg_size) {
-    /* If model starts with '(', parse a group. */
-    cm_skip_ws(lx);
-    if (lx->src < lx->end && *lx->src == '(') {
-        return match_group(lx, child_names, child_idx, child_count,
-                            0, model_name, out_msg, msg_size);
-    }
-    /* Single particle (NAME?occurrence). */
-    return match_particle(lx, child_names, child_idx, child_count,
-                          0, model_name, out_msg, msg_size);
 }
 
 /* Public entry point: match actual children against a content model
@@ -282,17 +404,31 @@ int leptris_content_model_match(const char* model, const char* elem_name,
         if (out_msg && msg_size) snprintf(out_msg, msg_size, "NULL model or children");
         return 0;
     }
-    CMLexer lx = { .src = model, .end = model + strlen(model) };
-    size_t child_idx = 0;
-    int rc = match_seq(&lx, child_names, &child_idx, child_count,
-                       elem_name, out_msg, msg_size);
-    if (rc != 1) return 0;
-    /* All children must be consumed. */
-    if (child_idx != child_count) {
+    CMState st = {0};
+    st.names = child_names;
+    st.count = child_count;
+    st.idx = 0;
+    st.lx = (CMLexer){ .src = model, .end = model + strlen(model) };
+    st.model_name = elem_name;
+    st.out_msg = out_msg;
+    st.msg_size = msg_size;
+
+    if (strstr(model, "#PCDATA")) return cm_match_mixed(model, &st);
+
+    if (!cm_match_expr(&st)) {
+        if (out_msg && msg_size && out_msg[0] == 0) {
+            snprintf(out_msg, msg_size,
+                     "Element '%s' does not match its content model",
+                     elem_name);
+        }
+        return 0;
+    }
+    if (st.idx != st.count) {
         if (out_msg && msg_size) {
             snprintf(out_msg, msg_size,
-                     "Element '%s' has %zu child(ren) but content model accepts %zu",
-                     elem_name, child_count, child_idx);
+                     "Element '%s' has %zu child(ren) but the content "
+                     "model accepts %zu",
+                     elem_name, child_count, st.idx);
         }
         return 0;
     }
