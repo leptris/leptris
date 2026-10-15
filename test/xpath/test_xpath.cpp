@@ -2603,3 +2603,71 @@ TEST(XPath20Ledger, DeepEqual) {
     EXPECT_TRUE(BoolEval("deep-equal(<a><b>1</b></a>, <a><b>1</b></a>)") ==
                 false || true); /* constructors optional; guard */
 }
+
+/* #469 precedence: an explicit binding for the literal prefix
+ * wins over the xmlns: quirk. */
+TEST(XPathNamespaces, ExplicitBindingWinsOverXmlnsQuirk) {
+    const char xml[] =
+        "<svgmap xmlns='http://www.example.org/doc' xml:lang='fr'>"
+        "<target href='a'/></svgmap>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Explicit binding wins over the quirk. */
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "xmlns", "urn:bogus"), LEPTRIS_OK);
+    LeptrisXPathResult r =
+        leptris_xpath_eval_ns(doc, root, "./xmlns:target", ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    leptris_xpath_ns_set_free(ns);
+
+    /* xml: resolves unbound (prebound to the XML namespace). */
+    r = leptris_xpath_eval(doc, root, "./@xml:lang");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "fr");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+/* leptris-ruby#458 regression: attribute-terminal steps must work
+ * in every path position — relative paths from the document
+ * context and after filtered expressions (the silent-nil and the
+ * "Unexpected token after expression: SLASH" grammar-error
+ * shapes). Both were fixed by the VM path work; these pin them. */
+TEST(XPathAttributeTerminal, RelativeAndFilteredShapes) {
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    struct {
+        const char* expr;
+        const char* want;
+    } cases[] = {
+        {"//a/@id", "x"},
+        {"//@id", "x"},
+        {"r/a/@id", "x"},
+        {"//*[local-name()='a']/@id", "x"},
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        ASSERT_EQ(leptris_xpath_result_count(r), 1u) << c.expr;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.expr;
+        EXPECT_STREQ(s, c.want) << c.expr;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+    }
+
+    leptris_document_free(doc);
+}
