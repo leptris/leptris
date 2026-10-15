@@ -2,12 +2,49 @@
 
 ## [1.9.357] - 2026-10-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
+- **XSD conformance: 898/1056 oracle parity (leptris#1691 closed).**
+  Four slices landed: ref-QName declaration resolution across the
+  include/import graph — chameleon includes adopt the includer's
+  namespace, first import per namespace wins (#1718); UPA —
+  choice-branch FIRST overlap and optional/repeating sequence
+  adjacency with exact wildcard coverage (#1719); the
+  attribute-wildcard family — `##targetNamespace`/`##other` list
+  keywords and union normalization (#1723); plus the earlier
+  derivation-ok/transitive-include slice (#1716). Floors 839 → 898;
+  the only non-converging pair is `length3_0`, an oracle gap
+  (libxml2 2.9.13 cannot resolve the spec-valid
+  `xs:non-positive-integer`), deliberately not codified.
+- **XInclude: xml:base chains + resolver policy (leptris#1694,
+  PR #1719).** Relative hrefs resolve against the nearest xml:base
+  ancestor (RFC 3986 merge) and nested includes resolve against the
+  INCLUDED document's own directory. `leptris_xinclude_process_opts`
+  adds a resolver hook, XML Catalog exact-mapping lookups, and
+  `no_network` (default on — remote schemes are resource errors;
+  catalogs are consulted first so remote names can localize).
+- **RelaxNG: sound interleave + include merge (leptris#1709,
+  PR #1711).** Include merge deep-copies (adoption-by-copy) instead
+  of moving shared trees; combine=interleave nested defines keep
+  their wrapper; the interleave walk is a consuming fixpoint with a
+  zero-width satisfiability pass; attribute choices with a text
+  branch validate (BIPM locality/date). Include-merge originals are
+  freed (Linux-ASAN leak).
+- **RELAX NG diagnostics: full report in the CLI (leptris#1704).**
+  A misplaced element that also carries an invalid attribute reports
+  BOTH diagnostics (Jing parity); `validate --rng` prints the whole
+  report instead of only the first record.
+- **RELAX NG: bare relative schema filenames resolve includes
+  against "." (PR #1720).** A schema filename with no path
+  separator made every relative `<include href>` resolve against
+  the filename itself and die with a misleading parse error.
+- **CLI: per-test fixture files for the parallel validators**
+  (PR #1708) — the ctest -j4 Schematron/RngRound flake.
+- **XSD anyAttribute unions + wildcard list keywords (PR #1723).**
 
-- (describe changes here)
+### Test suite
+
+- 2030 tests (2026 on v1.9.356), zero-warning builds maintained.
 
 
 ## [1.9.356] - 2026-10-14
