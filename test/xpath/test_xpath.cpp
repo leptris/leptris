@@ -1149,6 +1149,175 @@ TEST(XPathResults, MixedNodesetKindsNamesValues) {
     leptris_document_free(doc);
 }
 
+TEST(XPathResults, NullContextIsDocumentNode) {
+    /* leptris-ruby#458 root cause: a NULL context used to default to
+     * the ROOT element; libxml2/Nokogiri document-level queries
+     * evaluate against the DOCUMENT node — a relative name matches
+     * the root element, and child::* yields exactly the root. */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "r", 1 },
+        { "*", 1 },
+        { "node()", 1 },
+        { "a", 0 },
+        { "b", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0) << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r), (size_t)tc.expect_count)
+            << tc.expr;
+        if (tc.expect_count == 1) {
+            EXPECT_EQ(leptris_xpath_result_node_kind(r, 0),
+                      LEPTRIS_XPATH_NODE_ELEMENT) << tc.expr;
+        }
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, DocumentContextDescendantAxes) {
+    /* leptris-ruby#458 follow-up: from the document node (the
+     * NULL-context default), descendant and descendant-or-self
+     * axes must reach the whole tree — the root element is a
+     * descendant of the document. The VM's relative descendant
+     * opcodes skipped non-element inputs, so `.//a` and
+     * descendant::a came back empty while `//a` worked. */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "//a", 1 },
+        { ".//a", 1 },
+        { "descendant::a", 1 },
+        { "descendant-or-self::r", 1 },
+        { ".//b", 1 },
+        { "a", 0 },
+        { "descendant::z", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0) << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r), (size_t)tc.expect_count)
+            << tc.expr;
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, XmlnsPrefixResolvesDefaultNamespace) {
+    /* leptris-ruby#469: the reserved xmlns: prefix in an expression
+     * resolves to the in-scope DEFAULT namespace of the evaluation
+     * context — the libxml2/nokogiri idiom for default-namespaced
+     * documents. Explicit bindings win first; unprefixed tests stay
+     * spec-strict (no-namespace only). */
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<svgmap xmlns='http://example.org/doc'>"
+        "<target href='a'/><sub xmlns='http://example.org/other'>"
+        "<target href='b'/></sub></svgmap>";
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    // Element context: child xmlns:target matches the default-ns child
+    LeptrisXPathResult r = leptris_xpath_eval(doc, root, "./xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // Absolute form from document level (the nokogiri idiom spells
+    // every step xmlns:)
+    r = leptris_xpath_eval(doc, nullptr, "//xmlns:svgmap/xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // The INNER default declaration wins inside <sub>: its target
+    // child is in the 'other' namespace, not the root's default.
+    // (And xmlns:sub from the root correctly does NOT match — the
+    // element carrying xmlns='other' is in 'other'.)
+    r = leptris_xpath_eval(doc, root, "./xmlns:sub");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    r = leptris_xpath_eval(doc, root, ".//xmlns:target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+
+    // Unprefixed name tests stay spec-strict: no-namespace only
+    r = leptris_xpath_eval(doc, root, "./target");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    // An explicit binding overrides the quirk
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, (LeptrisXPathNsSet)0);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "x", "http://example.org/doc"),
+              LEPTRIS_OK);
+    r = leptris_xpath_eval_ns(doc, root, "./x:target", ns);
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    leptris_xpath_result_free(r);
+    leptris_xpath_ns_set_free(ns);
+
+    // No default declaration in scope: xmlns: matches nothing
+    LeptrisDocument plain = leptris_parse_string("<r><t/></r>", 11, &st);
+    ASSERT_NE(plain, nullptr);
+    r = leptris_xpath_eval(plain, nullptr, "//xmlns:t");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    leptris_document_free(plain);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, AttributeTerminalPathShapes) {
+    /* leptris-ruby#458: the final step being an ATTRIBUTE works for
+     * //a/@id and //@id but must work for every relative-path shape
+     * too: r/a/@id (silent empty today) and the filter-expr form
+     * //*[...]/@id (engine grammar: "Unexpected token after
+     * expression: SLASH"). */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "//a/@id", 1 },
+        { "//@id", 1 },
+        { "r/a/@id", 1 },
+        { "//*[local-name()='a']/@id", 1 },
+        { "./@id", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0)
+            << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r),
+                  (size_t)tc.expect_count)
+            << tc.expr;
+        if (tc.expect_count == 1) {
+            EXPECT_EQ(leptris_xpath_result_node_kind(r, 0),
+                      LEPTRIS_XPATH_NODE_ATTRIBUTE) << tc.expr;
+            EXPECT_STREQ(leptris_xpath_result_node_value(r, 0), "x")
+                << tc.expr;
+        }
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
 TEST(XPathResults, MixedNodesetAttributeNameValue) {
     const char xml[] = "<r><a id='x1'>t</a></r>";
     LeptrisStatus st = LEPTRIS_OK;
@@ -2433,4 +2602,72 @@ TEST(XPath20Ledger, DeepEqual) {
                 false); /* First vs Second differ */
     EXPECT_TRUE(BoolEval("deep-equal(<a><b>1</b></a>, <a><b>1</b></a>)") ==
                 false || true); /* constructors optional; guard */
+}
+
+/* #469 precedence: an explicit binding for the literal prefix
+ * wins over the xmlns: quirk. */
+TEST(XPathNamespaces, ExplicitBindingWinsOverXmlnsQuirk) {
+    const char xml[] =
+        "<svgmap xmlns='http://www.example.org/doc' xml:lang='fr'>"
+        "<target href='a'/></svgmap>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Explicit binding wins over the quirk. */
+    LeptrisXPathNsSet ns = leptris_xpath_ns_set_new();
+    ASSERT_NE(ns, nullptr);
+    ASSERT_EQ(leptris_xpath_ns_set_add(ns, "xmlns", "urn:bogus"), LEPTRIS_OK);
+    LeptrisXPathResult r =
+        leptris_xpath_eval_ns(doc, root, "./xmlns:target", ns);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+    leptris_xpath_ns_set_free(ns);
+
+    /* xml: resolves unbound (prebound to the XML namespace). */
+    r = leptris_xpath_eval(doc, root, "./@xml:lang");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u);
+    char* s = leptris_xpath_result_string(r);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STREQ(s, "fr");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+/* leptris-ruby#458 regression: attribute-terminal steps must work
+ * in every path position — relative paths from the document
+ * context and after filtered expressions (the silent-nil and the
+ * "Unexpected token after expression: SLASH" grammar-error
+ * shapes). Both were fixed by the VM path work; these pin them. */
+TEST(XPathAttributeTerminal, RelativeAndFilteredShapes) {
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisDocument doc = ParseWith(xml);
+    ASSERT_NE(doc, nullptr);
+
+    struct {
+        const char* expr;
+        const char* want;
+    } cases[] = {
+        {"//a/@id", "x"},
+        {"//@id", "x"},
+        {"r/a/@id", "x"},
+        {"//*[local-name()='a']/@id", "x"},
+    };
+    for (const auto& c : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, c.expr);
+        ASSERT_NE(r, nullptr) << c.expr;
+        ASSERT_EQ(leptris_xpath_result_count(r), 1u) << c.expr;
+        char* s = leptris_xpath_result_string(r);
+        ASSERT_NE(s, nullptr) << c.expr;
+        EXPECT_STREQ(s, c.want) << c.expr;
+        leptris_free_string(s);
+        leptris_xpath_result_free(r);
+    }
+
+    leptris_document_free(doc);
 }

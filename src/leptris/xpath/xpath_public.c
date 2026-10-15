@@ -6,6 +6,7 @@
  */
 
 #include "../dom/pi.h"
+#include "../dom/document_node.h"
 #include "xpath_carrier.h"
 #include "../include/leptris.h"
 #include "../leptris_internal.h"
@@ -109,7 +110,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
      * the compact-pointer DOM via the bytecode VM. */
 
     /* Use context element if provided, otherwise use root */
-    LeptrisElement context_elem = context ? context : leptris_document_root(doc);
+    LeptrisElement context_elem = context ? context : (LeptrisElement)leptris_document_get_node(doc);
     if (!context_elem) return NULL;
 
     /* Call internal implementation with string length */

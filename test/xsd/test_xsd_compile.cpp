@@ -143,17 +143,21 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     }
     EXPECT_GE(ok + failed, 160u) << "fixture set shrank";
     // Compile floor: was 163/163 when compile was unconditional —
-    // the structure check (#1691) now legitimately rejects the
-    // schema-error fixtures. The floor is the CROSS-PLATFORM
-    // minimum: Linux (case-sensitive fs) resolves 4 more fixtures'
-    // schemaLocations than macOS, where they silently fail to load
-    // and the violations go unseen — Linux ok=155, macOS 159 (the
-    // delta is tracked in #1691: fixture case mismatches + a
-    // missing-include diagnostic). The differential expectations
-    // live in XsdConformance (MANIFEST.tsv). Monotonic.
+    // the structure checks (#1691) now legitimately reject the
+    // schema-error fixtures (slices 1-3: src-attribute/src-element
+    // clauses, occurrence ordering, include-tns, xsi/xmlns
+    // reservations). The floor is the CROSS-PLATFORM minimum:
+    // Linux (case-sensitive fs) resolves 4 more fixtures'
+    // schemaLocations than macOS (delta tracked in #1691). The
+    // differential expectations live in XsdConformance
+    // (MANIFEST.tsv). Monotonic.
     RecordProperty("ok", std::to_string(ok));
     RecordProperty("failed", std::to_string(failed));
-    EXPECT_GE(ok, 155u) << "compile-success floor regressed";
+    // 150 -> 147 (slice 4: transitive include-tns, content-type
+    // mismatch, attribute-wildcard restriction) -> 142 (slice 5:
+    // ref QNames must resolve) -> 139 (slice 6: UPA —
+    // non-deterministic content models rejected).
+    EXPECT_GE(ok, 139u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -1942,6 +1946,119 @@ TEST(XsdErrorContext, ContentModelErrorCarriesPosition) {
 
 }  // namespace
 
+/* ---- #1691 slice 4: oracle-rejected schemas the engine must refuse
+ * to compile. File-based: the shapes need on-disk include graphs and
+ * global-declaration resolution. Each fixture is a measured
+ * schema-error row of the differential lane. */
+TEST(XsdConformanceClauses, TransitiveIncludeTnsMismatchRejected) {
+    /* 582906-2: the root IMPORTS prog1/prog2 (cross-namespace
+     * imports are legal); the src-include.1 violation lives one hop
+     * deeper — prog1/prog2 INCLUDE common, whose targetNamespace
+     * differs from THEIRS. The include-tns check must recurse into
+     * every loaded document, not just the root. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/582906-2_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    /* failure contract: an error-carrying handle + non-OK status */
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "src-include.1 must fire transitively";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, ExtensionContentTypeMismatchRejected) {
+    /* issue491 (cos-ct-derived-ok, libxml2: "the content type of
+     * both, the type and its base type, must either mixed or
+     * element-only"): complexContent extension of a simpleContent
+     * base. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/issue491_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "content-type mismatch on extension must be rejected";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, RestrictionWildcardNeedsBaseWildcard) {
+    /* derivation-ok-restriction-4-1: a restricted complex type with
+     * an attribute wildcard requires the base type to carry one
+     * (and the derived wildcard must be a subset). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) +
+                    "/derivation-ok-restriction-4-1-err_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "attribute-wildcard restriction without a base wildcard "
+           "must be rejected";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, NonDeterministicSequenceRejected) {
+    /* deter0_0: (odd,even)* followed by odd? — after the loop, the
+     * trailing odd? collides with the loop restart. UPA violation. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/deter0_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK) << "UPA violation must be rejected";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, WildcardChoiceOverlapRejected) {
+    /* any4_0: a choice branch wildcard whose namespace covers the
+     * other branch's explicit element — ambiguous. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/any4_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK) << "ambiguous wildcard choice must be rejected";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, DeterministicRepeatStillLoads) {
+    /* (a, a) is DETERMINISTIC (both required); the UPA check must
+     * not fire on required adjacency, and ##other must not cover
+     * targetNamespace elements (any5_1's (boo, other*, boo)). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p =
+        std::string(LEPTRIS_XSD_CASES_DIR) + "/seq-dubl-elem1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_xsd_free(s);
+    std::string p2 = std::string(LEPTRIS_XSD_CASES_DIR) + "/any5_1.xsd";
+    LeptrisXsdSchema s2 = leptris_xsd_compile_file(p2.c_str(), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_xsd_free(s2);
+}
+
+TEST(XsdConformanceClauses, UnresolvableRefQNameRejected) {
+    /* import1_0 (src-element.2): an xs:element/@ref whose QName
+     * resolves to no declaration (the import target file is
+     * missing) is a schema-load error. Resolution is by
+     * DECLARATION across the include/import graph (chameleon
+     * includes adopt the includer's namespace); namespace-only
+     * imports and missing files provide nothing. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/import1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "an unresolved ref QName must be rejected";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, ChameleonIncludeDeclaresResolve) {
+    /* The counterpart contract: declarations inside a chameleon
+     * include (no targetNamespace) resolve under the INCLUDING
+     * schema's namespace — include1_0's ref="foo:bar" resolves to
+     * the .inc's element bar, and the schema must load. */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) + "/include1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_xsd_free(s);
+}
+
 /* ---- #1075: the differential conformance lane ---------------------
  *
  * MANIFEST.tsv is generated by scripts/gen_xsd_manifest.py: the
@@ -1951,6 +2068,38 @@ TEST(XsdErrorContext, ContentModelErrorCarriesPosition) {
  * oracle. The pass floor is pinned from the first measured run and
  * is monotonic: raising it is progress, lowering it is a regression.
  */
+TEST(XsdConformanceClauses, ImplicitXmlPrefixRefResolves) {
+    /* leptris-ruby#478 repro 1: the slice-5 ref check resolved
+     * QNames strictly through in-scope declarations, but the xml
+     * prefix is PREDECLARED (XML Namespaces §3) — OOXML schemas
+     * carry <xs:attribute ref="xml:lang"/> (dc.xsd, dcterms.xsd,
+     * wml.xsd's xml:space) with only a locationless
+     * <xs:import namespace="...XML/1998/namespace"/>. The failed
+     * resolution aborted the ref check mid-graph and left the
+     * schema poisoned: the doc's own root then reported "not
+     * declared (strict)". */
+    const char schema[] =
+        "<?xml version=\"1.0\"?>"
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns=\"urn:t\""
+        " xmlns:xml=\"http://www.w3.org/XML/1998/namespace\""
+        " elementFormDefault=\"qualified\">"
+        " <xs:import namespace=\"http://www.w3.org/XML/1998/namespace\"/>"
+        " <xs:complexType name=\"T\">"
+        "  <xs:sequence><xs:element name=\"t\" type=\"xs:string\"/></xs:sequence>"
+        "  <xs:attribute ref=\"xml:lang\" use=\"optional\"/>"
+        " </xs:complexType>"
+        " <xs:element name=\"root\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(leptris_xsd_error_count(s), 0u)
+        << leptris_xsd_error_at(s, 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdConformance, ManifestExpectationsMatchOracle) {
     const std::string manifest_path =
         std::string(LEPTRIS_XSD_CASES_DIR) + "/MANIFEST.tsv";
@@ -2016,10 +2165,10 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
      * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 803) << "conformance floor regressed";
+    EXPECT_GE(pass, 898) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 151);
     EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 34);
+    EXPECT_GE(pass_schema_error, 129);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

@@ -11,6 +11,7 @@
  * handle concurrently against different documents. Free the handle
  * only after the last evaluation returns. */
 #include "xpath_internal.h"
+#include "../dom/document_node.h"
 #include "parser.h"
 #include "bytecode.h"
 #include "evaluator_internal.h"
@@ -96,7 +97,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_compiled_eval(
     if (!compiled || !doc) return NULL;
 
     LeptrisElement context_elem =
-        context ? context : leptris_document_root(doc);
+        context ? context : (LeptrisElement)leptris_document_get_node(doc);
     if (!context_elem) return NULL;
 
     XPathContext ctx_storage;
@@ -125,7 +126,7 @@ static struct leptris_xpath_result* compiled_eval_context(
     if (!compiled || !doc) return NULL;
 
     LeptrisElement context_elem =
-        context ? context : leptris_document_root(doc);
+        context ? context : (LeptrisElement)leptris_document_get_node(doc);
     if (!context_elem) return NULL;
 
     XPathContext ctx_storage;
@@ -227,7 +228,7 @@ struct leptris_xpath_result* leptris_xpath_compiled_eval_ctx(
                                      pos, size);
 
     LeptrisElement context_elem =
-        context ? context : leptris_document_root(doc);
+        context ? context : (LeptrisElement)leptris_document_get_node(doc);
     if (!context_elem) return NULL;
 
     XPathContext ctx_storage;

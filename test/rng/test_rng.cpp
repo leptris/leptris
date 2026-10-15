@@ -672,6 +672,44 @@ TEST(RngRegression, AttrValueConstraintBehindRefIsEnforcedAndEnumerated) {
     leptris_rng_free(rng);
 }
 
+TEST(RngRegression, PositionErrorStillReportsAttributeErrors) {
+    /* leptris#1704 (Jing parity): an element that fails its
+     * position (p under sections) must STILL get its attributes
+     * validated — against its own definition — or schema-attribute
+     * constraints (align enums) go invisible exactly where
+     * documents are most broken. Jing reports both, position
+     * first. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'>"
+        "<element name='clause'><text/></element>"
+        "</element></start>"
+        "<define name='p'>"
+        "<optional><attribute name='align'><ref name='vals'/></attribute>"
+        "</optional><text/></define>"
+        "<define name='vals'><choice>"
+        "<value>right</value><value>left</value>"
+        "<value>center</value><value>justified</value>"
+        "</choice></define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] = "<r><p align='mid-air'>t</p></r>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GE(n, 2u) << "expected position AND attribute errors";
+    EXPECT_NE(strstr(rep[0].message, "element \"p\" not allowed"),
+              nullptr) << rep[0].message;
+    EXPECT_NE(strstr(rep[1].message,
+        "value of attribute \"align\" is invalid"),
+        nullptr) << rep[1].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
 TEST(RngRegression, IncompleteNamesTheFirstRequiredElement) {
     /* Jing matchEndTag: requiredElementNames() - the first
      * non-nullable position's names (choice intersects, group
@@ -1142,6 +1180,42 @@ static int file_validates(const char* schema_name, const char* doc) {
     return ok;
 }
 
+TEST(RngInclude, BareRelativeSchemaFilenameResolvesSiblingIncludes) {
+    /* A schema given as a BARE relative filename (no separator)
+     * resolves its <include href="sibling.rng"> against the working
+     * directory — not against the filename as a directory (#1709
+     * follow-up: rng_dir_of left the filename in place). */
+    const char* frag_path = "leptris_rng_bare_frag.rng";
+    const char* main_path = "leptris_rng_bare_main.rng";
+    const char frag_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<define name='shared'><element name='e'><empty/></element>"
+        "</define></grammar>";
+    const char main_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<include href='leptris_rng_bare_frag.rng'/>"
+        "<start><ref name='shared'/></start></grammar>";
+    FILE* f = fopen(frag_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(frag_xml, 1, sizeof(frag_xml) - 1, f);
+    fclose(f);
+    f = fopen(main_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(main_xml, 1, sizeof(main_xml) - 1, f);
+    fclose(f);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse_file(main_path, &st);
+    ASSERT_NE(rng, nullptr) << leptris_status_string(st);
+    LeptrisDocument d = leptris_parse_string("<e/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    remove(frag_path);
+    remove(main_path);
+}
+
 TEST(RngInclude, MergesDefinesFromIncludedGrammar) {
     EXPECT_EQ(file_validates("main.rng", "<e/>"), 1);
     EXPECT_EQ(file_validates("main.rng", "<x/>"), 0);
@@ -1410,4 +1484,31 @@ TEST(RngIncludeMultiHop, ChoiceUnionSurvivesIncludeHop) {
               1);
     EXPECT_EQ(file_validates("comb3-choice-outer.rng", "<root><z/></root>"),
               0);
+}
+
+/* ---- leptris#1709: multi-depth combines + duplicated includes ----- */
+
+TEST(Rng1709Shapes, DuplicatedIncludeKeepsBothBranches) {
+    /* shared included DIRECTLY and via mid: the direct include's
+     * merge must not clobber mid's combined branch (the two paths
+     * shared one body tree in the first cut). */
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><a/><b/></root>"),
+              1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><a/></root>"), 1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><b/></root>"), 1);
+    EXPECT_EQ(file_validates("dup-inc-top.rng", "<root><z/></root>"), 0);
+}
+
+TEST(Rng1709Shapes, AttributeChoiceWithTextBranchAcceptsAny) {
+    /* bDateAttributes shape: CHOICE[enum-ref, text] — the text
+     * branch accepts values outside the enum. */
+    EXPECT_EQ(file_validates("attr-text-choice.rng",
+                             "<date type='published'/>"),
+              1);
+    EXPECT_EQ(file_validates("attr-text-choice.rng",
+                             "<date type='effective'/>"),
+              1);
+    /* attribute absent: the attribute is required by its own
+     * definition here, but the harness shape keeps it simple — the
+     * enum hit and text hit are the contract under test. */
 }

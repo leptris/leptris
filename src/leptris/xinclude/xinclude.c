@@ -514,10 +514,14 @@ static LeptrisElement xptr_select(LeptrisDocument doc, const char* value) {
     return found;
 }
 
-/* Forward decl for internal recursion-aware variant. */
+/* Forward decls: internal recursion variant + catalog lookup. */
 static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
                                               const char* base_url,
-                                              int depth);
+                                              int depth,
+                                              const leptris_xinclude_opts* opts);
+static void xinclude_catalog_lookup(const char* catalog_path,
+                                    const char* uri, char* out,
+                                    size_t out_size);
 
 /* TODO 117 Phase C: cycle detection.
  *
@@ -562,19 +566,163 @@ static CycleNode* cycle_pop(CycleNode* ancestors) {
  * (parse error, alloc failure), 1 otherwise. The `depth` parameter
  * (TODO 92 Phase 5) tracks how many xi:include layers we've descended
  * through; XINCLUDE_MAX_DEPTH stops mutual-recursion attacks. */
+/* ---- TODO.assemble 03: xml:base (RFC 3986) ------------------------------
+ *
+ * The effective base of an element = merge(inherited_base, this
+ * element's xml:base). merge_uri implements RFC 3986 §5.2 for the
+ * cases hrefs actually exercise: absolute refs replace; scheme-
+ * relative ("//host/x") keeps the scheme; root-relative ("/x")
+ * keeps scheme+authority; otherwise the reference rides the base's
+ * path directory with dot-segments removed. */
+static int uri_is_absolute(const char* s) {
+    for (const char* p = s; *p; p++) {
+        if (*p == ':') return p != s;
+        if (*p == '/' || *p == '?' || *p == '#') return 0;
+    }
+    return 0;
+}
+
+static void copy_dir_of(char* out, size_t out_size, const char* uri) {
+    const char* slash = strrchr(uri, '/');
+    if (!slash) {
+        out[0] = 0;
+        return;
+    }
+    size_t bl = (size_t)(slash - uri);
+    if (bl >= out_size) bl = out_size - 1;
+    memcpy(out, uri, bl);
+    out[bl] = 0;
+}
+
+static void remove_dot_segments(char* path) {
+    /* Rebuild the path segment by segment, dropping "." segments and
+     * popping ".." against the last emitted one (RFC 3986 §5.2.4 for
+     * the path-only form — no query/fragment here). */
+    char tmp[8192];
+    size_t tl = strlen(path);
+    if (tl >= sizeof(tmp)) return; /* oversized: leave as-is */
+    memcpy(tmp, path, tl + 1);
+
+    char* out = path;
+    size_t out_len = 0;
+    const char* r = tmp;
+    int absolute = (*r == '/');
+    if (absolute) r++;
+
+    while (*r) {
+        const char* seg = r;
+        while (*r && *r != '/') r++;
+        size_t sl = (size_t)(r - seg);
+        int had_slash = (*r == '/');
+        if (had_slash) r++;
+
+        if (sl == 1 && seg[0] == '.') continue;
+        if (sl == 2 && seg[0] == '.' && seg[1] == '.') {
+            if (out_len > 0) {
+                while (out_len > 0 && out[out_len - 1] != '/') out_len--;
+                if (out_len > 0) out_len--; /* the separator itself */
+            }
+            out[out_len] = 0;
+            continue;
+        }
+        if (out_len == 0) {
+            if (absolute) out[out_len++] = '/';
+        } else if (out[out_len - 1] != '/') {
+            out[out_len++] = '/';
+        }
+        memcpy(out + out_len, seg, sl);
+        out_len += sl;
+        out[out_len] = 0;
+    }
+    if (tl > 0 && tmp[tl - 1] == '/' &&
+        !(out_len > 0 && out[out_len - 1] == '/')) {
+        if (out_len == 0) {
+            if (absolute) out[out_len++] = '/';
+        } else if (out[out_len - 1] != '/') {
+            out[out_len++] = '/';
+        }
+        out[out_len] = 0;
+    }
+}
+
+static int merge_uri(const char* base, const char* ref, char* out,
+                     size_t out_size) {
+    if (!ref || !ref[0]) {
+        snprintf(out, out_size, "%s", base ? base : "");
+        return 0;
+    }
+    if (!base || !base[0] || uri_is_absolute(ref)) {
+        snprintf(out, out_size, "%s", ref);
+        return 0;
+    }
+    /* Filesystem-absolute reference: used as-is (the processor's
+     * base is a plain directory prefix, not a URI with authority). */
+    if (ref[0] == '/') {
+        snprintf(out, out_size, "%s", ref);
+        return 0;
+    }
+    if (strncmp(ref, "//", 2) == 0) {
+        /* scheme-relative: reuse the base's scheme */
+        const char* colon = strchr(base, ':');
+        if (colon) {
+            int n = snprintf(out, out_size, "%.*s:%s",
+                             (int)(colon - base), base, ref);
+            return (n < 0 || (size_t)n >= out_size);
+        }
+        snprintf(out, out_size, "%s", ref);
+        return 0;
+    }
+    /* strip query/fragment from the base for the directory merge */
+    char base_path[4096];
+    snprintf(base_path, sizeof(base_path), "%s", base);
+    char* cut = strpbrk(base_path, "?#");
+    if (cut) *cut = 0;
+    char dir[4096];
+    copy_dir_of(dir, sizeof(dir), base_path);
+    char joined[8192];
+    if (dir[0])
+        snprintf(joined, sizeof(joined), "%s/%s", dir, ref);
+    else
+        snprintf(joined, sizeof(joined), "%s", ref);
+    remove_dot_segments(joined);
+    snprintf(out, out_size, "%s", joined);
+    return 0;
+}
+
+/* The element's effective base: nearest xml:base (this element or
+ * nearest ancestor carrying one), merged over the inherited base. */
+static void effective_xml_base(LeptrisElement elem, const char* inherited,
+                               char* out, size_t out_size) {
+    const char* xb = get_attr_value(elem, "xml:base");
+    if (xb && xb[0] && inherited && inherited[0] &&
+        !uri_is_absolute(xb)) {
+        merge_uri(inherited, xb, out, out_size);
+    } else if (xb && xb[0]) {
+        snprintf(out, out_size, "%s", xb);
+    } else {
+        snprintf(out, out_size, "%s", inherited ? inherited : "");
+    }
+}
+
 static int process_element_xinclude(LeptrisElement elem,
                                      struct leptris_document* doc,
                                      const char* base_url,
+                                     const leptris_xinclude_opts* opts,
                                      int depth,
                                      CycleNode* ancestors) {
     if (!elem) return 1;
+
+    char subtree_base[4096];
+    effective_xml_base(elem, base_url, subtree_base, sizeof(subtree_base));
+    base_url = subtree_base;
 
     LeptrisNodeRef child = leptris_node_first_child((LeptrisNodeRef)elem);
     while (child) {
         LeptrisNodeRef next = leptris_node_next_sibling(child);
         if (leptris_node_get_type(child) == LEPTRIS_NODE_TYPE_ELEMENT) {
             int rc = process_element_xinclude((LeptrisElement)child, doc,
-                                              base_url, depth, ancestors);
+                                              base_url, opts, depth,
+                                              ancestors);
             if (!rc) return 0;
         }
         child = next;
@@ -608,8 +756,35 @@ static int process_element_xinclude(LeptrisElement elem,
     if (!is_xml && (frag || (xptr_attr && xptr_attr[0]))) resource_error = 1;
 
     char full_path[4096];
-    if (!resource_error &&
-        !join_path(full_path, sizeof(full_path), base_url, href_base)) return 1;
+    if (!resource_error) {
+        int rv;
+        if (base_url && base_url[0])
+            rv = merge_uri(base_url, href_base, full_path, sizeof(full_path));
+        else
+            rv = merge_uri(NULL, href_base, full_path, sizeof(full_path));
+        if (rv) return 1;
+    }
+    /* XML Catalog lookup (exact <uri name=...> mappings) rewrites
+     * the URI before the policy gate — catalogs exist precisely to
+     * map remote names onto local resources. */
+    char catalog_hit[4096];
+    catalog_hit[0] = 0;
+    if (!resource_error && opts && opts->catalog_path && opts->catalog_path[0]) {
+        xinclude_catalog_lookup(opts->catalog_path, full_path, catalog_hit,
+                                sizeof(catalog_hit));
+    }
+    const char* fetch_uri =
+        catalog_hit[0] ? catalog_hit : full_path;
+    /* TODO.assemble 04: network policy — remote schemes are resource
+     * errors unless the caller explicitly enables them; the gate runs
+     * on the POST-catalog URI (a catalog mapping may localize it). */
+    int no_network = opts ? opts->no_network : 1;
+    if (!resource_error && no_network && uri_is_absolute(fetch_uri) &&
+        (strncmp(fetch_uri, "http://", 7) == 0 ||
+         strncmp(fetch_uri, "https://", 8) == 0 ||
+         strncmp(fetch_uri, "ftp://", 6) == 0 ||
+         strncmp(fetch_uri, "ftps://", 7) == 0))
+        resource_error = 1;
 
     /* TODO 117 Phase C: cycle detection.  If `full_path` is already in
      * the ancestor chain, we'd be re-including something we're
@@ -619,9 +794,21 @@ static int process_element_xinclude(LeptrisElement elem,
     }
 
     size_t content_len = 0;
-    char* content = resource_error
-                        ? NULL
-                        : load_file_content(full_path, &content_len);
+    char* content = NULL;
+    int resolver_handled = 0;
+    if (!resource_error && opts && opts->resolver) {
+        int rr = opts->resolver(fetch_uri, opts->resolver_user, &content,
+                                &content_len);
+        if (rr == 1) {
+            resolver_handled = 1;
+        } else if (rr < 0) {
+            content = NULL; /* forced resource error -> fallback */
+        } else {
+            content = NULL;
+        }
+    }
+    if (!resource_error && !resolver_handled && !content)
+        content = load_file_content(fetch_uri, &content_len);
 
     /* The substitute node — element for parse="xml", text for parse="text",
      * NULL on failure (fallback path below). */
@@ -641,7 +828,21 @@ static int process_element_xinclude(LeptrisElement elem,
                 /* Resolve any xi:include nested inside the included doc
                  * before splicing — XInclude processes recursively.
                  * Bump depth so mutual-recursion stops at MAX_DEPTH. */
-                xinclude_process_internal(included_doc, base_url, depth + 1);
+                /* TODO.assemble 03: nested hrefs inside the included
+                 * document resolve against the INCLUDED document's
+                 * own location, not the includer's base. */
+                {
+                    char inc_dir[4096];
+                    copy_dir_of(inc_dir, sizeof(inc_dir), full_path);
+                    size_t dl = strlen(inc_dir);
+                    if (dl + 1 < sizeof(inc_dir) && (dl == 0 ||
+                                                     inc_dir[dl-1] != '/')) {
+                        inc_dir[dl++] = '/';
+                        inc_dir[dl] = 0;
+                    }
+                    xinclude_process_internal(included_doc, inc_dir,
+                                              depth + 1, opts);
+                }
                 LeptrisElement inc_root = leptris_document_root(included_doc);
                 if (inc_root) {
                     /* Phase 4 of TODO 92: xpointer attribute selects
@@ -775,11 +976,84 @@ fallback:
     return 1;
 }
 
+/* ---- TODO.assemble 04: XML Catalog (minimal) ----------------------------
+ *
+ * Parses an XML Catalog file and answers EXACT <uri name="..." uri=
+ * "..."/> mappings. The file is re-read per lookup (catalogs are
+ * small, XInclude counts are depth-bounded); a missing or malformed
+ * catalog simply yields no rewrite. */
+static void xinclude_catalog_lookup(const char* catalog_path,
+                                    const char* uri, char* out,
+                                    size_t out_size) {
+    out[0] = 0;
+    size_t clen = 0;
+    char* text = load_file_content(catalog_path, &clen);
+    if (!text) return;
+    /* Exact <uri name="..." uri="..."/> mappings; attribute order is
+     * free. Malformed input simply yields no rewrite. */
+    const char* p = text;
+    while ((p = strchr(p, '<')) != NULL) {
+        p++;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        if (strncmp(p, "uri", 3) != 0 ||
+            (p[3] != ' ' && p[3] != '\t' && p[3] != '\n' && p[3] != '\r' &&
+             p[3] != '/' && p[3] != '>')) {
+            continue;
+        }
+        const char* tag_end = strchr(p, '>');
+        if (!tag_end) break;
+        const char* name_v = NULL;
+        const char* uri_v = NULL;
+        const char* uri_v_end = NULL;
+        const char* q = p + 3;
+        while (q < tag_end) {
+            const char* eq = strchr(q, '=');
+            if (!eq || eq >= tag_end) break;
+            const char* key = eq;
+            while (key > p && key[-1] != ' ' && key[-1] != '\t' &&
+                   key[-1] != '\n' && key[-1] != '\r')
+                key--;
+            size_t kl = (size_t)(eq - key);
+            const char* vq = eq + 1;
+            while (vq < tag_end && (*vq == ' ' || *vq == '\t'))
+                vq++;
+            if (vq >= tag_end || (*vq != '"' && *vq != '\'')) {
+                q = eq + 1;
+                continue;
+            }
+            char quote = *vq++;
+            const char* vend = memchr(vq, quote, (size_t)(tag_end - vq));
+            if (!vend) break;
+            if ((kl == 4 && strncmp(key, "name", 4) == 0) &&
+                (size_t)(vend - vq) == strlen(uri) &&
+                strncmp(vq, uri, vend - vq) == 0)
+                name_v = vq;
+            if (kl == 3 && strncmp(key, "uri", 3) == 0) {
+                uri_v = vq;
+                uri_v_end = vend;
+            }
+            if (name_v && uri_v) {
+                size_t urlen = (size_t)(uri_v_end - uri_v);
+                if (urlen >= out_size) urlen = out_size - 1;
+                memcpy(out, uri_v, urlen);
+                out[urlen] = 0;
+                free(text);
+                return;
+            }
+            q = vend + 1;
+        }
+        p = tag_end + 1;
+    }
+    free(text);
+}
+
 /* Internal recursion-aware variant. Aborts with LEPTRIS_ERROR_INVALID_ARG
  * if depth exceeds XINCLUDE_MAX_DEPTH (TODO 92 Phase 5). */
 static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
                                               const char* base_url,
-                                              int depth) {
+                                              int depth,
+                                              const leptris_xinclude_opts* opts) {
     if (!doc) return LEPTRIS_ERROR_NULL_ARG;
     if (depth > XINCLUDE_MAX_DEPTH) return LEPTRIS_ERROR_INVALID_ARG;
 
@@ -789,11 +1063,29 @@ static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
     /* TODO 117 Phase C: thread empty ancestor list into the walk.
      * The first include pushes its own URI, so the second visit to the
      * same URI is detected as a cycle. */
-    int rc = process_element_xinclude(root, doc, base_url, depth, NULL);
+    int rc = process_element_xinclude(root, doc, base_url, opts, depth,
+                                      NULL);
     if (!rc) return LEPTRIS_ERROR_IO;
     return LEPTRIS_OK;
 }
 
 LEPTRIS_API LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url) {
-    return xinclude_process_internal(doc, base_url, 0);
+    /* no_network defaults to 1 for the legacy entry too — the remote
+     * refusal is the documented posture (TODO.assemble 04). */
+    leptris_xinclude_opts defaults;
+    memset(&defaults, 0, sizeof(defaults));
+    defaults.no_network = 1;
+    return xinclude_process_internal(doc, base_url, 0, &defaults);
+}
+
+LEPTRIS_API LeptrisStatus leptris_xinclude_process_opts(
+    LeptrisDocument doc, const char* base_url,
+    const leptris_xinclude_opts* opts) {
+    leptris_xinclude_opts defaults;
+    if (!opts) {
+        memset(&defaults, 0, sizeof(defaults));
+        defaults.no_network = 1;
+        opts = &defaults;
+    }
+    return xinclude_process_internal(doc, base_url, 0, opts);
 }

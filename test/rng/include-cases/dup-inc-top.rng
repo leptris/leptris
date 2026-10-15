@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <include href="dup-inc-shared.rng"/>
+  <include href="dup-inc-mid.rng"/>
+  <start><element name="root"><ref name="content"/></element></start>
+</grammar>

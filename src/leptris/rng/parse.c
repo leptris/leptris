@@ -19,12 +19,17 @@
  * carry backslashes; strrchr('/') alone left the filename in the
  * "directory" and every relative href resolved against a bogus
  * base). Returns s. */
-static char* rng_dir_of(char* s) {
+/* Cut the last path segment off `s`. Returns 0 when s carries no
+ * separator (a bare relative filename) — callers must then use "."
+ * as the base, or the FILENAME becomes the include directory and
+ * every relative include of the schema fails (#1709 follow-up). */
+static int rng_dir_of(char* s) {
     char* slash = strrchr(s, '/');
     char* bslash = strrchr(s, '\\');
     if (bslash && (!slash || bslash > slash)) slash = bslash;
-    if (slash) *slash = 0;
-    return s;
+    if (!slash) return 0;
+    *slash = 0;
+    return 1;
 }
 
 static RngPattern* pat_new(RngPatternKind kind) {
@@ -255,6 +260,35 @@ static void merge_start(RngGrammar* g, RngPattern* body) {
     g->start = ch;
 }
 
+/* Deep-copy a pattern subtree. The include merge used to MOVE the
+ * included grammar's body into the including grammar — but an
+ * include reachable through TWO paths (relaton's basicdoc: direct
+ * AND via biblio) leaves both grammars' define entries pointing at
+ * ONE shared tree; the second path's merge then mutates/frees nodes
+ * the first path still walks (leptris#1709). Name-based ref
+ * resolution (find_define at validate time) makes the copy safe —
+ * REF patterns carry only their name. */
+static char* rng_strdup_or_null(const char* s) {
+    return s ? leptris_strdup(s) : NULL;
+}
+static RngPattern* rng_pattern_deep_copy(const RngPattern* p) {
+    if (!p) return NULL;
+    RngPattern* c = pat_new(p->kind);
+    c->first_child = rng_pattern_deep_copy(p->first_child);
+    c->next = rng_pattern_deep_copy(p->next);
+    c->name = rng_strdup_or_null(p->name);
+    c->ns = rng_strdup_or_null(p->ns);
+    c->datatype = rng_strdup_or_null(p->datatype);
+    c->datatype_lib = rng_strdup_or_null(p->datatype_lib);
+    c->value = rng_strdup_or_null(p->value);
+    /* define: name-based resolution at validate time relinks; the
+     * copied subtree must not share the source grammar's (freed)
+     * define entries. */
+    c->define = NULL;
+    c->any_name = p->any_name;
+    return c;
+}
+
 /* INTERLEAVE and CHOICE are associative: a merge wrapper whose
  * child list already carries a same-kind combinator flattens into
  * the parent scope. The validator's single-pass interleave walk has
@@ -399,7 +433,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     }
     char nbase[1024];
     snprintf(nbase, sizeof(nbase), "%s", path);
-    rng_dir_of(nbase);
+    if (!rng_dir_of(nbase)) snprintf(nbase, sizeof(nbase), ".");
 
     char ierr[256];
     ierr[0] = 0;
@@ -516,7 +550,16 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     while (d) {
         RngDefine* next = d->next;
         RngPattern* wrap = pat_new(RNG_GROUP);
-        wrap->first_child = d->body;
+        /* COPY, not move: the included grammar may be reachable
+         * through another include path whose defines still walk
+         * this tree (leptris#1709, adoption-by-copy). The original
+         * tree is solely owned by THIS include-parse instance —
+         * free it, or every include hop leaks its define bodies
+         * (Linux-ASAN/LSan: 80-byte RngPattern trees per merged
+         * define). */
+        wrap->first_child = rng_pattern_deep_copy(d->body);
+        rng_pattern_free(d->body);
+        d->body = NULL;
         if (!add_define(g, leptris_strdup(d->name),
                         d->combine ? leptris_strdup(d->combine) : NULL,
                         wrap, err, errsz)) {
@@ -525,6 +568,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
             free(d);
             while (next) {
                 RngDefine* n2 = next->next;
+                rng_pattern_free(next->body);
                 free(next->name);
                 free(next->combine);
                 free(next);
@@ -646,7 +690,7 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
             }
             char nbase[1024];
             snprintf(nbase, sizeof(nbase), "%s", path);
-            rng_dir_of(nbase);
+            if (!rng_dir_of(nbase)) snprintf(nbase, sizeof(nbase), ".");
             struct leptris_relaxng* ex = rng_parse_doc(edoc, nbase[0] ? nbase : NULL);
             leptris_document_free(edoc);
             if (!ex || !ex->grammar || ex->error) {
@@ -861,10 +905,11 @@ struct leptris_relaxng* rng_parse_file(const char* path) {
         return NULL;
     }
 
-    /* Include hrefs resolve relative to the schema file's directory. */
+    /* Include hrefs resolve relative to the schema file's directory;
+     * a bare relative filename resolves its includes against "." */
     char base[512];
     snprintf(base, sizeof(base), "%s", path);
-    rng_dir_of(base);
+    if (!rng_dir_of(base)) snprintf(base, sizeof(base), ".");
 
     struct leptris_relaxng* rng =
         rng_parse_doc(doc, base[0] ? base : NULL);

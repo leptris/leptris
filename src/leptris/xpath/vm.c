@@ -264,11 +264,8 @@ static inline int vm_unprefixed_name_matches(XPathContext* ctx,
         const char* local = colon + 1;
         const char* en = leptris_element_get_name(e);
         if (!en || strcmp(en, local) != 0) return 0;
-        const char* test_uri = ctx
-            ? leptris_xpath_ns_lookup(
-                  (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                  name, plen)
-            : NULL;
+        const char* test_uri =
+            xpath_expr_prefix_uri(ctx, name, plen);
         if (test_uri) {
             const char* node_uri = leptris_element_get_namespace_uri(e);
             return node_uri && strcmp(node_uri, test_uri) == 0;
@@ -620,10 +617,9 @@ struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM*
      * different prefix for the same namespace (libxslt bug-97). */
     const char* tcolon = name ? strchr(name, ':') : NULL;
     const char* test_uri = NULL;
-    if (tcolon && ctx->ns_set) {
-        test_uri = leptris_xpath_ns_lookup(
-            (const struct leptris_xpath_ns_map*)ctx->ns_set,
-            name, (size_t)(tcolon - name));
+    if (tcolon) {
+        test_uri = xpath_expr_prefix_uri(ctx, name,
+                                         (size_t)(tcolon - name));
     }
 
     for (size_t i = 0; i < input->count; i++) {
@@ -1124,8 +1120,42 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
     int need_dedup = (input->count > 1);
 
     for (size_t i = 0; i < input->count; i++) {
-        if (!node_is_element(input->nodes[i])) continue;
-        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisNode* in_node = input->nodes[i];
+        /* Document-node contexts (NULL-context evals ride the doc
+         * node): every node below the document is a descendant —
+         * walk the root subtree with include_self=1 (the root
+         * element IS a descendant of the document, the same rule
+         * the AST walker applies). Name/wild tests are element-
+         * only, so document-level comments/PIs never match these
+         * opcodes. */
+        if (in_node && in_node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* dd =
+                ((LeptrisDocumentNode*)in_node)->doc;
+            LeptrisElement doc_root = (LeptrisElement)dd->new_dom_root;
+            if (!doc_root) doc_root = dd->root;
+            size_t mark = out->count;
+            if (doc_root)
+                descendant_walk(ctx, out, doc_root, name, wild, 1);
+            if (need_dedup) {
+                for (size_t k = mark; k < out->count; k++) {
+                    int dup = 0;
+                    for (size_t j = 0; j < mark; j++) {
+                        if (out->nodes[j] == out->nodes[k]) {
+                            dup = 1;
+                            break;
+                        }
+                    }
+                    if (dup) {
+                        out->nodes[k] = out->nodes[out->count - 1];
+                        out->count--;
+                        k--;
+                    }
+                }
+            }
+            continue;
+        }
+        if (!node_is_element(in_node)) continue;
+        LeptrisElement elem = (LeptrisElement)in_node;
 
         size_t mark = out->count;
         descendant_walk(ctx, out, elem, name, wild, include_self);

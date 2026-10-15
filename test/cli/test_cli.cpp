@@ -319,24 +319,58 @@ TEST(CliValidate, SvrlReportPrints) {
 }
 
 TEST(CliValidate, RngRound) {
-    write_file("leptris_cli_val.rng",
+    write_file("leptris_cli_val_rng.rng",
                "<element name='r'"
                " xmlns='http://relaxng.org/ns/structure/1.0'>"
                "<oneOrMore><element name='item'>"
                "<attribute name='n'/></element></oneOrMore>"
                "</element>");
-    write_file("leptris_cli_val_ok.xml", "<r><item n='2'/></r>");
-    auto r = run_cli({"validate", "--rng", "leptris_cli_val.rng",
-                      "leptris_cli_val_ok.xml"});
+    /* per-test filenames: these tests run CONCURRENTLY under ctest
+     * -j4 in the same cwd, and a same-path different-content write
+     * from a sibling test races the CLI read (the flake: RngRound
+     * validating MissingSchemaIsIoError's <r/>). */
+    write_file("leptris_cli_val_rng_ok.xml", "<r><item n='2'/></r>");
+    auto r = run_cli({"validate", "--rng", "leptris_cli_val_rng.rng",
+                      "leptris_cli_val_rng_ok.xml"});
     EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
     EXPECT_NE(r.out.find("rng: valid"), std::string::npos);
 }
 
+TEST(CliValidate, RngReportCarriesAllDiagnostics) {
+    /* #1704: a misplaced element that ALSO carries an invalid
+     * attribute reports BOTH diagnostics (Jing parity), plus the
+     * incompleteness note — the CLI prints the whole report. */
+    write_file("leptris_cli_val_rng_both.rng",
+               "<grammar ns='https://example.org/s'"
+               " xmlns='http://relaxng.org/ns/structure/1.0'>"
+               "<start><element name='doc'>"
+               "<element name='ok'><text/></element>"
+               "</element></start>"
+               "<define name='p'><optional>"
+               "<attribute name='align'><choice>"
+               "<value>left</value><value>right</value>"
+               "</choice></attribute></optional><text/></define>"
+               "</grammar>");
+    write_file("leptris_cli_val_rng_both.xml",
+               "<doc xmlns='https://example.org/s'>"
+               "<p align='mid-air'>t</p></doc>");
+    auto r = run_cli({"validate", "--rng", "leptris_cli_val_rng_both.rng",
+                      "leptris_cli_val_rng_both.xml"});
+    EXPECT_NE(r.exit_code, 0) << "stderr: " << r.err;
+    EXPECT_NE(r.out.find("rng: invalid"), std::string::npos);
+    EXPECT_NE(r.out.find("element \"p\" not allowed"),
+              std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find("value of attribute \"align\" is invalid"),
+              std::string::npos)
+        << r.out;
+}
+
 TEST(CliValidate, MissingSchemaIsIoError) {
-    write_file("leptris_cli_val_ok.xml", "<r/>");
+    write_file("leptris_cli_val_schmissing_ok.xml", "<r/>");
     auto r = run_cli({"validate", "--schematron",
                       "leptris_cli_no_such.sch",
-                      "leptris_cli_val_ok.xml"});
+                      "leptris_cli_val_schmissing_ok.xml"});
     EXPECT_EQ((r.exit_code >> 8) & 0xFF, 3)
         << "stderr: " << r.err;
 }
@@ -522,32 +556,34 @@ TEST(CliDiff, JsonOpsListed) {
 #if !defined(_WIN32)
 
 TEST(CliValidate, DtdValidPasses) {
-    write_file("leptris_cli_val.dtd",
+    write_file("leptris_cli_val_dtd_ok.dtd",
                "<!ELEMENT r (item+)>\n"
                "<!ELEMENT item EMPTY>\n"
                "<!ATTLIST item n CDATA #IMPLIED>\n");
-    write_file("leptris_cli_val_ok.xml", "<r><item/><item/></r>");
-    auto r = run_cli({"validate", "--dtd", "leptris_cli_val.dtd",
-                      "leptris_cli_val_ok.xml"});
+    write_file("leptris_cli_val_dtd_ok.xml", "<r><item/><item/></r>");
+    auto r = run_cli({"validate", "--dtd",
+                      "leptris_cli_val_dtd_ok.dtd",
+                      "leptris_cli_val_dtd_ok.xml"});
     EXPECT_EQ(r.exit_code, 0) << "stderr: " << r.err;
     EXPECT_NE(r.out.find("dtd: valid"), std::string::npos);
 }
 
 TEST(CliValidate, DtdInvalidFails) {
-    write_file("leptris_cli_val.dtd",
+    write_file("leptris_cli_val_dtd_bad.dtd",
                "<!ELEMENT r (item+)>\n"
                "<!ELEMENT item EMPTY>\n");
     write_file("leptris_cli_val_bad2.xml", "<r><item>x</item></r>");
-    auto r = run_cli({"validate", "--dtd", "leptris_cli_val.dtd",
+    auto r = run_cli({"validate", "--dtd",
+                      "leptris_cli_val_dtd_bad.dtd",
                       "leptris_cli_val_bad2.xml"});
     EXPECT_EQ((r.exit_code >> 8) & 0xFF, 1) << "stderr: " << r.err;
     EXPECT_NE(r.out.find("dtd: invalid"), std::string::npos);
 }
 
 TEST(CliValidate, MissingDtdIsIoError) {
-    write_file("leptris_cli_val_ok.xml", "<r/>");
+    write_file("leptris_cli_val_dtdmissing_ok.xml", "<r/>");
     auto r = run_cli({"validate", "--dtd", "leptris_cli_no_such.dtd",
-                      "leptris_cli_val_ok.xml"});
+                      "leptris_cli_val_dtdmissing_ok.xml"});
     EXPECT_EQ((r.exit_code >> 8) & 0xFF, 3) << "stderr: " << r.err;
 }
 

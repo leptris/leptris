@@ -13,6 +13,7 @@
 #include "../common/port.h" /* strndup shim for MSVC's CRT */
 #include "xsd_internal.h"
 #include "xsd_internal.h"
+#include "../dom/element.h" /* attribute walk for the clause checks */
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
 
@@ -94,8 +95,8 @@ static char* xsd_read_file(const char* path, size_t* out_len);
 static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src);
 static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
-                                 const char* name,
-                                 char* any_attr_ns);
+                                 const char* name, char* any_attr_ns,
+                                 char* base_any_attr_ns);
 static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                         LeptrisElement ct,
                                         const char* name);
@@ -728,11 +729,17 @@ static int xsd_uint_attr(LeptrisElement e, const char* name, int* out) {
 
 /* src-include.1 (conformance lane schema-error class, #1691):
  * the included/redefined schema's targetNamespace must equal the
- * includer's — or be absent. Checked on the root's top-level
- * include/redefine instructions; the subfile is parsed once here
- * purely for the tns verdict (the capture pass re-reads it). */
-static int xsd_check_include_tns(struct leptris_xsd_schema* s,
-                                 LeptrisElement root) {
+ * includer's — or be absent. Slice 4 (#1691): RECURSIVE — the
+ * violation can live one hop deeper than the root (582906-2: the
+ * root IMPORTS prog1/prog2 legally; prog1/prog2 INCLUDE common
+ * whose tns differs from theirs), so every loaded document's own
+ * includes are checked against that document's tns. */
+static int xsd_check_include_tns_pass(struct leptris_xsd_schema* s,
+                                      LeptrisElement root,
+                                      const char* doc_tns,
+                                      const char* base_dir,
+                                      int depth) {
+    if (!root || depth > 8) return 0;
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -745,14 +752,21 @@ static int xsd_check_include_tns(struct leptris_xsd_schema* s,
         leptris_element_expanded_name(c, &local, &prefix, &uri);
         if (!local || !uri || strcmp(uri, XSD_NS) != 0)
             continue;
-        if (strcmp(local, "include") != 0 && strcmp(local, "redefine") != 0)
-            continue;
+        int is_include = (strcmp(local, "include") == 0 ||
+                          strcmp(local, "redefine") == 0);
+        int is_import = (strcmp(local, "import") == 0);
+        /* The tns rule only binds include/redefine; imports may
+         * differ freely — but an imported document's OWN includes
+         * still must satisfy it (582906-2: the root imports
+         * prog1/prog2 legally, and their INCLUDE of common is the
+         * violation), so imports recurse without the verdict. */
+        if (!is_include && !is_import) continue;
         const char* loc =
             leptris_element_attribute(c, "schemaLocation");
-        if (!loc || !s->base_dir)
+        if (!loc || !base_dir)
             continue;
         char path[4096];
-        snprintf(path, sizeof(path), "%s/%s", s->base_dir, loc);
+        snprintf(path, sizeof(path), "%s/%s", base_dir, loc);
         size_t flen = 0;
         char* text = xsd_read_file(path, &flen);
         if (!text) continue;
@@ -766,37 +780,87 @@ static int xsd_check_include_tns(struct leptris_xsd_schema* s,
                     : NULL;
         int err = 0;
         char msg[512];
-        if (s->target_ns && sub_tns && s->target_ns[0] && sub_tns[0] &&
-            strcmp(sub_tns, s->target_ns) != 0) {
-            snprintf(msg, sizeof(msg),
-                     "src-include.1: the target namespace '%s' of the "
-                     "included/redefined schema '%s' differs from '%s' "
-                     "of the including schema",
-                     sub_tns, loc, s->target_ns);
-            err = 1;
-        } else if ((!s->target_ns || !s->target_ns[0]) && sub_tns &&
-                   sub_tns[0]) {
-            snprintf(msg, sizeof(msg),
-                     "src-include.1: the target namespace '%s' of the "
-                     "included/redefined schema '%s' has to be absent, "
-                     "since the including schema has no target namespace",
-                     sub_tns, loc);
-            err = 1;
+        if (is_include) {
+            if (doc_tns && sub_tns && doc_tns[0] && sub_tns[0] &&
+                strcmp(sub_tns, doc_tns) != 0) {
+                snprintf(msg, sizeof(msg),
+                         "src-include.1: the target namespace '%s' of the "
+                         "included/redefined schema '%s' differs from '%s' "
+                         "of the including schema",
+                         sub_tns, loc, doc_tns);
+                err = 1;
+            } else if ((!doc_tns || !doc_tns[0]) && sub_tns && sub_tns[0]) {
+                snprintf(msg, sizeof(msg),
+                         "src-include.1: the target namespace '%s' of the "
+                         "included/redefined schema '%s' has to be absent, "
+                         "since the including schema has no target namespace",
+                         sub_tns, loc);
+                err = 1;
+            }
+        }
+        if (!err && subroot) {
+            /* Recurse with the sub-document's own tns and the
+             * sub-file's directory as the include base. */
+            char sub_base[4096];
+            const char* slash = strrchr(path, '/');
+            const char* bslash = strrchr(path, '\\');
+            if (bslash && (!slash || bslash > slash)) slash = bslash;
+            if (slash) {
+                size_t bl = (size_t)(slash - path);
+                if (bl >= sizeof(sub_base)) bl = sizeof(sub_base) - 1;
+                memcpy(sub_base, path, bl);
+                sub_base[bl] = 0;
+                if (xsd_check_include_tns_pass(s, subroot, sub_tns,
+                                               sub_base, depth + 1)) {
+                    err = 2;
+                }
+            }
         }
         leptris_document_free(sub);
-        if (err) {
+        if (err == 1) {
             xsd_set_error(s, msg);
             return -1;
         }
+        if (err == 2) return -1;
     }
     return 0;
+}
+
+static int xsd_check_include_tns(struct leptris_xsd_schema* s,
+                                 LeptrisElement root) {
+    return xsd_check_include_tns_pass(s, root, s->target_ns, s->base_dir,
+                                      0);
 }
 
 /* Schema-structure constraints (the conformance lane's schema-error
  * class, #1691): the xs:-vocabulary rules the oracle enforces at
  * load. First violation wins; the message names the rule. */
+/* Attribute allowlists for the xs: vocabulary (conformance lane
+ * schema-error class, #1691 slice 3): the src-attribute.* /
+ * src-element.* clauses the oracle enforces at load. */
+static int xsd_attr_allowed(const char* local, int toplevel,
+                            const char* attr) {
+    if (strcmp(attr, "id") == 0) return 1;
+    if (strcmp(local, "attribute") == 0) {
+        if (strcmp(attr, "use") == 0 || strcmp(attr, "form") == 0)
+            return !toplevel;
+        /* ref form: ref + use only. name form: the rest. */
+        return 1;  /* name/type/default/fixed allowed in name form */
+    }
+    if (strcmp(local, "element") == 0) {
+        if (strcmp(attr, "minOccurs") == 0 ||
+            strcmp(attr, "maxOccurs") == 0)
+            return !toplevel;
+        if (strcmp(attr, "form") == 0) return !toplevel;
+        return 1;  /* name/ref/type/default/fixed/nillable/block/... */
+    }
+    if (strcmp(local, "annotation") == 0)
+        return strcmp(attr, "id") == 0;
+    return 1;
+}
+
 static int xsd_check_structure(struct leptris_xsd_schema* s,
-                               LeptrisElement e) {
+                               LeptrisElement e, int depth) {
     if (!e) return 0;
     for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(e));
          n; n = leptris_node_next_sibling(n)) {
@@ -809,8 +873,26 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
         leptris_element_expanded_name(c, &local, &prefix, &uri);
         if (!local || !uri || strcmp(uri, XSD_NS) != 0) {
             /* foreign-namespace content: recurse only */
-            if (xsd_check_structure(s, c) != 0) return -1;
+            if (xsd_check_structure(s, c, depth + 1) != 0) return -1;
             continue;
+        }
+        int toplevel = (depth == 0);
+        /* Unknown attributes on the xs: vocabulary (annot-err: a
+         * 'death' attribute on xs:annotation). */
+        for (LeptrisAttribute a = leptris_element_get_first_attribute(c);
+             a; a = leptris_attr_next(a)) {
+            const char* an = leptris_attribute_get_name(
+                (LeptrisAttribute)a);
+            if (strncmp(an, "xmlns", 5) == 0) continue;
+            if (!xsd_attr_allowed(local, toplevel, an)) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "src-%s: The attribute '%s' is not allowed on "
+                         "xs:%s",
+                         local, an, local);
+                xsd_set_error(s, msg);
+                return -1;
+            }
         }
         if (strcmp(local, "attribute") == 0 ||
             strcmp(local, "element") == 0) {
@@ -834,18 +916,79 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 xsd_set_error(s, msg);
                 return -1;
             }
+            /* name == "xmlns" reserves the namespace declaration
+             * name (scc-no-xmlns). */
+            if (strcmp(local, "attribute") == 0 && nm &&
+                strcmp(nm, "xmlns") == 0) {
+                xsd_set_error(
+                    s,
+                    "scc-no-xmlns: an attribute declaration must not "
+                    "be named 'xmlns'");
+                return -1;
+            }
+            const char* dv = leptris_element_attribute(c, "default");
+            const char* fx = leptris_element_attribute(c, "fixed");
+            if (dv && dv[0] && fx && fx[0]) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "src-element.1: xs:%s cannot carry both "
+                         "'default' and 'fixed'",
+                         local);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+        if (strcmp(local, "element") == 0) {
+            /* type attribute and an inline type child are mutually
+             * exclusive (src-element.3 / src-attribute.4). */
+            const char* ty = leptris_element_attribute(c, "type");
+            int has_type_child = 0;
+            for (LeptrisNodeRef k = leptris_node_first_child(
+                     leptris_element_as_node(c));
+                 k; k = leptris_node_next_sibling(k)) {
+                if (leptris_node_get_type(k) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                const char* kl = NULL;
+                const char* kp = NULL;
+                const char* ku = NULL;
+                leptris_element_expanded_name((LeptrisElement)k, &kl,
+                                              &kp, &ku);
+                if (kl && ku && strcmp(ku, XSD_NS) == 0 &&
+                    (strcmp(kl, "complexType") == 0 ||
+                     strcmp(kl, "simpleType") == 0))
+                    has_type_child = 1;
+            }
+            if (ty && ty[0] && has_type_child) {
+                xsd_set_error(
+                    s,
+                    "src-element.3: xs:element cannot carry both a "
+                    "'type' attribute and an inline type child");
+                return -1;
+            }
         }
         if (strcmp(local, "element") == 0 ||
             strcmp(local, "sequence") == 0 ||
             strcmp(local, "choice") == 0 ||
             strcmp(local, "all") == 0) {
-            int mn = -1, mx = -1;
+            int mn = 1, mx = 1;
             int has_mn = xsd_uint_attr(c, "minOccurs", &mn);
             int has_mx = xsd_uint_attr(c, "maxOccurs", &mx);
             const char* mx_raw =
                 leptris_element_attribute(c, "maxOccurs");
             int unbounded =
                 (mx_raw && strcmp(mx_raw, "unbounded") == 0);
+            /* Absent minOccurs defaults to 1: maxOccurs="0" alone is
+             * a violation (src-element.2.2's maxOccurs=0 shape). */
+            if (has_mn && !has_mx && !unbounded && mn > mx) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "occurrence: xs:%s minOccurs (%d) exceeds "
+                         "maxOccurs (%d)",
+                         local, mn, mx);
+                xsd_set_error(s, msg);
+                return -1;
+            }
             if (has_mn && has_mx && !unbounded && mn > mx) {
                 char msg[160];
                 snprintf(msg, sizeof(msg),
@@ -856,9 +999,801 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 return -1;
             }
         }
-        if (xsd_check_structure(s, c) != 0) return -1;
+        if (xsd_check_structure(s, c, depth + 1) != 0) return -1;
     }
     return 0;
+}
+
+/* ---- #1691 slice 4: derivation constraints -----------------------
+ *
+ * The oracle (libxml2 2.9.13) enforces two derivation-ok families at
+ * load that the capture pass never sees:
+ *   - cos-ct-derived-ok content-type match: a complexContent
+ *     extension must not change the content type (issue491).
+ *   - derivation-ok-restriction-4.1: a restricted complex type with
+ *     an attribute wildcard requires the base to carry a wildcard,
+ *     and a subset of it.
+ * Document-level, before capture: only same-document global complex
+ * types resolve here (the corpus shapes); imports ride the capture
+ * tables and stay out of this pass. */
+
+/* In-scope prefix -> uri for `e` (namespace declarations live in
+ * the element's own decl list — leptris_element_attribute does not
+ * answer "xmlns"/"xmlns:p"). Walks the ancestor chain. */
+static void xsd_ns_for_prefix(LeptrisElement e, const char* prefix,
+                              char* out, size_t outsz) {
+    out[0] = 0;
+    if (prefix && !prefix[0]) prefix = NULL;
+    for (LeptrisElement a = e; a; a = leptris_element_get_parent(a)) {
+        size_t n = leptris_element_namespace_count(a);
+        for (size_t i = 0; i < n; i++) {
+            const char* dp =
+                leptris_element_namespace_decl_prefix(a, i);
+            if (prefix) {
+                if (dp && strcmp(dp, prefix) == 0) {
+                    const char* du =
+                        leptris_element_namespace_decl_uri(a, i);
+                    snprintf(out, outsz, "%s", du ? du : "");
+                    return;
+                }
+            } else if (!dp) {
+                const char* du =
+                    leptris_element_namespace_decl_uri(a, i);
+                snprintf(out, outsz, "%s", du ? du : "");
+                return;
+            }
+        }
+    }
+}
+
+/* Split `qname` (possibly prefixed) and resolve the prefix in
+ * e's scope. Unresolvable prefixes yield empty local (skip). */
+static void xsd_resolve_qname(LeptrisElement e, const char* qname,
+                              char* uri, size_t urisz, char* local,
+                              size_t localsz) {
+    uri[0] = 0;
+    local[0] = 0;
+    if (!qname || !qname[0]) return;
+    const char* colon = strchr(qname, ':');
+    char prefix[64] = {0};
+    if (colon) {
+        size_t pl = (size_t)(colon - qname);
+        if (pl >= sizeof(prefix)) pl = sizeof(prefix) - 1;
+        memcpy(prefix, qname, pl);
+        snprintf(local, localsz, "%s", colon + 1);
+        char u[256];
+        xsd_ns_for_prefix(e, prefix, u, sizeof(u));
+        if (!u[0]) {
+            /* XML Namespaces: the prefixes xml and xmlns are
+             * PREDECLARED for every document — xs:import of
+             * http://www.w3.org/XML/1998/namespace (the dc.xsd
+             * shape: <xs:attribute ref="xml:lang"/>) resolves
+             * without any in-scope declaration. An empty uri here
+             * failed the slice-5 ref check and poisoned the whole
+             * schema graph (leptris#478 repro 1). */
+            if (strcmp(prefix, "xml") == 0)
+                snprintf(u, sizeof(u), "%s",
+                         "http://www.w3.org/XML/1998/namespace");
+            else if (strcmp(prefix, "xmlns") == 0)
+                snprintf(u, sizeof(u), "%s",
+                         "http://www.w3.org/2000/xmlns/");
+            else {
+                local[0] = 0;
+                return;
+            }
+        }
+        snprintf(uri, urisz, "%s", u);
+    } else {
+        char u[256];
+        xsd_ns_for_prefix(e, NULL, u, sizeof(u));
+        snprintf(uri, urisz, "%s", u);
+        snprintf(local, localsz, "%s", qname);
+    }
+}
+
+static LeptrisElement xsd_find_child(LeptrisElement e, const char* local) {
+    if (!e) return NULL;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, &p, &u);
+        if (l && u && strcmp(u, XSD_NS) == 0 && strcmp(l, local) == 0)
+            return (LeptrisElement)n;
+    }
+    return NULL;
+}
+
+static LeptrisElement xsd_find_any_attribute(LeptrisElement e) {
+    if (!e) return NULL;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, &p, &u);
+        if (l && u && strcmp(u, XSD_NS) == 0) {
+            if (strcmp(l, "anyAttribute") == 0) return (LeptrisElement)n;
+            LeptrisElement deep = xsd_find_any_attribute((LeptrisElement)n);
+            if (deep) return deep;
+        }
+    }
+    return NULL;
+}
+
+static int xsd_mixed_flag(LeptrisElement ct) {
+    const char* m = leptris_element_attribute(ct, "mixed");
+    return (m && (strcmp(m, "true") == 0 || strcmp(m, "1") == 0));
+}
+
+/* Global complex type by {uri}local among the root's depth-0
+ * declarations (globals live in the schema's target namespace). */
+static LeptrisElement xsd_find_global_ct(LeptrisElement root,
+                                         const char* uri,
+                                         const char* local) {
+    if (!root || !uri || !local) return NULL;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(c, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0 ||
+            strcmp(l, "complexType") != 0)
+            continue;
+        const char* nm = leptris_element_attribute(c, "name");
+        if (!nm || strcmp(nm, local) != 0) continue;
+        LeptrisElement schema = leptris_element_get_parent(c);
+        const char* tns = schema
+            ? leptris_element_attribute(schema, "targetNamespace")
+            : NULL;
+        if (strcmp(uri, tns ? tns : "") == 0) return c;
+    }
+    return NULL;
+}
+
+static int xsd_check_derivation(struct leptris_xsd_schema* s,
+                                LeptrisElement root) {
+    if (!root) return 0;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement ct = (LeptrisElement)n;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(ct, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0 ||
+            strcmp(l, "complexType") != 0)
+            continue;
+        LeptrisElement cc = xsd_find_child(ct, "complexContent");
+        if (!cc) continue;
+        LeptrisElement ext = xsd_find_child(cc, "extension");
+        LeptrisElement res = xsd_find_child(cc, "restriction");
+        LeptrisElement deriv = ext ? ext : res;
+        if (!deriv) continue;
+        int is_extension = (deriv == ext);
+        const char* base_q = leptris_element_attribute(deriv, "base");
+        if (!base_q || !base_q[0]) continue;
+        char buri[256], blocal[128];
+        xsd_resolve_qname(ct, base_q, buri, sizeof(buri), blocal,
+                          sizeof(blocal));
+        if (!blocal[0]) continue;
+        if (strcmp(buri, XSD_NS) == 0) continue; /* builtin base */
+        LeptrisElement base = xsd_find_global_ct(root, buri, blocal);
+        if (!base) continue; /* cross-document: capture handles it */
+
+        if (is_extension) {
+            /* cos-ct-derived-ok: the content types must agree. */
+            LeptrisElement cc_b = xsd_find_child(base, "complexContent");
+            LeptrisElement sc_b = xsd_find_child(base, "simpleContent");
+            int d_mixed = xsd_mixed_flag(ct);
+            int b_mixed = cc_b ? xsd_mixed_flag(base) : 0;
+            if ((sc_b && !cc_b) || (cc_b && d_mixed != b_mixed) ||
+                (!cc_b && !sc_b && d_mixed)) {
+                xsd_set_error(
+                    s,
+                    "derivation-ok: the content type of both, the "
+                    "type and its base type, must either 'mixed' or "
+                    "'element-only'");
+                return -1;
+            }
+        } else {
+            /* derivation-ok-restriction-4.1: attribute wildcards. */
+            LeptrisElement r_any = xsd_find_any_attribute(deriv);
+            if (!r_any) continue;
+            LeptrisElement b_any = xsd_find_any_attribute(base);
+            if (!b_any) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "derivation-ok-restriction-4.1: the complex "
+                         "type definition has an attribute wildcard, "
+                         "but the base complex type definition '%s' "
+                         "does not have one",
+                         blocal);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            const char* r_ns =
+                leptris_element_attribute(r_any, "namespace");
+            const char* b_ns =
+                leptris_element_attribute(b_any, "namespace");
+            if (!r_ns || !r_ns[0]) r_ns = "##any";
+            if (!b_ns || !b_ns[0]) b_ns = "##any";
+            if (strcmp(b_ns, "##any") == 0) continue;
+            if (strcmp(r_ns, "##any") != 0 &&
+                strcmp(r_ns, b_ns) != 0) {
+                /* token-list subset: every derived token must be in
+                 * the base list (##other/##local compared verbatim;
+                 * the corpus shapes are plain lists). */
+                char bcopy[256];
+                snprintf(bcopy, sizeof(bcopy), "%s", b_ns);
+                int subset = 1;
+                char rcopy[256];
+                snprintf(rcopy, sizeof(rcopy), "%s", r_ns);
+                for (char* tok = strtok(rcopy, " "); tok;
+                     tok = strtok(NULL, " ")) {
+                    int found = 0;
+                    char* save = NULL;
+                    char* bt = strtok_r(bcopy, " ", &save);
+                    while (bt) {
+                        if (strcmp(bt, tok) == 0) {
+                            found = 1;
+                            break;
+                        }
+                        bt = strtok_r(NULL, " ", &save);
+                    }
+                    if (!found) {
+                        subset = 0;
+                        break;
+                    }
+                    snprintf(bcopy, sizeof(bcopy), "%s", b_ns);
+                }
+                if (!subset) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "derivation-ok-restriction-4.1: the "
+                             "attribute wildcard is not a valid "
+                             "subset of the wildcard in the base "
+                             "complex type definition '%s'",
+                             blocal);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* ---- #1691 slice 6: UPA (Unique Particle Attribution) -------------
+ *
+ * The oracle rejects non-deterministic content models at load
+ * (deter0_0: (odd,even)* followed by odd?; any4_0: a wildcard
+ * choice branch overlapping an explicit element). The check that
+ * catches the real-world shapes without building a full derivative
+ * machine:
+ *   - choice/all branches: pairwise FIRST-set overlap;
+ *   - sequences: a child that can repeat or be skipped may not have
+ *     a FIRST overlap with the union of its siblings' FIRSTs
+ *     ((a,a) stays deterministic; (a?,a) and (a*,a) do not).
+ * FIRST entries are (name, wildcard-ns-class) pairs; a wildcard
+ * overlaps a name when its namespace set covers the name's
+ * namespace (the schema's targetNamespace for bare names). */
+
+#define XSD_UPA_MAX 64
+
+struct xsd_upa_first {
+    const char* name;   /* local name; NULL for a pure wildcard */
+    char ns[256];       /* the name's namespace ("" unqualified) */
+    char wc[256];       /* wildcard namespace spec ("" if not wc) */
+};
+
+static int xsd_upa_ns_covers(const char* wc, const char* ns,
+                             const char* tns) {
+    if (!wc || !wc[0]) return 0;
+    if (strcmp(wc, "##any") == 0) return 1;
+    if (strcmp(wc, "##other") == 0)
+        /* any namespace OTHER than the schema's targetNamespace and
+         * absent from no-namespace */
+        return ns && ns[0] && (!tns || !tns[0] || strcmp(ns, tns) != 0);
+    if (strcmp(wc, "##targetNamespace") == 0)
+        return ns && ns[0] && tns && strcmp(ns, tns) == 0;
+    if (strcmp(wc, "##local") == 0) return !ns || !ns[0];
+    return ns && ns[0] && strstr(wc, ns) != NULL;
+}
+
+static int xsd_upa_first_overlap(const struct xsd_upa_first* a,
+                                 const struct xsd_upa_first* b,
+                                 const char* tns) {
+    if (a->wc[0] && b->wc[0]) {
+        /* two wildcards overlap unless their sets are disjoint —
+         * conservatively report any pair carrying ##any, or equal
+         * specs */
+        if (strcmp(a->wc, "##any") == 0 || strcmp(b->wc, "##any") == 0 ||
+            strcmp(a->wc, b->wc) == 0)
+            return 1;
+        return 0;
+    }
+    if (a->wc[0])
+        return b->name ? xsd_upa_ns_covers(a->wc, b->ns, tns) : 0;
+    if (b->wc[0])
+        return a->name ? xsd_upa_ns_covers(b->wc, a->ns, tns) : 0;
+    if (!a->name || !b->name) return 0;
+    if (strcmp(a->name, b->name) != 0) return 0;
+    const char* ans = a->ns[0] ? a->ns : (tns ? tns : "");
+    const char* bns = b->ns[0] ? b->ns : (tns ? tns : "");
+    return strcmp(ans, bns) == 0;
+}
+
+static int xsd_upa_nullable(LeptrisElement e, int depth);
+static int xsd_upa_first(LeptrisElement e, struct xsd_upa_first* out,
+                         int max, int* n, const char* tns, int depth);
+
+static void xsd_upa_name_of(LeptrisElement e, const char* tns,
+                            struct xsd_upa_first* f) {
+    memset(f, 0, sizeof(*f));
+    const char* ref = leptris_element_attribute(e, "ref");
+    const char* nm = leptris_element_attribute(e, "name");
+    f->name = (ref && ref[0]) ? strrchr(ref, ':') ? strrchr(ref, ':') + 1
+                                                  : ref
+              : (nm ? nm : NULL);
+    (void)tns;
+    if (f->name && strchr(f->name, ':')) {
+        /* prefixed literal name — strip for the local compare */
+        f->name = strrchr(f->name, ':') + 1;
+    }
+}
+
+static int xsd_upa_first(LeptrisElement e, struct xsd_upa_first* out,
+                         int max, int* n, const char* tns, int depth) {
+    if (!e || depth > 24 || *n >= max) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+
+    if (strcmp(l, "element") == 0) {
+        struct xsd_upa_first f;
+        xsd_upa_name_of(e, tns, &f);
+        /* the element's namespace: the schema's targetNamespace for
+         * qualified globals/locals (form=qualified is the corpus
+         * shape); unqualified names carry "" */
+        const char* form = leptris_element_attribute(e, "form");
+        snprintf(f.ns, sizeof(f.ns), "%s",
+                 (form && strcmp(form, "unqualified") == 0)
+                     ? ""
+                     : (tns ? tns : ""));
+        if (f.name && *n < max) out[(*n)++] = f;
+        return 0;
+    }
+    if (strcmp(l, "any") == 0) {
+        struct xsd_upa_first f;
+        memset(&f, 0, sizeof(f));
+        const char* ns = leptris_element_attribute(e, "namespace");
+        snprintf(f.wc, sizeof(f.wc), "%s",
+                 (ns && ns[0]) ? ns : "##any");
+        if (*n < max) out[(*n)++] = f;
+        return 0;
+    }
+    if (strcmp(l, "sequence") == 0 || strcmp(l, "group") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            xsd_upa_first((LeptrisElement)c, out, max, n, tns, depth + 1);
+            if (!xsd_upa_nullable((LeptrisElement)c, depth + 1)) break;
+        }
+        return 0;
+    }
+    if (strcmp(l, "choice") == 0 || strcmp(l, "all") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            xsd_upa_first((LeptrisElement)c, out, max, n, tns, depth + 1);
+        }
+        return 0;
+    }
+    /* optional wrappers (xs already models minOccurs on the particle
+     * itself; xs:element with minOccurs=0 is handled by callers) */
+    return 0;
+}
+
+static int xsd_upa_nullable(LeptrisElement e, int depth) {
+    if (!e || depth > 24) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+    int mn = 1;
+    const char* mn_s = leptris_element_attribute(e, "minOccurs");
+    if (mn_s && strcmp(mn_s, "0") == 0) return 1;
+    if (strcmp(l, "choice") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c))
+            if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+                xsd_upa_nullable((LeptrisElement)c, depth + 1))
+                return 1;
+        return 0;
+    }
+    if (strcmp(l, "sequence") == 0) {
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            if (!xsd_upa_nullable((LeptrisElement)c, depth + 1))
+                return 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int xsd_upa_check_node(struct leptris_xsd_schema* s,
+                              LeptrisElement e, const char* tns,
+                              int depth);
+
+static int xsd_upa_collect_children(LeptrisElement e, LeptrisElement* kids,
+                                    int max) {
+    int n = 0;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             leptris_element_as_node(e));
+         c && n < max; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* kl = NULL;
+        const char* kp = NULL;
+        const char* ku = NULL;
+        leptris_element_expanded_name((LeptrisElement)c, &kl, &kp, &ku);
+        if (!kl || !ku || strcmp(ku, XSD_NS) != 0) continue;
+        if (strcmp(kl, "annotation") == 0) continue;
+        kids[n++] = (LeptrisElement)c;
+    }
+    return n;
+}
+
+static int xsd_upa_particle_can_repeat_or_skip(LeptrisElement c) {
+    const char* mn = leptris_element_attribute(c, "minOccurs");
+    const char* mx = leptris_element_attribute(c, "maxOccurs");
+    if (mn && strcmp(mn, "0") == 0) return 1;
+    if (mx && strcmp(mx, "unbounded") == 0) return 1;
+    if (mx && mx[0] && strcmp(mx, "1") != 0) {
+        long v = strtol(mx, NULL, 10);
+        if (v != 1) return 1;
+    }
+    /* an optional GROUP: its restart can collide with the sibling */
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(c, &l, &p2, &u);
+    return 0;
+}
+
+static int xsd_upa_check_node(struct leptris_xsd_schema* s,
+                              LeptrisElement e, const char* tns,
+                              int depth) {
+    if (!e || depth > 24) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+    int is_choice = (strcmp(l, "choice") == 0);
+    int is_all = (strcmp(l, "all") == 0);
+    int is_seq = (strcmp(l, "sequence") == 0);
+
+    LeptrisElement kids[64];
+    int nk = xsd_upa_collect_children(e, kids, 64);
+
+    if ((is_choice || is_all) && nk >= 2) {
+        for (int i = 0; i < nk; i++) {
+            struct xsd_upa_first fi[XSD_UPA_MAX];
+            int ni = 0;
+            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            for (int j = i + 1; j < nk; j++) {
+                struct xsd_upa_first fj[XSD_UPA_MAX];
+                int nj = 0;
+                xsd_upa_first(kids[j], fj, XSD_UPA_MAX, &nj, tns,
+                              depth + 1);
+                for (int a = 0; a < ni; a++)
+                    for (int b = 0; b < nj; b++) {
+                        if (xsd_upa_first_overlap(&fi[a], &fj[b], tns)) {
+                            xsd_set_error(
+                                s,
+                                "upa: the content model is not "
+                                "deterministic: ambiguous choice "
+                                "branches");
+                            return -1;
+                        }
+                    }
+            }
+        }
+    }
+    if (is_seq) {
+        for (int i = 0; i + 1 < nk; i++) {
+            if (!xsd_upa_particle_can_repeat_or_skip(kids[i])) continue;
+            struct xsd_upa_first fi[XSD_UPA_MAX];
+            int ni = 0;
+            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            /* the union of every LATER sibling's FIRST — after the
+             * repeating/skippable child, any of them may come next */
+            struct xsd_upa_first rest[XSD_UPA_MAX];
+            int nr = 0;
+            for (int j = i + 1; j < nk; j++)
+                xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
+                              depth + 1);
+            for (int a = 0; a < ni; a++)
+                for (int b = 0; b < nr; b++) {
+                    if (xsd_upa_first_overlap(&fi[a], &rest[b], tns)) {
+                        xsd_set_error(
+                            s,
+                            "upa: the content model is not "
+                            "deterministic: an optional or repeating "
+                            "particle overlaps a following particle");
+                        return -1;
+                    }
+                }
+        }
+    }
+    for (int i = 0; i < nk; i++)
+        if (xsd_upa_check_node(s, kids[i], tns, depth + 1) != 0)
+            return -1;
+    return 0;
+}
+
+static int xsd_check_upa(struct leptris_xsd_schema* s,
+                         LeptrisElement root) {
+    if (!root) return 0;
+    const char* tns = s->target_ns;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        if (xsd_upa_check_node(s, (LeptrisElement)n, tns, 0) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/* ---- #1691 slice 5: element/attribute/group ref resolution -------
+ *
+ * The oracle (libxml2 2.9.13) rejects a schema whose xs:element/@ref
+ * (or attribute, group, attributeGroup) QName does not resolve to a
+ * declaration (import1_0: the import's schemaLocation file is
+ * missing, so {http://BAR}bar.B resolves to nothing). Resolution is
+ * by DECLARATION, not by namespace: the available set records every
+ * loaded document's root-level declarations keyed by that
+ * document's effective target namespace (chameleon includes adopt
+ * the includer's). A namespace-only import or a missing file
+ * provides nothing. type=/base= QNames stay out of scope: the
+ * oracle fails to resolve spec-valid xs: builtins (length3_0's
+ * xs:non-positive-integer), so its type verdicts are not
+ * byte-matchable without codifying that gap. */
+
+struct xsd_decl {
+    char uri[256];
+    char name[128];
+};
+
+
+
+static void xsd_decls_add(struct xsd_decl* decls, int* n, int max,
+                          const char* uri, const char* name) {
+    if (!name || !name[0] || *n >= max) return;
+    for (int i = 0; i < *n; i++) {
+        if (strcmp(decls[i].name, name) == 0 &&
+            strcmp(decls[i].uri, uri ? uri : "") == 0)
+            return;
+    }
+    snprintf(decls[*n].uri, sizeof(decls[*n].uri), "%s", uri ? uri : "");
+    snprintf(decls[*n].name, sizeof(decls[*n].name), "%s", name);
+    (*n)++;
+}
+
+static int xsd_decls_contain(struct xsd_decl* decls, int n,
+                             const char* uri, const char* name) {
+    if (!name || !name[0]) return 0;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(decls[i].name, name) == 0 &&
+            strcmp(decls[i].uri, uri ? uri : "") == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void xsd_dirname_into(const char* path, char* out, size_t outsz) {
+    const char* slash = strrchr(path, '/');
+    const char* bslash = strrchr(path, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+    if (!slash) {
+        out[0] = 0;
+        return;
+    }
+    size_t bl = (size_t)(slash - path);
+    if (bl >= outsz) bl = outsz - 1;
+    memcpy(out, path, bl);
+    out[bl] = 0;
+}
+
+/* claimed[] tracks the namespaces an import already served — the
+ * oracle serves the FIRST import whose schemaLocation loads per
+ * namespace and skips the rest ("already imported with the schema
+ * located at ..."), so later docs' declarations must not
+ * resolve. */
+static void xsd_collect_decls_doc(LeptrisElement root, const char* eff_tns,
+                                  const char* base_dir,
+                                  struct xsd_decl* decls, int* n, int max,
+                                  char (*claimed)[256], int* nclaimed,
+                                  int cmax, int depth) {
+    if (!root || depth > 8 || *n >= max) return;
+    for (LeptrisNodeRef k = leptris_node_first_child(
+             leptris_element_as_node(root));
+         k; k = leptris_node_next_sibling(k)) {
+        if (leptris_node_get_type(k) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* kl = NULL;
+        const char* kp = NULL;
+        const char* ku = NULL;
+        leptris_element_expanded_name((LeptrisElement)k, &kl, &kp, &ku);
+        if (!kl || !ku || strcmp(ku, XSD_NS) != 0) continue;
+        if (strcmp(kl, "element") == 0 || strcmp(kl, "attribute") == 0 ||
+            strcmp(kl, "group") == 0 ||
+            strcmp(kl, "attributeGroup") == 0) {
+            const char* nm = leptris_element_attribute(
+                (LeptrisElement)k, "name");
+            xsd_decls_add(decls, n, max, eff_tns, nm);
+        }
+    }
+    /* cn, not n: the count pointer `n` is live across this loop —
+     * shadowing it passed the loop node as the decls count and the
+     * decls_add increment wrote node memory (#1717). */
+    for (LeptrisNodeRef cn = leptris_node_first_child(
+             leptris_element_as_node(root));
+         cn; cn = leptris_node_next_sibling(cn)) {
+        if (leptris_node_get_type(cn) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)cn;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(c, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0)
+            continue;
+        int is_inc = (strcmp(l, "include") == 0 ||
+                      strcmp(l, "redefine") == 0);
+        int is_imp = (strcmp(l, "import") == 0);
+        if (!is_inc && !is_imp) continue;
+        const char* loc = leptris_element_attribute(c, "schemaLocation");
+        if (!loc || !base_dir) continue; /* provides nothing */
+        /* The import-namespace claim: the first LOADABLE import
+         * per namespace wins; later ones are skipped. */
+        char imp_ns[256];
+        imp_ns[0] = 0;
+        if (is_imp) {
+            const char* ns = leptris_element_attribute(c, "namespace");
+            snprintf(imp_ns, sizeof(imp_ns), "%s", ns ? ns : "");
+            int seen = 0;
+            for (int ci = 0; ci < *nclaimed; ci++)
+                if (strcmp(claimed[ci], imp_ns) == 0) seen = 1;
+            if (seen) continue; /* skipped import: provides nothing */
+        }
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", base_dir, loc);
+        size_t flen = 0;
+        char* text = xsd_read_file(path, &flen);
+        if (!text) continue; /* missing file: provides nothing */
+        LeptrisDocument sub = leptris_parse_string(text, flen, NULL);
+        free(text);
+        if (!sub) continue;
+        LeptrisElement subroot = leptris_document_root(sub);
+        if (is_imp && *nclaimed < cmax) {
+            int seen = 0;
+            for (int ci = 0; ci < *nclaimed; ci++)
+                if (strcmp(claimed[ci], imp_ns) == 0) seen = 1;
+            if (!seen)
+                snprintf(claimed[(*nclaimed)++], 256, "%s", imp_ns);
+        }
+        if (subroot) {
+            const char* sub_tns = leptris_element_attribute(
+                subroot, "targetNamespace");
+            const char* eff = is_inc ? (sub_tns ? sub_tns : eff_tns)
+                                     : sub_tns;
+            char sub_base[4096];
+            xsd_dirname_into(path, sub_base, sizeof(sub_base));
+            xsd_collect_decls_doc(subroot, eff, sub_base, decls, n, max,
+                                  claimed, nclaimed, cmax, depth + 1);
+        }
+        leptris_document_free(sub);
+    }
+}
+
+static int xsd_check_refs_walk(LeptrisElement root,
+                               struct leptris_xsd_schema* s,
+                               struct xsd_decl* decls, int ndecls) {
+    if (!root) return 0;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* l = NULL;
+        const char* p = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(c, &l, &p, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0)
+            continue;
+        int is_ref_holder =
+            (strcmp(l, "element") == 0 || strcmp(l, "attribute") == 0 ||
+             strcmp(l, "group") == 0 || strcmp(l, "attributeGroup") == 0);
+        if (!is_ref_holder) {
+            if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+            continue;
+        }
+        const char* ref = leptris_element_attribute(c, "ref");
+        if (!ref || !ref[0]) {
+            if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+            continue;
+        }
+        char ruri[256], rlocal[128];
+        xsd_resolve_qname(c, ref, ruri, sizeof(ruri), rlocal,
+                          sizeof(rlocal));
+        /* The XML namespace's attribute declarations are BUILT IN
+         * (XSD 1.0 §3.15 / the xml.xsd the spec normatively
+         * provides): xml:lang/space/base/id resolve without any
+         * loaded declaration — a locationless
+         * <xs:import namespace="...XML/1998/namespace"/> provides
+         * nothing by design (leptris-ruby#478). */
+        if (!(strcmp(ruri, "http://www.w3.org/XML/1998/namespace") == 0 &&
+              (strcmp(rlocal, "lang") == 0 || strcmp(rlocal, "space") == 0 ||
+               strcmp(rlocal, "base") == 0 || strcmp(rlocal, "id") == 0)) &&
+            !xsd_decls_contain(decls, ndecls, ruri, rlocal)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-element.2: The QName value '{%s}%s' does not "
+                     "resolve to a(n) %s declaration",
+                     ruri, rlocal,
+                     strcmp(l, "attribute") == 0 ? "attribute"
+                                                 : "element");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        if (xsd_check_refs_walk(c, s, decls, ndecls) != 0) return -1;
+    }
+    return 0;
+}
+
+static int xsd_check_refs(struct leptris_xsd_schema* s,
+                          LeptrisElement root) {
+    if (!root) return 0;
+    struct xsd_decl decls[512];
+    int ndecls = 0;
+    char claimed[32][256];
+    int nclaimed = 0;
+    xsd_collect_decls_doc(root, s->target_ns, s->base_dir, decls,
+                          &ndecls, 512, claimed, &nclaimed, 32, 0);
+    return xsd_check_refs_walk(root, s, decls, ndecls);
 }
 
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
@@ -917,7 +1852,24 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * required/allowed attributes on the xs: vocabulary and
      * occurrence ordering, checked at the document level exactly
      * where the oracle raises them — before capture. */
-    if (xsd_check_structure(s, root) != 0)
+    if (xsd_check_structure(s, root, 0) != 0)
+        goto fail;
+
+    /* Derivation constraints (#1691 slice 4): content-type match on
+     * extension (cos-ct-derived-ok) and the attribute-wildcard
+     * subset rules on restriction (derivation-ok-restriction-4-1). */
+    if (xsd_check_derivation(s, root) != 0)
+        goto fail;
+
+    /* Ref resolution (#1691 slice 5): element/attribute/group
+     * ref QNames must resolve to a declaration in an available
+     * document. */
+    if (xsd_check_refs(s, root) != 0)
+        goto fail;
+
+    /* UPA (#1691 slice 6): choice-branch FIRST overlap and the
+     * optional/repeating-sequence adjacency rule. */
+    if (xsd_check_upa(s, root) != 0)
         goto fail;
 
     /* Schema Component Constraint: xsi: Not Allowed — the schema's
@@ -1015,6 +1967,10 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                         tail_a->next = mine->attrs;
                         mine->attrs = prepend;
                     }
+                    /* the base's attribute wildcard joins the union */
+                    if (bt->any_attr_ns && !mine->any_attr_base_ns)
+                        mine->any_attr_base_ns =
+                            xsd_strdup(bt->any_attr_ns);
                 } else if (prepend) {
                     XsdTypeAttrs* row =
                         (XsdTypeAttrs*)calloc(1, sizeof(*row));
@@ -1398,6 +2354,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         }
         free(ta->type_name);
         free(ta->any_attr_ns);
+        free(ta->any_attr_base_ns);
         free(ta);
         ta = tn;
     }
@@ -1499,8 +2456,8 @@ static XsdCm* xsd_cm_copy_list(const XsdCm* head) {
 
 static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
-                                 const char* name,
-                                 char* any_attr_ns) {
+                                 const char* name, char* any_attr_ns,
+                                 char* base_any_attr_ns) {
     if (!root) return;
     root->name = xsd_strdup(name);
     /* leptris-ruby#440: the DECLARING file's targetNamespace — the
@@ -1510,18 +2467,20 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
     if (s->target_ns) root->ns = xsd_strdup(s->target_ns);
     root->next = s->complex_types;
     s->complex_types = root;
-    if (attrs || any_attr_ns) {
+    if (attrs || any_attr_ns || base_any_attr_ns) {
         XsdTypeAttrs* ta = (XsdTypeAttrs*)calloc(1, sizeof(*ta));
         if (ta) {
             ta->type_name = xsd_strdup(name);
             if (root->ns) ta->ns = xsd_strdup(root->ns);
             ta->attrs = attrs;
             ta->any_attr_ns = any_attr_ns;
+            ta->any_attr_base_ns = base_any_attr_ns;
             ta->next = s->type_attrs;
             s->type_attrs = ta;
         }
-    } else if (any_attr_ns) {
+    } else {
         free(any_attr_ns);
+        free(base_any_attr_ns);
     }
 }
 
@@ -1620,6 +2579,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
     if (!root) return NULL;
     XsdAttrDecl* attrs = NULL;
     char* any_attr_ns = NULL;
+    char* base_any_attr_ns = NULL;
 
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(ct));
@@ -1688,6 +2648,12 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             s, base);
                         attrs = xsd_copy_attr_rows(bt ? bt->attrs
                                                       : NULL);
+                        /* the spec's attribute-wildcard union: the
+                         * derived type also allows what the base's
+                         * xs:anyAttribute allowed (#1691) */
+                        if (bt && bt->any_attr_ns && !base_any_attr_ns)
+                            base_any_attr_ns =
+                                xsd_strdup(bt->any_attr_ns);
                     }
                     XsdAttrDecl* own_attrs =
                         xsd_capture_attr_rows(s, dq, 0);
@@ -1845,7 +2811,8 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         xsd_cm_free(root->open_any);
         root->open_any = NULL;
     }
-    xsd_register_complex(s, root, attrs, name, any_attr_ns);
+    xsd_register_complex(s, root, attrs, name, any_attr_ns,
+                          base_any_attr_ns);
     return root;
 }
 
