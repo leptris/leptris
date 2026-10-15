@@ -1,9 +1,10 @@
 # REMAINING — the complete open-work ledger
 
-SSOT for everything still open after v1.9.144 (2026-09-12).
-Update entries as work ships; delete entries as they close.
-Per-lane details live in the numbered docs; this file is the index
-+ the graph.
+SSOT for everything still open. REFRESHED 2026-10-15 for v1.9.357:
+the engine issue board is EMPTY (#878-family, #659, #1691, #1694,
+#1704, #1709, #1712 all closed); this file's per-lane statuses were
+re-verified against the shipped state. Per-lane details live in the
+numbered docs; this file is the index + the graph.
 
 ## A. In flight — the staged path (2026-09-12)
 
@@ -93,20 +94,38 @@ ruby/python/c scoreboard. We feed measured numbers only.
   v1.9.144, the adapter batched-accessor primitive.)
 - **#930** — CLOSED (v1.9.117).
 
-## C. TODO.xslt-full lanes — residual items
+## C. TODO.xslt-full lanes — residual items (2026-10-15 re-verified)
 
-- 01/03/04/06/08/09/10 — CLOSED.
-- 05 (dates) tail → Stage 2.2. 07 (fn items) tail → Stage 2.3.
-- 11/12 (XQuery) tails → Stage 2.1 QT3 subsets via the XTH
-  connector shape.
-- 13 (perf) = #682 (Stage 5). SAX binding-drain residual: retry
-  quiet-machine best-of-20, else engine-side batched-drain API.
-- 14 (HTML) = #659 (Stage 1).
-- 15 (binding entries) → Stage 2.4. RelaxNG entries already
-  shipped (leptris-ruby#165).
-- 16 (Schematron 2025): COMPLETE C-side = Stage 3; binding PRs
-  open (user merges).
-- 17 (XML diff): PRs open = Stage 4 (leptris-ruby#171, canon#191).
+- 01/03/04/05/06/07/08/09/10 — CLOSED (fn sequences/regex/math/
+  strings/dates/grammar-3x/function-items/maps-arrays/xslt fillins/
+  tunnel params all shipped; dates + fn-items verified in
+  functions_ext31.c).
+- 11/12 (XQuery) — core surface shipped through v1.9.245+; the
+  residual is QT3-suite growth only: the typed-atom lane sits at
+  99 adopted / 2 pins (cbcl-002/002b) and the 5
+  duration-canonical survivors are Saxon-verified but may be
+  unreachable — measure before grinding.
+- 13 (perf) = #682: ceiling-analyzed (~1.1x in-process max);
+  OWNER SCOPE CALL pending — do not grind.
+- 14 (HTML) = #659: CLOSED C-side (fail=0 on the 1753-case corpus,
+  1555 pass / 198 legitimate skips).
+- 15 (binding entries): versioned eval shipped
+  (leptris_xpath_eval_versioned, xpath_public.c); result-type
+  mirrors live with the binding agents.
+- 16 (Schematron): COMPLETE C-side (IR + SVRL + CLI --phase/--svrl);
+  binding wrappers in their repos (dedicated agents).
+- 17 (XML diff): C-side shipped; binding PRs with the user.
+- 18 (compact nodes): superseded by the #1285 compact-pointer
+  architecture (elements at ~96 bytes shipped).
+
+## C2. New open work since the last refresh
+
+- DTD Phase 8 closeout (PE substitution headless reparse, mixed
+  models through %pe;, nested-group choice parse + real
+  backtracking) — PR #1724 (in CI).
+- #1717 closed: the churn-crash report was slice-tooling shadowing,
+  engine exonerated.
+- Engine issue board: ZERO open issues as of 2026-10-15.
 
 ## D. Bindings (user-owned repos — PRs only, never release)
 
