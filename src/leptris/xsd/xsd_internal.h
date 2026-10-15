@@ -197,6 +197,7 @@ typedef struct xsd_type_attrs {
     char* type_name;
     char* ns;           /* leptris-ruby#440: declaring schema's tns */
     char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
+    char* any_attr_base_ns; /* extension: the base type's wildcard (union) */
     XsdAttrDecl* attrs;
     struct xsd_type_attrs* next;
 } XsdTypeAttrs;
