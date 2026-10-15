@@ -576,9 +576,7 @@ static inline void leptris_elem_set_prefix(LeptrisElement e, char* prefix,
         nc = (struct leptris_ns_cache*)
             leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
         if (!nc) return;
-        nc->prefix = NULL;
-        nc->namespace_uri = NULL;
-        nc->declarations = NULL;
+        memset(nc, 0, sizeof(*nc));
         elem_set_ns_cache(e, nc);
     }
     nc->prefix = prefix;
@@ -594,9 +592,7 @@ static inline void leptris_elem_set_ns_uri(LeptrisElement e, char* uri,
         nc = (struct leptris_ns_cache*)
             leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
         if (!nc) return;
-        nc->prefix = NULL;
-        nc->namespace_uri = NULL;
-        nc->declarations = NULL;
+        memset(nc, 0, sizeof(*nc));
         elem_set_ns_cache(e, nc);
     }
     nc->namespace_uri = uri;
@@ -694,10 +690,7 @@ static inline struct leptris_ns_cache* leptris_elem_cache_ensure(
     nc = (struct leptris_ns_cache*)
         leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
     if (!nc) return NULL;
-    nc->prefix = NULL;
-    nc->namespace_uri = NULL;
-    nc->declarations = NULL;
-    nc->raw_attrs = NULL;
+    memset(nc, 0, sizeof(*nc));
     elem_set_ns_cache(e, nc);
     return nc;
 }
