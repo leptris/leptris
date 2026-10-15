@@ -288,7 +288,7 @@ TEST(DtdValidate, UniqueIdsAreValid) {
     ASSERT_NE(doc, nullptr);
 
     const char dtd_text[] =
-        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT root (a|b)*>"
         "<!ELEMENT a EMPTY>"
         "<!ELEMENT b EMPTY>"
         "<!ATTLIST a id ID #IMPLIED>"
@@ -315,7 +315,7 @@ TEST(DtdValidate, DuplicateIdIsInvalid) {
     ASSERT_NE(doc, nullptr);
 
     const char dtd_text[] =
-        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT root (a|b)*>"
         "<!ELEMENT a EMPTY>"
         "<!ELEMENT b EMPTY>"
         "<!ATTLIST a id ID #IMPLIED>"
@@ -343,7 +343,7 @@ TEST(DtdValidate, IdrefResolvesIsValid) {
     ASSERT_NE(doc, nullptr);
 
     const char dtd_text[] =
-        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT root (a|b)*>"
         "<!ELEMENT a EMPTY>"
         "<!ELEMENT b EMPTY>"
         "<!ATTLIST a id ID #IMPLIED>"
@@ -370,7 +370,7 @@ TEST(DtdValidate, IdrefUnresolvedIsInvalid) {
     ASSERT_NE(doc, nullptr);
 
     const char dtd_text[] =
-        "<!ELEMENT root (a|b)>"
+        "<!ELEMENT root (a|b)*>"
         "<!ELEMENT a EMPTY>"
         "<!ELEMENT b EMPTY>"
         "<!ATTLIST a id ID #IMPLIED>"
@@ -1316,6 +1316,82 @@ TEST(DtdValidate, ExternalPEWithoutLoaderIsSkippedLeniently) {
 
 
 // ---- #1211: the documented NULL-on-error contract ----
+
+/* ---- TODO.hygiene/02 closeout: Phase 8 residuals -------------------
+ *
+ * Behavioral gaps the probe run surfaced:
+ *   - a MIXED content model delivered through a parameter entity
+ *     ((#PCDATA|b)* via %pe;) validates as if #PCDATA were
+ *     required-once — the * through the PE doesn't apply;
+ *   - a nested parenthesized choice-with-sequence ((a|b,c))+ fails
+ *     to PARSE at all. */
+
+static LeptrisDTD* parse_dtd_ok(const char* text) {
+    LeptrisDTD* d = leptris_dtd_parse(text, std::strlen(text));
+    EXPECT_NE(d, nullptr) << text;
+    return d;
+}
+
+static int validates(const char* dtd_text, const char* xml) {
+    LeptrisDTD* d = parse_dtd_ok(dtd_text);
+    if (!d) return -1;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    if (!doc) {
+        leptris_dtd_free(d);
+        return -2;
+    }
+    LeptrisDTDError err = {0};
+    int rc = leptris_dtd_validate(doc, d, &err);
+    leptris_dtd_error_free(&err);
+    leptris_document_free(doc);
+    leptris_dtd_free(d);
+    return rc;
+}
+
+TEST(DtdPhase8, MixedModelThroughParameterEntity) {
+    /* #PCDATA|b)* delivered via %mix; must behave exactly like the
+     * inline spelling: mixed content, b elements interleaved. */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc (item)*>\n"
+        "<!ENTITY % mix \"(#PCDATA|b)*\">\n"
+        "<!ELEMENT item %mix;>\n",
+        "<doc><item>x<b/>y</item></doc>"), 1);
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc (item)*>\n"
+        "<!ENTITY % mix \"(#PCDATA|b)*\">\n"
+        "<!ELEMENT item %mix;>\n",
+        "<doc><item>plain text</item></doc>"), 1);
+    /* negative: c is not in the model */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc (item)*>\n"
+        "<!ENTITY % mix \"(#PCDATA|b)*\">\n"
+        "<!ELEMENT item %mix;>\n",
+        "<doc><item>x<c/></item></doc>"), 0);
+    /* the inline spelling must keep working (control) */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc (item)*>\n"
+        "<!ELEMENT item (#PCDATA|b)*>\n",
+        "<doc><item>x<b/>y</item></doc>"), 1);
+}
+
+TEST(DtdPhase8, NestedChoiceWithSequenceParsesAndBacktracks) {
+    /* (a|b,c) inside a repetition: b,c runs must parse and match
+     * through the backtracking path. */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((a|b,c))+>\n"
+        "<!ELEMENT a EMPTY><!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><b/><c/><b/><c/></doc>"), 1);
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((a|b,c))+>\n"
+        "<!ELEMENT a EMPTY><!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><a/><b/><c/></doc>"), 1);
+    /* negative: a lone b (the c is required by the b branch) */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((a|b,c))+>\n"
+        "<!ELEMENT a EMPTY><!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><b/></doc>"), 0);
+}
 
 TEST(DtdParse, MalformedDeclarationYieldsNull) {
     const char* broken = "<!ELEMENT broken (>";
