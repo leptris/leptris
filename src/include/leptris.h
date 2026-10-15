@@ -3074,7 +3074,10 @@ LEPTRIS_API const char* leptris_status_string(LeptrisStatus status);
  * Evaluate XPath expression
  *
  * @param doc Document (required)
- * @param context Context element (NULL = document root)
+ * @param context Context element (NULL = the document node —
+ *        relative paths then resolve against the document's
+ *        children, i.e. the root element matches by name, matching
+ *        libxml2/Nokogiri document-level query semantics)
  * @param expression XPath expression string
  * @return XPath result or NULL on error
  *
@@ -3133,7 +3136,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval(
  * leptris_xpath_eval).
  *
  * @param doc Document to evaluate against
- * @param context Context element (NULL = document root)
+ * @param context Context element (NULL = the document node)
  * @param expression Expression text
  * @param version LEPTRIS_XPATH_10 or LEPTRIS_XPATH_31
  * @param status Optional status out-param
@@ -3689,7 +3692,7 @@ LEPTRIS_API LeptrisXPathResult leptris_xpath_eval_with_vars(
  * root (e.g. relative paths like ".//item[@id = $x]").
  *
  * @param doc Document
- * @param context Context element (NULL = document root)
+ * @param context Context element (NULL = the document node)
  * @param expression XPath expression
  * @param variables Variable set (may be NULL)
  * @return XPath result (caller frees with leptris_xpath_result_free)
@@ -3771,7 +3774,7 @@ LEPTRIS_API LeptrisXPathNsSet leptris_xpath_ns_set_new_from_pairs(
  * declared it with).
  *
  * @param doc Document
- * @param context Context element (NULL = document root)
+ * @param context Context element (NULL = the document node)
  * @param expression XPath expression
  * @param ns Namespace bindings (may be NULL; then behavior equals
  *        leptris_xpath_eval_with_vars_context)

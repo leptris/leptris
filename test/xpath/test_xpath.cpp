@@ -1149,6 +1149,73 @@ TEST(XPathResults, MixedNodesetKindsNamesValues) {
     leptris_document_free(doc);
 }
 
+TEST(XPathResults, NullContextIsDocumentNode) {
+    /* leptris-ruby#458 root cause: a NULL context used to default to
+     * the ROOT element; libxml2/Nokogiri document-level queries
+     * evaluate against the DOCUMENT node — a relative name matches
+     * the root element, and child::* yields exactly the root. */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "r", 1 },
+        { "*", 1 },
+        { "node()", 1 },
+        { "a", 0 },
+        { "b", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0) << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r), (size_t)tc.expect_count)
+            << tc.expr;
+        if (tc.expect_count == 1) {
+            EXPECT_EQ(leptris_xpath_result_node_kind(r, 0),
+                      LEPTRIS_XPATH_NODE_ELEMENT) << tc.expr;
+        }
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
+TEST(XPathResults, AttributeTerminalPathShapes) {
+    /* leptris-ruby#458: the final step being an ATTRIBUTE works for
+     * //a/@id and //@id but must work for every relative-path shape
+     * too: r/a/@id (silent empty today) and the filter-expr form
+     * //*[...]/@id (engine grammar: "Unexpected token after
+     * expression: SLASH"). */
+    const char xml[] = "<r><a id='x'><b/></a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    struct { const char* expr; int expect_count; } cases[] = {
+        { "//a/@id", 1 },
+        { "//@id", 1 },
+        { "r/a/@id", 1 },
+        { "//*[local-name()='a']/@id", 1 },
+        { "./@id", 0 },
+    };
+    for (auto& tc : cases) {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, tc.expr);
+        ASSERT_NE(r, (LeptrisXPathResult)0)
+            << "eval failed: " << tc.expr;
+        EXPECT_EQ(leptris_xpath_result_count(r),
+                  (size_t)tc.expect_count)
+            << tc.expr;
+        if (tc.expect_count == 1) {
+            EXPECT_EQ(leptris_xpath_result_node_kind(r, 0),
+                      LEPTRIS_XPATH_NODE_ATTRIBUTE) << tc.expr;
+            EXPECT_STREQ(leptris_xpath_result_node_value(r, 0), "x")
+                << tc.expr;
+        }
+        leptris_xpath_result_free(r);
+    }
+    leptris_document_free(doc);
+}
+
 TEST(XPathResults, MixedNodesetAttributeNameValue) {
     const char xml[] = "<r><a id='x1'>t</a></r>";
     LeptrisStatus st = LEPTRIS_OK;
