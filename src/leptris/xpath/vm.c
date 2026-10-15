@@ -1124,8 +1124,42 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
     int need_dedup = (input->count > 1);
 
     for (size_t i = 0; i < input->count; i++) {
-        if (!node_is_element(input->nodes[i])) continue;
-        LeptrisElement elem = (LeptrisElement)input->nodes[i];
+        LeptrisNode* in_node = input->nodes[i];
+        /* Document-node contexts (NULL-context evals ride the doc
+         * node): every node below the document is a descendant —
+         * walk the root subtree with include_self=1 (the root
+         * element IS a descendant of the document, the same rule
+         * the AST walker applies). Name/wild tests are element-
+         * only, so document-level comments/PIs never match these
+         * opcodes. */
+        if (in_node && in_node->type == LEPTRIS_NODE_TYPE_DOCUMENT) {
+            struct leptris_document* dd =
+                ((LeptrisDocumentNode*)in_node)->doc;
+            LeptrisElement doc_root = (LeptrisElement)dd->new_dom_root;
+            if (!doc_root) doc_root = dd->root;
+            size_t mark = out->count;
+            if (doc_root)
+                descendant_walk(ctx, out, doc_root, name, wild, 1);
+            if (need_dedup) {
+                for (size_t k = mark; k < out->count; k++) {
+                    int dup = 0;
+                    for (size_t j = 0; j < mark; j++) {
+                        if (out->nodes[j] == out->nodes[k]) {
+                            dup = 1;
+                            break;
+                        }
+                    }
+                    if (dup) {
+                        out->nodes[k] = out->nodes[out->count - 1];
+                        out->count--;
+                        k--;
+                    }
+                }
+            }
+            continue;
+        }
+        if (!node_is_element(in_node)) continue;
+        LeptrisElement elem = (LeptrisElement)in_node;
 
         size_t mark = out->count;
         descendant_walk(ctx, out, elem, name, wild, include_self);
