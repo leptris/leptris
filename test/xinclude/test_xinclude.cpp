@@ -6,7 +6,29 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <errno.h>
+#ifdef _WIN32
+#include <direct.h>
+#define XI_MKDIR(p) _mkdir(p)
+#define XI_RMDIR(p) _rmdir(p)
+#else
 #include <sys/stat.h>
+#include <sys/types.h>
+#define XI_MKDIR(p) mkdir(p, 0755)
+#define XI_RMDIR(p) rmdir(p)
+#endif
+
+/* mkdir -p for the (short) fixture paths; EEXIST is fine. */
+static void xi_mkdir_p(const std::string& path) {
+    if (path.empty()) return;
+    for (size_t i = 1; i <= path.size(); i++) {
+        if (i == path.size() || path[i] == '/' || path[i] == '\\') {
+            std::string prefix = path.substr(0, i);
+            XI_MKDIR(prefix.c_str()); /* EEXIST tolerated */
+        }
+    }
+}
+
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -425,8 +447,7 @@ TEST(XIncludeXmlBase, AncestorXmlBaseResolvesRelativeHref) {
     const char* dir = "/tmp/leptris_xi_base";
     char target[256];
     snprintf(target, sizeof(target), "%s/inner.xml", dir);
-    remove(dir);
-    mkdir(dir, 0755);
+    XI_MKDIR(dir);
     FILE* f = fopen(target, "wb");
     ASSERT_NE(f, nullptr);
     fwrite(inner_xml, 1, std::strlen(inner_xml), f);
@@ -454,7 +475,7 @@ TEST(XIncludeXmlBase, AncestorXmlBaseResolvesRelativeHref) {
 
     leptris_document_free(doc);
     remove(target);
-    rmdir(dir);
+    XI_RMDIR(dir);
 }
 
 TEST(XIncludeXmlBase, RelativeXmlBaseMergesOverDocBase) {
@@ -464,9 +485,7 @@ TEST(XIncludeXmlBase, RelativeXmlBaseMergesOverDocBase) {
     const char* dir = "/tmp/leptris_xi_rel/sub";
     char target[256];
     snprintf(target, sizeof(target), "%s/inner.xml", dir);
-    char mk[128];
-    snprintf(mk, sizeof(mk), "mkdir -p %s", dir);
-    if (system(mk) != 0) FAIL() << "mkdir failed";
+    xi_mkdir_p(dir);
     FILE* f = fopen(target, "wb");
     ASSERT_NE(f, nullptr);
     fwrite(inner_xml, 1, std::strlen(inner_xml), f);
@@ -498,9 +517,7 @@ TEST(XIncludeXmlBase, NestedIncludeResolvesAgainstIncludedDocDir) {
      * peer resolves against dirA (the included doc's own location),
      * not the includer's directory. */
     const char* dir = "/tmp/leptris_xi_nested";
-    char mk[128];
-    snprintf(mk, sizeof(mk), "mkdir -p %s", dir);
-    if (system(mk) != 0) FAIL() << "mkdir failed";
+    xi_mkdir_p(dir);
     char peer_path[256];
     snprintf(peer_path, sizeof(peer_path), "%s/peer.xml", dir);
     const char peer_xml[] = "<peer>from-dir</peer>";
