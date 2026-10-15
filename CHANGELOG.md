@@ -2,12 +2,30 @@
 
 ## [1.9.358] - 2026-10-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xpath: document-level queries evaluate against the document node**
+  (leptris-ruby#458). A NULL context defaulted to the root element in
+  all four public eval entry points; libxml2/Nokogiri semantics are
+  the document node — `doc.xpath("r/a/@id")` now resolves the root's
+  children (was silently empty), and doc-level `*` yields exactly the
+  root (was the root's children). `leptris.h` documents NULL = the
+  document node.
+- **xpath: the `//` + `*` fast path continues past predicates**
+  (leptris-ruby#458). It parsed the star step and predicates then
+  returned bare, leaving a following SLASH unconsumed —
+  `//*[local-name()='a']/@id` and `//*[@id]/@id` failed to compile
+  with "Unexpected token after expression: SLASH". It now runs
+  parse_path_continuation, the same shape `(//a)/@id` already used.
+- **dtd: Phase 8 closeout** (#1724). Parameter-entity substitution
+  peeks the `<!ELEMENT` / `<!ATTLIST` / `<!NOTATION` keyword before
+  consuming (PE-blurred keyword boundary); occurrence capture after
+  the balanced-paren scan; nested-group choice parses and backtracks;
+  mixed content models `(#PCDATA|a|b)*` validate through the
+  rewritten backtracking matcher — `(#PCDATA)` without `*` correctly
+  rejects element children.
+- Four Phase-5 ID content-model fixtures corrected from `(a|b)` to
+  `(a|b)*` (an ID requires at least one matching child).
 
 
 ## [1.9.357] - 2026-10-15
