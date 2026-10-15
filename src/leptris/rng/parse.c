@@ -19,12 +19,17 @@
  * carry backslashes; strrchr('/') alone left the filename in the
  * "directory" and every relative href resolved against a bogus
  * base). Returns s. */
-static char* rng_dir_of(char* s) {
+/* Cut the last path segment off `s`. Returns 0 when s carries no
+ * separator (a bare relative filename) — callers must then use "."
+ * as the base, or the FILENAME becomes the include directory and
+ * every relative include of the schema fails (#1709 follow-up). */
+static int rng_dir_of(char* s) {
     char* slash = strrchr(s, '/');
     char* bslash = strrchr(s, '\\');
     if (bslash && (!slash || bslash > slash)) slash = bslash;
-    if (slash) *slash = 0;
-    return s;
+    if (!slash) return 0;
+    *slash = 0;
+    return 1;
 }
 
 static RngPattern* pat_new(RngPatternKind kind) {
@@ -428,7 +433,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     }
     char nbase[1024];
     snprintf(nbase, sizeof(nbase), "%s", path);
-    rng_dir_of(nbase);
+    if (!rng_dir_of(nbase)) snprintf(nbase, sizeof(nbase), ".");
 
     char ierr[256];
     ierr[0] = 0;
@@ -685,7 +690,7 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
             }
             char nbase[1024];
             snprintf(nbase, sizeof(nbase), "%s", path);
-            rng_dir_of(nbase);
+            if (!rng_dir_of(nbase)) snprintf(nbase, sizeof(nbase), ".");
             struct leptris_relaxng* ex = rng_parse_doc(edoc, nbase[0] ? nbase : NULL);
             leptris_document_free(edoc);
             if (!ex || !ex->grammar || ex->error) {
@@ -900,10 +905,11 @@ struct leptris_relaxng* rng_parse_file(const char* path) {
         return NULL;
     }
 
-    /* Include hrefs resolve relative to the schema file's directory. */
+    /* Include hrefs resolve relative to the schema file's directory;
+     * a bare relative filename resolves its includes against "." */
     char base[512];
     snprintf(base, sizeof(base), "%s", path);
-    rng_dir_of(base);
+    if (!rng_dir_of(base)) snprintf(base, sizeof(base), ".");
 
     struct leptris_relaxng* rng =
         rng_parse_doc(doc, base[0] ? base : NULL);
