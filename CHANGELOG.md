@@ -2,12 +2,17 @@
 
 ## [1.9.361] - 2026-10-15
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xinclude: element fallbacks splice on resource errors** (#1734,
+  #1740). A resource error under the 1.9.357 resolver policy
+  (no_network refusal, missing file, cycle) dropped the xi:include
+  AND its fallback when the fallback carried element children — the
+  fallback path read only text content. Element children now move
+  before the refused include (XInclude §4.5: the fallback's children
+  replace it, same-pool move), the include unlinks, and text-only
+  fallbacks keep the historical single text node. Specs pin the
+  element, multi-node, and text shapes.
 
 
 ## [1.9.360] - 2026-10-15
