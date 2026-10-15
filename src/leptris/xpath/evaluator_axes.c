@@ -506,9 +506,9 @@ static XPathNodeSet* axis_attribute(XPathContext* ctx, LeptrisElement node,
                  * may use a different prefix for the same namespace
                  * (libxslt bug-97). Unbound prefix: fall through to
                  * the literal compare (legacy behavior). */
-                const char* uri = leptris_xpath_ns_lookup(
-                    (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                    tv, (size_t)(tcolon - tv));
+                const char* uri =
+                    xpath_expr_prefix_uri(ctx, tv,
+                                          (size_t)(tcolon - tv));
                 if (uri && !leptris_sv_is_empty(&attr->name_view)) {
                     const char* a = attr->name_view.data;
                     size_t al = attr->name_view.length;

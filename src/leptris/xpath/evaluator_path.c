@@ -176,11 +176,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
              * that namespace via a different prefix or the default
              * namespace. Unbound prefix falls through to the
              * historic literal-prefix comparison. */
-            const char* test_uri = ctx
-                ? leptris_xpath_ns_lookup(
-                      (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                      test_prefix, prefix_len)
-                : NULL;
+            const char* test_uri = xpath_expr_prefix_uri(ctx, test_prefix, prefix_len);
             if (test_uri) {
                 const char* node_uri = leptris_element_get_namespace_uri(elem);
                 return node_uri && strcmp(node_uri, test_uri) == 0 &&
@@ -207,11 +203,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
              * previously ignored: //t:* matched EVERY element. */
             if (test->prefix) {
                 size_t prefix_len = strlen(test->prefix);
-                const char* test_uri = ctx
-                    ? leptris_xpath_ns_lookup(
-                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                          test->prefix, prefix_len)
-                    : NULL;
+                const char* test_uri = xpath_expr_prefix_uri(ctx, test->prefix, prefix_len);
                 if (test_uri) {
                     const char* node_uri =
                         leptris_element_get_namespace_uri(elem);
@@ -231,11 +223,7 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
                 /* Has prefix (e.g., "ns1:*") - match namespace */
                 size_t prefix_len = colon - test->value;
 
-                const char* test_uri = ctx
-                    ? leptris_xpath_ns_lookup(
-                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                          test->value, prefix_len)
-                    : NULL;
+                const char* test_uri = xpath_expr_prefix_uri(ctx, test->value, prefix_len);
                 if (test_uri) {
                     const char* node_uri =
                         leptris_element_get_namespace_uri(elem);
@@ -1188,11 +1176,7 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
                              * default). Unbound prefix falls back to the
                              * literal comparison. */
                             if (names_match && test_prefix) {
-                                const char* test_uri = ctx
-                                    ? leptris_xpath_ns_lookup(
-                                          (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                                          test_prefix, strlen(test_prefix))
-                                    : NULL;
+                                const char* test_uri = xpath_expr_prefix_uri(ctx, test_prefix, strlen(test_prefix));
                                 if (test_uri) {
                                     const char* root_uri =
                                         leptris_element_get_namespace_uri(root);

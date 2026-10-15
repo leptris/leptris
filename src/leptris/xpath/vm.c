@@ -264,11 +264,8 @@ static inline int vm_unprefixed_name_matches(XPathContext* ctx,
         const char* local = colon + 1;
         const char* en = leptris_element_get_name(e);
         if (!en || strcmp(en, local) != 0) return 0;
-        const char* test_uri = ctx
-            ? leptris_xpath_ns_lookup(
-                  (const struct leptris_xpath_ns_map*)ctx->ns_set,
-                  name, plen)
-            : NULL;
+        const char* test_uri =
+            xpath_expr_prefix_uri(ctx, name, plen);
         if (test_uri) {
             const char* node_uri = leptris_element_get_namespace_uri(e);
             return node_uri && strcmp(node_uri, test_uri) == 0;
@@ -620,10 +617,9 @@ struct leptris_xpath_result* vm_apply_axis_attribute(XPathContext* ctx, XPathVM*
      * different prefix for the same namespace (libxslt bug-97). */
     const char* tcolon = name ? strchr(name, ':') : NULL;
     const char* test_uri = NULL;
-    if (tcolon && ctx->ns_set) {
-        test_uri = leptris_xpath_ns_lookup(
-            (const struct leptris_xpath_ns_map*)ctx->ns_set,
-            name, (size_t)(tcolon - name));
+    if (tcolon) {
+        test_uri = xpath_expr_prefix_uri(ctx, name,
+                                         (size_t)(tcolon - name));
     }
 
     for (size_t i = 0; i < input->count; i++) {
