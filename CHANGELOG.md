@@ -2,12 +2,9 @@
 
 ## [1.9.362] - 2026-10-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xsd: per-unit wildcard provenance for `##other` / `##targetNamespace` across imports (#1735, PR #1744).** `xs:any`/`xs:anyAttribute` namespace lists resolve the two unit-relative tokens against the target namespace of the schema unit DECLARING the wildcard, not the merged schema's main tns. Every wildcard now records its declaring unit's tns at capture (`XsdCm.any_unit_tns` for particles; `any_attr_unit_ns` / `any_attr_base_unit_ns` on the type atom for attribute wildcards, threading the #1723 `any_attr_base_ns` precedent across the unit boundary), and `any_ns_matches` / `any_attr_matches` resolve against it with the merged tns as fallback. Red-first gtests pin the element and attribute forms.
 
 
 ## [1.9.361] - 2026-10-15
