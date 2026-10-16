@@ -838,6 +838,68 @@ TEST(ParseRecover, UnclosedAtEofClosesEverything) {
     leptris_document_free(doc);
 }
 
+/* leptris#1748: a bare '<' followed by a non-markup character
+ * ('< b') is unescaped text. RECOVER folds the byte into the text
+ * run (libxml2 XML_PARSE_RECOVER semantics) and records a
+ * diagnostic; the script-with-comparison shape previously aborted
+ * to the empty-document fallback SILENTLY — no tree, no diagnostic
+ * — which blinded every consumer keyed on the record. */
+TEST(ParseRecover, BareLtInTextKeepsTreeAndRecords) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<root><script>if (a < b) { c(); }</script></root>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "root");
+    LeptrisElement script = leptris_element_first_child_any(root);
+    ASSERT_NE(script, nullptr);
+    EXPECT_STREQ(leptris_element_name(script), "script");
+    /* The unescaped byte rides the text verbatim (libxml2 keeps the
+     * run as one node; ours may split — content is the contract). */
+    const char* text = leptris_element_text(script);
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text, "if (a < b) { c(); }");
+    EXPECT_EQ(leptris_document_parse_diag_count(doc), 1u);
+    LeptrisDiagKind kind = (LeptrisDiagKind)-1;
+    char msg[128] = {0};
+    ASSERT_EQ(leptris_document_parse_diag(doc, 0, &kind, msg,
+                                          sizeof(msg)), 1);
+    EXPECT_EQ(kind, LEPTRIS_DIAG_RECOVER);
+    leptris_document_free(doc);
+}
+
+TEST(ParseRecover, BareLtInTextStrictStillFails) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<root><script>if (a < b) { c(); }</script></root>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_DEFAULT, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+}
+
+/* The #1748 reporter shape end-to-end: DOCTYPE-prefixed HTML-
+ * shaped input through the XML lane keeps the whole tree. */
+TEST(ParseRecover, DoctypePrefixedHtmlShapeKeepsTree) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xml[] =
+        "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">"
+        "<title>t</title></head>\n"
+        "<body><p>hello<br>world<img src=\"x.png\"><ul><li>one<li>two</ul>\n"
+        "<script>if (a < b) { c(); }</script></body></html>";
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, strlen(xml), LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr) << "status " << (int)st;
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "html");
+    EXPECT_GT(leptris_document_parse_diag_count(doc), 0u);
+    leptris_document_free(doc);
+}
+
 TEST(ParseRecover, WithoutFlagStillFails) {
     LeptrisStatus st = LEPTRIS_OK;
     const char xml[] = "<root><a>x</b></root>";
