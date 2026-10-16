@@ -1729,7 +1729,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     : ((p.end - q > 48) ? q + 48 : p.end);
                 while (q < probe_end) {
                     char ch = *q;
-                    if (ch == '<') { lt = (char*)q; goto text_done; }
+                    if (ch == '<') { lt = (char*)q; break; }
                     has_amp |= (ch == '&');
                     has_cr |= (ch == '\r');
                     q++;
@@ -1739,6 +1739,33 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 if (!lt) lt = p.end;
                 has_amp |= memchr(q, '&', (size_t)((char*)lt - q)) != NULL;
                 has_cr |= memchr(q, '\r', (size_t)((char*)lt - q)) != NULL;
+            }
+            /* leptris#1748: a '<' that opens no markup construct
+             * ('!', '?', '/', name-start) is unescaped text. Strict
+             * keeps failing at it; RECOVER records a diagnostic and
+             * folds the byte into the text run (libxml2
+             * XML_PARSE_RECOVER semantics) — previously this class
+             * aborted to the empty-document fallback with NO tree
+             * and NO diagnostic (the silent corruption canon hit). */
+            while (lt && lt + 1 < p.end && p.recover) {
+                char nx = lt[1];
+                if (nx == '!' || nx == '?' || nx == '/' ||
+                    IS_NAME_START(nx))
+                    break;
+                leptris_diag_emit(
+                    &p.doc->parse_diags, &p.doc->parse_diag_count,
+                    &p.doc->parse_diag_cap,
+                    LEPTRIS_DIAG_RECOVER, NULL,
+                    "Unescaped < not allowed in a text node");
+                const char* nq = lt + 1;
+                const char* nlt =
+                    memchr(nq, '<', (size_t)(p.end - nq));
+                const char* span_end = nlt ? nlt : p.end;
+                has_amp |= memchr(nq, '&',
+                                  (size_t)(span_end - nq)) != NULL;
+                has_cr |= memchr(nq, '\r',
+                                 (size_t)(span_end - nq)) != NULL;
+                lt = (char*)nlt;
             }
         text_done:
             p.pos = lt ? lt : p.end;
