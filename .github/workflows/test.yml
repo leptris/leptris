@@ -1,9 +1,8 @@
 name: C Library & CLI Test Suite
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main, develop, "fix/**" ]
+    branches: [ main, develop ]
     paths-ignore:
       - '**.md'
       - '**.adoc'
