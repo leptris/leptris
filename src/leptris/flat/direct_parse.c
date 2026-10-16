@@ -1755,7 +1755,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 leptris_diag_emit(
                     &p.doc->parse_diags, &p.doc->parse_diag_count,
                     &p.doc->parse_diag_cap,
-                    LEPTRIS_DIAG_RECOVER, NULL,
+                    LEPTRIS_DIAG_UNESCAPED_LT, NULL,
                     "Unescaped < not allowed in a text node");
                 const char* nq = lt + 1;
                 const char* nlt =

@@ -867,7 +867,10 @@ TEST(ParseRecover, BareLtInTextKeepsTreeAndRecords) {
     char msg[128] = {0};
     ASSERT_EQ(leptris_document_parse_diag(doc, 0, &kind, msg,
                                           sizeof(msg)), 1);
-    EXPECT_EQ(kind, LEPTRIS_DIAG_RECOVER);
+    /* #1749: the kind carries the severity — unescaped '<' is a
+     * STRICT-FATAL class recovered on the lenient lane, its own
+     * kind, not the generic RECOVER bucket. */
+    EXPECT_EQ(kind, LEPTRIS_DIAG_UNESCAPED_LT);
     leptris_document_free(doc);
 }
 
