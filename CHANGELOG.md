@@ -2,12 +2,20 @@
 
 ## [1.9.363] - 2026-10-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **parse: RECOVER folds a bare `<` in text into the run (#1748, PR #1750).**
+  `< b` — a `<` that opens no markup construct — had no recovery lane: even
+  under `LEPTRIS_PARSE_RECOVER` the parse aborted to the #547 empty-document
+  fallback with the diagnostic list EMPTY. Silent total data loss on
+  `<script>if (a < b) { c(); }</script>` (the shape HTML-producing tools
+  emit), and the missing record kept recovery-record-keyed consumers —
+  canon's loud/tolerant HTML fallback — from ever engaging, so the input
+  serialized as just the XML declaration. The text scan now folds the byte
+  into the run with a `LEPTRIS_DIAG_RECOVER` record under RECOVER (libxml2
+  keeps the full tree and reports 5 errors on the reporter's input; ours
+  now keeps the tree too); strict parsing still fails. Engine suite
+  2046/2046; canon's battery spec goes 1 failure → 0.
 
 
 ## [1.9.362] - 2026-10-16
