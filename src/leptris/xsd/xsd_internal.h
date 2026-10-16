@@ -101,6 +101,10 @@ typedef struct xsd_cm {
                      * capture time (forward ref) — folded by the
                      * post-capture resolver (leptris-ruby#440 A) */
     char* any_ns; /* CM_ANY: the namespace attribute grammar */
+    /* #1735: the target namespace of the unit DECLARING the
+     * wildcard — ##targetNamespace/##other are unit-relative and
+     * the merged schema keeps only the main unit's tns */
+    char* any_unit_tns;
     int process_skip; /* CM_ANY: processContents="skip" or "lax" */
     int min, max; /* occurrence bounds; max < 0 = unbounded */
     struct xsd_cm* first_child; /* group children list */
@@ -198,6 +202,9 @@ typedef struct xsd_type_attrs {
     char* ns;           /* leptris-ruby#440: declaring schema's tns */
     char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
     char* any_attr_base_ns; /* extension: the base type's wildcard (union) */
+    /* #1735: declaring unit's tns for each wildcard above */
+    char* any_attr_unit_ns;
+    char* any_attr_base_unit_ns;
     XsdAttrDecl* attrs;
     struct xsd_type_attrs* next;
 } XsdTypeAttrs;

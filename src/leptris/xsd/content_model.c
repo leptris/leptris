@@ -289,7 +289,11 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                         (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
                         ss_add(&next, tr->to);
                 } else if (p->kind == XSD_CM_ANY) {
-                    if (any_ns_matches(p, uri, target_ns))
+                    /* #1735: ##targetNamespace/##other are relative
+                     * to the DECLARING unit's tns */
+                    if (any_ns_matches(p, uri,
+                                       p->any_unit_tns ? p->any_unit_tns
+                                                       : target_ns))
                         ss_add(&next, tr->to);
                 }
             }
