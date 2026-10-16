@@ -6685,6 +6685,19 @@ static LeptrisDocument html_parse_shared(
             size_t dlen = (size_t)(de > ds ? de - ds : 0);
             char* tgt = (char*)leptris_pool_alloc(b.pool, tlen + 1);
             char* dat = (char*)leptris_pool_alloc(b.pool, dlen + 1);
+            /* libxml2 HTML parity (#1748): the XML-declaration
+             * construct ('<?xml ...?>') is an XML-ism — the HTML
+             * lane skips it entirely. Retaining it as a PI made the
+             * data carry the terminator '?' (serialized
+             * '<?xml ...??>'), and the declaration metadata + PI
+             * doubled when the serializer's xml_declaration rode
+             * along. */
+            if (tlen == 3 && (ts[0] | 0x20) == 'x' &&
+                (ts[1] | 0x20) == 'm' && (ts[2] | 0x20) == 'l') {
+                p = (de < end) ? de + 1 : end;
+                text = p;
+                continue;
+            }
             if (tgt && dat) {
                 memcpy(tgt, ts, tlen);
                 tgt[tlen] = 0;

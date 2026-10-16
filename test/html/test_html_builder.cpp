@@ -188,3 +188,43 @@ TEST(HtmlBuilder, RawTextElementNotEscaped) {
     EXPECT_EQ(out.find("&lt;"), std::string::npos) << out;
     leptris_document_free(d);
 }
+
+/* leptris#1748: the XML-declaration construct ('<?xml ...?>') in
+ * HTML input is an XML-ism — libxml2's HTML parser skips it, and
+ * retaining it as a PI (data carrying the terminator '?') made
+ * serialization emit '<?xml ...??>' and double the declaration when
+ * the serializer's own xml_declaration rode along. */
+TEST(HtmlBuilder, Html4DropsXmlDeclarationProlog) {
+    const char* html =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
+        "<head><title>t</title></head><body><p>x</p></body></html>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d =
+        leptris_parse_html4_string(html, strlen(html), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(d, nullptr);
+    for (int decl = 0; decl < 2; decl++) {
+        LeptrisSerializeOptions opts;
+        memset(&opts, 0, sizeof(opts));
+        opts.xml_declaration = decl;
+        opts.encoding = "UTF-8";
+        char* s = leptris_document_serialize(d, &opts);
+        ASSERT_NE(s, nullptr);
+        std::string out(s);
+        leptris_free_string(s);
+        EXPECT_EQ(out.find("??"), std::string::npos)
+            << "decl=" << decl << " got: " << out.substr(0, 90);
+        /* decl=0: the prolog never leaks. decl=1: exactly the
+         * serializer's own declaration — never two, never the
+         * input's remnant. */
+        size_t decls = 0;
+        for (size_t at = out.find("<?xml"); at != std::string::npos;
+             at = out.find("<?xml", at + 1))
+            decls++;
+        EXPECT_EQ(decls, (size_t)decl)
+            << "decl=" << decl << " got: " << out.substr(0, 90);
+        EXPECT_NE(out.find("<html"), std::string::npos) << out;
+    }
+    leptris_document_free(d);
+}
