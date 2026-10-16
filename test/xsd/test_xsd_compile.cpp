@@ -2173,3 +2173,164 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
 }
+
+// ---- #1735: unit-relative wildcard provenance across imports ----
+// ##targetNamespace / ##other resolve against the target namespace
+// of the unit the wildcard is DECLARED in, not the merged schema's
+// main tns.
+namespace {
+
+int validate_compiled(LeptrisXsdSchema s, const char* xml) {
+    LeptrisStatus vst = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &vst);
+    if (!d) return 0;
+    int ok = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    return ok;
+}
+
+/* imp.xsd carries tns urn:imp and a type whose wildcard uses
+ * ##targetNamespace; main.xsd (tns urn:main) imports it. An
+ * instance child in urn:imp satisfies the wildcard (declaring
+ * unit's tns), one in urn:other never does. */
+TEST(XsdWildcardUnitTns1735, ElementTargetNamespaceInImportedUnit) {
+    std::string dir = ::testing::TempDir();
+    FILE* f1 = fopen((dir + "x1735imp.xsd").c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* imp =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:imp\">"
+        "<xs:complexType name=\"CT_Open\">"
+        "<xs:sequence>"
+        "<xs:any namespace=\"##targetNamespace\" processContents=\"skip\""
+        " minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(imp, 1, strlen(imp), f1);
+    fclose(f1);
+    FILE* f2 = fopen((dir + "x1735main.xsd").c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* mainx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:i=\"urn:imp\""
+        " targetNamespace=\"urn:main\">"
+        "<xs:import namespace=\"urn:imp\""
+        " schemaLocation=\"x1735imp.xsd\"/>"
+        "<xs:element name=\"r\" type=\"i:CT_Open\"/>"
+        "</xs:schema>";
+    fwrite(mainx, 1, strlen(mainx), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((dir + "x1735main.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    /* child in the IMPORTED unit's tns: the wildcard's
+     * ##targetNamespace is urn:imp (the declaring unit) */
+    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:imp\"/></r>"), 1)
+        << "##targetNamespace must resolve against urn:imp";
+    /* a third namespace matches neither reading */
+    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:other\"/></r>"), 0);
+    leptris_xsd_free(s);
+    remove((dir + "x1735imp.xsd").c_str());
+    remove((dir + "x1735main.xsd").c_str());
+}
+
+/* ##other in the imported unit excludes the declaring unit's tns
+ * (urn:imp) only — the MAIN unit's tns (urn:main) is "other". */
+TEST(XsdWildcardUnitTns1735, ElementOtherInImportedUnit) {
+    std::string dir = ::testing::TempDir();
+    FILE* f1 = fopen((dir + "x1735oimp.xsd").c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* imp =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:imp\">"
+        "<xs:complexType name=\"CT_Open\">"
+        "<xs:sequence>"
+        "<xs:any namespace=\"##other\" processContents=\"skip\""
+        " minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(imp, 1, strlen(imp), f1);
+    fclose(f1);
+    FILE* f2 = fopen((dir + "x1735omain.xsd").c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* mainx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:i=\"urn:imp\""
+        " targetNamespace=\"urn:main\">"
+        "<xs:import namespace=\"urn:imp\""
+        " schemaLocation=\"x1735oimp.xsd\"/>"
+        "<xs:element name=\"r\" type=\"i:CT_Open\"/>"
+        "</xs:schema>";
+    fwrite(mainx, 1, strlen(mainx), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((dir + "x1735omain.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    /* the declaring unit's own tns is what ##other excludes */
+    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:imp\"/></r>"), 0);
+    /* the main unit's tns is OTHER relative to urn:imp */
+    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:main\"/></r>"), 1)
+        << "##other is relative to urn:imp, not the main tns";
+    leptris_xsd_free(s);
+    remove((dir + "x1735oimp.xsd").c_str());
+    remove((dir + "x1735omain.xsd").c_str());
+}
+
+/* attribute wildcards carry the same unit-relative provenance */
+TEST(XsdWildcardUnitTns1735, AnyAttrTargetNamespaceInImportedUnit) {
+    std::string dir = ::testing::TempDir();
+    FILE* f1 = fopen((dir + "x1735aimp.xsd").c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* imp =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:imp\">"
+        "<xs:complexType name=\"CT_Open\">"
+        "<xs:sequence>"
+        "<xs:element name=\"a\" type=\"xs:token\"/>"
+        "</xs:sequence>"
+        "<xs:anyAttribute namespace=\"##targetNamespace\""
+        " processContents=\"skip\"/>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(imp, 1, strlen(imp), f1);
+    fclose(f1);
+    FILE* f2 = fopen((dir + "x1735amain.xsd").c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* mainx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:i=\"urn:imp\""
+        " targetNamespace=\"urn:main\">"
+        "<xs:import namespace=\"urn:imp\""
+        " schemaLocation=\"x1735aimp.xsd\"/>"
+        "<xs:element name=\"r\" type=\"i:CT_Open\"/>"
+        "</xs:schema>";
+    fwrite(mainx, 1, strlen(mainx), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((dir + "x1735amain.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    /* the extra attribute lives in urn:imp = the declaring unit's
+     * ##targetNamespace */
+    EXPECT_EQ(validate_compiled(
+                  s, "<r xmlns:x=\"urn:imp\" x:note=\"hi\"><a>x</a></r>"),
+              1)
+        << "anyAttribute ##targetNamespace must resolve against urn:imp";
+    /* a foreign-namespace attribute never matches */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<r xmlns:y=\"urn:other\" y:note=\"hi\"><a>x</a></r>"),
+              0);
+    leptris_xsd_free(s);
+    remove((dir + "x1735aimp.xsd").c_str());
+    remove((dir + "x1735amain.xsd").c_str());
+}
+
+}  // namespace

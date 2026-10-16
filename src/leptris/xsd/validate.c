@@ -478,11 +478,19 @@ static void validate_attributes(struct xsd_validator* v,
         /* extension union: an attribute is allowed when it matches the
          * derived type's wildcard OR the base type's (the spec's
          * attribute-wildcard union; #1691 anyAttr-derive family) */
+        /* #1735: each wildcard resolves against its DECLARING
+         * unit's tns (recorded at capture); the merged schema's tns
+         * is the fallback */
         if ((ta->any_attr_ns &&
-             any_attr_matches(ta->any_attr_ns, auri, xsd_target_ns(s))) ||
+             any_attr_matches(ta->any_attr_ns, auri,
+                              ta->any_attr_unit_ns
+                                  ? ta->any_attr_unit_ns
+                                  : xsd_target_ns(s))) ||
             (ta->any_attr_base_ns &&
              any_attr_matches(ta->any_attr_base_ns, auri,
-                              xsd_target_ns(s))))
+                              ta->any_attr_base_unit_ns
+                                  ? ta->any_attr_base_unit_ns
+                                  : xsd_target_ns(s))))
             continue;
         verrf_at(v, elem, "attribute", local,
                  "not declared (strict)");
