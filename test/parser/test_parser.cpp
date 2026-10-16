@@ -799,8 +799,17 @@ TEST(ParseRecover, MismatchedCloseKeepsTreeAndDropsStray) {
     EXPECT_STREQ(leptris_element_text(a), "x");
     /* Two recoveries: the stray </b> drops, and <a> closes
      * implicitly when </root> names the ancestor (libxml2 reports
-     * both as well). */
+     * both as well). Both are MISMATCHED_TAG — the #1749 severity
+     * contract keeps UNCLOSED_ELEMENT for the EOF class only. */
     EXPECT_EQ(leptris_document_parse_diag_count(doc), 2u);
+    LeptrisDiagKind kind = (LeptrisDiagKind)-1;
+    char msg[128] = {0};
+    ASSERT_EQ(leptris_document_parse_diag(doc, 0, &kind, msg,
+                                          sizeof(msg)), 1);
+    EXPECT_EQ(kind, LEPTRIS_DIAG_MISMATCHED_TAG);
+    ASSERT_EQ(leptris_document_parse_diag(doc, 1, &kind, msg,
+                                          sizeof(msg)), 1);
+    EXPECT_EQ(kind, LEPTRIS_DIAG_MISMATCHED_TAG);
     leptris_document_free(doc);
 }
 
