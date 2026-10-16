@@ -2142,11 +2142,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                         while ((int)p.depth - 1 > anc) {
                             LeptrisElement ce =
                                 p.open_stack[p.depth - 1];
+                            /* #1749 severity: the implicit close
+                             * is the MISMATCH recovery (libxml2
+                             * reports a tag mismatch; recoverable
+                             * class) — UNCLOSED_ELEMENT stays
+                             * reserved for the still-open-at-EOF
+                             * fatal class. */
                             leptris_diag_emit(
                                 &p.doc->parse_diags,
                                 &p.doc->parse_diag_count,
                                 &p.doc->parse_diag_cap,
-                                LEPTRIS_DIAG_UNCLOSED_ELEMENT, NULL,
+                                LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
                                 "Element %s closed implicitly by </%.*s>",
                                 elem_name(ce),
                                 (int)close_local_len, close_local);
