@@ -290,6 +290,10 @@ typedef enum {
      * implicitly), and an element still open at EOF. Append-only. */
     LEPTRIS_DIAG_MISMATCHED_TAG,
     LEPTRIS_DIAG_UNCLOSED_ELEMENT,
+    /* leptris#1748: an unescaped '<' in text folded into the run —
+     * RECOVERABLE-lane record of a STRICT-FATAL class (the strict
+     * path fails the parse; severity mapping: fatal). Append-only. */
+    LEPTRIS_DIAG_UNESCAPED_LT,
     LEPTRIS_DIAG_COUNT_
 } LeptrisDiagKind;
 
