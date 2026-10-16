@@ -2,12 +2,18 @@
 
 ## [1.9.364] - 2026-10-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **parse diagnostics carry severity classification (#1749, PR #1752).**
+  Two append-only `LeptrisDiagKind` refinements so embedders can implement
+  raise-on-fatal / recover-on-recoverable without string matching:
+  `LEPTRIS_DIAG_UNESCAPED_LT` — the #1748 unescaped-`<` recovery is a
+  strict-fatal class and now records its own kind instead of the generic
+  RECOVER bucket; and the ancestor-implicit-close recovery records
+  `LEPTRIS_DIAG_MISMATCHED_TAG` (libxml2 reports the same shape as a tag
+  mismatch), reserving `LEPTRIS_DIAG_UNCLOSED_ELEMENT` for the
+  still-open-at-EOF fatal class. Record messages unchanged; enum is
+  append-only.
 
 
 ## [1.9.363] - 2026-10-16
