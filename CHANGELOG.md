@@ -2,12 +2,20 @@
 
 ## [1.9.365] - 2026-10-16
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **html4: skip the XML-declaration construct in HTML input (#1748, PR #1754).**
+  The html4 lane parsed `<?xml ...?>` as a PI node (target `xml`) whose data
+  carried the terminator `?`, so serialization emitted
+  `<?xml version="1.0" encoding="UTF-8"??>` — and with the serializer's
+  `xml_declaration` riding along (the default `to_xml`), the output carried
+  two declarations, which canon's XHTML pretty-printer degenerated to
+  declaration-only output downstream. libxml2's HTML parser skips the
+  XML-declaration construct entirely; the html4 lane now does the same (the
+  WHATWG lane keeps its specified bogus-comment shape). Red-first gtest pins
+  the contract: `xml_declaration=0` emits no declaration, `1` emits exactly
+  the serializer's own — never the input's remnant, never `??`. Engine suite
+  2047/2047; canon's battery 9/9.
 
 
 ## [1.9.364] - 2026-10-16
