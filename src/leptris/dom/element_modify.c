@@ -359,74 +359,6 @@ static LeptrisNode* copy_leaf_one(LeptrisNode* c,
     }
 }
 
-/* #1534: copy a non-element node (plus its linked tail — the #540
- * chain shape) into the target document's pool. Same per-kind
- * creation helpers the subtree copier uses. */
-static LeptrisNode* copy_leaf_chain(LeptrisNode* head,
-                                    struct leptris_document* target) {
-    LeptrisNode* copy_head = NULL;
-    LeptrisNode* copy_tail = NULL;
-    for (LeptrisNode* c = head; c;
-         c = leptris_node_get_next_sibling(c)) {
-        LeptrisNode* cc = NULL;
-        switch (c->type) {
-            case LEPTRIS_NODE_TYPE_TEXT: {
-                LeptrisTextNode* t = (LeptrisTextNode*)c;
-                const char* content = leptris_textnode_content(t);
-                cc = (LeptrisNode*)leptris_text_create(
-                    content, t->content_len, target->pool, target);
-                break;
-            }
-            case LEPTRIS_NODE_TYPE_CDATA: {
-                LeptrisCDATANode* cd = (LeptrisCDATANode*)c;
-                cc = (LeptrisNode*)leptris_cdata_create(
-                    cd->content, cd->content ? strlen(cd->content) : 0,
-                    target->pool);
-                break;
-            }
-            case LEPTRIS_NODE_TYPE_COMMENT: {
-                LeptrisCommentNode* cm = (LeptrisCommentNode*)c;
-                cc = (LeptrisNode*)leptris_comment_create(
-                    cm->content,
-                    cm->content ? strlen(cm->content) : 0,
-                    target->pool);
-                break;
-            }
-            case LEPTRIS_NODE_TYPE_PI: {
-                LeptrisPINode* pi = (LeptrisPINode*)c;
-                cc = (LeptrisNode*)leptris_pi_create(
-                    pi->target, pi->target ? strlen(pi->target) : 0,
-                    pi->data ? pi->data : "",
-                    pi->data ? strlen(pi->data) : 0, target->pool);
-                break;
-            }
-            case LEPTRIS_NODE_TYPE_ENTITY_REF: {
-                LeptrisEntityRefNode* er = (LeptrisEntityRefNode*)c;
-                cc = (LeptrisNode*)leptris_entity_ref_create(
-                    er->name, er->name ? strlen(er->name) : 0,
-                    target->pool);
-                break;
-            }
-            default:
-                cc = NULL;
-        }
-        if (!cc) {
-            /* OOM mid-chain: copies already made live only in the
-             * target pool — no caller-visible handle exists, and
-             * document free reclaims them (the same conservatism
-             * copy_subtree_detached uses on !cc). */
-            return NULL;
-        }
-        if (!copy_head) {
-            copy_head = cc;
-        } else {
-            leptris_node_set_next_sibling(copy_tail, cc);
-        }
-        copy_tail = cc;
-    }
-    return copy_head;
-}
-
 static LeptrisNode* adopt_for_splice(LeptrisNode* node,
                                      struct leptris_document* target) {
     if (!node || !target) return node;
@@ -465,13 +397,15 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
          * the target — its pool dies with the target, so the node
          * moves by reference. */
         if (src->absorbed_by == target) return node;
-        /* top == node: a DOC-LEVEL leaf (prolog/epilog, #580) —
-         * its sibling chain spans unrelated nodes (including the
-         * root element), so copy exactly the argument (#1539).
-         * An in-element leaf keeps the #540 chain shape. */
-        if (top == node) return copy_leaf_one(node, target);
-        LeptrisNode* copy = copy_leaf_chain(node, target);
-        return copy;
+        /* Copy exactly the argument (#1755): the callers of this
+         * face append fragment children INDIVIDUALLY (the binding's
+         * fragment loop, moxml's NodeSet iteration), so a wholesale
+         * run copy duplicated every later sibling — and its missing
+         * ELEMENT case failed the whole append with
+         * LEPTRIS_ERROR_MEMORY on the first mixed-content chain.
+         * Doc-level leaves (prolog/epilog, #580) were already
+         * single-node for the same reason (#1539). */
+        return copy_leaf_one(node, target);
     }
     /* Type-safe walk to the chain top: get_document reads
      * element-form fields and misreads non-element structs. */
