@@ -1,0 +1,74 @@
+# Continuous fuzzing for the C99 engine (approach ported from
+# teptris test/fuzz): three libFuzzer harnesses under
+# fuzzer+address+undefined — parse round-trip (both parse modes),
+# the op-driven mutation API, and the XPath evaluator with every
+# accessor drained. The invariants are the memory-safety contracts
+# (no crash, no leak), not semantic correctness — the conformance
+# suites own that. Nightly + manual dispatch; crashes fail the run
+# and upload the offending inputs.
+name: fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "fuzz budget in minutes"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure (fuzz targets on)
+        run: >-
+          cmake -B fuzz-build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DLEPTRIS_ENABLE_FUZZING=ON -DLEPTRIS_BUILD_CLI=OFF
+          -DLEPTRIS_BUILD_BENCHMARKS=OFF -DBUILD_TESTING=OFF
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -g -O1"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined"
+
+      - name: Build the harnesses
+        run: |
+          clang --version | head -1
+          cmake --build fuzz-build --target fuzz_parse fuzz_mutate fuzz_xpath -j4
+
+      - name: Seed the corpus
+        run: |
+          mkdir -p corpus crashes
+          find test/fixtures -name "*.xml" | while read -r f; do
+            cp "$f" "corpus/$(echo "$f" | tr '/' '_')"
+          done
+
+      - name: Fuzz
+        run: |
+          MINS="${{ github.event.inputs.minutes || '10' }}"
+          SECS=$((MINS * 60))
+          THIRD=$((SECS / 3))
+          ./fuzz-build/fuzz_parse corpus -max_total_time="$THIRD" -timeout=5 \
+            -rss_limit_mb=2560 -artifact_prefix="$PWD/crashes/"
+          ./fuzz-build/fuzz_mutate corpus -max_total_time="$THIRD" -timeout=5 \
+            -rss_limit_mb=2560 -artifact_prefix="$PWD/crashes/"
+          ./fuzz-build/fuzz_xpath corpus -max_total_time="$THIRD" -timeout=5 \
+            -rss_limit_mb=2560 -artifact_prefix="$PWD/crashes/"
+
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crashes
+          path: crashes/
+          if-no-files-found: ignore

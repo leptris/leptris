@@ -260,16 +260,18 @@ if(Python3_FOUND)
         ENVIRONMENT "PYTHONPATH=")
 endif()
 
-# libFuzzer harness (TODO 40) — built only when LEPTRIS_ENABLE_FUZZING=ON.
-# Not a ctest target; invoked manually with corpus.
+# libFuzzer harnesses — built only when LEPTRIS_ENABLE_FUZZING=ON.
+# Not ctest targets; invoked manually with a corpus (or by the
+# nightly fuzz workflow, which invokes them at the build root —
+# subdirectory targets land under build/test/ by default).
 if(LEPTRIS_ENABLE_FUZZING)
-    add_executable(fuzz_parse ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/fuzz_parse.c)
-    target_link_libraries(fuzz_parse PRIVATE leptris)
-    target_include_directories(fuzz_parse PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/include)
-    # The harness doc and the nightly workflow invoke the binary at
-    # the build root, not under build/test/ where subdirectory
-    # targets land by default.
-    set_target_properties(fuzz_parse PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    foreach(target fuzz_parse fuzz_mutate fuzz_xpath)
+        add_executable(${target}
+            ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/${target}.c)
+        target_link_libraries(${target} PRIVATE leptris)
+        target_include_directories(${target} PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/include)
+        set_target_properties(${target} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    endforeach()
 endif()
