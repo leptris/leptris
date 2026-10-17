@@ -3019,6 +3019,58 @@ TEST(DomAttachInstalled, ForeignAttachReportsCopyAddress) {
     leptris_document_free(target);
 }
 
+/* leptris#1755: a foreign MIXED-CONTENT fragment hands the
+ * engine a text node whose sibling chain carries the following
+ * element. The leaf adopt ran a WHOLESALE chain copy that had no
+ * ELEMENT case — the element hit default: and the whole append
+ * failed with LEPTRIS_ERROR_MEMORY ("Memory allocation failed" —
+ * a lie; nothing was out of memory). Every caller of this face
+ * appends fragment children INDIVIDUALLY (the binding's fragment
+ * loop, moxml's NodeSet iteration), so the foreign leaf adopt
+ * copies exactly the argument node — the sibling run stays in the
+ * source for its own appends. */
+TEST(DomAttachInstalled, ForeignMixedChainTextBeforeElement) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* src = "<f>lead<item>t</item>tail</f>";
+    LeptrisDocument frag = leptris_parse_string(src, strlen(src), &st);
+    ASSERT_NE(frag, nullptr);
+    LeptrisDocument target = leptris_parse_string("<doc/>", 6, &st);
+    ASSERT_NE(target, nullptr);
+    LeptrisElement troot = leptris_document_root(target);
+    LeptrisElement froot = leptris_document_root(frag);
+    /* node-level first child: the TEXT "lead" (the element-level
+     * face would skip it and return <item>). */
+    LeptrisNodeRef text = leptris_node_first_child((LeptrisNodeRef)froot);
+    ASSERT_NE(text, nullptr);
+    ASSERT_EQ(leptris_node_get_type(text), LEPTRIS_NODE_TYPE_TEXT);
+
+    EXPECT_EQ(leptris_element_add_child_addr(
+                  (uintptr_t)troot, (uintptr_t)text),
+              LEPTRIS_OK);
+    /* exactly the argument: no sibling run rides along (serialize
+     * pins the child set; child_count is element-oriented) */
+    char* out = leptris_element_serialize(troot, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<doc>lead</doc>");
+    leptris_free_string(out);
+
+    /* the binding's loop continues: the element sibling appends on
+     * its own, and the trailing text with it — no duplication of
+     * the element the first adopt must NOT have carried */
+    LeptrisElement item = leptris_element_first_child_any(froot);
+    ASSERT_NE(item, nullptr);
+    EXPECT_EQ(leptris_element_add_child_addr(
+                  (uintptr_t)troot, (uintptr_t)item),
+              LEPTRIS_OK);
+    /* the source dies; the installed copies must survive */
+    leptris_document_free(frag);
+    out = leptris_element_serialize(troot, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<doc>lead<item>t</item></doc>");
+    leptris_free_string(out);
+    leptris_document_free(target);
+}
+
 TEST(DomAttachInstalled, SameDocumentReturnsArgument) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
