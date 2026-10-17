@@ -4,7 +4,21 @@
 
 ### Fixed
 
-- foreign leaf adopt copies exactly the argument (leptris#1755) (dom)
+- **dom: the foreign leaf adopt copies exactly the argument node (#1755, PR #1757).**
+  `adopt_for_splice`'s non-element branch ran a wholesale sibling-chain copy
+  (`copy_leaf_chain`) whose switch had no ELEMENT case: any mixed-content
+  chain — a text node whose next sibling is the element that follows it, the
+  standard fragment shape lutaml/moxml produce — hit `default:` and the whole
+  append failed with `LEPTRIS_ERROR_MEMORY` ("Memory allocation failed": a
+  lie; nothing was out of memory). The run-copy was also wrong for every
+  caller that reaches this path — the binding's fragment loop and moxml's
+  NodeSet iteration append fragment children individually, so a chain copy
+  duplicated every later sibling even where it succeeded. The foreign leaf
+  adopt now copies exactly the argument (doc-level leaves were already
+  single-node for the same reason, #1539); the single-caller chain copier is
+  deleted. This is the deterministic face of the Ruby 4.0 render crash
+  (leptris-ruby#489): the GC-stressed metanorma collection render goes
+  2 failures -> 0. Engine suite 2048/2048; binding suite 1094/1094.
 
 
 
