@@ -2,12 +2,20 @@
 
 ## [1.9.367] - 2026-10-17
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **dom: zero-initialize the namespace cache at every allocation site (#1742, PR #1742).**
+  The three cache-creating sites partially initialized the new
+  `leptris_ns_cache` — prefix/URI/declarations (and `raw_attrs` at only one of
+  the three) — leaving `doc_next`, the heap-ownership flags, and the
+  child-iteration cache (generations, index, node pointer) on **arena
+  garbage**. Any read before its explicit set was an uninitialized read: the
+  document-free walk chain and the child-cache generation compare could act on
+  poisoned bytes. All three sites now zero the whole struct. New
+  poisoned-arena regressions fill the remaining arena with `0xa5` and assert
+  every field comes up clean through the prefix setter, the URI setter, and
+  `cache_ensure` (red on main's header, green on the fix). Engine suite
+  2040/2040 on the PR, 2048/2048 on merged main.
 
 
 ## [1.9.366] - 2026-10-17
