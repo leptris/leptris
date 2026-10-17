@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.366] - 2026-10-17
+
+### Fixed
+
+- foreign leaf adopt copies exactly the argument (leptris#1755) (dom)
+
+
+
 ## [1.9.365] - 2026-10-16
 
 ### Fixed
