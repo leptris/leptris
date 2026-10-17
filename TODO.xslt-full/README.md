@@ -16,8 +16,13 @@ Rules (per repo conventions):
   (benchmarks/xslt/*) — conformance may not cost the lead. A fix
   that regresses a benchmark by >3% needs an algorithmic answer.
 
-Live census (157 open, by failure signature; refresh with the
-triage script in 00):
+**GATE MET (verified 2026-10-17, main @ 75cd5f6e):**
+libxslt suite **205/205** (open_cases.txt empty; macOS legitimately
+skips bug-169 — encoding-sensitive via iconv, Linux CI is
+authoritative), XsltFull **27/27** (the suite carries 27 cases; the
+historical 45 count predates the case consolidation), full suite
+**2053/2053** locally. The census below is the campaign-start
+snapshot, kept for the record:
 - 84 PI/COMMENT-OUT — fragment-node serialization + content edges
 - 28 EMPTY — root-node `/` semantics, doc() chains, early exits
 - 24 DIFF — number corners, attr-set precedence, sort, AVT edges
