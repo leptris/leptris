@@ -407,6 +407,132 @@ TEST(PlanWalk, NestedScalarsAttributesCollections) {
     leptris_plan_free(plan);
 }
 
+/* leptris#1743: diamond-shared plan graphs — two sibling rows
+ * referencing the SAME plan index (lutaml-model's PlanCompiler
+ * emits recursive content models as a DAG; the binding flattens it
+ * identity-memoized). Each parent must walk the shared plan
+ * independently: b's <leaf> must materialize even though plan 1
+ * was already walked under a. */
+TEST(PlanWalk, SharedChildPlanIndexWalksPerParent) {
+    LeptrisDocument doc = parse(
+        "<n><a><leaf>x</leaf></a><b><leaf>y</leaf></b></n>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan n_kids[2] = {
+        {"a", LEPTRIS_PLAN_KIND_NESTED, 1, 1},
+        {"b", LEPTRIS_PLAN_KIND_NESTED, 1, 1},
+    };
+    leptris_child_plan shared_kids[1] = {
+        {"leaf", LEPTRIS_PLAN_KIND_NESTED, 2, 2}};
+    leptris_element_plan plans[3] = {};
+    plans[0].element_name = "n";
+    plans[0].child_count = 2;
+    plans[0].child_plans = n_kids;
+    plans[1].element_name = "a";
+    plans[1].child_count = 1;
+    plans[1].child_plans = shared_kids;
+    plans[2].element_name = "leaf";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 3;
+    spec.plans = plans;
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+
+    LeptrisPlanResult a = leptris_plan_value_at(r, 0);
+    ASSERT_NE(a, nullptr);
+    EXPECT_STREQ(leptris_plan_value_name(a), "a");
+    ASSERT_EQ(leptris_plan_value_count(a), 1u);
+    LeptrisPlanResult al = leptris_plan_value_at(a, 0);
+    EXPECT_STREQ(leptris_plan_value_name(al), "leaf");
+    EXPECT_EQ(leptris_plan_value_kind(al), LEPTRIS_PLAN_VALUE_ELEMENT);
+
+    LeptrisPlanResult b = leptris_plan_value_at(r, 1);
+    ASSERT_NE(b, nullptr);
+    EXPECT_STREQ(leptris_plan_value_name(b), "b");
+    ASSERT_EQ(leptris_plan_value_count(b), 1u);
+    LeptrisPlanResult bl = leptris_plan_value_at(b, 0);
+    EXPECT_STREQ(leptris_plan_value_name(bl), "leaf");
+    EXPECT_EQ(leptris_plan_value_kind(bl), LEPTRIS_PLAN_VALUE_ELEMENT);
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
+/* leptris#1743: RECURSIVE plan graphs — lutaml-model's
+ * PlanCompiler emits recursive content models as a plan CYCLE
+ * (entry -> sub -> entry); a NESTED row's target plan describes
+ * the element the row matches, so the cycle rides an
+ * intermediate plan. The binding flattens these identity-memoized
+ * (the flatten is where the STS runaway lived). The walk follows
+ * the DOCUMENT tree, so a finite document must materialize
+ * through every re-entry of the shared plans. */
+TEST(PlanWalk, RecursivePlanCycleWalksFiniteDocument) {
+    LeptrisDocument doc = parse(
+        "<entry><t>1</t><sub><entry><t>2</t></entry></sub></entry>");
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    leptris_child_plan entry_kids[2] = {
+        {"t", LEPTRIS_PLAN_KIND_SCALAR, 1, -1},
+        {"sub", LEPTRIS_PLAN_KIND_NESTED, 2, 1},
+    };
+    leptris_child_plan sub_kids[1] = {
+        {"entry", LEPTRIS_PLAN_KIND_NESTED, 3, 0}};
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "entry";
+    plans[0].child_count = 2;
+    plans[0].child_plans = entry_kids;
+    plans[1].element_name = "sub";
+    plans[1].child_count = 1;
+    plans[1].child_plans = sub_kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK);
+
+    LeptrisPlanResult r = leptris_plan_walk(doc, root, plan, &st);
+    ASSERT_NE(r, nullptr);
+    ASSERT_EQ(leptris_plan_value_count(r), 2u);
+
+    LeptrisPlanResult t1 = leptris_plan_value_at(r, 0);
+    ASSERT_NE(t1, nullptr);
+    EXPECT_STREQ(leptris_plan_value_string(t1), "1");
+
+    LeptrisPlanResult sub = leptris_plan_value_at(r, 1);
+    ASSERT_NE(sub, nullptr);
+    EXPECT_STREQ(leptris_plan_value_name(sub), "sub");
+    /* the cycle re-enters plan 0 for the entry inside sub */
+    ASSERT_EQ(leptris_plan_value_count(sub), 1u);
+    LeptrisPlanResult inner = leptris_plan_value_at(sub, 0);
+    ASSERT_NE(inner, nullptr);
+    EXPECT_STREQ(leptris_plan_value_name(inner), "entry");
+    ASSERT_EQ(leptris_plan_value_count(inner), 1u);
+    LeptrisPlanResult t2 = leptris_plan_value_at(inner, 0);
+    ASSERT_NE(t2, nullptr);
+    EXPECT_STREQ(leptris_plan_value_string(t2), "2");
+
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+    leptris_document_free(doc);
+}
+
 TEST(PlanWalk, RawCallbackAndMixedContent) {
     LeptrisDocument doc = parse(
         "<p>intro <b>bold</b> mid"
