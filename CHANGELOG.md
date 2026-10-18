@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.368] - 2026-10-18
+
+### Fixed
+
+- leptris_element_get_document is kind-safe (leptris-ruby#487) (dom)
+
+
+
 ## [1.9.367] - 2026-10-17
 
 ### Fixed
