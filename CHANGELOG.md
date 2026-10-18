@@ -4,8 +4,23 @@
 
 ### Fixed
 
-- leptris_element_get_document is kind-safe (leptris-ruby#487) (dom)
-
+- **dom: `leptris_element_get_document` is kind-safe (#487, PR #1763).**
+  The addr-based attach face called get_document on the RAW child before
+  any kind routing. For the TEXT nodes a hydration loop appends,
+  get_document read element-form fields — the namebp fast-outs and
+  element parent offsets. A live inline text usually survived the
+  misread; a recycled or heap-backed text handed the walk a wild pointer
+  and the process died: the **Ruby 4.0 + darwin Bus error at
+  element.rb:809** in the lutaml/moxml DOCX hydration suite
+  (leptris-ruby#487) — deterministic across randomized runs, with
+  Ruby 3.3/3.4 and 4.0-ubuntu clean on identical code (GC timing, not
+  semantics). Non-element nodes now route through the per-struct
+  `owner_doc` read (the same authority adopt_for_splice's #1534 kind
+  routing uses); NULL answers for unstamped detached leaves stay part of
+  the contract. Verified on Ruby 4.0.5 darwin with the reporter's
+  harness: the uniword DOCX suite runs 385/385 plain AND under
+  RUBY_GC_STRESS (deterministic SIGSEGV before). Engine suite
+  2036/2036 with a new kind-safety contract test.
 
 
 ## [1.9.367] - 2026-10-17
