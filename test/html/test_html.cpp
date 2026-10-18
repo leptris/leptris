@@ -10,6 +10,10 @@ extern "C" {
 #include <cstring>
 #include <string>
 
+static bool h389_ieq(const char* a, const char* b) {
+    return a && b && strcmp(a, b) == 0;
+}
+
 namespace {
 
 /* Tree-shape dumps force the XML method (ext.html_method = -1,
@@ -2269,4 +2273,64 @@ TEST(HtmlParse, SetTextSurvivesSerialization) {
             << "mode " << mode << ": " << xml;
         leptris_document_free(doc);
     }
+}
+
+/* leptris#389: a comment token following ignored <html>/<body>
+ * start tags must insert at the current node (WHATWG 13.2.6.4.4
+ * in-body comment insertion) — the ignored start tags do not
+ * change where subsequent comments land, and the after-head
+ * front-peel (13.2.6.4.6) does not govern the in-body window.
+ * The structural <body> handler only stashes attributes; the
+ * body materializes at the split, and the comment must ride the
+ * rest INTO it — not peel to the html level (which orphaned it
+ * when the split short-circuited on the explicit-body walk). */
+TEST(HtmlParse, InBodyCommentAfterIgnoredStructuralStartTags) {
+    LeptrisStatus st;
+    const char* doc1 =
+        "<body><html><body><!-- c --><p>Test</p></body></html></body>";
+    LeptrisDocument d = leptris_parse_html_string(doc1, strlen(doc1), &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement body = nullptr;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             (LeptrisNodeRef)leptris_document_root(d));
+         c; c = leptris_node_next_sibling((LeptrisNodeRef)c))
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+            h389_ieq(leptris_element_name((LeptrisElement)c), "body"))
+            body = (LeptrisElement)c;
+    ASSERT_NE(body, nullptr);
+    int comments = 0, elems = 0;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             (LeptrisNodeRef)body);
+         c; c = leptris_node_next_sibling((LeptrisNodeRef)c)) {
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_COMMENT)
+            comments++;
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT)
+            elems++;
+    }
+    EXPECT_EQ(comments, 1);
+    EXPECT_EQ(elems, 1);
+    leptris_document_free(d);
+}
+
+TEST(HtmlParse, InBodyCommentBodyFirstShape) {
+    LeptrisStatus st;
+    const char* doc1 = "<body><!-- c --><p>Test</p>";
+    LeptrisDocument d = leptris_parse_html_string(doc1, strlen(doc1), &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement body = nullptr;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             (LeptrisNodeRef)leptris_document_root(d));
+         c; c = leptris_node_next_sibling((LeptrisNodeRef)c))
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT &&
+            h389_ieq(leptris_element_name((LeptrisElement)c), "body"))
+            body = (LeptrisElement)c;
+    ASSERT_NE(body, nullptr);
+    int comments = 0;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             (LeptrisNodeRef)body);
+         c; c = leptris_node_next_sibling((LeptrisNodeRef)c))
+        if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_COMMENT)
+            comments++;
+    EXPECT_EQ(comments, 1);
+    leptris_document_free(d);
 }
