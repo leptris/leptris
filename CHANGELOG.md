@@ -2,12 +2,21 @@
 
 ## [1.9.369] - 2026-10-18
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **test: falsifiable kind-safety pin for the #487 class (PR #1765).**
+  The #487 fix's original contract test passes on both sides of the fix
+  (a pool-created detached text survives the element-form misread), so
+  it could not catch a regression. `OversizedTextKindSafe` uses the
+  shape that actually crashed in the wild — HEAP-BACKED text (oversized
+  content leaves the inline-window allocation) — and asserts the
+  kind-safe contract end to end: get_document answers the text's own
+  owner document (the observable red on pre-fix source was NULL — the
+  same element-form misread that wild-pointer-walked under the
+  reporter's GC timing), and the oversized text attaches through the
+  addr face and round-trips byte-exactly. Falsifiability verified both
+  ways: RED on pre-fix source (deterministic NULL), GREEN on the
+  fixed source. Test-only.
 
 
 ## [1.9.368] - 2026-10-18
