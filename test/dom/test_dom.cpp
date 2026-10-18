@@ -3078,6 +3078,36 @@ TEST(DomAttachInstalled, ForeignMixedChainTextBeforeElement) {
  * usually survives the misread; a recycled or heap-backed text
  * hands the walk a wild pointer and the process dies. The face (and
  * get_document itself) must be kind-safe. */
+/* leptris-ruby#487, the falsifiable pin: the crashing texts in the
+ * wild were HEAP-BACKED (oversized content leaves the inline window —
+ * the pool-created text of TextChildAttachIsKindSafe survives the
+ * element-form misread, so that test alone cannot go red). An
+ * oversized text must resolve its document through its OWN owner
+ * field, attach, and round-trip — never through element-form reads. */
+TEST(DomAttachInstalled, OversizedTextKindSafe) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+
+    std::string big(8192, 'x');
+    LeptrisNodeRef text = leptris_text_node_create(d, big.c_str());
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(leptris_node_get_type(text), LEPTRIS_NODE_TYPE_TEXT);
+
+    /* kind-safe document resolution: the text's OWN owner doc */
+    EXPECT_EQ(leptris_element_get_document((LeptrisElement)text), d);
+
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  (uintptr_t)root, (uintptr_t)text, NULL),
+              LEPTRIS_OK);
+    char* out = leptris_element_serialize(root, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_EQ(std::string(out), "<r>" + big + "</r>");
+    leptris_free_string(out);
+    leptris_document_free(d);
+}
+
 TEST(DomAttachInstalled, TextChildAttachIsKindSafe) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
