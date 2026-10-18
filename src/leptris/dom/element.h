@@ -501,6 +501,12 @@ int leptris_elem_pos_lookup(const struct leptris_document* doc,
                             uint32_t* start_tag_end, uint32_t* element_end);
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem);
+
+/* #487: the KIND-SAFE document resolver for non-element nodes
+ * (text/cdata/comment/pi) — reads each struct's own owner_doc
+ * field instead of element-form views. get_document routes
+ * non-elements here; element callers keep the element path. */
+struct leptris_document* leptris_leaf_owner_doc(LeptrisNode* n);
 LeptrisMemoryPool* leptris_element_get_pool(LeptrisElement elem);
 
 /* Round 21: header.flags bit 6 — "elem->name is preceded by 8 bytes

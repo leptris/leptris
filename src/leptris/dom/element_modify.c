@@ -299,7 +299,7 @@ static int node_in_current_mut_block(struct leptris_document* doc,
  * #1320-family doc stamps: text an int32 offset, cdata/comment/pi
  * a direct pointer. Unstamped = the #540 same-doc detached-chain
  * contract (public creators stamp; hand-built chains don't). */
-static struct leptris_document* leaf_owner_doc(LeptrisNode* n) {
+struct leptris_document* leptris_leaf_owner_doc(LeptrisNode* n) {
     switch (n->type) {
         case LEPTRIS_NODE_TYPE_TEXT:
             return leptris_textnode_owner_doc((LeptrisTextNode*)n);
@@ -390,7 +390,7 @@ static LeptrisNode* adopt_for_splice(LeptrisNode* node,
             src = leptris_element_get_document(
                 (LeptrisElement)top);
         } else {
-            src = leaf_owner_doc(top);
+            src = leptris_leaf_owner_doc(top);
         }
         if (!src || src == target) return node;
         /* #1548: the source is a doomed scratch doc absorbed into
