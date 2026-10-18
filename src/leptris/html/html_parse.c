@@ -4890,6 +4890,14 @@ static void h_split_head_body(HBuilder* b, LeptrisElement html,
             int hty = leptris_node_get_type(head_end);
             if (hty == LEPTRIS_NODE_TYPE_COMMENT ||
                 hty == LEPTRIS_NODE_TYPE_PI) {
+                /* leptris#389: once a structural <body> token has
+                 * opened the in-body window, a comment is BODY
+                 * content (13.2.6.4.4 inserts at the current node)
+                 * — end the head run here so the comment leads the
+                 * rest into the body, instead of joining the head
+                 * run or the after-head deferral. */
+                if (b->body_tag_seen)
+                    break;
                 if (b->whatwg_head_set) {
                     if (past_head_end) {
                         /* After </head>: the comment is an html
@@ -5221,6 +5229,16 @@ head_end = leptris_node_get_next_sibling(head_end);
     if (b->whatwg_head_set && !b->frameset &&
         (rest || b->head_end_seen)) {
         if (b->head_end_seen) {
+            /* leptris#389: a structural <body> start tag opens the
+             * in-body window — comments after it insert at the
+             * current node (13.2.6.4.4 in-body comment insertion)
+             * and belong INSIDE the body. The after-head front
+             * peel (13.2.6.4.6) only governs the pre-body window;
+             * once body_tag_seen armed the body, leading comments
+             * of the rest stay body content. The head-commit and
+             * after-body peel below stay unconditional. */
+            int in_body_window = b->body_tag_seen;
+            if (!in_body_window) {
             /* Front peel: leading comments/PIs of the rest. Uses
              * its OWN last-marker so the ws-registered suffix
              * segment is MERGED (ws first, then comments), never
@@ -5253,6 +5271,7 @@ head_end = leptris_node_get_next_sibling(head_end);
                 else
                     suffix_first = peel_first;
                 suffix_last = peel_last;
+            }
             }
             /* A comment tokenized BEFORE </html> but after
              * </body> rides in the rest - peel the trailing run
