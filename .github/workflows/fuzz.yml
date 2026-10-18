@@ -32,6 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Utf8proc (real Unicode configuration)
+        run: sudo apt-get update -q && sudo apt-get install -y -q libutf8proc-dev
+
       - name: Configure (fuzz targets on)
         run: >-
           cmake -B fuzz-build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo
