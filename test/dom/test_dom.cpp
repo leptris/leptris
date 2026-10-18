@@ -3071,6 +3071,42 @@ TEST(DomAttachInstalled, ForeignMixedChainTextBeforeElement) {
     leptris_document_free(target);
 }
 
+/* leptris-ruby#487: the addr-based attach face ran
+ * leptris_element_get_document on the RAW child before any kind
+ * routing — for a TEXT child that reads element-form fields
+ * (namebp fast-outs, element parent offsets). A live inline text
+ * usually survives the misread; a recycled or heap-backed text
+ * hands the walk a wild pointer and the process dies. The face (and
+ * get_document itself) must be kind-safe. */
+TEST(DomAttachInstalled, TextChildAttachIsKindSafe) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_document_root(d);
+
+    /* detached text via the public face — a non-element child */
+    LeptrisNodeRef text =
+        leptris_text_node_create(d, "hello");
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(leptris_node_get_type(text), LEPTRIS_NODE_TYPE_TEXT);
+
+    /* get_document on the text must not crash and must not
+     * manufacture a bogus document pointer */
+    LeptrisDocument tdoc = leptris_element_get_document(
+        (LeptrisElement)text);
+    EXPECT_TRUE(tdoc == d || tdoc == nullptr);
+
+    /* the attach face with the text child must succeed */
+    EXPECT_EQ(leptris_element_add_child_addr_installed(
+                  (uintptr_t)root, (uintptr_t)text, NULL),
+              LEPTRIS_OK);
+    char* out = leptris_element_serialize(root, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<r>hello</r>");
+    leptris_free_string(out);
+    leptris_document_free(d);
+}
+
 TEST(DomAttachInstalled, SameDocumentReturnsArgument) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d = leptris_parse_string("<r/>", 4, &st);

@@ -400,6 +400,14 @@ LeptrisElement leptris_root_doc_memo_root_for_tests(void) {
 
 struct leptris_document* leptris_element_get_document(LeptrisElement elem) {
     if (!elem) return NULL;
+    /* #487: a non-element node must never read element-form fields
+     * (the namebp fast-outs and element parent offsets below) — a
+     * recycled or heap-backed text handed the walk a wild pointer
+     * and the process died. Route through the kind-safe owner
+     * read; NULL answers are part of the contract (unstamped
+     * detached leaves). */
+    if (((LeptrisNodeRef)elem)->type != LEPTRIS_NODE_TYPE_ELEMENT)
+        return leptris_leaf_owner_doc((LeptrisNode*)elem);
     /* Lane 18 R3: an UNATTACHED namebp-carrying element roots
      * itself in the name slot (#1189) — that slot is its
      * authoritative document and must never see the recyclable-
