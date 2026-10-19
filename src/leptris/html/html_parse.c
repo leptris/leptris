@@ -8162,14 +8162,16 @@ static LeptrisDocument html_parse_shared(
                 cq++;
             }
             p = (cq < end) ? cq + 1 : end;
-            /* #1771: the raw scan consumed to EOF without the close
-             * tag — html5lib's named variant for the strict
-             * containers, the generic one for the RCDATA pair
-             * (mapping mined from the corpus: script/style/xmp/
-             * noframes/noembed/iframe -> named; textarea/title ->
-             * generic; plaintext has no close form and never
-             * reports). Judged here, before the element pops. */
-            if (b.whatwg && rs >= end &&
+            /* #1771: the element never closed at EOF — either the
+             * raw scan consumed to EOF without a close tag, or the
+             * close tag itself is unterminated (</script foo= —
+             * tests16:11-60). html5lib's named variant for the
+             * strict containers, the generic one for the RCDATA
+             * pair (mapping mined from the corpus: script/style/
+             * xmp/noframes/noembed/iframe -> named; textarea/
+             * title -> generic; plaintext has no close form and
+             * never reports). Judged here, before the pop. */
+            if (b.whatwg && cq >= end &&
                 strcmp(name, "plaintext") != 0) {
                 int named = strcmp(name, "textarea") != 0 &&
                             strcmp(name, "title") != 0;
