@@ -22,6 +22,53 @@ LeptrisDocument ParseWith(const char* xml) {
     return doc;
 }
 
+/* leptris-ruby#502 parity pin: a document-context relative path
+ * selects the DOCUMENT's children (XPath 1.0 §2) — libxml2/Nokogiri
+ * measured identical: doc.xpath("bibdata/status/stage") with root
+ * <metanorma> returns [] (bibdata is a child of the ROOT ELEMENT,
+ * one level down); doc.root.xpath(...) finds it. The classic
+ * "root-relative" behavior was the OLD moxml adapter's substitution,
+ * not Nokogiri semantics. */
+TEST(XPathDocContext, RelativePathFromDocumentContext) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* xml = "<metanorma><bibdata><status>"
+                      "<stage>published</stage></status></bibdata>"
+                      "</metanorma>";
+    LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+    ASSERT_NE(d, nullptr);
+
+    /* Nokogiri parity: a relative step naming a NON-child of the
+     * document returns empty */
+    LeptrisXPathResult r =
+        leptris_xpath_eval(d, NULL, "bibdata/status/stage");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 0u);
+    leptris_xpath_result_free(r);
+
+    /* the root ELEMENT is a child of the document */
+    LeptrisXPathResult rn =
+        leptris_xpath_eval(d, NULL, "metanorma/bibdata/status/stage");
+    ASSERT_NE(rn, nullptr);
+    ASSERT_EQ(leptris_xpath_result_count(rn), 1u);
+    LeptrisElement e = leptris_xpath_result_get(rn, 0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "stage");
+    EXPECT_STREQ(leptris_element_text(e), "published");
+    leptris_xpath_result_free(rn);
+
+    /* absolute shapes unchanged */
+    LeptrisXPathResult a = leptris_xpath_eval(d, NULL, "/bibdata");
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(a), 0u);
+    leptris_xpath_result_free(a);
+    LeptrisXPathResult am =
+        leptris_xpath_eval(d, NULL, "/metanorma/bibdata/status/stage");
+    ASSERT_NE(am, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(am), 1u);
+    leptris_xpath_result_free(am);
+    leptris_document_free(d);
+}
+
 TEST(XPathAxes, DescendantOrSelfFindsAll) {
     LeptrisDocument doc = ParseWith(kBasic);
     ASSERT_NE(doc, nullptr);
