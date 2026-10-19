@@ -6593,7 +6593,21 @@ static LeptrisDocument html_parse_shared(
                                            (h_ieq_raw(on, "ul") ||
                                             h_ieq_raw(on, "ol")));
                             }
-                            if (fenced) break;
+                            if (fenced) {
+                                /* #1771: html5lib's walk reports
+                                 * unexpected-end-tag when a special
+                                 * element stops the search before
+                                 * the target is found (endTagOther);
+                                 * the list-scope fences map to its
+                                 * endTagListItem not-in-scope
+                                 * error. */
+                                h_diag(&b, "unexpected-end-tag",
+                                       (size_t)(p - b.input_base),
+                                       "</%s> ignored: a special "
+                                       "element fences the target",
+                                       lname);
+                                break;
+                            }
                         }
                         if (on && tag_match) {
                             /* Scope guard (WHATWG): a foreign
