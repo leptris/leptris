@@ -4,7 +4,17 @@
 
 ### Fixed
 
-- detached text mutations resolve their document (moxml#401) (dom)
+- **dom: detached text mutations resolve their document
+  (moxml#401, PR #1785).** `Text#content=` on a detached text node
+  — subtree removed, node unlinked, or document-level stray text —
+  failed with `Invalid argument`. Three composed gaps: the
+  document resolver's parent walk stopped at a detached ancestor
+  instead of falling through to the node's #1320 owner stamp;
+  parse-carved text nodes were never stamped at all (only the
+  public creator stamped); and lazily-promoted documents had no
+  pool at mutation time. All parsed text stamps at carve now; a
+  detached mutation promotes the document. Red-first specs
+  (`DomTextMutate.*`); 100% of 2066 ctest.
 
 
 
