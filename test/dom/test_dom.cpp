@@ -3386,3 +3386,47 @@ TEST(DomBasics, AttributesSnapshotEmptyAndNullContracts) {
 
     leptris_document_free(doc);
 }
+
+/* moxml#401: Text#content= on a DETACHED text node (its subtree
+ * removed, or the node itself unlinked) failed with INVALID_ARG —
+ * the resolver's parent walk stopped at the detached ancestor and
+ * the #1320 owner stamp was only set by the public creator, never
+ * by the parse paths. Detached text mutations must reach the
+ * owning document's pool. */
+TEST(DomTextMutate, DetachedSubtreeTextSetContent) {
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><a>hello world</a></r>", 25, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef root = (LeptrisNodeRef)leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement a = (LeptrisElement)leptris_node_first_child(root);
+    ASSERT_NE(a, nullptr);
+    LeptrisNodeRef t = leptris_node_first_child((LeptrisNodeRef)a);
+    ASSERT_EQ(leptris_node_get_type(t), LEPTRIS_NODE_TYPE_TEXT);
+
+    /* detach the element subtree carrying the text */
+    ASSERT_EQ(leptris_element_remove_child(
+                  (LeptrisElement)root, a),
+              LEPTRIS_OK);
+    EXPECT_EQ(leptris_text_node_set_content(t, "changed"), LEPTRIS_OK);
+    const char* got = leptris_text_node_get_content(t);
+    EXPECT_STREQ(got, "changed");
+    leptris_document_free(doc);
+}
+
+TEST(DomTextMutate, DetachedTextNodeSetContent) {
+    LeptrisStatus st;
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><a>hello world</a></r>", 25, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisNodeRef root = (LeptrisNodeRef)leptris_document_root(doc);
+    LeptrisElement a = (LeptrisElement)leptris_node_first_child(root);
+    LeptrisNodeRef t = leptris_node_first_child((LeptrisNodeRef)a);
+    /* unlink JUST the text from its parent */
+    ASSERT_EQ(leptris_element_remove_child(
+                  a, (LeptrisElement)t),
+              LEPTRIS_OK);
+    EXPECT_EQ(leptris_text_node_set_content(t, "solo"), LEPTRIS_OK);
+    leptris_document_free(doc);
+}

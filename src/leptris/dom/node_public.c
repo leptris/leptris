@@ -294,7 +294,13 @@ static LeptrisDocument node_public_document(LeptrisNodeRef node) {
         return leptris_element_get_document((LeptrisElement)node);
     }
     LeptrisElement parent = leptris_node_parent(node);
-    if (parent) return leptris_element_get_document(parent);
+    if (parent) {
+        /* moxml#401: a DETACHED ancestor resolves to nothing — fall
+         * through to the node's own #1320 stamp instead of
+         * returning NULL from the parent's failed walk. */
+        LeptrisDocument pd = leptris_element_get_document(parent);
+        if (pd) return pd;
+    }
     /* Issue #519: detached non-element nodes carry their owning
      * document — mutations must work before any attach. Text was the
      * one kind #519 skipped (its pool backref covered it until #1285
@@ -413,7 +419,12 @@ LEPTRIS_API LeptrisStatus leptris_text_node_set_content(LeptrisNodeRef node,
     /* #1285 slice 4: the pool field is gone — allocate the
      * NUL-terminated copy from the owning document's pool. */
     LeptrisDocument doc = node_public_document(node);
-    if (!doc || !doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
+    if (!doc) return LEPTRIS_ERROR_INVALID_ARG;
+    /* TODO 139: lazily-promoted documents carry no pool until the
+     * promote runs — a detached mutation is the promote trigger
+     * (moxml#401). */
+    leptris_document_ensure_promoted(doc);
+    if (!doc->pool) return LEPTRIS_ERROR_INVALID_ARG;
     char* copy = node_public_pool_strdup(doc->pool, content, len);
     if (!copy) return LEPTRIS_ERROR_MEMORY;
     leptris_textnode_set_content_ptr_doc(t, copy, len, doc);
