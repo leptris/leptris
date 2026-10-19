@@ -2,12 +2,27 @@
 
 ## [1.9.373] - 2026-10-19
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
+
+- **html: the #1771 verdict-parity gate (PRs #1778, #1779, #1780,
+  #1782, #1783).** The HTML5 corpus lane now gates on the §13.2.5
+  parse-error stream, not just tree shape: html5lib's own #errors
+  verdict vs `LEPTRIS_PARSE_COLLECT_HTML_ERRORS` per case. New
+  emission sites — the doctype-less initial insertion-mode family
+  (chars/start-tag/end-tag/EOF), EOF with open elements, the
+  raw-text EOF variants (named vs generic per the corpus's own
+  mapping), frameset-after-body-content, and the fenced
+  any-other-end-tag walk. Verdict parity 190 → 1394 of 1555 (floor
+  pinned); code-set overlap 975/1231, 417 exact; trees
+  byte-identical throughout (1555/1555).
 
 ### Changed
 
-- (describe changes here)
+- **docs: the mission and the mission plan (#1776, #1777).** The
+  two-sided bar — conformance suites as the gate, benchmark
+  supremacy as the goal — now lives in CLAUDE.md, the README, and
+  `docs/MISSION-PLAN.md` (four falsifiable gates, phase
+  sequencing, invariants).
 
 
 ## [1.9.372] - 2026-10-19
