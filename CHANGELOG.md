@@ -2,12 +2,14 @@
 
 ## [1.9.372] - 2026-10-19
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
-
 ### Changed
 
-- (describe changes here)
+- **test: document-context XPath parity pin (leptris-ruby#502).**
+  Test-only release: pins the `document()`/context-node parity
+  contract with a side-by-side Nokogiri regression spec in
+  `test/xpath/test_xpath.cpp` — expressions evaluated with a NULL
+  context resolve against the document node, matching Nokogiri.
+  No library-code changes; runtime rides re-pin to this engine.
 
 
 ## [1.9.371] - 2026-10-19
