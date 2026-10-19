@@ -17,6 +17,28 @@ canonicalization (C14N).  It is designed for low-latency,
 memory-efficient workloads where predictable performance and safe
 memory handling matter.
 
+== Mission
+
+Replace the libxml2 era with a clean-room, dependency-free XML stack
+that is simultaneously more conformant and faster than the incumbents,
+delivered natively to every language it reaches.
+
+The bar is two-sided:
+
+* **Conformance suites are the gate.** W3C XPath (438/438), libxslt
+  (205/205), QT3, the WHATWG/html5lib corpus — a feature isn't done
+  until the suite says so.
+* **Benchmark supremacy is the goal.** No published scoreboard row —
+  parse, serialize, XPath, walk+read, build — may trail nokogiri,
+  libxml2, or pugixml.
+
+One engine, four runtime bindings —
+https://github.com/leptris/leptris-ruby[leptris-ruby]
+(Nokogiri-compatible), https://github.com/leptris/leptris-py[leptris-py],
+https://github.com/leptris/leptris-ts[leptris-ts] (WebAssembly), and
+https://github.com/leptris/leptris-rs[leptris-rs] — same engine, same
+numbers everywhere.
+
 == Highlights
 
 * **XML 1.0 parsing** with UTF-8 validation and optional encoding
