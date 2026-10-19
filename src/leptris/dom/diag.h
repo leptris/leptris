@@ -27,6 +27,10 @@ typedef struct LeptrisDiag {
                                    * validated document is freed — musl
                                    * unmaps the region and the report
                                    * pass segfaulted reading it. */
+    /* #1771: the machine-readable CODE — the §13.2.5 parse-error
+     * token name for HTML lints ("unexpected-tag-in-body"), NULL
+     * when the diag has no code. Captured at emit (strdup'd). */
+    char* code;
 
     int line;
     int col_start;                /* Jing: element/attr errors */
@@ -50,6 +54,18 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
                                const char* fmt, ...)
 #if defined(__GNUC__)
     __attribute__((format(printf, 6, 7)))
+#endif
+    ;
+
+/* #1771: the code-carrying variant — same record, plus the
+ * machine-readable code string (strdup'd into the record). Line/col
+ * come from the caller (the tokenizer's own position); the record's
+ * node-derived position path does not apply. */
+LeptrisDiag* leptris_diag_emit_code(LeptrisDiag** list, int* count, int* cap,
+                                    LeptrisDiagKind kind, const char* code,
+                                    int line, int col, const char* fmt, ...)
+#if defined(__GNUC__)
+    __attribute__((format(printf, 8, 9)))
 #endif
     ;
 

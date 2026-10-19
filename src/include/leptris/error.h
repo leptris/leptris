@@ -152,6 +152,28 @@ LEPTRIS_API int leptris_document_parse_diag(LeptrisDocument doc,
                                             char* message,
                                             size_t message_cap);
 
+/**
+ * Read one parse diagnostic's machine-readable code and position
+ * (leptris-ruby#1771: the §13.2.5 parse-error token name for HTML
+ * lints; NULL code for diags without one).
+ *
+ * @param doc Document handle
+ * @param index Diagnostic index (< leptris_document_parse_diag_count)
+ * @param code Out: NUL-terminated code buffer (may be NULL)
+ * @param code_cap Capacity of code (ignored when code NULL)
+ * @param line Out: 1-based line (may be NULL; 0 when unknown)
+ * @param col Out: 1-based column (may be NULL; 0 when unknown)
+ * @return 1 on success; 0 for NULL doc or out-of-range index
+ *
+ * Memory: Code is copied into the caller's buffer; diagnostics
+ *         are owned by the document until leptris_document_free.
+ */
+LEPTRIS_API int leptris_document_parse_diag_code(LeptrisDocument doc,
+                                                 size_t index,
+                                                 char* code,
+                                                 size_t code_cap,
+                                                 int* line, int* col);
+
 #ifdef __cplusplus
 }
 #endif

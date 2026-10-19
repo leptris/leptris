@@ -17,8 +17,10 @@
 #include "../dom/comment.h"
 #include "../dom/doctype.h"
 #include "../dom/root_doc_map.h"
+#include "../dom/diag.h"
 #include "../dom/cdata.h"
 #include "../dom/pi.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -2687,6 +2689,15 @@ typedef struct {
     /* #659 master mode flag (the per-slice flags below derive from
      * the same html_parse_shared arg). */
     int whatwg;
+    /* #1771: the parse-lint channel — record the §13.2.5
+     * parse-error token stream when the option bit is set. The
+     * input base + length turn token offsets into 1-based
+     * line/column at emit (amortized: last-line memo). */
+    int collect_errors;
+    const char* input_base;
+    size_t input_len;
+    size_t err_line_memo_off;
+    int err_line_memo;
     /* #659 frameset mode (WHATWG): a <frameset> before any body
      * content REPLACES the body — the commit synthesis emits
      * html > [head, frameset]. */
@@ -2877,6 +2888,8 @@ static int h_in_head_noscript(HBuilder* b) {
 /* #659: stash the attributes of a dropped structural tag —
  * pool-owned flat name/value pairs, applied to the synthesized
  * element at commit. */
+static void h_diag(HBuilder* b, const char* code, size_t off,
+                   const char* fmt, ...);
 static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
                           char** attrs, int* n) {
     while (q < end && *q != '>' && *n + 1 < 32) {
@@ -2927,7 +2940,12 @@ static void h_stash_attrs(HBuilder* b, const char* q, const char* end,
             int dup = 0;
             for (int j = 0; j + 1 < *n; j += 2)
                 if (strcmp(attrs[j], aname) == 0) { dup = 1; break; }
-            if (!dup) {
+            if (dup) {
+                h_diag(b, "duplicate-attribute",
+                       (size_t)(as - b->input_base),
+                       "duplicate attribute '%s' ignored; first value "
+                       "wins", aname);
+            } else {
                 attrs[(*n)++] = aname;
                 attrs[(*n)++] = aval;
             }
@@ -5532,8 +5550,40 @@ static LeptrisTextNode* h_text_node(HBuilder* b, const char* s,
     return leptris_text_create(dec, dlen, b->pool, b->doc);
 }
 
+/* #1771: record one §13.2.5 parse-error token. Code is the spec
+ * token name; `off` is the byte offset into the owned input.
+ * Line/column are computed with a forward-only line memo (lint
+ * volumes are ordered, so the walk amortizes). No-op unless the
+ * option bit is set — the tree construction stays exactly as
+ * fast without it. */
+static void h_diag(HBuilder* b, const char* code, size_t off,
+                   const char* fmt, ...) __attribute__((format(printf, 4, 5)));
+static void h_diag(HBuilder* b, const char* code, size_t off,
+                   const char* fmt, ...) {
+    if (!b->collect_errors || !b->doc) return;
+    if (off > b->input_len) off = b->input_len;
+    int line = b->err_line_memo, col = 1;
+    size_t from = b->err_line_memo_off;
+    if (off < from) { from = 0; line = 1; }
+    for (size_t i = from; i < off; i++) {
+        if (b->input_base[i] == '\n') { line++; col = 1; }
+        else col++;
+    }
+    b->err_line_memo = line;
+    b->err_line_memo_off = off;
+    char detail[192];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(detail, sizeof(detail), fmt, ap);
+    va_end(ap);
+    leptris_diag_emit_code(&b->doc->parse_diags, &b->doc->parse_diag_count,
+                           &b->doc->parse_diag_cap, LEPTRIS_DIAG_RECOVER,
+                           code, line, col, "%s", detail);
+}
+
 static LeptrisDocument html_parse_shared(
-    const char* buf, size_t len, LeptrisStatus* status, int whatwg) {
+    const char* buf, size_t len, LeptrisStatus* status, int whatwg,
+    LeptrisParseFlags flags) {
     if (status) *status = LEPTRIS_OK;
     if (!buf) {
         if (status) *status = LEPTRIS_ERROR_NULL_ARG;
@@ -5561,6 +5611,8 @@ static LeptrisDocument html_parse_shared(
     b.doc = doc;
     b.pool = doc->pool;
     b.whatwg = whatwg;
+    b.collect_errors =
+        (flags & LEPTRIS_PARSE_COLLECT_HTML_ERRORS) ? 1 : 0;
     b.whatwg_head_set = whatwg;
     b.whatwg_foster = whatwg;
     b.whatwg_adopt = whatwg;
@@ -5576,6 +5628,10 @@ static LeptrisDocument html_parse_shared(
     }
     memcpy(owned, buf, len);
     owned[len] = '\0';
+    /* #1771: the lint channel's offset base — after `owned` exists. */
+    b.input_base = owned;
+    b.input_len = len;
+    b.err_line_memo = 1;
     b.owned = owned;
     h_id_luts_init();
 
@@ -5724,6 +5780,10 @@ static LeptrisDocument html_parse_shared(
                 }
                 if (dt_kw && (doc->doctype || b.left_initial ||
                               h_in_head_noscript(&b))) {
+                    h_diag(&b, "unexpected-doctype",
+                           (size_t)(p - b.input_base),
+                           "DOCTYPE token outside the initial mode "
+                           "is ignored");
                     while (q < end && *q != '>') q++;
                     p = (q < end) ? q + 1 : end;
                     text = p;
@@ -5946,6 +6006,10 @@ static LeptrisDocument html_parse_shared(
                     }
                     const char* q2 = ns2;
                     while (q2 < end && *q2 != '>') q2++;
+                    h_diag(&b, "unexpected-character-in-tag",
+                           (size_t)(ns2 - b.input_base),
+                           "malformed tag construct became a bogus "
+                           "comment");
                     h_bogus_comment(&b, ns2, (size_t)(q2 - ns2));
                     p = (q2 < end) ? q2 + 1 : end;
                     text = p;
@@ -5955,6 +6019,8 @@ static LeptrisDocument html_parse_shared(
             /* #659 eof-in-tag: an unterminated END tag at EOF is
              * dropped too (same 13.2.5.44 rule). */
             if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
+                h_diag(&b, "eof-in-tag", (size_t)(p - b.input_base),
+                       "end tag at EOF is dropped");
                 if (text < p) {
                     LeptrisTextNode* t = h_text_node(&b, text, p);
                     if (t) h_append(&b, (LeptrisNodeRef)t);
@@ -6760,6 +6826,9 @@ static LeptrisDocument html_parse_shared(
          * a parse error — the tag is dropped, pending text lands,
          * parsing ends (webkit01:4: '<di' -> empty body). */
         if (b.whatwg && !memchr(p, '>', (size_t)(end - p))) {
+            /* #1771: eof-in-tag (13.2.5.44). */
+            h_diag(&b, "eof-in-tag", (size_t)(p - b.input_base),
+                   "start tag at EOF is dropped");
             if (text < p) {
                 LeptrisTextNode* t = h_text_node(&b, text, p);
                 if (t) h_append(&b, (LeptrisNodeRef)t);
@@ -6800,6 +6869,10 @@ static LeptrisDocument html_parse_shared(
                 scan++;
             }
             if (!closed) {
+                /* #1771: eof-in-tag — the unterminated START tag
+                 * is dropped (13.2.5.44, webkit02:5). */
+                h_diag(&b, "eof-in-tag", (size_t)(p - b.input_base),
+                       "start tag at EOF is dropped");
                 if (text < p) {
                     LeptrisTextNode* t =
                         h_text_node(&b, text, p);
@@ -7861,6 +7934,14 @@ static LeptrisDocument html_parse_shared(
                     vs = scan;
                     while (scan < end && *scan != quote) scan++;
                     vlen = (size_t)(scan - vs);
+                    if (scan >= end) {
+                        /* #1771: the quote never closed — 13.2.5
+                         * eof-in-tag. */
+                        h_diag(&b, "eof-in-tag",
+                               (size_t)(as - b.input_base),
+                               "attribute value at EOF is "
+                               "unterminated");
+                    }
                     if (scan < end) scan++;
                 } else {
                     vs = scan;
@@ -7883,6 +7964,13 @@ static LeptrisDocument html_parse_shared(
                 aval = (char*)"";
             }
             if (aval) {
+                /* #1771: a same-named attribute is ignored (first
+                 * value wins, 13.2.5.3 duplicate-attribute). */
+                if (leptris_element_attribute(e, aname))
+                    h_diag(&b, "duplicate-attribute",
+                           (size_t)(as - b.input_base),
+                           "duplicate attribute '%s' ignored; first "
+                           "value wins", aname);
                 /* #659: foreign attribute-name adjustment
                  * (viewBox, definitionURL, ...). */
                 const char* aadj =
@@ -8300,7 +8388,7 @@ LEPTRIS_API LeptrisDocument leptris_parse_html_string(
     /* #659: THE WHATWG ENGINE — the full "in head" set lifts into
      * the implied head (script/style/noscript/template/...). The
      * html5lib corpus is this entry's conformance meter. */
-    return html_parse_shared(buf, len, status, 1);
+    return html_parse_shared(buf, len, status, 1, LEPTRIS_PARSE_DEFAULT);
 }
 
 LEPTRIS_API LeptrisDocument leptris_parse_html4_string(
@@ -8308,5 +8396,13 @@ LEPTRIS_API LeptrisDocument leptris_parse_html4_string(
     /* #659: libxml2/Nokogiri compatibility — leading script/style
      * stay in body (title/meta/link/base still lift). The
      * committed Nokogiri reference trees measure this entry. */
-    return html_parse_shared(buf, len, status, 0);
+    return html_parse_shared(buf, len, status, 0, LEPTRIS_PARSE_DEFAULT);
+}
+
+LEPTRIS_API LeptrisDocument leptris_parse_html_string_flags(
+    const char* buf, size_t len, LeptrisParseFlags flags,
+    LeptrisStatus* status) {
+    /* #1771: the WHATWG engine with per-call options — the parse-
+     * lint bit rides here. */
+    return html_parse_shared(buf, len, status, 1, flags);
 }
