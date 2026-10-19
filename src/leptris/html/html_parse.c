@@ -5556,8 +5556,11 @@ static LeptrisTextNode* h_text_node(HBuilder* b, const char* s,
  * volumes are ordered, so the walk amortizes). No-op unless the
  * option bit is set — the tree construction stays exactly as
  * fast without it. */
+#if defined(__GNUC__)
 static void h_diag(HBuilder* b, const char* code, size_t off,
-                   const char* fmt, ...) __attribute__((format(printf, 4, 5)));
+                   const char* fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+#endif
 static void h_diag(HBuilder* b, const char* code, size_t off,
                    const char* fmt, ...) {
     if (!b->collect_errors || !b->doc) return;
