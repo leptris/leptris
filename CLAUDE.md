@@ -6,6 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **libleptris** — pure C99 XML 1.0 parser, XPath 1.0 engine (W3C-conformant), and SAX parser. Ships as a static/shared library plus a `leptris` CLI. Zero required runtime deps; `utf8proc` (Unicode) and `iconv` (encoding conversion) are optional.
 
+**Mission.** Replace the libxml2 era with a clean-room, dependency-free XML stack that is simultaneously more conformant and faster than the incumbents, delivered natively to every language it reaches. The bar is two-sided:
+
+- **Conformance suites are the gate.** W3C XPath (438/438), libxslt (205/205), QT3, the WHATWG/html5lib corpus — a feature isn't done until the suite says so.
+- **Benchmark supremacy is the goal.** No published scoreboard row — parse, serialize, XPath, walk+read, build — may trail nokogiri, libxml2, or pugixml.
+
+One engine, four runtime bindings — leptris-ruby (Nokogiri-compatible), leptris-py, leptris-ts (WebAssembly), leptris-rs — same engine, same numbers everywhere.
+
 ## Build & Test
 
 CMake-based (CMake ≥ 3.20). The default build is a static lib + CLI + tests:
