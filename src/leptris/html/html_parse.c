@@ -3139,6 +3139,8 @@ static uint8_t h_id_p, h_id_li, h_id_dd, h_id_dt, h_id_ol, h_id_ul,
     h_id_frameset, h_id_button, h_id_applet, h_id_caption,
     h_id_colgroup, h_id_marquee, h_id_object, h_id_html, h_id_rb,
     h_id_rt, h_id_rp, h_id_rtc, h_id_listing, h_id_plaintext;
+static uint8_t h_id_textarea, h_id_title, h_id_xmp, h_id_iframe,
+    h_id_noembed, h_id_noframes;
 static uint8_t h_heading_lut[256], h_ruby_lut[256], h_p_fence_lut[256],
     h_li_fence_lut[256], h_dd_fence_lut[256];
 /* #1218 slice 6: the per-name strcmp chains the sampler pinned at
@@ -3186,6 +3188,12 @@ static void h_id_luts_init(void) {
     h_id_rtc = h_tag_id("rtc");
     h_id_listing = h_tag_id("listing");
     h_id_plaintext = h_tag_id("plaintext");
+    h_id_textarea = h_tag_id("textarea");
+    h_id_title = h_tag_id("title");
+    h_id_xmp = h_tag_id("xmp");
+    h_id_iframe = h_tag_id("iframe");
+    h_id_noembed = h_tag_id("noembed");
+    h_id_noframes = h_tag_id("noframes");
     h_id_head = h_tag_id("head");
     h_id_body = h_tag_id("body");
     h_id_noscript = h_tag_id("noscript");
@@ -8154,6 +8162,25 @@ static LeptrisDocument html_parse_shared(
                 cq++;
             }
             p = (cq < end) ? cq + 1 : end;
+            /* #1771: the raw scan consumed to EOF without the close
+             * tag — html5lib's named variant for the strict
+             * containers, the generic one for the RCDATA pair
+             * (mapping mined from the corpus: script/style/xmp/
+             * noframes/noembed/iframe -> named; textarea/title ->
+             * generic; plaintext has no close form and never
+             * reports). Judged here, before the element pops. */
+            if (b.whatwg && rs >= end &&
+                strcmp(name, "plaintext") != 0) {
+                int named = strcmp(name, "textarea") != 0 &&
+                            strcmp(name, "title") != 0;
+                h_diag(&b,
+                       named ? "expected-named-closing-tag-but-got-eof"
+                             : "expected-closing-tag-but-got-eof",
+                       (size_t)(end - b.input_base),
+                       "raw-text element <%s> left open at end of "
+                       "input",
+                       name);
+            }
             b.depth--;   /* the raw element is complete */
             text = p;
             continue;
@@ -8271,11 +8298,27 @@ done:
     /* #1771: elements still open at EOF are
      * expected-closing-tag-but-got-eof (html5lib's verdict; the
      * implied html shell does not count). Judged BEFORE the
-     * wrapper synthesis, which tears the open stack down. */
-    if (b.whatwg && b.depth > 0 &&
-        !(b.depth == 1 && b.open_id[0] == h_id_html))
-        h_diag(&b, "expected-closing-tag-but-got-eof", b.input_len,
-               "elements left open at end of input");
+     * wrapper synthesis, which tears the open stack down. Our
+     * stack carries no implied html/body, so the html5lib
+     * top-of-stack rule maps to: any real element open, gated on
+     * </body>/</html> never having been seen — after-body EOF is
+     * clean whatever remains (tests1:34). A raw-text container
+     * got its own variant at the raw branch already (that branch
+     * pops the element, so the top here is whatever wraps it). */
+    if (b.whatwg && b.depth > 0) {
+        uint8_t top = b.open_id[b.depth - 1];
+        if (top != h_id_html && top != h_id_head &&
+            top != h_id_body)
+            h_diag(&b,
+                   (top == h_id_script || top == h_id_style ||
+                    top == h_id_listing || top == h_id_plaintext ||
+                    top == h_id_textarea || top == h_id_title ||
+                    top == h_id_xmp || top == h_id_iframe ||
+                    top == h_id_noembed || top == h_id_noframes)
+                       ? "expected-named-closing-tag-but-got-eof"
+                       : "expected-closing-tag-but-got-eof",
+                   b.input_len, "elements left open at end of input");
+    }
     /* Nokogiri document shape (#659): with no explicit <html>,
      * synthesize <html><head></head><body>content</body></html> —
      * the document model is single-rooted, and libxml2's
