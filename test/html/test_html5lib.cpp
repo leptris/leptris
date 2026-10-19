@@ -21,6 +21,8 @@
 #include <gtest/gtest.h>
 extern "C" {
 #include "leptris.h"
+#include "leptris/html.h"
+#include "leptris/error.h"
 /* Internal (non-exported) accessor needed for the ns comparison;
  * the public surface exposes attribute/namespace-node URIs only. */
 const char* leptris_element_get_namespace_uri(LeptrisElement elem);
@@ -50,6 +52,10 @@ struct XCase {
     bool skip = false;     /* fragment pairs / script-on */
     std::string skip_why;
     XNode doc;             /* synthesized document level */
+    /* the #errors section, verbatim "(line,col): code" entries —
+     * the html5lib suite's own parse-error verdict (leptris#1771
+     * verdict-parity gate) */
+    std::vector<std::string> errors;
     XCase() { doc.kind = XNode::DOC; }
 };
 
@@ -327,7 +333,11 @@ std::vector<XCase> ScanFile(const std::string& path, const std::string& fname,
                 } else if (l.compare(0, 7, "#errors") == 0) {
                     i++;
                     while (i < lines.size() &&
-                           !(lines[i].size() && lines[i][0] == '#')) i++;
+                           !(lines[i].size() && lines[i][0] == '#')) {
+                        if (!lines[i].empty())
+                            c.errors.push_back(lines[i]);
+                        i++;
+                    }
                 } else if (l.compare(0, 18, "#document-fragment") == 0) {
                     c.skip = true;
                     c.skip_why = "fragment mode";
@@ -828,4 +838,148 @@ TEST(Html5LibCorpus, TreeConstruction) {
         /* Parity floor — the true #659 metric; only raises. */
         EXPECT_GE(ppassed, (size_t)784);
     }
+}
+
+/* ---- #1771 VERDICT PARITY (leptris#1771) ----
+ *
+ * The tree gate proves WHAT we build; this gate proves we JUDGE the
+ * same inputs the same way. The corpus's #errors section is
+ * html5lib's own parse-error verdict for every case; ours is the
+ * §13.2.5 token stream recorded through
+ * LEPTRIS_PARSE_COLLECT_HTML_ERRORS (leptris_parse_html_string_flags).
+ * The gate is VERDICT parity — did we error where they errored —
+ * per case; the code sets are compared too and dumped to the
+ * red-list for the tail. Positions are not compared (offset
+ * conventions differ legitimately). */
+TEST(Html5LibCorpus, ErrorVerdictParity) {
+    const char* srcdir = getenv("HTML5LIB_SRC");
+    std::string dir = srcdir && *srcdir
+        ? srcdir
+        : LEPTRIS_HTML5LIB_DIR;
+    std::vector<std::string> files(kHtml5libDatFiles,
+                                   kHtml5libDatFiles +
+                                       sizeof(kHtml5libDatFiles) /
+                                           sizeof(kHtml5libDatFiles[0]));
+    size_t total = 0, parity = 0, skipped = 0, vfail = 0;
+    size_t code_both = 0, code_overlap = 0, code_equal = 0;
+    std::vector<std::string> failures;
+    std::string err;
+    for (const std::string& fn : files) {
+        std::vector<XCase> cs = ScanFile(dir + "/" + fn, fn, &err, 0, 1);
+        if (!err.empty() && cs.empty()) {
+            ADD_FAILURE() << fn << ": " << err;
+            continue;
+        }
+        for (auto& c : cs) {
+            total++;
+            if (c.skip) { skipped++; continue; }
+            LeptrisStatus st = LEPTRIS_OK;
+            LeptrisDocument d = leptris_parse_html_string_flags(
+                c.data.c_str(), c.data.size(),
+                LEPTRIS_PARSE_COLLECT_HTML_ERRORS, &st);
+            if (!d) {
+                vfail++;
+                failures.push_back(c.id + ": parse failed");
+                continue;
+            }
+            size_t n = leptris_document_parse_diag_count(d);
+            bool ours_err = n > 0;
+            bool want_err = !c.errors.empty();
+            std::string ours_codes, want_codes;
+            size_t shown = 0;
+            for (size_t i = 0; i < n && shown < 6; i++) {
+                char code[64] = {0};
+                if (leptris_document_parse_diag_code(d, i, code,
+                                                     sizeof(code),
+                                                     nullptr, nullptr) &&
+                    code[0]) {
+                    if (shown++) ours_codes += ",";
+                    ours_codes += code;
+                }
+            }
+            for (size_t i = 0; i < c.errors.size(); i++) {
+                const std::string& e = c.errors[i];
+                /* corpus formats: "(l,c): code", "(l,c) code",
+                 * "(l:c) code" — strip the "(...)" position. */
+                std::string code = e;
+                if (e.size() > 1 && e[0] == '(') {
+                    size_t close = e.find(')');
+                    if (close != std::string::npos) {
+                        size_t cs = close + 1;
+                        while (cs < e.size() &&
+                               (e[cs] == ':' || e[cs] == ' '))
+                            cs++;
+                        code = e.substr(cs);
+                    }
+                }
+                if (!want_codes.empty()) want_codes += ",";
+                want_codes += code;
+            }
+            leptris_document_free(d);
+
+            if (ours_err == want_err) {
+                parity++;
+                if (ours_err) {
+                    /* secondary: code-set comparison (reported,
+                     * not gated — the verdict is the flip) */
+                    code_both++;
+                    bool overlap = false, equal = false;
+                    /* both sides are small comma lists; exact-set
+                     * comparison on the shown prefixes */
+                    equal = ours_codes == want_codes;
+                    for (size_t a = 0, b = a; !overlap &&
+                             a < ours_codes.size(); ) {
+                        size_t ca = ours_codes.find(',', a);
+                        std::string oc = ours_codes.substr(
+                            a, ca == std::string::npos
+                                   ? std::string::npos : ca - a);
+                        for (b = 0; b < want_codes.size(); ) {
+                            size_t cb = want_codes.find(',', b);
+                            std::string wc = want_codes.substr(
+                                b, cb == std::string::npos
+                                       ? std::string::npos : cb - b);
+                            if (oc == wc) { overlap = true; break; }
+                            if (cb == std::string::npos) break;
+                            b = cb + 1;
+                        }
+                        if (ca == std::string::npos) break;
+                        a = ca + 1;
+                    }
+                    if (overlap) code_overlap++;
+                    if (equal) code_equal++;
+                    if (!overlap)
+                        failures.push_back(c.id + ": code-set divergence want["
+                                           + want_codes + "] ours["
+                                           + ours_codes + "]");
+                }
+            } else {
+                vfail++;
+                failures.push_back(
+                    c.id + ": verdict mismatch want"
+                    + (want_err ? "=errors[" + want_codes + "]"
+                                : "=clean")
+                    + " ours"
+                    + (ours_err ? "=errors[" + ours_codes + "]"
+                                : "=clean"));
+            }
+        }
+    }
+    FILE* rl = fopen("html5lib-verdict-redlist.txt", "w");
+    if (rl) {
+        for (auto& f : failures) fprintf(rl, "%s\n", f.c_str());
+        fclose(rl);
+    }
+    printf("[verdict-parity] total=%zu parity=%zu verdict-fail=%zu "
+           "skip=%zu | both-error=%zu code-overlap=%zu code-equal=%zu "
+           "(red-list: html5lib-verdict-redlist.txt)\n",
+           total, parity, vfail, skipped,
+           code_both, code_overlap, code_equal);
+    for (size_t i = 0; i < failures.size() && i < 20; i++)
+        printf("  VERDICT %s\n", failures[i].c_str());
+    EXPECT_GT(total, (size_t)1500);
+    /* Verdict-parity floor — set at the slice-2 baseline
+     * (1312/1555; was 190 before the #1771 emission slices:
+     * doctype-less initial-mode family, trailing chars, EOF with
+     * open elements). Each slice only raises it. */
+    EXPECT_GE(parity, (size_t)1312);
 }
