@@ -4,8 +4,25 @@
 
 ### Added
 
-- §13.2.5 parse-error lint surface — opt-in token stream (leptris-ruby#1771) (html)
-
+- **html: the §13.2.5 parse-error lint surface (#1771, PR #1772).**
+  `LEPTRIS_PARSE_COLLECT_HTML_ERRORS` on the new
+  `leptris_parse_html_string_flags` entry records the WHATWG
+  parse-error token stream as diagnostics — machine-readable **code**
+  (the spec token name: "duplicate-attribute", "eof-in-tag",
+  "unexpected-doctype", ...), **line**, **column** — one class
+  (RECOVER), per the issue's "a single class + code is enough for
+  canon to map" contract. The diag record gains a machine-readable
+  code field; the read side gains
+  `leptris_document_parse_diag_code` (the existing kind+message face
+  is untouched — no ABI break). Slice 1 instruments the sites the
+  parser already self-documents: duplicate-attribute (structural
+  stash + generic start-tag paths), eof-in-tag (all three drop
+  shapes), unexpected-doctype outside the initial mode, and the
+  malformed-construct bogus-comment fallback; follow-up slices
+  extend the coverage per the §13.2.5 list. Off by default — the
+  tree construction is exactly as fast without the bit. Engine suite
+  2044/2044 including the html5lib corpus gate and the export-surface
+  gate; MSVC format-attribute guard included.
 ### Fixed
 
 - guard the h_diag format attribute for MSVC (html)
