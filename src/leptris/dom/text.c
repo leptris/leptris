@@ -33,7 +33,15 @@ LeptrisTextNode* leptris_text_create(const char* content,
     node->base.raw = 0;   /* uninitialized: see create_borrowed */
     node->parent_off = 0;
     node->next_sibling_off = 0;
-    node->owner_doc_off = 0;   /* #1320: only the public creator stamps */
+    /* moxml#401: stamp here when the doc is in hand — the #1320
+     * "only the public creator stamps" rule left every parse-carved
+     * and builder-created text unstamped, so a DETACHED text (its
+     * subtree removed) could not resolve its document for mutations
+     * (content= -> INVALID_ARG). */
+    node->owner_doc_off =
+        doc ? leptris_compact_int32_encode_doc(node, doc,
+                                               &node->owner_doc_off, doc)
+            : 0;
 
     if (content && content_len > 0) {
         memcpy(content_storage, content, content_len);
@@ -82,7 +90,13 @@ LeptrisTextNode* leptris_text_create_borrowed(const char* content,
     node->content_len = (uint32_t)content_len;
     node->parent_off = 0;
     node->next_sibling_off = 0;
-    node->owner_doc_off = 0;   /* #1320: only the public creator stamps */
+    /* moxml#401: same stamp — the borrowed flavor's doc tag is
+     * MANDATORY (its content pointer needs the doc-tagged fallback
+     * anyway), so the owner resolution must have it too. */
+    node->owner_doc_off =
+        doc ? leptris_compact_int32_encode_doc(node, doc,
+                                               &node->owner_doc_off, doc)
+            : 0;
 
     return node;
 }
