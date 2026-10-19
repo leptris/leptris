@@ -245,7 +245,12 @@ typedef enum {
      * is dropped, unclosed elements close at EOF. Each recovery
      * records a parse diagnostic (mismatched-tag / unclosed-element
      * kind). Without the bit the parse fails as before. */
-    LEPTRIS_PARSE_RECOVER = 32u
+    LEPTRIS_PARSE_RECOVER = 32u,
+    /* leptris-ruby#1771: record the WHATWG §13.2.5 parse-error
+     * token stream as diagnostics (code + line + column) on the
+     * HTML parse — the lint layer validators need. Opt-in: the
+     * tree construction stays exactly as fast without it. */
+    LEPTRIS_PARSE_COLLECT_HTML_ERRORS = 64u
 } LeptrisParseFlags;
 
 /* ============================================================================

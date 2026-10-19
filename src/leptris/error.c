@@ -154,3 +154,18 @@ LEPTRIS_API int leptris_document_parse_diag(LeptrisDocument doc,
     }
     return 1;
 }
+
+LEPTRIS_API int leptris_document_parse_diag_code(LeptrisDocument doc,
+                                                 size_t index,
+                                                 char* code,
+                                                 size_t code_cap,
+                                                 int* line, int* col) {
+    if (!doc || index >= (size_t)doc->parse_diag_count) return 0;
+    struct LeptrisDiag* d = (struct LeptrisDiag*)doc->parse_diags + index;
+    if (code && code_cap) {
+        snprintf(code, code_cap, "%s", d->code ? d->code : "");
+    }
+    if (line) *line = d->line;
+    if (col) *col = d->col_start;
+    return 1;
+}

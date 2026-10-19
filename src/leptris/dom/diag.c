@@ -22,6 +22,7 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
     LeptrisDiag* d = &(*list)[*count];
     d->kind = kind;
     d->offender_name = NULL;
+    d->code = NULL;
     d->line = 0;
     d->col_start = 0;
     d->col_end = 0;
@@ -46,10 +47,40 @@ LeptrisDiag* leptris_diag_emit(LeptrisDiag** list, int* count, int* cap,
     return d;
 }
 
+LeptrisDiag* leptris_diag_emit_code(LeptrisDiag** list, int* count, int* cap,
+                                    LeptrisDiagKind kind, const char* code,
+                                    int line, int col, const char* fmt, ...) {
+    if (!list || !count || !cap) return NULL;
+    if (*count == *cap) {
+        int nc = *cap ? *cap * 2 : 8;
+        LeptrisDiag* nl = (LeptrisDiag*)realloc(
+            *list, sizeof(LeptrisDiag) * (size_t)nc);
+        if (!nl) return NULL;
+        *list = nl;
+        *cap = nc;
+    }
+    LeptrisDiag* d = &(*list)[*count];
+    d->kind = kind;
+    d->offender_name = NULL;
+    d->code = code ? leptris_strdup(code) : NULL;
+    d->line = line;
+    d->col_start = col;
+    d->col_end = 0;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(d->message, sizeof(d->message), fmt, ap);
+    va_end(ap);
+    (*count)++;
+    return d;
+}
+
 void leptris_diag_free(LeptrisDiag** list, int* count, int* cap) {
     if (!list) return;
     if (*list && count) {
-        for (int i = 0; i < *count; i++) free((*list)[i].offender_name);
+        for (int i = 0; i < *count; i++) {
+            free((*list)[i].offender_name);
+            free((*list)[i].code);
+        }
     }
     free(*list);
     *list = NULL;

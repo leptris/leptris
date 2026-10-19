@@ -72,6 +72,21 @@ LEPTRIS_API LeptrisDocument leptris_parse_html4_string(const char* html,
                                                        size_t length,
                                                        LeptrisStatus* status);
 
+/**
+ * Parse HTML with per-call options (leptris-ruby#1771).
+ *
+ * Identical to leptris_parse_html_string; `flags` may carry
+ * LEPTRIS_PARSE_COLLECT_HTML_ERRORS to record the WHATWG §13.2.5
+ * parse-error token stream as diagnostics (read via
+ * leptris_document_parse_diag_count + leptris_document_parse_diag +
+ * leptris_document_parse_diag_code).
+ *
+ * @return Document, or NULL on failure
+ */
+LEPTRIS_API LeptrisDocument leptris_parse_html_string_flags(
+    const char* buf, size_t len, LeptrisParseFlags flags,
+    LeptrisStatus* status);
+
 #ifdef __cplusplus
 }
 #endif
