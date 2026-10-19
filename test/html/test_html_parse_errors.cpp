@@ -70,10 +70,16 @@ TEST(HtmlParseErrors, EofInTagCarriesSpecCode) {
         xml, strlen(xml), LEPTRIS_PARSE_COLLECT_HTML_ERRORS, &st);
     ASSERT_NE(d, nullptr);
     auto diags = drain(d);
-    ASSERT_GE(diags.size(), 1u);
-    EXPECT_EQ(diags[0].code, "eof-in-tag");
+    /* The doctype-less initial mode fires first (the <a> token),
+     * then the unterminated tag at EOF — html5lib's verdict for
+     * this input is both codes, in token order. */
+    ASSERT_GE(diags.size(), 2u);
+    EXPECT_EQ(diags[0].code, "expected-doctype-but-got-start-tag");
     EXPECT_EQ(diags[0].line, 1);
-    EXPECT_EQ(diags[0].col, 8);
+    EXPECT_EQ(diags[0].col, 1);
+    EXPECT_EQ(diags[1].code, "eof-in-tag");
+    EXPECT_EQ(diags[1].line, 1);
+    EXPECT_EQ(diags[1].col, 8);
     leptris_document_free(d);
 }
 
@@ -84,8 +90,11 @@ TEST(HtmlParseErrors, DoctypeOutsideInitialIgnored) {
         xml, strlen(xml), LEPTRIS_PARSE_COLLECT_HTML_ERRORS, &st);
     ASSERT_NE(d, nullptr);
     auto diags = drain(d);
-    ASSERT_GE(diags.size(), 1u);
-    EXPECT_EQ(diags[0].code, "unexpected-doctype");
+    /* The <div> opens the doctype-less initial mode; the DOCTYPE
+     * token inside the body is unexpected-doctype (13.2.6.4.73). */
+    ASSERT_GE(diags.size(), 2u);
+    EXPECT_EQ(diags[0].code, "expected-doctype-but-got-start-tag");
+    EXPECT_EQ(diags[1].code, "unexpected-doctype");
     leptris_document_free(d);
 }
 
@@ -96,7 +105,15 @@ TEST(HtmlParseErrors, LineColumnTrackRealLines) {
         xml, strlen(xml), LEPTRIS_PARSE_COLLECT_HTML_ERRORS, &st);
     ASSERT_NE(d, nullptr);
     auto diags = drain(d);
-    ASSERT_GE(diags.size(), 1u);
-    EXPECT_EQ(diags[0].line, 3);
+    ASSERT_GE(diags.size(), 2u);
+    EXPECT_EQ(diags[0].code, "expected-doctype-but-got-start-tag");
+    EXPECT_EQ(diags[0].line, 1);
+    bool dup_found = false;
+    for (auto& dd : diags)
+        if (dd.code == "duplicate-attribute") {
+            dup_found = true;
+            EXPECT_EQ(dd.line, 3);
+        }
+    EXPECT_TRUE(dup_found);
     leptris_document_free(d);
 }

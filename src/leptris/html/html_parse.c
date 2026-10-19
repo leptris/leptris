@@ -5584,6 +5584,22 @@ static void h_diag(HBuilder* b, const char* code, size_t off,
                            code, line, col, "%s", detail);
 }
 
+/* #1771 verdict slice: a non-whitespace character run while the
+ * doctype-less initial insertion mode is still open is the spec's
+ * expected-doctype-but-got-chars (13.2.6.4.1). Judged once per run
+ * here — ahead of the per-path flush/drop decisions, so dropped or
+ * re-parented text still reports. */
+static void h_initial_chars_diag(HBuilder* b, const char* from,
+                                 const char* to) {
+    for (const char* c = from; c < to; c++)
+        if (*c && !h_is_ws(*c)) {
+            h_diag(b, "expected-doctype-but-got-chars",
+                   (size_t)(from - b->input_base),
+                   "characters in the initial insertion mode");
+            return;
+        }
+}
+
 static LeptrisDocument html_parse_shared(
     const char* buf, size_t len, LeptrisStatus* status, int whatwg,
     LeptrisParseFlags flags) {
@@ -5652,6 +5668,12 @@ static LeptrisDocument html_parse_shared(
         /* Classify the markup construct. */
         if (p + 1 >= end) { p++; continue; }
         char k1 = p[1];
+
+        /* #1771: judge a pending character run against the
+         * doctype-less initial mode before any branch flushes or
+         * drops it (expected-doctype-but-got-chars). */
+        if (b.whatwg && !b.left_initial && !doc->doctype && text < p)
+            h_initial_chars_diag(&b, text, p);
 
         if (k1 == '!') {
             /* Flush pending text first. */
@@ -6033,6 +6055,10 @@ static LeptrisDocument html_parse_shared(
                 continue;
             }
             /* End tag: ends the initial insertion mode too. */
+            if (b.whatwg && !b.left_initial && !doc->doctype)
+                h_diag(&b, "expected-doctype-but-got-end-tag",
+                       (size_t)(p - b.input_base),
+                       "end tag in the initial insertion mode");
             if (b.whatwg && !b.left_initial && text < p) {
                 int ws_only = 1;
                 for (const char* c = text; c < p; c++)
@@ -6816,6 +6842,13 @@ static LeptrisDocument html_parse_shared(
                 if (*c != 0 && !h_is_ws(*c)) { ws_only = 0; break; }
             if (ws_only) text = p;
         }
+        /* #1771: a start tag in the doctype-less initial insertion
+         * mode is expected-doctype-but-got-start-tag (13.2.6.4.1) —
+         * even when the tag itself is a dropped structural one. */
+        if (b.whatwg && !b.left_initial && !doc->doctype)
+            h_diag(&b, "expected-doctype-but-got-start-tag",
+                   (size_t)(p - b.input_base),
+                   "start tag in the initial insertion mode");
         b.left_initial = 1;
         /* 13.2.5.4.4: non-whitespace body text (NUL ignored — an
          * ignored token cannot clear the flag) clears frameset-ok;
@@ -8201,6 +8234,11 @@ static LeptrisDocument html_parse_shared(
     }
 
     /* Trailing text. */
+    /* #1771: a trailing character run in the doctype-less initial
+     * insertion mode is expected-doctype-but-got-chars too — the
+     * loop-internal judge only runs at markup boundaries. */
+    if (b.whatwg && !b.left_initial && !doc->doctype && text < end)
+        h_initial_chars_diag(&b, text, end);
     if (text < end) {
         LeptrisTextNode* t = h_text_node(&b, text, end);
         if (t) {
@@ -8230,6 +8268,14 @@ done:
     /* Nothing appended (empty input, stray end tags only, doctype
      * only) is NOT an error in lenient HTML mode: the wrapper
      * synthesis below yields the empty Nokogiri shape. */
+    /* #1771: elements still open at EOF are
+     * expected-closing-tag-but-got-eof (html5lib's verdict; the
+     * implied html shell does not count). Judged BEFORE the
+     * wrapper synthesis, which tears the open stack down. */
+    if (b.whatwg && b.depth > 0 &&
+        !(b.depth == 1 && b.open_id[0] == h_id_html))
+        h_diag(&b, "expected-closing-tag-but-got-eof", b.input_len,
+               "elements left open at end of input");
     /* Nokogiri document shape (#659): with no explicit <html>,
      * synthesize <html><head></head><body>content</body></html> —
      * the document model is single-rooted, and libxml2's
@@ -8361,6 +8407,12 @@ done:
                               b.body_attr_n);
         }
     }
+    /* #1771: EOF in the doctype-less initial insertion mode is
+     * expected-doctype-but-got-eof (13.2.6.4.1) — empty and
+     * whitespace-only documents included. */
+    if (b.whatwg && !b.left_initial && !doc->doctype)
+        h_diag(&b, "expected-doctype-but-got-eof", b.input_len,
+               "document ended without a DOCTYPE");
     doc->new_dom_root = b.root;
     leptris_root_doc_register(b.root, doc);
     if (b.prolog_head) {
