@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.374] - 2026-10-19
+
+### Fixed
+
+- detached text mutations resolve their document (moxml#401) (dom)
+
+
+
 ## [1.9.373] - 2026-10-19
 
 ### Added
