@@ -7063,6 +7063,18 @@ static LeptrisDocument html_parse_shared(
             /* frameset is NOT in the 13.2.6.5 breakout list: inside
              * foreign content it is a plain foreign element
              * (plain-text-unsafe:16-23). */
+            /* #1771: html5lib's verdict — a <frameset> token that
+             * reaches the body phase after body content is
+             * unexpected-start-tag whether it then converts or is
+             * ignored (webkit01:51); head-phase converters and
+             * in-template framesets stay clean. body_seen is not
+             * set by the frameset token itself (it is in the
+             * head-only list), so it reads PRIOR content only. */
+            if (b.body_seen && !b.frameset &&
+                h_template_idx(&b) < 0)
+                h_diag(&b, "unexpected-start-tag",
+                       (size_t)(p - b.input_base),
+                       "frameset after body content");
             /* depth<=1: at most the (explicit or synthesized) html
              * element is open; frameset-ok is the spec gate and the
              * body is removed wholesale when it converts. */
