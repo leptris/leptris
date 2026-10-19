@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.371] - 2026-10-19
+
+### Added
+
+- §13.2.5 parse-error lint surface — opt-in token stream (leptris-ruby#1771) (html)
+
+### Fixed
+
+- guard the h_diag format attribute for MSVC (html)
+
+
+
 ## [1.9.370] - 2026-10-18
 
 <!-- Edit this section with the actual release notes. -->
