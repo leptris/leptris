@@ -978,8 +978,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
         printf("  VERDICT %s\n", failures[i].c_str());
     EXPECT_GT(total, (size_t)1500);
     /* Verdict-parity floor — set at the slice-2 baseline
-     * (1372/1555; was 190 before the #1771 emission slices —
+     * (1379/1555; was 190 before the #1771 emission slices —
      * the doctype-less initial-mode family, trailing chars, EOF with
      * open elements; slice 3 adds the raw-text EOF variants). Only raises. */
-    EXPECT_GE(parity, (size_t)1372);
+    EXPECT_GE(parity, (size_t)1379);
 }
