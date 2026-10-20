@@ -4,7 +4,39 @@
 
 ### Fixed
 
-- escape entity-shaped text output and validate UTF-8 at load
+- **serialize: decoded entity-shaped text is escaped
+  unconditionally (leptris-ruby#515, PR #1793).** Parse expands
+  entities into text (named references that survive under
+  `KEEP_ENTITY_REFS` become `ENTITY_REF` nodes), but both text
+  emitters kept an entity lookahead that re-emitted decoded data
+  verbatim: `&#x41;` reparsed as `A`, and `&lt;UK&gt;` minted a
+  `<UK>` element that swallowed siblings. Every `&` in text is now
+  escaped; `ENTITY_REF` nodes still serialize as markup.
+- **parse: strict loads validate the effective encoding
+  (leptris-ruby#514, PR #1793).** Non-RECOVER parses reject
+  invalid UTF-8 under XML 1.0 §4.3.3 (RFC 3629 strictness:
+  overlongs, surrogates, >U+10FFFF, truncation are fatal), for
+  documents that are UTF-8 by declaration or default. A declared
+  non-UTF-8 encoding is exempt (legacy encodings still transcode
+  through the iconv lane), and RECOVER keeps the #1660
+  best-effort-tree contract. The ASCII fast path scans
+  word-at-a-time (~14 GB/s, ~0.2% of a full parse).
+
+### Added
+
+- **html: verdict parity 1446 to 1508 of 1555 (PR #1794).** Seven
+  emission slices, each grounded in html5lib's source and gated by
+  the #1771 corpus harness with zero want=clean regressions:
+  depth-0 stray raw-text end tags (`</script>`, `</style>`, …);
+  later `<html>` tokens (non-html-root); the end-tag-too-early
+  family (heading mismatch, implied-end crossings, and the same
+  rule on li/dd/dt/p implied closes); after-body/frameset phase
+  codes; InBody frameset, duplicate body/head, and AfterHead
+  out-of-my-head tags; select/table/foreign codes
+  (unexpected-input-in-select, hidden-input-in-table,
+  unexpected-html-element-in-foreign-content); and tokenizer
+  need-space-after-doctype. Tree parity stays 1555/1555; the
+  verdict floor rose from 1409 to 1508.
 
 
 
