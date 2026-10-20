@@ -994,6 +994,7 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * adds in-body caption/col/…/tr and frame (ignored), plus the
      * stray </p> phase codes; the character-phase slice adds
      * expected-eof-but-got-char and unexpected-char-after-body/
-     * -frameset. Only raises. */
-    EXPECT_GE(parity, (size_t)1514);
+     * -frameset; the tokenizer EOF slice adds eof-in-comment and
+     * eof-in-comment-double-dash. Only raises. */
+    EXPECT_GE(parity, (size_t)1517);
 }
