@@ -979,9 +979,10 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
     EXPECT_GT(total, (size_t)1500);
     /* Verdict-parity floor — main measured 1446/1555 before these
      * slices (1409 was the slice-2 baseline; was 190 before the
-     * #1771 emission slices). The raw-text stray-end-tag slice adds
-     * 12 depth-0 cases (raw-text elements complete during start-tag
-     * handling, so the token can close nothing); non-html-root adds
-     * the 9 later-<html> cases (html5lib startTagHtml). Only raises. */
-    EXPECT_GE(parity, (size_t)1467);
+     * #1771 emission slices). Raw-text stray end tags add 12 depth-0
+     * cases; non-html-root adds the 9 later-<html> cases; the
+     * end-tag-too-early slices add heading name mismatches, block
+     * closes over non-implied elements, and the same rule on the
+     * implied close of li/dd/dt/p start tags. Only raises. */
+    EXPECT_GE(parity, (size_t)1477);
 }
