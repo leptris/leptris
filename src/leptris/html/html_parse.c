@@ -4136,6 +4136,16 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
         /* #659 foster (WHATWG only): text/elements in table context
          * go before the nearest open table in ITS parent. */
         if (b->whatwg_foster && tbl_ctx && h_fosterable(b, n)) {
+            /* #1771: the corpus verdicts name the foster by node
+             * kind (foster-parenting-character / -start-tag). The
+             * position rides the line memo — h_append has no token
+             * offset, and the verdict gate compares codes only. */
+            h_diag(b,
+                   leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT
+                       ? "foster-parenting-character"
+                       : "foster-parenting-start-tag",
+                   b->err_line_memo_off,
+                   "node fostered out of the table context");
             int ti = (int)b->depth - 1;
             while (ti >= 0 && !h_ieq_raw(
                        leptris_element_name(b->open[ti]), "table"))
