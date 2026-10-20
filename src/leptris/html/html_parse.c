@@ -6433,6 +6433,16 @@ static LeptrisDocument html_parse_shared(
                                (size_t)(p - b.input_base),
                                "</%s> with no open heading", lname);
                     }
+                    /* InHead/AfterHead endTagOther: a </p> before
+                     * body content is dropped with unexpected-end-tag
+                     * and inserts nothing (tests19:3). */
+                    if (b.whatwg && strcmp(lname, "p") == 0 &&
+                        !b.body_seen && (b.head_tag_seen ||
+                                         b.head_end_seen) &&
+                        !b.frameset && !b.after_body && !b.after_html)
+                        h_diag(&b, "unexpected-end-tag",
+                               (size_t)(p - b.input_base),
+                               "</p> outside the body phase");
                     /* #659 13.2.6.4.17: </p> with no p in button
                      * scope inserts an EMPTY <p> and closes it
                      * (tests1:29) — the stray tag still leaves a
@@ -6460,6 +6470,13 @@ static LeptrisDocument html_parse_shared(
                                 break;
                         }
                         if (!p_open) {
+                            /* InBody endTagP: no p in button scope
+                             * is a parse error even though the
+                             * empty p is still inserted
+                             * (tests2:60). */
+                            h_diag(&b, "unexpected-end-tag",
+                                   (size_t)(p - b.input_base),
+                                   "</p> with no p in scope");
                             LeptrisElement pe =
                                 h_open_element(&b, "p");
                             (void)pe;
@@ -7694,6 +7711,13 @@ static LeptrisDocument html_parse_shared(
                 }
             }
             if (!tbl_ctx) {
+                /* InBody startTagMisplaced: caption/col/colgroup/
+                 * head/tbody/td/tfoot/th/thead/tr in body is a
+                 * parse error and the token is ignored
+                 * (tests25:7 <body><col>A). */
+                h_diag(&b, "unexpected-start-tag-ignored",
+                       (size_t)(p - b.input_base),
+                       "<%s> ignored in the body phase", name);
                 /* The TOKEN is ignored - surrounding character
                  * tokens keep flowing into body (the html-merge
                  * flush pattern). */
@@ -7712,6 +7736,20 @@ static LeptrisDocument html_parse_shared(
          * an ignored <frameset> vanishes). */
         if (b.whatwg && strcmp(name, "frame") == 0 &&
             (!b.frameset || b.after_frameset)) {
+            /* InBody reports the frame as a misplaced start tag
+             * (tests25:10); the after-</frameset> phase names its
+             * own code (the after-</html> phase is reported at the
+             * start-tag dispatch). */
+            if (!b.after_html) {
+                if (!b.frameset)
+                    h_diag(&b, "unexpected-start-tag-ignored",
+                           (size_t)(p - b.input_base),
+                           "<frame> ignored in the body phase");
+                else
+                    h_diag(&b, "unexpected-start-tag-after-frameset",
+                           (size_t)(p - b.input_base),
+                           "<frame> after </frameset>");
+            }
             while (q < end && *q != '>') q++;
             p = (q < end) ? q + 1 : end;
             text = p;
