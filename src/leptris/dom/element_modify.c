@@ -543,6 +543,13 @@ LeptrisStatus leptris_element_prepend_child(LeptrisElement parent, LeptrisElemen
     /* Call internal void function, assume success */
     leptris_element_prepend_child_internal(parent, (LeptrisNode*)child);
     leptris_element_invalidate_child_cache(parent);
+
+    /* TODO 132: the child splice changed the element set — a cached
+     * index would describe the pre-insert tree (leptris-ruby #519). */
+    if (leptris_element_get_document(parent)) {
+        leptris_element_index_invalidate(
+            leptris_element_get_document(parent));
+    }
     return LEPTRIS_OK;
 }
 
@@ -671,6 +678,13 @@ LeptrisStatus leptris_element_insert_before(LeptrisElement sibling, LeptrisEleme
 
     leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(parent));
     leptris_element_invalidate_child_cache(parent);
+
+    /* TODO 132: the sibling splice changed the element set — a cached
+     * index would describe the pre-insert tree (leptris-ruby #519). */
+    if (leptris_element_get_document(parent)) {
+        leptris_element_index_invalidate(
+            leptris_element_get_document(parent));
+    }
     return LEPTRIS_OK;
 }
 
@@ -785,6 +799,13 @@ LeptrisStatus leptris_element_insert_after(LeptrisElement sibling, LeptrisElemen
 
     leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(parent));
     leptris_element_invalidate_child_cache(parent);
+
+    /* TODO 132: the sibling splice changed the element set — a cached
+     * index would describe the pre-insert tree (leptris-ruby #519). */
+    if (leptris_element_get_document(parent)) {
+        leptris_element_index_invalidate(
+            leptris_element_get_document(parent));
+    }
     return LEPTRIS_OK;
 }
 
