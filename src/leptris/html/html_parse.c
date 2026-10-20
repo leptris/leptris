@@ -8323,29 +8323,43 @@ done:
     /* Nothing appended (empty input, stray end tags only, doctype
      * only) is NOT an error in lenient HTML mode: the wrapper
      * synthesis below yields the empty Nokogiri shape. */
-    /* #1771: elements still open at EOF are
-     * expected-closing-tag-but-got-eof (html5lib's verdict; the
-     * implied html shell does not count). Judged BEFORE the
-     * wrapper synthesis, which tears the open stack down. Our
-     * stack carries no implied html/body, so the html5lib
-     * top-of-stack rule maps to: any real element open, gated on
-     * </body>/</html> never having been seen — after-body EOF is
-     * clean whatever remains (tests1:34). A raw-text container
-     * got its own variant at the raw branch already (that branch
-     * pops the element, so the top here is whatever wraps it). */
+    /* #1771: html5lib's InBody processEOF (html5parser.py:958):
+     * ONE expected-closing-tag-but-got-eof iff ANY open element is
+     * outside the allowed set {dd,dt,li,p,tbody,td,tfoot,th,thead,
+     * tr,body,html} — li/p/table scaffolding does not count
+     * (tests1:34), address/applet/div do (blocks.dat:1,
+     * tests20:96-class). AfterBody's processEOF is silent
+     * (html5parser.py:2533) and its non-wsCharacters rule flips the
+     * phase back to in-body — the builder's after_body/after_body_done
+     * pair is exactly that state. A raw-text container got its own
+     * variant at the raw branch already (that branch pops the
+     * element). Judged BEFORE the wrapper synthesis tears the open
+     * stack down. */
     if (b.whatwg && b.depth > 0) {
-        uint8_t top = b.open_id[b.depth - 1];
-        if (top != h_id_html && top != h_id_head &&
-            top != h_id_body)
-            h_diag(&b,
-                   (top == h_id_script || top == h_id_style ||
-                    top == h_id_listing || top == h_id_plaintext ||
-                    top == h_id_textarea || top == h_id_title ||
-                    top == h_id_xmp || top == h_id_iframe ||
-                    top == h_id_noembed || top == h_id_noframes)
-                       ? "expected-named-closing-tag-but-got-eof"
-                       : "expected-closing-tag-but-got-eof",
-                   b.input_len, "elements left open at end of input");
+        static uint8_t k_allowed[256];
+        static int allowed_init;
+        if (!allowed_init) {
+            /* id tables are lazily initialized once; these ids are
+             * stable for the process lifetime */
+            uint8_t ids[] = {h_id_p, h_id_li, h_id_dd, h_id_dt,
+                             h_id_tbody, h_id_td, h_id_tfoot,
+                             h_id_th, h_id_thead, h_id_tr,
+                             h_id_body, h_id_html};
+            for (size_t k = 0; k < sizeof(ids) / sizeof(ids[0]); k++)
+                k_allowed[ids[k]] = 1;
+            allowed_init = 1;
+        }
+        for (size_t k = 0; k < b.depth; k++) {
+            uint8_t id = b.open_id[k];
+            if (id == h_id_html || id == h_id_head || id == h_id_body)
+                continue;
+            if (!k_allowed[id]) {
+                h_diag(&b, "expected-closing-tag-but-got-eof",
+                       b.input_len,
+                       "elements left open at end of input");
+                break;
+            }
+        }
     }
     /* Nokogiri document shape (#659): with no explicit <html>,
      * synthesize <html><head></head><body>content</body></html> —
