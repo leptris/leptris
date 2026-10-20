@@ -990,6 +990,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * out-of-my-head tags; the select/table/foreign slice adds
      * unexpected-input-in-select, hidden-input-in-table, and
      * unexpected-html-element-in-foreign-content; the tokenizer
-     * slice adds need-space-after-doctype. Only raises. */
-    EXPECT_GE(parity, (size_t)1508);
+     * slice adds need-space-after-doctype; the misplaced-tag slice
+     * adds in-body caption/col/…/tr and frame (ignored), plus the
+     * stray </p> phase codes. Only raises. */
+    EXPECT_GE(parity, (size_t)1511);
 }
