@@ -39,6 +39,71 @@ TEST(SerializeRoundTrip, EscapesBareAmpersandInText) {
     leptris_document_free(doc);
 }
 
+TEST(SerializeRoundTrip, EscapesEntityShapedTextUnconditionally) {
+    // leptris-ruby#515: parse decodes entities into text; a decoded
+    // text value that LOOKS like an entity reference ("&#x26;",
+    // "&amp;", "&lt;UK&gt;") must still escape its '&' on output.
+    // The old serializer passed entity-shaped runs through verbatim,
+    // so the next parse produced a different value (&#x41; -> A,
+    // &lt;UK&gt; -> a literal <UK> start tag).
+    struct { const char* xml; const char* want; const char* want_text; } cases[] = {
+        {"<r>a &amp;#x26; b</r>", "<r>a &amp;#x26; b</r>", "a &#x26; b"},
+        {"<r>a &amp;amp; b</r>", "<r>a &amp;amp; b</r>", "a &amp; b"},
+        {"<r>a &amp;lt;UK&amp;gt; b</r>", "<r>a &amp;lt;UK&amp;gt; b</r>",
+         "a &lt;UK&gt; b"},
+        {"<r>a &amp;#x41; b</r>", "<r>a &amp;#x41; b</r>", "a &#x41; b"},
+        // Attribute forces the non-fused text emitter; the first four
+        // cases take the fused <name>text</name> fast path.
+        {"<r k='v'>a &amp;#x26; b</r>", "<r k=\"v\">a &amp;#x26; b</r>",
+         "a &#x26; b"},
+    };
+    for (auto& c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc = leptris_parse_string(c.xml, std::strlen(c.xml), &st);
+        ASSERT_NE(doc, nullptr) << c.xml;
+        char* serialized = leptris_document_serialize(doc, nullptr);
+        ASSERT_NE(serialized, nullptr) << c.xml;
+        EXPECT_STREQ(serialized, c.want) << c.xml;
+
+        // The emitted bytes must reparse to the same string value.
+        LeptrisDocument again = leptris_parse_string(
+            serialized, std::strlen(serialized), &st);
+        ASSERT_NE(again, nullptr) << serialized;
+        LeptrisElement root = leptris_document_root(again);
+        ASSERT_NE(root, nullptr) << serialized;
+        const char* content = leptris_element_text(root);
+        ASSERT_NE(content, nullptr) << serialized;
+        EXPECT_STREQ(content, c.want_text) << c.xml;
+        if (std::string(c.xml).find("UK") != std::string::npos) {
+            // No <UK> element may have been minted.
+            EXPECT_EQ(leptris_element_first_child(root, "UK"), nullptr) << c.xml;
+        }
+
+        leptris_document_free(again);
+        leptris_free_string(serialized);
+        leptris_document_free(doc);
+    }
+}
+
+TEST(SerializeRoundTrip, KeepsEntityRefNodesUnescaped) {
+    // KEEP_ENTITY_REFS stores named references as ENTITY_REF nodes;
+    // those still serialize as &name; (they are markup, not text).
+    const char xml[] =
+        "<!DOCTYPE r [<!ENTITY foo \"x\">]><r>a &foo; b</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_flags(
+        xml, std::strlen(xml), LEPTRIS_PARSE_KEEP_ENTITY_REFS, &st);
+    ASSERT_NE(doc, nullptr);
+    char* serialized = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_NE(std::string(serialized).find("&foo;"), std::string::npos)
+        << serialized;
+    EXPECT_EQ(std::string(serialized).find("&amp;foo;"), std::string::npos)
+        << serialized;
+    leptris_free_string(serialized);
+    leptris_document_free(doc);
+}
+
 TEST(SerializeRoundTrip, GrowsBufferForHugeTextContent) {
     // Regression for TODO 08: buffer_ensure_capacity must grow without
     // integer overflow or silent realloc-failure corruption.

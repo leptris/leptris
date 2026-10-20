@@ -43,6 +43,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 
 /* File-scope externs: engine config TLS defined in core.c (declared
  * in leptris_internal.h; this TU reads it without the umbrella) and
@@ -3415,6 +3416,123 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
     return d;
 }
 
+/* ---- Load-time encoding validation (leptris-ruby#514) ----
+ *
+ * XML 1.0 §4.3.3: a document without a declaration is UTF-8; a
+ * declared non-UTF-8 encoding is exempt (its bytes are legitimately
+ * not UTF-8 — leptris_parse_string transcodes declared legacy
+ * encodings through iconv before they reach this funnel). Structural
+ * UTF-8 (RFC 3629) is strict: overlongs, surrogates, >U+10FFFF and
+ * truncated sequences are fatal, matching libxml2's load-time
+ * "Invalid bytes in character encoding". */
+
+static int dp_ascii_case_eq(const char* a, const char* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        char x = a[i];
+        char y = b[i];
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return 0;
+    }
+    return 1;
+}
+
+/* 1 when the XML declaration names an encoding other than UTF-8 /
+ * US-ASCII. No (or unreadable) declaration -> 0, the UTF-8 default. */
+static int dp_declares_non_utf8(const char* s, size_t len) {
+    size_t i = 0;
+    if (len >= 3 && (unsigned char)s[0] == 0xEF &&
+        (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) {
+        i = 3;
+    }
+    if (len - i < 5 || memcmp(s + i, "<?xml", 5) != 0) return 0;
+    if (len - i > 5) {
+        char c = s[i + 5];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '?')
+            return 0;
+    }
+    size_t j = i + 5;
+    size_t end = j;
+    while (end + 1 < len && !(s[end] == '?' && s[end + 1] == '>')) end++;
+    if (end + 1 >= len) return 0;
+    while (j < end) {
+        if (end - j >= 8 && memcmp(s + j, "encoding", 8) == 0 &&
+            (j == i + 5 || s[j - 1] == ' ' || s[j - 1] == '\t' ||
+             s[j - 1] == '\r' || s[j - 1] == '\n')) {
+            size_t k = j + 8;
+            while (k < end && (s[k] == ' ' || s[k] == '\t' ||
+                               s[k] == '\r' || s[k] == '\n')) k++;
+            if (k < end && s[k] == '=') {
+                k++;
+                while (k < end && (s[k] == ' ' || s[k] == '\t' ||
+                                   s[k] == '\r' || s[k] == '\n')) k++;
+                if (k < end && (s[k] == '"' || s[k] == '\'')) {
+                    char q = s[k++];
+                    size_t v = k;
+                    while (k < end && s[k] != q) k++;
+                    size_t vl = k - v;
+                    if (vl == 5 && dp_ascii_case_eq(s + v, "UTF-8", 5)) return 0;
+                    if (vl == 4 && dp_ascii_case_eq(s + v, "UTF8", 4)) return 0;
+                    if (vl == 8 && dp_ascii_case_eq(s + v, "US-ASCII", 8))
+                        return 0;
+                    return 1;
+                }
+            }
+        }
+        j++;
+    }
+    return 0;
+}
+
+static int dp_utf8_valid(const char* s, size_t len) {
+    const unsigned char* p = (const unsigned char*)s;
+    size_t i = 0;
+    /* ASCII fast path: 8 bytes per iteration. The DFA below runs
+     * only when a high byte is present; ordinary documents pay one
+     * memory-bandwidth pass. */
+    while (i + 8 <= len) {
+        uint64_t w;
+        memcpy(&w, p + i, 8);
+        if (w & UINT64_C(0x8080808080808080)) break;
+        i += 8;
+    }
+    while (i < len && p[i] < 0x80) i++;
+    while (i < len) {
+        unsigned c = p[i];
+        if (c < 0x80) {
+            i++;
+            continue;
+        }
+        size_t n;
+        unsigned lo = 0x80;
+        unsigned hi = 0xBF;
+        if (c >= 0xC2 && c <= 0xDF) {
+            n = 1;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            n = 2;
+            if (c == 0xE0) lo = 0xA0;
+            else if (c == 0xED) hi = 0x9F;
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            n = 3;
+            if (c == 0xF0) lo = 0x90;
+            else if (c == 0xF4) hi = 0x8F;
+        } else {
+            return 0;
+        }
+        if (len - i <= n) return 0;
+        if (p[i + 1] < lo || p[i + 1] > hi) return 0;
+        for (size_t k = 2; k <= n; k++) {
+            if (p[i + k] < 0x80 || p[i + k] > 0xBF) return 0;
+        }
+        i += n + 1;
+    }
+    return 1;
+}
+
+static int dp_input_encoding_ok(const char* s, size_t len) {
+    return dp_declares_non_utf8(s, len) || dp_utf8_valid(s, len);
+}
+
 /* Public: copy the input then parse (standard path).
  *
  * The copy and the arena-sizing pre-scan are ONE fused SIMD pass
@@ -3424,6 +3542,7 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
  * arena holds only nodes and strings. */
 struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
+    if (!dp_input_encoding_ok(xml, len)) return NULL;
     {
         struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
         if (d) return d;
@@ -3435,6 +3554,12 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
 struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                            unsigned parse_flags) {
     if (!xml || len == 0) return NULL;
+    /* RECOVER keeps the #1660 best-effort contract (never NULL for
+     * malformed input); the fatal encoding check is strict-lane. */
+    if (!(parse_flags & LEPTRIS_PARSE_RECOVER) &&
+        !dp_input_encoding_ok(xml, len)) {
+        return NULL;
+    }
     /* The interleaved lane has no recovery support (#1660) — RECOVER
      * parses take the default lane. */
     if (!(parse_flags & LEPTRIS_PARSE_RECOVER)) {
@@ -3462,6 +3587,7 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
 /* Public: parse a caller-owned writable buffer without copying. */
 struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
+    if (!dp_input_encoding_ok(buf, len)) return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
     return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0);
 }

@@ -203,10 +203,12 @@ int buffer_has_error(SerializeBuffer* buf) {
 
 
 /* Inline escaped-text emitter (TODO 194d): writes into a caller-
- * reserved worst-case buffer (6 bytes per input byte), preserving
- * the entity semantics of the previous per-run walkers — entity
- * references emit as-is (text mode), bare & escapes, quotes are
- * ordinary in text mode and escaped in attribute mode. */
+ * reserved worst-case buffer (6 bytes per input byte). Every '&' is
+ * escaped — entity references are parse-time markup and either
+ * already decoded into the text (predefined/char refs) or carried as
+ * ENTITY_REF nodes; a decoded text value shaped like "&#x26;" is
+ * data, not markup (leptris-ruby#515). Quotes are ordinary in text
+ * mode and escaped in attribute mode. */
 /* Escape-class table (serialize endgame): the run scan was 3-4
  * compares per byte — the dominant serializer cost at 57% of the
  * text-heavy profile. One indexed load + one test per byte, the
@@ -300,23 +302,9 @@ static char* emit_escaped_inline(char* out, const char* content,
         }
 
         if (content[i] == '&') {
-            size_t j = i + 1;
-            int found_semicolon = 0;
-            while (j < len && j < i + 12) {
-                if (content[j] == ';') { found_semicolon = 1; break; }
-                if (!isalnum((unsigned char)content[j]) && content[j] != '#' && content[j] != '-') break;
-                j++;
-            }
-            if (!attr_mode && found_semicolon && j > i + 1) {
-                size_t n = j - i + 1;
-                memcpy(out, &content[i], n);
-                out += n;
-                i = j + 1;
-            } else {
-                memcpy(out, "&amp;", 5);
-                out += 5;
-                i++;
-            }
+            memcpy(out, "&amp;", 5);
+            out += 5;
+            i++;
             continue;
         }
         if (content[i] == '<') { memcpy(out, "&lt;", 4); out += 4; }
@@ -716,8 +704,8 @@ void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf) {
     }
 
     /* Run-batched (TODO 194b): bulk-append ordinary bytes up to the
-     * next special character; the entity lookahead only runs at '&'.
-     * Quotes and apostrophes are ordinary in text content. */
+     * next special character. Quotes and apostrophes are ordinary in
+     * text content. */
     size_t i = 0;
     while (i < content_len) {
         size_t run = i;
@@ -733,26 +721,10 @@ void serialize_text_internal(LeptrisTextNode* text, SerializeBuffer* buf) {
         }
 
         if (content[i] == '&') {
-            /* Look ahead for ';' to detect entity reference */
-            size_t j = i + 1;
-            int found_semicolon = 0;
-            while (j < text->content_len && j < i + 12) {
-                if (content[j] == ';') {
-                    found_semicolon = 1;
-                    break;
-                }
-                if (!isalnum((unsigned char)content[j]) && content[j] != '#' && content[j] != '-') {
-                    break;
-                }
-                j++;
-            }
-            if (found_semicolon && j > i + 1) {
-                buffer_append_len(buf, &content[i], j - i + 1);
-                i = j + 1;
-            } else {
-                buffer_append_len(buf, "&amp;", 5);
-                i++;
-            }
+            /* Always escape: decoded text is data. Named references
+             * that survived parsing live in ENTITY_REF nodes. */
+            buffer_append_len(buf, "&amp;", 5);
+            i++;
             continue;
         }
 

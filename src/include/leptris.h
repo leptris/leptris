@@ -838,6 +838,11 @@ LEPTRIS_API LeptrisStatus leptris_document_set_root_ex(
 /**
  * Parse XML string into document
  *
+ * Encoding: the input must be valid in its effective encoding. With
+ * no XML declaration (or a UTF-8/US-ASCII one) that is UTF-8 (XML
+ * 1.0 §4.3.3) and invalid byte sequences are a fatal load error. A
+ * declared legacy encoding is transcoded to UTF-8 before parsing.
+ *
  * @param xml XML string (must be valid UTF-8)
  * @param length Length of XML string in bytes
  * @param status Output status code (can be NULL)
@@ -979,6 +984,11 @@ LEPTRIS_API int leptris_rng_error_line(LeptrisRelaxNG rng, size_t i);
 LEPTRIS_API int leptris_rng_error_column(LeptrisRelaxNG rng, size_t i);
 
 
+/* Parse with explicit flags. Strict (non-RECOVER) parses validate
+ * the input against its effective encoding (see leptris_parse_string);
+ * RECOVER keeps the best-effort #1660 contract and skips the fatal
+ * encoding check. A declared non-UTF-8 encoding is exempt from UTF-8
+ * validation and passes through raw in this lane. */
 LEPTRIS_API LeptrisDocument leptris_parse_string_flags(const char* xml,
                                                     size_t length,
                                                     LeptrisParseFlags flags,
