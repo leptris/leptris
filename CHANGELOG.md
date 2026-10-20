@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.376] - 2026-10-20
+
+### Fixed
+
+- escape entity-shaped text output and validate UTF-8 at load
+
+
+
 ## [1.9.375] - 2026-10-20
 
 ### Added
