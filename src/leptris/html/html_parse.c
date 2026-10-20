@@ -4228,8 +4228,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
             b->depth > 0 &&
             b->open_id[b->depth - 1] == h_id_template) {
-            const char* tc =
-                leptris_text_node_get_content((LeptrisTextNode*)n);
+            const char* tc = leptris_text_node_get_content(n);
             int nonws = 0;
             if (tc)
                 for (const char* w = tc; *w; w++)
