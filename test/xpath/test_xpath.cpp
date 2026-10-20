@@ -94,6 +94,111 @@ TEST(XPathFunctions, CountReturnsNodeSetSize) {
     leptris_document_free(doc);
 }
 
+/* leptris-ruby #519: a node-set XPath run primes the TODO 132 element
+ * index. Sibling insertions change the element set but did not
+ * invalidate it, so the next //name query answered from the stale
+ * index and missed the inserted element. Child insertion (append)
+ * always invalidated; every splice path must too. */
+TEST(XPathIndexInvalidation, SiblingInsertionsRefreshDescendantAxis) {
+    const char xml[] = "<root><anchor/></root>";
+
+    auto eval_count = [](LeptrisDocument doc, const char* expr) -> int {
+        LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
+        if (!r) return -1;
+        int n = (int)leptris_xpath_result_count(r);
+        leptris_xpath_result_free(r);
+        return n;
+    };
+
+    /* TODO 190: the index builds on the SECOND axis query. Prime it so
+     * the post-insert query is served from the cached index — the
+     * stale-read shape in the report. */
+    auto prime = [&eval_count](LeptrisDocument doc) {
+        EXPECT_EQ(eval_count(doc, "//anchor"), 1);
+        EXPECT_EQ(eval_count(doc, "//anchor"), 1);
+    };
+
+    /* insert_after — the shape in the report (add_next_sibling). */
+    {
+        LeptrisDocument doc =
+            leptris_parse_string(xml, strlen(xml), nullptr);
+        ASSERT_NE(doc, nullptr);
+        prime(doc);
+        EXPECT_EQ(eval_count(doc, "//ext"), 0);
+        LeptrisElement anchor = leptris_element_first_child_any(
+            leptris_document_root(doc));
+        ASSERT_NE(anchor, nullptr);
+        LeptrisElement ext = leptris_element_create(doc, "ext");
+        ASSERT_NE(ext, nullptr);
+        ASSERT_EQ(leptris_element_insert_after(anchor, ext), LEPTRIS_OK);
+        EXPECT_EQ(eval_count(doc, "//ext"), 1);
+        leptris_document_free(doc);
+    }
+
+    /* insert_before. */
+    {
+        LeptrisDocument doc =
+            leptris_parse_string(xml, strlen(xml), nullptr);
+        ASSERT_NE(doc, nullptr);
+        prime(doc);
+        EXPECT_EQ(eval_count(doc, "//ext"), 0);
+        LeptrisElement anchor = leptris_element_first_child_any(
+            leptris_document_root(doc));
+        ASSERT_NE(anchor, nullptr);
+        LeptrisElement ext = leptris_element_create(doc, "ext");
+        ASSERT_NE(ext, nullptr);
+        ASSERT_EQ(leptris_element_insert_before(anchor, ext), LEPTRIS_OK);
+        EXPECT_EQ(eval_count(doc, "//ext"), 1);
+        leptris_document_free(doc);
+    }
+
+    /* prepend_child — the other child splice that skipped invalidation. */
+    {
+        LeptrisDocument doc =
+            leptris_parse_string(xml, strlen(xml), nullptr);
+        ASSERT_NE(doc, nullptr);
+        prime(doc);
+        EXPECT_EQ(eval_count(doc, "//ext"), 0);
+        LeptrisElement root = leptris_document_root(doc);
+        ASSERT_NE(root, nullptr);
+        LeptrisElement ext = leptris_element_create(doc, "ext");
+        ASSERT_NE(ext, nullptr);
+        ASSERT_EQ(leptris_element_prepend_child(root, ext), LEPTRIS_OK);
+        EXPECT_EQ(eval_count(doc, "//ext"), 1);
+        leptris_document_free(doc);
+    }
+
+    /* Compiled handle — the raw FFI face the binding evaluates with. */
+    {
+        LeptrisDocument doc =
+            leptris_parse_string(xml, strlen(xml), nullptr);
+        ASSERT_NE(doc, nullptr);
+        prime(doc);
+        LeptrisXPathCompiled compiled = leptris_xpath_compile("//ext");
+        ASSERT_NE(compiled, nullptr);
+        LeptrisXPathResult first =
+            leptris_xpath_compiled_eval(compiled, doc, nullptr);
+        ASSERT_NE(first, nullptr);
+        EXPECT_EQ(leptris_xpath_result_count(first), 0u);
+        leptris_xpath_result_free(first);
+
+        LeptrisElement anchor = leptris_element_first_child_any(
+            leptris_document_root(doc));
+        ASSERT_NE(anchor, nullptr);
+        LeptrisElement ext = leptris_element_create(doc, "ext");
+        ASSERT_NE(ext, nullptr);
+        ASSERT_EQ(leptris_element_insert_after(anchor, ext), LEPTRIS_OK);
+
+        LeptrisXPathResult second =
+            leptris_xpath_compiled_eval(compiled, doc, nullptr);
+        ASSERT_NE(second, nullptr);
+        EXPECT_EQ(leptris_xpath_result_count(second), 1u);
+        leptris_xpath_result_free(second);
+        leptris_xpath_compiled_free(compiled);
+        leptris_document_free(doc);
+    }
+}
+
 /* Lane 07 tail (#692-B): function items report a distinct public
  * result type at the boundary — closures and named references. */
 TEST(XPathResultTypes, FunctionItemsReportFunctionType) {
