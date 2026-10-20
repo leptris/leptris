@@ -1002,7 +1002,14 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * depth-0 </p> phase code, the after-</html> end-tag code, the
      * frameset after-html character code, and image-start-tag; the
      * agency slice adds adoption-agency-1.3 for formatting end tags
-     * whose element is in scope but not the current node. Only
-     * raises. */
-    EXPECT_GE(parity, (size_t)1540);
+     * whose element is in scope but not the current node; the
+     * menuitem slice adds the endTagOther pair for </menuitem>
+     * (stray before a special, or found with non-implied open
+     * elements above); the closing slice adds the frameset
+     * trailing-character code, BeforeHead end-tag-after-implied-
+     * root, foreign-content end-tag mismatch, markup-declaration
+     * (expected-dashes-or-doctype), solidus-in-tag, attributes-in-
+     * end-tag, before-html end tags, form-in-table, template foster
+     * characters and two-heads. Only raises. */
+    EXPECT_GE(parity, (size_t)1555);
 }
