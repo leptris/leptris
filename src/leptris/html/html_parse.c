@@ -6304,21 +6304,35 @@ static LeptrisDocument html_parse_shared(
                 text = p;
                 continue;
             }
-            /* Stray raw-text end tag with no open stack: the raw-text
-             * element completed during its start-tag handling, so this
-             * token cannot close anything. html5lib's InHead/InBody
-             * endTagOther reports unexpected-end-tag once the tree has
-             * content (the synthesized body is the special node);
-             * with nothing seen yet the phase errors differently and
-             * the initial-mode checks above already cover it. */
-            if (b.whatwg && nlen && b.depth == 0 && b.top_tail) {
+            /* Stray end tags with no open stack. The raw-text family
+             * completes during start-tag handling; void elements and
+             * menuitem have no in-body end handler. html5lib's
+             * endTagOther reports by phase: before-html is
+             * end-tag-after-implied-root; AfterBody/AfterFrameset
+             * and AfterAfter* have their own codes; InHead/InBody/
+             * AfterHead report unexpected-end-tag. */
+            if (b.whatwg && nlen && b.depth == 0) {
                 char rn[16];
                 size_t rl = nlen < sizeof(rn) - 1 ? nlen : sizeof(rn) - 1;
                 for (size_t i = 0; i < rl; i++) rn[i] = h_lower(ns[i]);
                 rn[rl] = 0;
-                if (h_is_rawtext_name(rn)) {
-                    h_diag(&b, "unexpected-end-tag",
-                           (size_t)(p - b.input_base),
+                int stray = h_is_rawtext_name(rn) ||
+                            (h_is_void(rn) && strcmp(rn, "br") != 0) ||
+                            strcmp(rn, "menuitem") == 0;
+                if (stray) {
+                    const char* code = "unexpected-end-tag";
+                    if (b.after_html)
+                        code = "expected-eof-but-got-end-tag";
+                    else if (b.after_body)
+                        code = "unexpected-end-tag-after-body";
+                    else if (b.frameset && b.after_frameset)
+                        code = "unexpected-end-tag-after-frameset";
+                    else if (b.frameset)
+                        code = "unexpected-end-tag-in-frameset";
+                    else if (!b.top_tail && !b.head_tag_seen &&
+                             !b.body_seen && !b.body_tag_seen)
+                        code = "end-tag-after-implied-root";
+                    h_diag(&b, code, (size_t)(p - b.input_base),
                            "</%s> has no matching open element", rn);
                     p = q;
                     text = p;
@@ -6340,6 +6354,19 @@ static LeptrisDocument html_parse_shared(
                 for (size_t i = 0; i < cl; i++)
                     lname[i] = h_lower(ns[i]);
                 lname[cl] = 0;
+                /* InBody endTagOther: a VOID element has no end
+                 * handler, so a stray end tag reports
+                 * unexpected-end-tag (tests25:15-20: </keygen>).
+                 * </br> is endTagBr and acts as <br> above. */
+                if (b.whatwg && h_is_void(lname) &&
+                    strcmp(lname, "br") != 0) {
+                    h_diag(&b, "unexpected-end-tag",
+                           (size_t)(p - b.input_base),
+                           "</%s> is a void element", lname);
+                    p = q;
+                    text = p;
+                    continue;
+                }
                 if (!h_is_void(lname)) {
                     if (b.whatwg &&
                         strcmp(lname, "menuitem") == 0) {
