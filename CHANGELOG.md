@@ -2,12 +2,23 @@
 
 ## [1.9.377] - 2026-10-20
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **html: verdict parity 1508 to 1532 of 1555 (PR #1797).** Five
+  emission slices, each grounded in html5lib's parser/tokenizer
+  source and gated by the #1771 corpus harness with zero want=clean
+  regressions: misplaced in-body caption/col/…/tr and `<frame>`
+  (unexpected-start-tag-ignored) plus the stray `</p>` phase codes;
+  after-html/after-body/after-frameset character codes
+  (expected-eof-but-got-char, unexpected-char-after-body,
+  unexpected-char-after-frameset); unterminated-comment tokenizer
+  codes (eof-in-comment, eof-in-comment-double-dash);
+  plaintext-at-EOF and the `</` tokenizer EOF codes; and a
+  phase-aware depth-0 stray-end-tag branch covering raw-text names,
+  void elements and menuitem (end-tag-after-implied-root before
+  html, after-body/-frameset/after-html variants, otherwise
+  unexpected-end-tag). Tree parity stays 1555/1555; the verdict
+  floor rose from 1508 to 1532.
 
 
 ## [1.9.376] - 2026-10-20
