@@ -6144,6 +6144,18 @@ static LeptrisDocument html_parse_shared(
             {
                 const char* ns2 = p + 2;
                 if (b.whatwg && ns2 >= end) {
+                    /* Tokenizer: EOF in the tag-open state emits
+                     * expected-closing-tag-but-got-eof and the two
+                     * characters as text (tests1:38); in the
+                     * initial mode that text also reports the
+                     * missing doctype. */
+                    h_diag(&b, "expected-closing-tag-but-got-eof",
+                           (size_t)(p - b.input_base),
+                           "end tag at end of input");
+                    if (!b.left_initial && !doc->doctype)
+                        h_diag(&b, "expected-doctype-but-got-chars",
+                               (size_t)(p - b.input_base),
+                               "characters in the initial mode");
                     if (text < p) {
                         LeptrisTextNode* t =
                             h_text_node(&b, text, p);
@@ -8602,6 +8614,13 @@ static LeptrisDocument html_parse_shared(
                        "input",
                        name);
             }
+            /* PLAINTEXT has no close form: it is still open at
+             * EOF, so InBody processEOF reports the unclosed
+             * element (tests18:2-7, tests19:6). */
+            if (b.whatwg && cq >= end && strcmp(name, "plaintext") == 0)
+                h_diag(&b, "expected-closing-tag-but-got-eof",
+                       (size_t)(end - b.input_base),
+                       "plaintext reaches end of input");
             b.depth--;   /* the raw element is complete */
             text = p;
             continue;
