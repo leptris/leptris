@@ -4655,10 +4655,15 @@ static void h_reconstruct(HBuilder* b) {
     }
 }
 
+/* #1771: defined with the diagnostics below; the adoption agency
+ * reports from here first. */
+static void h_diag(HBuilder* b, const char* code, size_t off,
+                   const char* fmt, ...);
+
 /* The adoption agency proper. Returns 1 when the end tag is fully
  * consumed; 0 means no formatting entry matched and the caller
  * runs its generic (any-other-end-tag) handling. */
-static int h_afe_end(HBuilder* b, const char* subject) {
+static int h_afe_end(HBuilder* b, const char* subject, size_t off) {
     if (b->depth > 0) {
         LeptrisElement cur = b->open[b->depth - 1];
         const char* cn = leptris_element_name(cur);
@@ -4708,6 +4713,14 @@ static int h_afe_end(HBuilder* b, const char* subject) {
                 h_afe_remove_idx(b, fi);
                 return 1;
             }
+        }
+        /* html5lib adoption-agency-1.3: the formatting element is
+         * in the stack and in scope, but open elements sit above
+         * it (it is not the current node). Parsing proceeds. */
+        if (b->whatwg_adopt && b->depth != (size_t)si + 1) {
+            h_diag(b, "adoption-agency-1.3", off,
+                   "</%s> formatting element is not the current node",
+                   subject);
         }
         int fbi = -1;
         for (size_t k = (size_t)si + 1; k < b->depth; k++) {
@@ -6590,7 +6603,8 @@ static LeptrisDocument html_parse_shared(
                      * matched; otherwise the generic path below
                      * is the any-other-end-tag run. */
                     if (b.whatwg_adopt && h_is_formatting(lname) &&
-                        h_afe_end(&b, lname)) {
+                        h_afe_end(&b, lname,
+                                  (size_t)(p - b.input_base))) {
                         p = q;
                         text = p;
                         continue;
@@ -8362,7 +8376,7 @@ static LeptrisDocument html_parse_shared(
                     }
                 }
                 if (!dup_out_of_scope) {
-                h_afe_end(&b, name);
+                h_afe_end(&b, name, (size_t)(p - b.input_base));
                 /* The agency's 8-iteration cap can leave the
                  * entry — the start-tag branch removes it
                  * unconditionally. */

@@ -1000,7 +1000,9 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * stray-end-tag slice makes the depth-0 branch phase-aware for
      * raw-text, void and menuitem names; this batch adds the
      * depth-0 </p> phase code, the after-</html> end-tag code, the
-     * frameset after-html character code, and image-start-tag. Only
+     * frameset after-html character code, and image-start-tag; the
+     * agency slice adds adoption-agency-1.3 for formatting end tags
+     * whose element is in scope but not the current node. Only
      * raises. */
-    EXPECT_GE(parity, (size_t)1535);
+    EXPECT_GE(parity, (size_t)1540);
 }
