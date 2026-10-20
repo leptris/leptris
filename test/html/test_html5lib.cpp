@@ -987,6 +987,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * frameset phase slices add the AfterBody/AfterFrameset/
      * AfterAfter* start-tag codes; the start-tag phase slice adds
      * InBody frameset, duplicate body/head, and AfterHead
-     * out-of-my-head tags. Only raises. */
-    EXPECT_GE(parity, (size_t)1498);
+     * out-of-my-head tags; the select/table/foreign slice adds
+     * unexpected-input-in-select, hidden-input-in-table, and
+     * unexpected-html-element-in-foreign-content. Only raises. */
+    EXPECT_GE(parity, (size_t)1504);
 }

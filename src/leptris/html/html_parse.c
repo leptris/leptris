@@ -4183,6 +4183,17 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             b->open_ns[b->depth - 2] == H_NS_HTML &&
             b->open_id[b->depth - 2] == h_id_table)
             tbl_ctx = 1;
+        /* InTable startTagInput with type=hidden: html5lib reports
+         * unexpected-hidden-input-in-table and inserts AT the spot
+         * (no fostering — h_fosterable exempts it, tests7:16-20). */
+        if (b->whatwg_foster && tbl_ctx && b->input_hidden_tag &&
+            leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT &&
+            h_tag_id(leptris_element_name((LeptrisElement)n)) ==
+                h_id_input) {
+            h_diag(b, "unexpected-hidden-input-in-table",
+                   b->err_line_memo_off,
+                   "hidden input inserted in table context");
+        }
         /* #659 foster (WHATWG only): text/elements in table context
          * go before the nearest open table in ITS parent. */
         if (b->whatwg_foster && tbl_ctx && h_fosterable(b, n)) {
@@ -7528,6 +7539,12 @@ static LeptrisDocument html_parse_shared(
             (strcmp(name, "input") == 0 ||
              strcmp(name, "keygen") == 0 ||
              strcmp(name, "textarea") == 0)) {
+            /* InSelect startTagInput (shared by input/keygen/
+             * textarea) reports before popping the select
+             * (tests7:14). */
+            h_diag(&b, "unexpected-input-in-select",
+                   (size_t)(p - b.input_base),
+                   "<%s> inside <select>", name);
             for (size_t d2 = b.depth; d2 > 0; d2--)
                 if (strcmp(leptris_element_name(b.open[d2 - 1]),
                            "select") == 0) {
@@ -7712,7 +7729,13 @@ static LeptrisDocument html_parse_shared(
                 if (h_is_breakout(name) ||
                     (strcmp(name, "font") == 0 && h_font_break(q, end))) {
                     /* Breakout: pop the foreign scope, reprocess
-                     * under HTML rules below. */
+                     * under HTML rules below. html5lib's foreign
+                     * startTagOther reports the HTML element as
+                     * unexpected in foreign content
+                     * (tests9:15, tests10:14). */
+                    h_diag(&b, "unexpected-html-element-in-foreign-content",
+                           (size_t)(p - b.input_base),
+                           "<%s> breaks out of foreign content", name);
                     while (b.depth > 0 &&
                            b.open_ns[b.depth - 1] != H_NS_HTML &&
                            !h_is_int_point(&b, b.depth - 1))
