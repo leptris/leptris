@@ -7423,6 +7423,17 @@ static LeptrisDocument html_parse_shared(
             continue;
         }
 
+        /* html5lib startTagHtml: an <html> token processed once the
+         * html/head/body phases exist is not the first start tag —
+         * parse error non-html-root, then the attributes merge onto
+         * the root (tests14:3/4/6, tests19:37/38/88, tests2:52-54). */
+        if (b.whatwg && strcmp(name, "html") == 0 &&
+            (b.html_seen || b.head_tag_seen || b.body_tag_seen ||
+             b.after_body || b.body_seen)) {
+            h_diag(&b, "non-html-root",
+                   (size_t)(p - b.input_base),
+                   "<html> after the root element exists");
+        }
         /* 13.2.6.3: an <html> start tag inside content (never
          * seen yet, deep in a table/foreign subtree) merges attrs
          * and is ignored - no element (domjs-unsafe:36:
