@@ -6357,6 +6357,13 @@ static LeptrisDocument html_parse_shared(
                                    strcmp(lname, "select") != 0 &&
 
                                    strcmp(lname, "template") != 0) {
+                            /* #1771: html5lib's InSelect endTagOther
+                             * reports the drop (unexpected-end-tag-
+                             * in-select). */
+                            h_diag(&b, "unexpected-end-tag-in-select",
+                                   (size_t)(p - b.input_base),
+                                   "</%s> ignored inside <select>",
+                                   lname);
                             p = q;
                             text = p;
                             continue;
@@ -7215,7 +7222,11 @@ static LeptrisDocument html_parse_shared(
         if (b.whatwg && h_in_select(&b) &&
             strcmp(name, "select") == 0) {
             /* 13.2.6.4.11: a <select> start tag inside a select
-             * ACTS AS its end tag — no nesting (tests1:30). */
+             * ACTS AS its end tag — no nesting (tests1:30).
+             * #1771: html5lib reports unexpected-select-in-select. */
+            h_diag(&b, "unexpected-select-in-select",
+                   (size_t)(p - b.input_base),
+                   "<select> inside <select> acts as an end tag");
             for (size_t d2 = b.depth; d2 > 0; d2--)
                 if (strcmp(leptris_element_name(b.open[d2 - 1]),
                            "select") == 0) {
@@ -7274,6 +7285,11 @@ static LeptrisDocument html_parse_shared(
                 b.depth = (size_t)sel_idx;   /* pop the select;
                                                * reprocess below */
             } else {
+                /* #1771: html5lib's InSelect startTagOther reports
+                 * the drop (unexpected-start-tag-in-select). */
+                h_diag(&b, "unexpected-start-tag-in-select",
+                       (size_t)(p - b.input_base),
+                       "<%s> ignored inside <select>", name);
                 while (q < end && *q != '>') q++;
                 p = (q < end) ? q + 1 : end;
                 text = p;
