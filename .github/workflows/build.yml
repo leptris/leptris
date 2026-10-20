@@ -70,7 +70,7 @@ jobs:
 
       - name: Run tests
         if: runner.os != 'Windows'
-        run: ctest --test-dir build --output-on-failure --build-config Release
+        run: ctest --test-dir build --output-on-failure --build-config Release --parallel 4
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
@@ -80,7 +80,7 @@ jobs:
           # CTest working dir; SymbolExportCheck uses nm-style symbol
           # extraction. Skip all three until they're portable. The
           # MSVC build itself is the contract this job verifies.
-          ctest --test-dir build --output-on-failure --build-config Release `
+          ctest --test-dir build --output-on-failure --build-config Release --parallel 4 `
             --exclude-regex 'XIncludeProcess|XIncludeXpointer|XIncludeRecursion|XIncludePhaseA|XIncludePhaseC|CliVersion|CliParse|CliFormat|CliXpath|SymbolExportCheck'
 
       - name: Test CLI - parse

@@ -19,6 +19,17 @@ endif()
 
 include(GoogleTest)
 
+# Native builds discover the gtest cases at BUILD time so the list is
+# baked into CTestTestfile and `ctest --parallel` can schedule the
+# whole suite. PRE_TEST expands the list while ctest runs, which only
+# works serially — under -j the _NOT_BUILT placeholders execute. Cross
+# builds must keep PRE_TEST: their binaries cannot run on the host.
+if(CMAKE_CROSSCOMPILING)
+    set(LEPTRIS_GTEST_DISCOVERY_MODE PRE_TEST)
+else()
+    set(LEPTRIS_GTEST_DISCOVERY_MODE POST_BUILD)
+endif()
+
 # Convenience aggregate target — `cmake --build build --target check_all`.
 add_custom_target(check_all
     COMMENT "Running all Leptris specs")
@@ -52,10 +63,12 @@ function(leptris_add_test name)
     # Timing specs measure ratios; concurrent processes steal cache
     # and skew short measurements — run test_perf's cases serially.
     if(name STREQUAL "test_perf")
-        gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST
+        gtest_discover_tests(${name}
+                             DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE}
                              PROPERTIES RUN_SERIAL TRUE)
     else()
-        gtest_discover_tests(${name} DISCOVERY_MODE PRE_TEST)
+        gtest_discover_tests(${name}
+                             DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE})
     endif()
     add_dependencies(check_all ${name})
 endfunction()
@@ -70,7 +83,7 @@ function(leptris_add_cli_test name)
         LEPTRIS_CLI_BIN="${CMAKE_BINARY_DIR}/cli/leptris"
         LEPTRIS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     gtest_discover_tests(${name}
-        DISCOVERY_MODE PRE_TEST
+        DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE}
         PROPERTIES
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         # CLI cases spawn subprocesses; fork/exec contention under

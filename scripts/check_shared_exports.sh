@@ -26,7 +26,7 @@ cmake -B "$BUILD" -S "$ROOT" \
     -DLEPTRIS_BUILD_BENCHMARKS=OFF \
     > /dev/null
 
-cmake --build "$BUILD" --target leptris_shared > /dev/null
+cmake --build "$BUILD" --target leptris_shared --parallel > /dev/null
 
 LIB=$(find "$BUILD" -name 'libleptris.*.dylib' -o -name 'libleptris.so*' \
         2>/dev/null | grep -v '[0-9]\.dylib$' | head -1)
@@ -98,13 +98,17 @@ REQUIRED=(
 )
 
 rc=0
+# One nm pass instead of one per symbol: the export table is a few KB
+# but nm re-reads the whole dylib each time (~55 spawns + reads).
+# macOS: nm -gU; Linux: nm -D --defined-only. The macOS spelling
+# prefixes symbols with '_', hence the optional underscore.
+EXPORTS=$(mktemp)
+trap 'rm -f "$EXPORTS"' EXIT
+if ! nm -gU "$LIB" > "$EXPORTS" 2>/dev/null; then
+    nm -D --defined-only "$LIB" > "$EXPORTS" 2>/dev/null || true
+fi
 for sym in "${REQUIRED[@]}"; do
-    # nm flags: -g externals only, -U exclude undefined, -C no demangle.
-    # macOS:    nm -gU <lib>
-    # Linux:    nm -D --defined-only <lib>
-    if nm -gU "$LIB" 2>/dev/null | grep -qE " _?${sym}\$"; then
-        echo "  OK   $sym"
-    elif nm -D --defined-only "$LIB" 2>/dev/null | grep -qE " ${sym}\$"; then
+    if grep -qE "[[:space:]]_?${sym}\$" "$EXPORTS"; then
         echo "  OK   $sym"
     else
         echo "  MISS $sym"
