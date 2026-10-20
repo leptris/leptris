@@ -5903,6 +5903,21 @@ static LeptrisDocument html_parse_shared(
                      * doctype - with an EMPTY name (13.2.5 "missing-
                      * doctype-name", doctype01.dat:4/5). WHATWG
                      * mode only; html4 keeps the drop. */
+                    /* #1771: html5lib's BeforeHtml processDoctype —
+                     * name != html, a public id, or a system id other
+                     * than about:legacy-compat is unknown-doctype. */
+                    if (b.whatwg) {
+                        size_t ln = nlen;
+                        int name_html = (ln == 4);
+                        for (int i = 0; name_html && i < 4; i++)
+                            if (h_lower(nstart[i]) != "html"[i])
+                                name_html = 0;
+                        if (!name_html || pub[0] ||
+                            (sys[0] && strcmp(sys, "about:legacy-compat") != 0))
+                            h_diag(&b, "unknown-doctype",
+                                   (size_t)(nstart - b.input_base),
+                                   "unknown DOCTYPE shape");
+                    }
                     if (nlen || b.whatwg) {
                         /* WHATWG lowercases the doctype name;
                          * libxml2 (the html4/parity mode) preserves
