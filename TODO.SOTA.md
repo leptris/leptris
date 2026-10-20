@@ -28,9 +28,23 @@ docs/MISSION-PLAN.md and is updated at every release.
 ## Gate A — Conformance: zero reds everywhere
 
 ### A1 WHATWG verdict parity: 1394/1555 → 1555/1555
-The remaining 161 verdict cases + ~270 code-set divergences
-(html5lib-verdict-redlist.txt). Ground every slice in html5lib's
-actual source (~/src/external/html5lib):
+**Measured 2026-10-21 (main after #1800): 1535/1555 verdict,
+1555/1555 tree, zero false positives; floor pinned at 1535.** The
+remaining 20 verdict misses: adoption-agency (tests2:10, tests19:98,
+tests19:99, tests26:1, tests26:9), menuitem strays (menuitem:10/12),
+table/caption singletons (tests9:16, tests10:15, tests16:197,
+pending-spec-changes:2, tests20:48), tokenizer singletons (tests10:2,
+tests2:18, tests2:58, tests19:41, tests19:82) and two-heads
+(tests3:13). The remaining ~270 code-set divergences are prose-dialect
+labels from older corpus datasets; the verdict gate is presence-only.
+The slices already shipped: initial mode, raw-text EOF, unterminated
+close, frameset, fenced walk, InBody EOF allowed-set, in-select,
+foster-by-kind, unknown-doctype (#1778-#1791), raw-text strays,
+non-html-root, end-tag-too-early, after-body/frameset phases,
+start-tag phases, select/table/foreign, need-space-after-doctype
+(#1794), misplaced/stray-p, after-html codes, image (#1797, #1800).
+Ground every further slice in html5lib's actual source
+(~/src/external/html5lib):
 - [ ] escaped-state EOF codes (`unexpected-eof-in-text-mode`,
       `eof-in-script-in-script`) — the script-data state machine's
       EOF classification
@@ -76,6 +90,14 @@ actual source (~/src/external/html5lib):
 ## Gate B — Performance: every published row ≥1.00x
 
 ### B1 build row: ~2.9x → ≤1.0x (the #242 campaign)
+**Measured 2026-10-21: 1.86-1.92x** (moxml `sota/04-performance`
+branch + leptris 1.9.376.0; harness `wt/460-harness/build_bench.rb`,
+31 interleaved reps: 4.08ms vs Nokogiri 2.20ms for 250 records).
+Was 2.95x at the 1.9.363 era; the add_child alias and same-doc fast
+path landed since. StackProf attribution: `NativeNode.create_element`
+14.6%, GC mark+sweep 19%, `prime_contract` 7.7%, attach path 45% of
+tree; the `invalidate_namespace_cache!` line attribution is a
+sampling artifact (deleting both attach invalidations gains ~5%).
 Harness: wt/460-harness/build_bench.rb. Decomposition on record.
 - [ ] per-element object budget: one Ruby object per created node
       (drop the shell entirely post-create-priming; the mint cache
