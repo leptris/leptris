@@ -83,7 +83,11 @@ jobs:
 
       - name: Run tests
         if: runner.os != 'Windows'
-        run: ctest --test-dir build --output-on-failure --build-config Release
+        # Native builds bake the gtest case list at build time
+        # (DISCOVERY_MODE POST_BUILD), so CTest can schedule the
+        # whole suite. 4 matches the runner vCPU floor; the suite is
+        # process-isolated and each case is independent.
+        run: ctest --test-dir build --output-on-failure --build-config Release --parallel 4
 
       - name: Enable crash minidumps (Windows, leptris#1577)
         if: runner.os == 'Windows'
@@ -111,7 +115,7 @@ jobs:
           # MSVC build itself is the contract this job verifies.
           # /Zi in the configure step writes PDBs beside the test
           # executables so the minidumps decode with symbols.
-          ctest --test-dir build --output-on-failure --build-config Release `
+          ctest --test-dir build --output-on-failure --build-config Release --parallel 4 `
             --exclude-regex 'XIncludeProcess|XIncludeXpointer|XIncludeRecursion|XIncludePhaseA|XIncludePhaseC|CliVersion|CliParse|CliFormat|CliXpath|SymbolExportCheck'
 
       - name: Upload crash dumps (Windows, leptris#1577)
@@ -275,7 +279,7 @@ jobs:
           # can't amortize the record pass); the forced gate must
           # still exercise the lane on suite-sized fixtures.
           LEPTRIS_IL_MIN: "0"
-        run: ctest --test-dir build --output-on-failure --build-config Release
+        run: ctest --test-dir build --output-on-failure --build-config Release --parallel 4
 
   test-amalgamated:
     name: Amalgamated build (single TU)
@@ -303,4 +307,4 @@ jobs:
         run: cmake --build build -j2
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure --build-config Release
+        run: ctest --test-dir build --output-on-failure --build-config Release --parallel 4
