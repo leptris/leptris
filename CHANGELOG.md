@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.378] - 2026-10-20
+
+### Fixed
+
+- invalidate the element index on sibling and prepend splices (dom)
+
+
+
 ## [1.9.377] - 2026-10-20
 
 ### Added
