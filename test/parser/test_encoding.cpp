@@ -257,6 +257,88 @@ TEST(EncodingEdgeCases, EmptyXmlElementRoundTrips) {
     leptris_document_free(doc);
 }
 
+/* leptris-ruby#514: strict load validates the input against the
+ * effective encoding. Without a declaration (or with a UTF-8 one)
+ * the entity is UTF-8 in XML 1.0; invalid byte sequences are a
+ * fatal load error, matching libxml2's "Invalid bytes in character
+ * encoding". A declared non-UTF-8 encoding is exempt — those bytes
+ * are legitimately not UTF-8. */
+TEST(EncodingUtf8Strict, RejectsInvalidBytesWithoutDeclaration) {
+    const char bad[] = "<r>\xC3\x28</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(bad, sizeof(bad) - 1, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+}
+
+TEST(EncodingUtf8Strict, RejectsInvalidBytesWithUtf8Declaration) {
+    const char bad[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r>\xC3\x28</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(bad, sizeof(bad) - 1, &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
+
+    const char bad_lower[] =
+        "<?xml version='1.0' encoding='utf-8'?><r>\xC3\x28</r>";
+    LeptrisDocument doc2 = leptris_parse_string(
+        bad_lower, sizeof(bad_lower) - 1, &st);
+    EXPECT_EQ(doc2, nullptr);
+}
+
+TEST(EncodingUtf8Strict, RejectsEveryInvalidSequenceClass) {
+    struct { const char* xml; size_t len; } cases[] = {
+        {"<r>\xC0\x80</r>", 0},            /* overlong NUL */
+        {"<r>\xED\xA0\x80</r>", 0},        /* surrogate U+D800 */
+        {"<r>\xF5\x80\x80\x80</r>", 0},    /* > U+10FFFF */
+        {"<r>\x80</r>", 0},                /* lone continuation */
+        {"<r>abc\xC3", 0},                 /* truncated at EOF */
+        {"<r a='\xC3\x28'/>", 0},          /* invalid in attribute */
+    };
+    for (auto& c : cases) {
+        size_t len = c.len ? c.len : std::strlen(c.xml);
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc = leptris_parse_string(c.xml, len, &st);
+        EXPECT_EQ(doc, nullptr) << "accepted invalid bytes";
+        if (doc) leptris_document_free(doc);
+    }
+}
+
+TEST(EncodingUtf8Strict, AcceptsValidMultibyte) {
+    const char xml[] = "<r>caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_STREQ(leptris_element_text(leptris_document_root(doc)),
+                 "caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80");
+    leptris_document_free(doc);
+}
+
+TEST(EncodingUtf8Strict, DeclaredNonUtf8IsExempt) {
+    /* ISO-8859-1 0xE9 is not valid UTF-8 but is valid in the
+     * declared encoding; the load lane transcodes it (libxml2). */
+    const char xml[] =
+        "<?xml version='1.0' encoding='ISO-8859-1'?><r>caf\xE9</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, sizeof(xml) - 1, &st);
+    ASSERT_NE(doc, nullptr);
+    const char* text = leptris_element_text(leptris_document_root(doc));
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(std::string(text), "caf\xC3\xA9");
+    leptris_document_free(doc);
+}
+
+TEST(EncodingUtf8Strict, RecoverLaneKeepsBestEffortTree) {
+    /* #1660: RECOVER never returns NULL for malformed input; the
+     * encoding check must not break that contract. */
+    const char bad[] = "<r>\xC3\x28</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string_flags(
+        bad, sizeof(bad) - 1, LEPTRIS_PARSE_RECOVER, &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_document_free(doc);
+}
+
 }  // namespace
 
 /* Issue #613: with_encoding on declared ISO-8859-1 must deliver
