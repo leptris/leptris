@@ -989,6 +989,7 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * InBody frameset, duplicate body/head, and AfterHead
      * out-of-my-head tags; the select/table/foreign slice adds
      * unexpected-input-in-select, hidden-input-in-table, and
-     * unexpected-html-element-in-foreign-content. Only raises. */
-    EXPECT_GE(parity, (size_t)1504);
+     * unexpected-html-element-in-foreign-content; the tokenizer
+     * slice adds need-space-after-doctype. Only raises. */
+    EXPECT_GE(parity, (size_t)1508);
 }
