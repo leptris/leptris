@@ -2,12 +2,19 @@
 
 ## [1.9.375] - 2026-10-20
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Added
 
-### Changed
-
-- (describe changes here)
+- **html: the #1771 verdict-parity emission slices (PRs #1788,
+  #1789, #1790, #1791) — parity 1394 to 1423 of 1555.** The EOF
+  closing-tag verdict now implements html5lib's InBody processEOF
+  allowed-set exactly (zero false positives — the lint's first
+  requirement); the in-select drop sites report
+  unexpected-start/end-tag-in-select and unexpected-select-in-
+  select; the foster branch reports foster-parenting-character/
+  -start-tag by node kind; unknown-doctype follows html5lib's
+  BeforeHtml processDoctype (name/public/system shape). Trees
+  byte-identical throughout (1555/1555); full suite green at
+  every step.
 
 
 ## [1.9.374] - 2026-10-19
