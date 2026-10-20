@@ -2767,6 +2767,9 @@ typedef struct {
      * switch, so the divert stays armed. Re-armed by each
      * </body>/</html> token. */
     int after_body_done;
+    /* Verdict bookkeeping only (never gates tree placement): the
+     * AfterBody startTagOther error has fired for this phase. */
+    int after_body_diag_done;
     /* #659 two-mode split: leptris_parse_html_string is the WHATWG
      * engine (full "in head" set: script/style/noscript/template
      * ... lift into the implied head); the new
@@ -7102,6 +7105,28 @@ static LeptrisDocument html_parse_shared(
         while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
         size_t nlen = (size_t)(q - ns);
         char* name = h_pooled_lower(b.pool, ns, nlen);
+        if (name && b.whatwg && strcmp(name, "html") != 0) {
+            if (b.after_html &&
+                !(b.frameset && strcmp(name, "noframes") == 0)) {
+                /* AfterAfterBody / AfterAfterFrameset startTagOther
+                 * (only html — and noframes in the frameset flavor —
+                 * is accepted). */
+                h_diag(&b, "expected-eof-but-got-start-tag",
+                       (size_t)(p - b.input_base),
+                       "<%s> after </html>", name);
+            } else if (b.after_body && !b.after_body_done &&
+                       !b.frameset && !b.after_body_diag_done) {
+                /* AfterBody startTagOther: the first non-html start
+                 * tag after </body> errors and moves the phase back
+                 * to in-body (tests15:4/6, tests9:21, tests10:20).
+                 * Bookkeeping is diagnostic-only: after_body_done
+                 * also gates comment placement. */
+                h_diag(&b, "unexpected-start-tag-after-body",
+                       (size_t)(p - b.input_base),
+                       "<%s> after </body>", name);
+                b.after_body_diag_done = 1;
+            }
+        }
         if (!name) goto done;
         /* #659 (13.2.6.4.7): <image> is renamed <img> and
          * reprocessed (tests1:90). */
@@ -7320,6 +7345,20 @@ static LeptrisDocument html_parse_shared(
             strcmp(name, "frame") != 0 &&
             strcmp(name, "noframes") != 0 &&
             strcmp(name, "html") != 0) {
+            /* html5lib phase verdicts for the dropped token (the
+             * after-</html> flavor is emitted at the start-tag
+             * dispatch): AfterFrameset names its own code; inside an
+             * open frameset it is InFrameset's. */
+            if (!b.after_html) {
+                if (b.after_frameset)
+                    h_diag(&b, "unexpected-start-tag-after-frameset",
+                           (size_t)(p - b.input_base),
+                           "<%s> after </frameset>", name);
+                else
+                    h_diag(&b, "unexpected-start-tag-in-frameset",
+                           (size_t)(p - b.input_base),
+                           "<%s> inside <frameset>", name);
+            }
             if (text < p) {
                 LeptrisTextNode* t = h_text_node(&b, text, p);
                 if (t) {

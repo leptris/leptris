@@ -983,6 +983,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * cases; non-html-root adds the 9 later-<html> cases; the
      * end-tag-too-early slices add heading name mismatches, block
      * closes over non-implied elements, and the same rule on the
-     * implied close of li/dd/dt/p start tags. Only raises. */
-    EXPECT_GE(parity, (size_t)1477);
+     * implied close of li/dd/dt/p start tags; the after-body and
+     * frameset phase slices add the AfterBody/AfterFrameset/
+     * AfterAfter* start-tag codes. Only raises. */
+    EXPECT_GE(parity, (size_t)1492);
 }
