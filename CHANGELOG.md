@@ -1,11 +1,57 @@
 ## [Unreleased]
 
-## [1.9.378] - 2026-10-20
+## [1.9.378] - 2026-10-21
+
+### Added
+
+- **SECURITY.md: private reporting channel and CVE-response note
+  (PR #1804).** Reports go through GitHub Security Advisories, with
+  an acknowledgment target, coordinated disclosure, and CVE
+  assignment when warranted. The supported-version table follows
+  the lockstep rule: a fix is delivered only when the binding
+  release carries the fixed engine. The hardening inventory records
+  what actually ships: zero required runtime dependencies,
+  ASAN+leak and macOS `leaks` lanes, nightly libFuzzer on the
+  parser, explicit depth/size limits, and the conformance suites.
+- **Test suite runs in parallel without changing any test (PR
+  #1799).** `gtest_discover_tests` now bakes the case list at build
+  time for native builds (`POST_BUILD`; cross builds keep
+  `PRE_TEST`), so `ctest --parallel` expands real cases instead of
+  `_NOT_BUILT` placeholders. CI runs the native and matrix lanes at
+  `--parallel 4` (qemu s390x and ILP32 stay serial). The CLI test
+  helper passed `WORKING_DIRECTORY` inside `PROPERTIES`, which
+  silently dropped the following `RUN_SERIAL`; passing it as a
+  keyword restores the serialization. Same 2074 cases, all green:
+  66.0 s serial → 31.0 s `-j4` locally; the export check alone
+  20.7-23.3 s → 8.7-9.3 s.
 
 ### Fixed
 
-- invalidate the element index on sibling and prepend splices (dom)
-
+- **dom: node-set XPath no longer answers from a stale element
+  index after sibling insertion (leptris-ruby#519, PR #1802).** The
+  lazy TODO 132 index was invalidated by `append_child` but not by
+  `insert_before`, `insert_after` or `prepend_child`, so a
+  `//name` query after `add_next_sibling` missed the new element
+  until an unrelated child insert rebuilt the index. All three
+  splice paths now invalidate the document index; the regression
+  spec covers each path plus the compiled-handle FFI face the
+  bindings evaluate with.
+- **html: WHATWG verdict parity is complete — 1555/1555, zero
+  misses (PR #1803).** The remaining 20 corpus documents now report
+  at their html5lib source sites: `adoption-agency-1.3` for
+  formatting end tags whose element is in scope but not the current
+  node; the `</menuitem>` endTagOther pair (stray, and found with
+  non-implied open elements above); tokenizer
+  `expected-dashes-or-doctype`,
+  `unexpected-character-after-solidus-in-tag` and
+  `attributes-in-end-tag`; AfterAfterFrameset trailing characters,
+  BeforeHead `end-tag-after-implied-root`, BeforeHtml
+  `unexpected-end-tag-before-html`, and foreign-content end-tag
+  mismatch; `unexpected-form-in-table` for both the insertion and
+  the ignored duplicate plus the `</form>` table-voodoo pair;
+  template `foster-parenting-character`; and
+  `two-heads-are-not-better-than-one`. Tree parity stays
+  1555/1555; the verdict floor is pinned at the full corpus count.
 
 
 ## [1.9.377] - 2026-10-20
