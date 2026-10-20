@@ -5817,12 +5817,25 @@ static LeptrisDocument html_parse_shared(
                 size_t clen = cclose
                                   ? (size_t)(ce - cs)
                                   : (size_t)(end - cs);
-                if (!cclose)
+                if (!cclose) {
+                    /* Tokenizer EOF states: a trailing "--" is
+                     * comment-end-double-dash (tests2:59), anything
+                     * else is a plain eof-in-comment (tests2:35/43). */
+                    if (b.whatwg) {
+                        int dd = clen >= 2 && cs[clen - 1] == '-' &&
+                                 cs[clen - 2] == '-';
+                        h_diag(&b,
+                               dd ? "eof-in-comment-double-dash"
+                                  : "eof-in-comment",
+                               (size_t)(end - b.input_base),
+                               "comment reaches end of input");
+                    }
                     /* Unterminated at EOF: html5lib drops the
                      * trailing dash run (tests2:59: <!--x-- keeps
                      * data "x"). */
                     while (clen > 0 && cs[clen - 1] == '-')
                         clen--;
+                }
                 p = cclose ? ce + cclose : end;
                 LeptrisCommentNode* c = leptris_comment_create(
                     cs, clen, b.pool);
