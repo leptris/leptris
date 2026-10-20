@@ -4680,11 +4680,6 @@ static void h_reconstruct(HBuilder* b) {
     }
 }
 
-/* #1771: defined with the diagnostics below; the adoption agency
- * reports from here first. */
-static void h_diag(HBuilder* b, const char* code, size_t off,
-                   const char* fmt, ...);
-
 /* The adoption agency proper. Returns 1 when the end tag is fully
  * consumed; 0 means no formatting entry matched and the caller
  * runs its generic (any-other-end-tag) handling. */
