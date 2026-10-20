@@ -5912,6 +5912,13 @@ static LeptrisDocument html_parse_shared(
                 }
                 if (is_dt) {
                     q += 7;
+                    /* Tokenizer: need-space-after-doctype when the
+                     * keyword is not followed by whitespace
+                     * (doctype01:3, tests2:26-28). */
+                    if (b.whatwg && q < end && *q != '>' && !h_is_ws(*q))
+                        h_diag(&b, "need-space-after-doctype",
+                               (size_t)(q - b.input_base),
+                               "no space after <!doctype");
                     while (q < end && h_is_ws(*q)) q++;
                     const char* nstart = q;
                     while (q < end && !h_is_ws(*q) && *q != '>') q++;
