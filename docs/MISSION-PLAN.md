@@ -161,3 +161,15 @@ One table, updated at every release train: gate, command, last run,
 verdict. When every row of Gate A and Gate B reads "green (dated)"
 and Gate D1 is green, the mission is achieved — and v1.0.0 is the
 tag that says so.
+
+| Gate | Command | Last run | Verdict |
+|------|---------|----------|---------|
+| A1 WHATWG tree parity | `test_html5lib --gtest_filter=Html5LibCorpus.*` | 2026-10-21 | green, 1555/1555 |
+| A1 WHATWG verdict parity | `Html5LibCorpus.ErrorVerdictParity` | 2026-10-21 | 1535/1555 (floor 1535; **red**) |
+| A7 libxslt | `LibxsltSuite` | 2026-10-20 | 205/205 (204 + 1 macOS skip) |
+| B1 build row | `wt/460-harness/build_bench.rb` | 2026-10-21 | 1.86-1.92x (**red**, sota/04 branch) |
+| B2 walk row | `wt/460-harness/walk_read_bench.rb` | 2026-10-20 | 0.88x (green) |
+| Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; PR #1799) |
+| Rides 1.9.377 | registries | 2026-10-21 | rubygems/PyPI 1.9.377.0, npm 0.1.21 |
+| Issues | all repos | 2026-10-21 | 0 open (ruby#514/#515 closed with gem verification) |
+
