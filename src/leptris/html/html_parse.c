@@ -4035,6 +4035,13 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { ws = 0; break; }
         if (!ws) {
+            /* AfterFrameset processCharacters reports
+             * unexpected-char-after-frameset; the after-</html>
+             * flavor is reported by the expected-eof block below. */
+            if (!b->after_html)
+                h_diag(b, "unexpected-char-after-frameset",
+                       b->err_line_memo_off,
+                       "characters after </frameset>");
             /* Every whitespace character inserts, every
              * non-whitespace one drops (tests2:7: " te st" ->
              * "  "). Filter in place, like after-frameset. */
@@ -4057,7 +4064,20 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             for (const char* q = tt; *q; q++)
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { nonws = 1; break; }
-        if (nonws) b->after_body_done = 1;
+        if (nonws) {
+            b->after_body_done = 1;
+            /* AfterAfterBody/AfterAfterFrameset processCharacters
+             * report expected-eof-but-got-char; AfterBody reports
+             * unexpected-char-after-body (tests2:55, tests19:41). */
+            if (b->after_html)
+                h_diag(b, "expected-eof-but-got-char",
+                       b->err_line_memo_off,
+                       "characters after </html>");
+            else
+                h_diag(b, "unexpected-char-after-body",
+                       b->err_line_memo_off,
+                       "characters after </body>");
+        }
     }
     /* Doc-start mixed run: the ws prefix is "before html"
      * whitespace and drops (doctype01:31, tests19:79). Tightest

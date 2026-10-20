@@ -992,6 +992,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * unexpected-html-element-in-foreign-content; the tokenizer
      * slice adds need-space-after-doctype; the misplaced-tag slice
      * adds in-body caption/col/…/tr and frame (ignored), plus the
-     * stray </p> phase codes. Only raises. */
-    EXPECT_GE(parity, (size_t)1511);
+     * stray </p> phase codes; the character-phase slice adds
+     * expected-eof-but-got-char and unexpected-char-after-body/
+     * -frameset. Only raises. */
+    EXPECT_GE(parity, (size_t)1514);
 }
