@@ -977,9 +977,11 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
     for (size_t i = 0; i < failures.size() && i < 20; i++)
         printf("  VERDICT %s\n", failures[i].c_str());
     EXPECT_GT(total, (size_t)1500);
-    /* Verdict-parity floor — set at the slice-2 baseline
-     * (1409/1555; was 190 before the #1771 emission slices —
-     * the doctype-less initial-mode family, trailing chars, EOF with
-     * open elements; slice 3 adds the raw-text EOF variants). Only raises. */
-    EXPECT_GE(parity, (size_t)1409);
+    /* Verdict-parity floor — main measured 1446/1555 before the
+     * raw-text stray-end-tag slice (1409 was the slice-2 baseline;
+     * was 190 before the #1771 emission slices). The slice adds the
+     * 12 depth-0 stray `</script>`/`</style>`/... cases (raw-text
+     * elements complete during start-tag handling, so the token can
+     * close nothing and html5lib's endTagOther errors). Only raises. */
+    EXPECT_GE(parity, (size_t)1458);
 }

@@ -3299,6 +3299,18 @@ static int h_is_formatting(const char* n) {
     return h_fmt4_lut[h_tag_id(n)];
 }
 
+/* Raw-text tokenizer targets. In body they have no dedicated end-tag
+ * handler: html5lib's endTagOther walks the stack and reports
+ * unexpected-end-tag at the first special node, so every such token
+ * reaching the generic walk is stray (the tokenizer consumes the
+ * matching terminator when the element is actually open). */
+static int h_is_rawtext_name(const char* n) {
+    return strcmp(n, "script") == 0 || strcmp(n, "style") == 0 ||
+           strcmp(n, "title") == 0 || strcmp(n, "textarea") == 0 ||
+           strcmp(n, "xmp") == 0 || strcmp(n, "iframe") == 0 ||
+           strcmp(n, "noembed") == 0 || strcmp(n, "noframes") == 0;
+}
+
 /* WHATWG "special" category (13.2.4.2) — the adoption agency's
  * furthest-block candidates. */
 /* Generated tag classifier (#1218 hot path): one first-char
@@ -6191,6 +6203,27 @@ static LeptrisDocument html_parse_shared(
                 text = p;
                 continue;
             }
+            /* Stray raw-text end tag with no open stack: the raw-text
+             * element completed during its start-tag handling, so this
+             * token cannot close anything. html5lib's InHead/InBody
+             * endTagOther reports unexpected-end-tag once the tree has
+             * content (the synthesized body is the special node);
+             * with nothing seen yet the phase errors differently and
+             * the initial-mode checks above already cover it. */
+            if (b.whatwg && nlen && b.depth == 0 && b.top_tail) {
+                char rn[16];
+                size_t rl = nlen < sizeof(rn) - 1 ? nlen : sizeof(rn) - 1;
+                for (size_t i = 0; i < rl; i++) rn[i] = h_lower(ns[i]);
+                rn[rl] = 0;
+                if (h_is_rawtext_name(rn)) {
+                    h_diag(&b, "unexpected-end-tag",
+                           (size_t)(p - b.input_base),
+                           "</%s> has no matching open element", rn);
+                    p = q;
+                    text = p;
+                    continue;
+                }
+            }
             if (nlen && (b.depth > 0 ||
                          (b.whatwg &&
                           ((nlen == 4 &&
@@ -6623,7 +6656,14 @@ static LeptrisDocument html_parse_shared(
                                             strcmp(lname, "dd") == 0 ||
                                             strcmp(lname, "dt") == 0) &&
                                            (h_ieq_raw(on, "ul") ||
-                                            h_ieq_raw(on, "ol")));
+                                            h_ieq_raw(on, "ol"))) ||
+                                          /* html5lib endTagOther: a
+                                           * raw-text name has no
+                                           * in-body handler, so the
+                                           * walk errors at the first
+                                           * special node. */
+                                          (h_is_rawtext_name(lname) &&
+                                           h_is_special_ww(on));
                             }
                             if (fenced) {
                                 /* #1771: html5lib's walk reports
