@@ -4220,6 +4220,31 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                    b->err_line_memo_off,
                    "hidden input inserted in table context");
         }
+        /* Template content whose last node is a table-context
+         * element inserts text as that node's sibling (the template
+         * flavor of foster parenting). html5lib still reports the
+         * foster (template.dat:112: <template><tr>…</tr>a). */
+        if (b->whatwg && b->whatwg_foster &&
+            leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT &&
+            b->depth > 0 &&
+            b->open_id[b->depth - 1] == h_id_template) {
+            const char* tc =
+                leptris_text_node_get_content((LeptrisTextNode*)n);
+            int nonws = 0;
+            if (tc)
+                for (const char* w = tc; *w; w++)
+                    if (*w != ' ' && *w != '\t' && *w != '\n' &&
+                        *w != '\r') { nonws = 1; break; }
+            LeptrisNodeRef last = leptris_node_last_child_internal(
+                (LeptrisNode*)b->open[b->depth - 1]);
+            if (nonws && last &&
+                leptris_node_get_type(last) ==
+                    LEPTRIS_NODE_TYPE_ELEMENT &&
+                h_is_table_context((LeptrisElement)last))
+                h_diag(b, "foster-parenting-character",
+                       b->err_line_memo_off,
+                       "text fostered in template table content");
+        }
         /* #659 foster (WHATWG only): text/elements in table context
          * go before the nearest open table in ITS parent. */
         if (b->whatwg_foster && tbl_ctx && h_fosterable(b, n)) {
@@ -6126,6 +6151,15 @@ static LeptrisDocument html_parse_shared(
                     }
                     p = (ce + 3 <= end) ? ce + 3 : end;
                 } else {
+                    /* Tokenizer markup-declaration-open: "<!" that
+                     * is neither a comment nor DOCTYPE (and, in
+                     * HTML content, not CDATA) reports
+                     * expected-dashes-or-doctype (tests10:2:
+                     * <![CDATA[a]]> outside foreign content). */
+                    if (b.whatwg)
+                        h_diag(&b, "expected-dashes-or-doctype",
+                               (size_t)(p - b.input_base),
+                               "<! markup declaration");
                     /* CDATA-ish bogus: skip to '>'. WHATWG makes
                      * it a bogus comment (tests1:42-49) — except
                      * doctype-shaped constructs, which the
@@ -6236,6 +6270,20 @@ static LeptrisDocument html_parse_shared(
             const char* q = ns;
             while (q < end && !h_is_ws(*q) && *q != '>' && *q != '/') q++;
             size_t nlen = (size_t)(q - ns);
+            /* Tokenizer: an end tag may carry attributes
+             * syntactically (they are ignored at tree time, but
+             * the token reports attributes-in-end-tag;
+             * tests2:18's </b test<b ...>). A lone "/" before
+             * ">" is the self-closing form, not an attribute. */
+            {
+                const char* tq = q;
+                while (tq < end && h_is_ws(*tq)) tq++;
+                if (tq < end && *tq != '>' &&
+                    !(*tq == '/' && tq + 1 < end && tq[1] == '>'))
+                    h_diag(&b, "attributes-in-end-tag",
+                           (size_t)(tq - b.input_base),
+                           "attributes in an end tag");
+            }
             while (q < end && *q != '>') q++;
             if (q < end) q++;
             /* Flush pending text before closing. A
@@ -6273,6 +6321,17 @@ static LeptrisDocument html_parse_shared(
                 for (size_t i = 0; i < cl0; i++)
                     lname0[i] = h_lower(ns[i]);
                 lname0[cl0] = 0;
+                /* html5lib InForeignContent.processEndTag: an end
+                 * tag that does not name the current foreign node
+                 * reports before the walk (tests19:82: <math></p>). */
+                {
+                    const char* topn = leptris_element_name(
+                        b.open[b.depth - 1]);
+                    if (topn && !h_ieq_raw(topn, lname0))
+                        h_diag(&b, "unexpected-end-tag",
+                               (size_t)(p - b.input_base),
+                               "</%s> in foreign content", lname0);
+                }
                 int match_foreign = 0, crossed_ip = 0;
                 for (size_t d = b.depth; d > 0; d--) {
                     if (b.open_ns[d - 1] == H_NS_HTML) break;
@@ -6347,7 +6406,16 @@ static LeptrisDocument html_parse_shared(
                 int stray = h_is_rawtext_name(rn) ||
                             (h_is_void(rn) && strcmp(rn, "br") != 0) ||
                             strcmp(rn, "menuitem") == 0;
-                if (stray) {
+                /* BeforeHtml endTagOther: every end tag other than
+                 * head/body/html/br reports here (html5lib
+                 * BeforeHtmlPhase; tests2:18's </b ...>). */
+                int before_html = !b.top_tail && !b.head_tag_seen &&
+                                  !b.body_seen && !b.body_tag_seen;
+                int bb_exempt = strcmp(rn, "head") == 0 ||
+                                strcmp(rn, "body") == 0 ||
+                                strcmp(rn, "html") == 0 ||
+                                strcmp(rn, "br") == 0;
+                if (stray || (before_html && !bb_exempt)) {
                     const char* code = "unexpected-end-tag";
                     if (b.after_html)
                         code = "expected-eof-but-got-end-tag";
@@ -6357,9 +6425,8 @@ static LeptrisDocument html_parse_shared(
                         code = "unexpected-end-tag-after-frameset";
                     else if (b.frameset)
                         code = "unexpected-end-tag-in-frameset";
-                    else if (!b.top_tail && !b.head_tag_seen &&
-                             !b.body_seen && !b.body_tag_seen)
-                        code = "end-tag-after-implied-root";
+                    else if (before_html)
+                        code = "unexpected-end-tag-before-html";
                     h_diag(&b, code, (size_t)(p - b.input_base),
                            "</%s> has no matching open element", rn);
                     p = q;
@@ -6378,6 +6445,28 @@ static LeptrisDocument html_parse_shared(
                 h_diag(&b, "unexpected-end-tag",
                        (size_t)(p - b.input_base),
                        "</p> outside the body phase");
+            /* BeforeHead endTagOther: before the head phase starts
+             * (only the html element open), any end tag other than
+             * head/body/html/br is end-tag-after-implied-root
+             * (tests19:2: <html></p><!--foo-->). */
+            if (b.whatwg && nlen && b.depth == 1 &&
+                b.open_id[0] == h_id_html &&
+                !b.head_tag_seen && !b.head_end_seen &&
+                !b.body_seen && !b.body_tag_seen &&
+                !b.frameset && !b.after_body && !b.after_html) {
+                char* ph = h_pooled_lower(b.pool, ns, nlen);
+                if (ph && strcmp(ph, "head") != 0 &&
+                    strcmp(ph, "body") != 0 &&
+                    strcmp(ph, "html") != 0 &&
+                    strcmp(ph, "br") != 0) {
+                    h_diag(&b, "end-tag-after-implied-root",
+                           (size_t)(p - b.input_base),
+                           "</%s> before the head phase", ph);
+                    p = q;
+                    text = p;
+                    continue;
+                }
+            }
             if (nlen && (b.depth > 0 ||
                          (b.whatwg &&
                           ((nlen == 4 &&
@@ -6415,7 +6504,7 @@ static LeptrisDocument html_parse_shared(
                          * at body); a SPECIAL element crossed
                          * ignores the tag (menuitem:8: x stays in
                          * the p). */
-                        int msp = 0;
+                        int msp = 0, implied_ok = 1;
                         for (size_t d2 = b.depth; d2 > 0; d2--) {
                             const char* on2 =
                                 leptris_element_name(b.open[d2 - 1]);
@@ -6426,13 +6515,39 @@ static LeptrisDocument html_parse_shared(
                                 break;
                             }
                             if (h_is_special_ww(on2)) break;
+                            if (!h_is_implied_end_name(on2))
+                                implied_ok = 0;
                         }
-                        (void)msp;
+                        /* html5lib endTagOther reports in both
+                         * shapes: the walk found the element but
+                         * non-implied nodes sit above it, or the
+                         * walk stopped at a special (stray). */
+                        if (!msp)
+                            h_diag(&b, "unexpected-end-tag",
+                                   (size_t)(p - b.input_base),
+                                   "</menuitem> is a stray end tag");
+                        else if (!implied_ok)
+                            h_diag(&b, "unexpected-end-tag",
+                                   (size_t)(p - b.input_base),
+                                   "</menuitem> with open elements above");
                         p = q;
                         text = p;
                         continue;
                     }
                     if (b.whatwg && strcmp(lname, "form") == 0) {
+                        /* InTable endTagOther runs the body rule
+                         * under table voodoo: both codes report
+                         * (tests16:197: <form><table></form>). */
+                        if (b.depth > 0 &&
+                            h_id_table_ctx(b.open_id[b.depth - 1])) {
+                            h_diag(&b,
+                                   "unexpected-end-tag-implies-table-voodoo",
+                                   (size_t)(p - b.input_base),
+                                   "</form> inside a table");
+                            h_diag(&b, "unexpected-end-tag",
+                                   (size_t)(p - b.input_base),
+                                   "</form> inside a table");
+                        }
                         /* Vendored rule: </form> closes implied
                          * end-tag layers (option/optgroup/li/dd/
                          * dt/p), then pops the form ONLY when it
@@ -7412,7 +7527,41 @@ static LeptrisDocument html_parse_shared(
                 /* InBody/AfterHead startTagHead: any <head> after
                  * the head phase started is an unexpected start tag
                  * (tests6:1: </head> <head>). */
-                if (b.whatwg &&
+                /* An explicit <head> while the IMPLIED head already
+                 * holds head content is html5lib's InHead
+                 * startTagHead — two-heads-are-not-better-than-one
+                 * (tests3:13: <html><meta><head>). */
+                int head_content_before = 0;
+                if (!b.head_tag_seen && !b.head_end_seen &&
+                    b.depth == 1 && b.open[0] &&
+                    b.open_id[0] == h_id_html) {
+                    LeptrisNodeRef hc =
+                        leptris_node_last_child_internal(
+                            (LeptrisNode*)b.open[0]);
+                    if (hc && leptris_node_get_type(hc) ==
+                                  LEPTRIS_NODE_TYPE_ELEMENT) {
+                        const char* hn2 = leptris_element_name(
+                            (LeptrisElement)hc);
+                        head_content_before =
+                            hn2 && (h_ieq_raw(hn2, "title") ||
+                                    h_ieq_raw(hn2, "meta") ||
+                                    h_ieq_raw(hn2, "link") ||
+                                    h_ieq_raw(hn2, "base") ||
+                                    h_ieq_raw(hn2, "basefont") ||
+                                    h_ieq_raw(hn2, "bgsound") ||
+                                    h_ieq_raw(hn2, "script") ||
+                                    h_ieq_raw(hn2, "style") ||
+                                    h_ieq_raw(hn2, "noframes") ||
+                                    h_ieq_raw(hn2, "noscript") ||
+                                    h_ieq_raw(hn2, "template"));
+                    }
+                }
+                if (b.whatwg && head_content_before)
+                    h_diag(&b,
+                           "two-heads-are-not-better-than-one",
+                           (size_t)(p - b.input_base),
+                           "<head> in the implied head");
+                else if (b.whatwg &&
                     (b.head_tag_seen || b.head_end_seen ||
                      b.body_tag_seen || b.body_seen))
                     h_diag(&b, "unexpected-start-tag",
@@ -7730,7 +7879,30 @@ static LeptrisDocument html_parse_shared(
         /* 13.2.6.4.7: a <form> start tag with the form pointer
          * already set (a form still open) is IGNORED - <form><form>
          * is one form (tests6:13); likewise inside a table
-         * (tests20:46/47). </form> clears the pointer. */
+         * (tests20:46/47). </form> clears the pointer.
+         *
+         * html5lib reports both flavors: InTable startTagForm
+         * always says unexpected-form-in-table (even when it
+         * inserts), and InBody reports unexpected-start-tag for a
+         * duplicate (tests20:48: <table><form></table><form>). */
+        if (b.whatwg && strcmp(name, "form") == 0) {
+            int in_tbl = b.depth > 0 &&
+                         h_id_table_ctx(b.open_id[b.depth - 1]);
+            if (!in_tbl && b.depth >= 2 &&
+                b.open_ns[b.depth - 1] == H_NS_HTML &&
+                b.open_id[b.depth - 1] == h_id_form &&
+                b.open_ns[b.depth - 2] == H_NS_HTML &&
+                b.open_id[b.depth - 2] == h_id_table)
+                in_tbl = 1;   /* table > form wrapper */
+            if (in_tbl)
+                h_diag(&b, "unexpected-form-in-table",
+                       (size_t)(p - b.input_base),
+                       "<form> in table context");
+            else if (b.form_open)
+                h_diag(&b, "unexpected-start-tag",
+                       (size_t)(p - b.input_base),
+                       "<form> while a form is open");
+        }
         if (b.whatwg && strcmp(name, "form") == 0 && b.form_open) {
             /* The generic pre-element flush above already drained
              * the pending run. */
@@ -8460,6 +8632,14 @@ static LeptrisDocument html_parse_shared(
                     q += 2;
                     break;
                 }
+                /* Tokenizer self-closing-start-tag: a solidus not
+                 * followed by '>' reports and reprocesses in
+                 * before-attribute-name (tests2:58). */
+                if (b.whatwg)
+                    h_diag(&b,
+                           "unexpected-character-after-solidus-in-tag",
+                           (size_t)(q - b.input_base),
+                           "'/' before an attribute name");
                 q++;
                 continue;
             }
@@ -8794,6 +8974,14 @@ static LeptrisDocument html_parse_shared(
                         drop = 1;
                         break;
                     }
+                /* AfterAfterFrameset processCharacters reports
+                 * expected-eof-but-got-char for every non-space
+                 * character (tests19:41). */
+                if (drop)
+                    h_diag(&b, "expected-eof-but-got-char",
+                           (size_t)(text - b.input_base),
+                           "characters after </html> in the frameset"
+                           " phase");
             }
             if (!drop) {
                 if (!b.post_table_text) h_reconstruct(&b);
