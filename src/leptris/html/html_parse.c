@@ -7126,6 +7126,25 @@ static LeptrisDocument html_parse_shared(
                        "<%s> after </body>", name);
                 b.after_body_diag_done = 1;
             }
+            /* AfterHead startTagFromHead: a head-only start tag in
+             * the window after </head> and before body content is
+             * processed in head but reported out-of-my-head
+             * (tests7:3/4). */
+            if (b.head_end_seen && !b.body_seen && !b.body_tag_seen &&
+                !b.frameset && !b.after_body &&
+                (strcmp(name, "base") == 0 ||
+                 strcmp(name, "basefont") == 0 ||
+                 strcmp(name, "bgsound") == 0 ||
+                 strcmp(name, "link") == 0 ||
+                 strcmp(name, "meta") == 0 ||
+                 strcmp(name, "noframes") == 0 ||
+                 strcmp(name, "script") == 0 ||
+                 strcmp(name, "style") == 0 ||
+                 strcmp(name, "title") == 0)) {
+                h_diag(&b, "unexpected-start-tag-out-of-my-head",
+                       (size_t)(p - b.input_base),
+                       "<%s> after </head>", name);
+            }
         }
         if (!name) goto done;
         /* #659 (13.2.6.4.7): <image> is renamed <img> and
@@ -7220,6 +7239,13 @@ static LeptrisDocument html_parse_shared(
                 if (t) h_append(&b, (LeptrisNodeRef)t);
             }
             if (strcmp(name, "body") == 0) {
+                /* InBody startTagBody always reports
+                 * unexpected-start-tag for a second <body>
+                 * (tests2:16); the first one is the phase entry. */
+                if (b.whatwg && (b.body_tag_seen || b.body_seen))
+                    h_diag(&b, "unexpected-start-tag",
+                           (size_t)(p - b.input_base),
+                           "<body> after the body exists");
                 b.body_tag_seen = 1;
                 if (b.whatwg) b.frameset_ok = 0;
                 /* Only the FIRST structural <body> marks the
@@ -7231,6 +7257,15 @@ static LeptrisDocument html_parse_shared(
                     b.lift_boundary = b.top_tail;
                 }
             } else {
+                /* InBody/AfterHead startTagHead: any <head> after
+                 * the head phase started is an unexpected start tag
+                 * (tests6:1: </head> <head>). */
+                if (b.whatwg &&
+                    (b.head_tag_seen || b.head_end_seen ||
+                     b.body_tag_seen || b.body_seen))
+                    h_diag(&b, "unexpected-start-tag",
+                           (size_t)(p - b.input_base),
+                           "<head> after the head phase");
                 /* Before-head ends here: later comments are head
                  * content; earlier ones stay html-prefix children. */
                 b.head_tag_seen = 1;
@@ -7259,18 +7294,18 @@ static LeptrisDocument html_parse_shared(
             /* frameset is NOT in the 13.2.6.5 breakout list: inside
              * foreign content it is a plain foreign element
              * (plain-text-unsafe:16-23). */
-            /* #1771: html5lib's verdict — a <frameset> token that
-             * reaches the body phase after body content is
-             * unexpected-start-tag whether it then converts or is
-             * ignored (webkit01:51); head-phase converters and
-             * in-template framesets stay clean. body_seen is not
-             * set by the frameset token itself (it is in the
-             * head-only list), so it reads PRIOR content only. */
-            if (b.body_seen && !b.frameset &&
+            /* #1771: html5lib's InBody startTagFrameset always
+             * reports unexpected-start-tag — the frameset either
+             * converts (body element absent, frameset-ok set) or is
+             * ignored. frameset_ok==0 marks the InBody phase: any
+             * body tag/content (or a frameset-ok-clearing start)
+             * has already been seen. AfterHead converters keep
+             * frameset_ok==1 and stay clean (webkit01:51). */
+            if (!b.frameset_ok && !b.frameset &&
                 h_template_idx(&b) < 0)
                 h_diag(&b, "unexpected-start-tag",
                        (size_t)(p - b.input_base),
-                       "frameset after body content");
+                       "frameset in the body phase");
             /* depth<=1: at most the (explicit or synthesized) html
              * element is open; frameset-ok is the spec gate and the
              * body is removed wholesale when it converts. */

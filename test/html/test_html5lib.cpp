@@ -985,6 +985,8 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * closes over non-implied elements, and the same rule on the
      * implied close of li/dd/dt/p start tags; the after-body and
      * frameset phase slices add the AfterBody/AfterFrameset/
-     * AfterAfter* start-tag codes. Only raises. */
-    EXPECT_GE(parity, (size_t)1492);
+     * AfterAfter* start-tag codes; the start-tag phase slice adds
+     * InBody frameset, duplicate body/head, and AfterHead
+     * out-of-my-head tags. Only raises. */
+    EXPECT_GE(parity, (size_t)1498);
 }
