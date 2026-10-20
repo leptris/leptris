@@ -1,13 +1,18 @@
 ## [Unreleased]
 
-## [1.9.379] - 2026-10-20
+## [1.9.379] - 2026-10-21
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **html: build under GCC 14 and the wasm32 zero-warning gate (PR
+  #1806).** The template-foster diagnostic added in #1803 passed
+  `(LeptrisTextNode*)n` to `leptris_text_node_get_content`, whose
+  parameter is `LeptrisNodeRef`. GCC 14 (manylinux) treats
+  incompatible pointer types as a hard error and emcc flags them as
+  warnings — which broke the 1.9.378 wheel builds (leptris-py) and
+  failed the leptris-ts zero-warning gate on every lane. The
+  accessor takes the node handle directly; no behavior change.
+  Full suite 2075/2075.
 
 
 ## [1.9.378] - 2026-10-21
