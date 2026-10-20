@@ -4035,10 +4035,13 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 if (*q != ' ' && *q != '\t' && *q != '\n' &&
                     *q != '\r') { ws = 0; break; }
         if (!ws) {
-            /* AfterFrameset processCharacters reports
-             * unexpected-char-after-frameset; the after-</html>
-             * flavor is reported by the expected-eof block below. */
-            if (!b->after_html)
+            /* AfterFrameset/AfterAfterFrameset processCharacters
+             * both report and DROP the run (no phase switch). */
+            if (b->after_html)
+                h_diag(b, "expected-eof-but-got-char",
+                       b->err_line_memo_off,
+                       "characters after </html> in the frameset phase");
+            else
                 h_diag(b, "unexpected-char-after-frameset",
                        b->err_line_memo_off,
                        "characters after </frameset>");
@@ -4068,12 +4071,15 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             b->after_body_done = 1;
             /* AfterAfterBody/AfterAfterFrameset processCharacters
              * report expected-eof-but-got-char; AfterBody reports
-             * unexpected-char-after-body (tests2:55, tests19:41). */
-            if (b->after_html)
+             * unexpected-char-after-body (tests2:55, tests19:41).
+             * AfterAfterBody then switches to in-body and inserts
+             * the run — clear the phase flags so later comments are
+             * body content, not document epilog. */
+            if (b->after_html) {
                 h_diag(b, "expected-eof-but-got-char",
                        b->err_line_memo_off,
                        "characters after </html>");
-            else
+            } else
                 h_diag(b, "unexpected-char-after-body",
                        b->err_line_memo_off,
                        "characters after </body>");
@@ -6304,6 +6310,15 @@ static LeptrisDocument html_parse_shared(
                 text = p;
                 continue;
             }
+            /* AfterAfterBody/AfterAfterFrameset processEndTag: ANY
+             * end tag is a phase error, and the token is then
+             * reprocessed in body — report once and fall through
+             * with the phase flags cleared (tests19:43). */
+            if (b.whatwg && b.after_html) {
+                h_diag(&b, "expected-eof-but-got-end-tag",
+                       (size_t)(p - b.input_base),
+                       "end tag after </html>");
+            }
             /* Stray end tags with no open stack. The raw-text family
              * completes during start-tag handling; void elements and
              * menuitem have no in-body end handler. html5lib's
@@ -6339,6 +6354,17 @@ static LeptrisDocument html_parse_shared(
                     continue;
                 }
             }
+            /* InHead/AfterHead endTagOther: a </p> before body
+             * content is dropped with unexpected-end-tag and
+             * inserts no empty p (tests19:3). Depth-0 only — the
+             * in-body stray-p rule below owns the body phase. */
+            if (b.whatwg && nlen == 1 && h_lower(ns[0]) == 'p' &&
+                b.depth == 0 && !b.body_seen &&
+                (b.head_tag_seen || b.head_end_seen) &&
+                !b.frameset && !b.after_body && !b.after_html)
+                h_diag(&b, "unexpected-end-tag",
+                       (size_t)(p - b.input_base),
+                       "</p> outside the body phase");
             if (nlen && (b.depth > 0 ||
                          (b.whatwg &&
                           ((nlen == 4 &&
@@ -7255,9 +7281,14 @@ static LeptrisDocument html_parse_shared(
         }
         if (!name) goto done;
         /* #659 (13.2.6.4.7): <image> is renamed <img> and
-         * reprocessed (tests1:90). */
-        if (b.whatwg && strcmp(name, "image") == 0)
+         * reprocessed (tests1:90); html5lib reports the legacy
+         * spelling as image-start-tag (tests19:89). */
+        if (b.whatwg && strcmp(name, "image") == 0) {
+            h_diag(&b, "image-start-tag",
+                   (size_t)(p - b.input_base),
+                   "<image> acts as <img>");
             name = h_pooled_lower(b.pool, "img", 3);
+        }
         /* #1218: ONE classification per start tag — every
          * downstream consumer (frameset-ok, void, open) reads the
          * resolved entry instead of re-walking the bucket. */

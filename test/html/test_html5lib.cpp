@@ -998,6 +998,9 @@ TEST(Html5LibCorpus, ErrorVerdictParity) {
      * eof-in-comment-double-dash; the plaintext/EOF slice adds the
      * plaintext open-at-EOF and the "</" tokenizer EOF codes; the
      * stray-end-tag slice makes the depth-0 branch phase-aware for
-     * raw-text, void and menuitem names. Only raises. */
-    EXPECT_GE(parity, (size_t)1532);
+     * raw-text, void and menuitem names; this batch adds the
+     * depth-0 </p> phase code, the after-</html> end-tag code, the
+     * frameset after-html character code, and image-start-tag. Only
+     * raises. */
+    EXPECT_GE(parity, (size_t)1535);
 }
