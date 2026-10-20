@@ -3311,6 +3311,41 @@ static int h_is_rawtext_name(const char* n) {
            strcmp(n, "noembed") == 0 || strcmp(n, "noframes") == 0;
 }
 
+/* html5lib generateImpliedEndTags set (§13.2.4.5): closing a block
+ * or list item may pop these silently; anything else above the
+ * target makes the close "too early". */
+static int h_is_implied_end_name(const char* n) {
+    return strcmp(n, "p") == 0 || strcmp(n, "li") == 0 ||
+           strcmp(n, "dd") == 0 || strcmp(n, "dt") == 0 ||
+           strcmp(n, "option") == 0 || strcmp(n, "optgroup") == 0 ||
+           strcmp(n, "rb") == 0 || strcmp(n, "rt") == 0 ||
+           strcmp(n, "rtc") == 0 || strcmp(n, "rp") == 0;
+}
+
+/* End tags html5lib implements with endTagBlock / endTagListItem /
+ * endTagAppletMarqueeObject — the handlers that raise
+ * end-tag-too-early when the target is not the current node after
+ * implied-end generation. */
+static int h_is_tooearly_target(const char* n) {
+    return strcmp(n, "p") == 0 || strcmp(n, "li") == 0 ||
+           strcmp(n, "dd") == 0 || strcmp(n, "dt") == 0 ||
+           strcmp(n, "applet") == 0 || strcmp(n, "marquee") == 0 ||
+           strcmp(n, "object") == 0 ||
+           strcmp(n, "address") == 0 || strcmp(n, "article") == 0 ||
+           strcmp(n, "aside") == 0 || strcmp(n, "blockquote") == 0 ||
+           strcmp(n, "button") == 0 || strcmp(n, "center") == 0 ||
+           strcmp(n, "details") == 0 || strcmp(n, "dialog") == 0 ||
+           strcmp(n, "dir") == 0 || strcmp(n, "div") == 0 ||
+           strcmp(n, "dl") == 0 || strcmp(n, "fieldset") == 0 ||
+           strcmp(n, "figcaption") == 0 || strcmp(n, "figure") == 0 ||
+           strcmp(n, "footer") == 0 || strcmp(n, "header") == 0 ||
+           strcmp(n, "hgroup") == 0 || strcmp(n, "listing") == 0 ||
+           strcmp(n, "main") == 0 || strcmp(n, "menu") == 0 ||
+           strcmp(n, "nav") == 0 || strcmp(n, "ol") == 0 ||
+           strcmp(n, "pre") == 0 || strcmp(n, "section") == 0 ||
+           strcmp(n, "summary") == 0 || strcmp(n, "ul") == 0;
+}
+
 /* WHATWG "special" category (13.2.4.2) — the adoption agency's
  * furthest-block candidates. */
 /* Generated tag classifier (#1218 hot path): one first-char
@@ -6307,6 +6342,29 @@ static LeptrisDocument html_parse_shared(
                             const char* hn =
                                 leptris_element_name(b.open[d - 1]);
                             if (hn && h_is_heading(hn)) {
+                                /* html5lib endTagHeading: after the
+                                 * implied-end pass, a current
+                                 * heading of a different name makes
+                                 * the close too early (tests19:24:
+                                 * </h2> over an open h3), and so
+                                 * does a non-implied element above
+                                 * the heading. */
+                                int early = strcmp(hn, lname) != 0;
+                                for (size_t k = d; k < b.depth; k++) {
+                                    const char* an2 = leptris_element_name(
+                                        b.open[k]);
+                                    if (an2 &&
+                                        b.open_ns[k] == H_NS_HTML &&
+                                        !h_is_implied_end_name(an2)) {
+                                        early = 1;
+                                        break;
+                                    }
+                                }
+                                if (early)
+                                    h_diag(&b, "end-tag-too-early",
+                                           (size_t)(p - b.input_base),
+                                           "</%s> closes <%s> early",
+                                           lname, hn);
                                 h_pop_to(&b, d - 1);
                             /* Old-suite rule (tests1:21/91):
                              * </table> also closes open
@@ -6347,6 +6405,12 @@ static LeptrisDocument html_parse_shared(
                             text = p;
                             continue;
                         }
+                        /* No heading in scope: html5lib still checks
+                         * the current node, which is never the token
+                         * (tests19:23: </h3> after <p>). */
+                        h_diag(&b, "end-tag-too-early",
+                               (size_t)(p - b.input_base),
+                               "</%s> with no open heading", lname);
                     }
                     /* #659 13.2.6.4.17: </p> with no p in button
                      * scope inserts an EMPTY <p> and closes it
@@ -6716,6 +6780,27 @@ static LeptrisDocument html_parse_shared(
                                     strcmp(lname, "template") != 0 &&
                                     (int)(d - 1) <= ti)
                                     break;
+                            }
+                            /* html5lib endTagBlock / endTagListItem /
+                             * endTagAppletMarqueeObject: after the
+                             * implied-end pass, a non-implied element
+                             * above the target makes the close too
+                             * early (tests3:11: </pre> over <div>). */
+                            if (b.whatwg && b.open_ns[d - 1] == H_NS_HTML &&
+                                h_is_tooearly_target(lname)) {
+                                for (size_t k = d; k < b.depth; k++) {
+                                    const char* an2 =
+                                        leptris_element_name(b.open[k]);
+                                    if (an2 &&
+                                        b.open_ns[k] == H_NS_HTML &&
+                                        !h_is_implied_end_name(an2)) {
+                                        h_diag(&b, "end-tag-too-early",
+                                               (size_t)(p - b.input_base),
+                                               "</%s> closes over <%s>",
+                                               lname, an2);
+                                        break;
+                                    }
+                                }
                             }
                             h_pop_to(&b, d - 1);
                             /* Old-suite </table> rule: closes
@@ -7571,6 +7656,12 @@ static LeptrisDocument html_parse_shared(
         /* Implied end tags this start tag triggers (HTML rules
          * only — foreign content has none). */
         if (elem_ns == H_NS_HTML) {
+            /* html5lib startTagListItem/startTagBlock: an implied
+             * close whose target is buried under a non-implied
+             * element (div, article, ...) reports end-tag-too-early
+             * on this START tag (tests2:11, tests3:20). One per
+             * token, like the reference walk. */
+            const char* implied_early = NULL;
             /* WHATWG: a dd/dt start closes the NEAREST open dd/dt
              * in default scope — sibling definition items even
              * with content in between (13.2.6.4.7, tests19:30:
@@ -7580,6 +7671,15 @@ static LeptrisDocument html_parse_shared(
                 for (size_t d = b.depth; d > 0; d--) {
                     uint8_t oid = b.open_id[d - 1];
                     if (oid == h_id_dd || oid == h_id_dt) {
+                        for (size_t k = d; k < b.depth; k++) {
+                            const char* an2 =
+                                leptris_element_name(b.open[k]);
+                            if (an2 && b.open_ns[k] == H_NS_HTML &&
+                                !h_is_implied_end_name(an2)) {
+                                implied_early = an2;
+                                break;
+                            }
+                        }
                         b.depth = d - 1;
                         break;
                     }
@@ -7601,6 +7701,17 @@ static LeptrisDocument html_parse_shared(
                     if ((tid == h_id_li && oid == h_id_li) ||
                         (tid != h_id_li &&
                          (oid == h_id_dd || oid == h_id_dt))) {
+                        if (!implied_early) {
+                            for (size_t k = d; k < b.depth; k++) {
+                                const char* an2 =
+                                    leptris_element_name(b.open[k]);
+                                if (an2 && b.open_ns[k] == H_NS_HTML &&
+                                    !h_is_implied_end_name(an2)) {
+                                    implied_early = an2;
+                                    break;
+                                }
+                            }
+                        }
                         b.depth = d - 1;
                         break;
                     }
@@ -7621,6 +7732,17 @@ static LeptrisDocument html_parse_shared(
                 for (size_t d = b.depth; d > 0; d--) {
                     uint8_t oid = b.open_id[d - 1];
                     if (oid == h_id_p) {
+                        if (!implied_early) {
+                            for (size_t k = d; k < b.depth; k++) {
+                                const char* an2 =
+                                    leptris_element_name(b.open[k]);
+                                if (an2 && b.open_ns[k] == H_NS_HTML &&
+                                    !h_is_implied_end_name(an2)) {
+                                    implied_early = an2;
+                                    break;
+                                }
+                            }
+                        }
                         b.depth = d - 1;
                         break;
                     }
@@ -7629,6 +7751,10 @@ static LeptrisDocument html_parse_shared(
                         break;
                 }
             }
+            if (b.whatwg && implied_early)
+                h_diag(&b, "end-tag-too-early",
+                       (size_t)(p - b.input_base),
+                       "implied close crosses <%s>", implied_early);
             uint8_t tmpl_last_popped = H_ID_UNKNOWN;
             while (b.depth > 0) {
                 uint8_t oid = b.open_id[b.depth - 1];
