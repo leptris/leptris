@@ -158,8 +158,10 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     // ref QNames must resolve) -> 139 (slice 6: UPA —
     // non-deterministic content models rejected) -> 136 (the
     // src-attribute declaration clauses: use=required+default,
-    // @ref with type/form/inline-child, @type with inline child).
-    EXPECT_GE(ok, 136u) << "compile-success floor regressed";
+    // @ref with type/form/inline-child, @type with inline child)
+    // -> 135 (an xs:-prefixed type reference must resolve:
+    // length3's xs:non-positive-integer is a 1999-draft name).
+    EXPECT_GE(ok, 135u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -2391,6 +2393,35 @@ TEST(XsdConformanceClauses, AttributeRefPlainStillLoads) {
     LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
     EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
     leptris_xsd_free(s);
+}
+
+/* An xs:-prefixed type reference must name a real builtin (the
+ * length3 corpus schema's type='xs:non-positive-integer' — a
+ * 1999-draft name that never shipped — must fail the schema, not
+ * compile into an untyped declaration). The ur-types (anyType,
+ * anySimpleType) and NOTATION stay legal. */
+TEST(XsdConformanceClauses, UnknownBuiltinTypeReferenceRejected) {
+    const char* t =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\">"
+        " <complexType name=\"c\">"
+        "  <sequence><element name=\"size\" type=\"%s\"/></sequence>"
+        " </complexType>"
+        " <element name=\"depth\" type=\"c\"/>"
+        "</schema>";
+    char buf[512];
+    /* the 1999-draft spelling is not an XSD 1.0 builtin */
+    snprintf(buf, sizeof(buf), t, "xs:non-positive-integer");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(buf, strlen(buf), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "xs:non-positive-integer does not resolve";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+    /* the ur-types stay legal */
+    snprintf(buf, sizeof(buf), t, "xs:anyType");
+    LeptrisXsdSchema s2 = leptris_xsd_compile(buf, strlen(buf), &st);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s2);
+    leptris_xsd_free(s2);
 }
 
 /* The token family (everything derived from xs:token) validates

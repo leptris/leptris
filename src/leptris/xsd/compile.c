@@ -1036,6 +1036,29 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 return -1;
             }
         }
+        /* An xs:-prefixed type reference names a real builtin (the
+         * length3 corpus schema's type='xs:non-positive-integer' —
+         * a 1999-draft name — must fail, not compile untyped). The
+         * ur-types and NOTATION sit outside the tier-1 table on
+         * purpose. */
+        if (strcmp(local, "element") == 0 ||
+            strcmp(local, "attribute") == 0) {
+            const char* ty = leptris_element_attribute(c, "type");
+            if (ty && strncmp(ty, "xs:", 3) == 0 &&
+                xsd_builtin_valid(ty, "x") == -1 &&
+                strcmp(ty, "xs:anyType") != 0 &&
+                strcmp(ty, "xs:anySimpleType") != 0 &&
+                strcmp(ty, "xs:anyAtomicType") != 0 &&
+                strcmp(ty, "xs:NOTATION") != 0) {
+                char msg[160];
+                snprintf(msg, sizeof(msg),
+                         "src-attribute.4: the type reference '%s' "
+                         "does not resolve to a builtin definition",
+                         ty);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
         if (strcmp(local, "element") == 0 ||
             strcmp(local, "sequence") == 0 ||
             strcmp(local, "choice") == 0 ||
