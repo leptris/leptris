@@ -106,7 +106,11 @@ finishes in 0.533-0.573x of Nokogiri's CPU time (~1.8x faster),
 three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
 250 records, 31 reps; same document and query both sides).**
 - [x] parse→query→serialize pipeline row vs nokogiri (green, dated)
-- [ ] build→transform (XSLT) pipeline row
+- [x] build→transform (XSLT) pipeline row — **GREEN 2026-10-21:
+      build 250 records, XSLT 1.0 transform, serialize — leptris
+      finishes in 0.492-0.515x of Nokogiri's CPU time (~2x faster),
+      three interleaved-median runs
+      (`wt/460-harness/xslt_pipeline_bench.rb`)**
 - [ ] both to serialbench as the public scoreboard
 
 ### B4 durability
