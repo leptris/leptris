@@ -6,12 +6,13 @@
  *
  *   parse="text" — load the file as plain text, splice a text node
  *                  in place of the xi:include element.
- *   parse="xml"  — load+parse the file as XML, deep-copy the root
- *                  of the included document into the parent document's
- *                  pool, splice the copy in place of the xi:include.
- *                  xpointer fragment selection is TODO 92 Phase 3.
+ *   parse="xml"  — load+parse the file as XML, move the selected
+ *                  subtree (the whole root, or the fragment named by
+ *                  the xpointer attribute / href shorthand) into the
+ *                  parent document by pool adoption, and splice it in
+ *                  place of the xi:include element.
  *
- * XPointer forms (TODO.remaining/04): the xpointer attribute and
+ * XPointer forms: the xpointer attribute and
  * href fragment identifiers support bare shorthand (an NCName,
  * selecting the element with that ID), the element() scheme
  * (element(name/1/2) child sequences), and the xpointer() scheme
@@ -702,11 +703,15 @@ static int process_element_xinclude(LeptrisElement elem,
     if (!href || !href[0]) return 1;
     const char* xptr_attr = leptris_xinclude_get_xpointer(elem);
 
-    /* XInclude §4: split a fragment identifier off the href. The
-     * fragment (when present) is a shorthand pointer for parse="xml".
-     * Resource errors per spec: fragment + explicit xpointer attr
-     * together, any fragment on parse="text", or an xpointer attr on
-     * parse="text". Resource error -> fallback, like a load failure. */
+    /* XInclude §3.1/§4: split a fragment identifier off the href.
+     * For parse="xml" sub-resources are named by the separate
+     * xpointer attribute; href fragments "must not be used; their
+     * appearance is a fatal error" and the xpointer attribute "must
+     * not be present when parse='text'" (§3.1).  We take the lenient
+     * resource-error reading for all three markup violations so
+     * xi:fallback answers (§4.4) instead of aborting the document:
+     * fragment + explicit xpointer attr together, any fragment on
+     * parse="text", or an xpointer attr on parse="text". */
     const char* frag = strchr(href, '#');
     if (frag && !frag[1]) frag = NULL;   /* bare trailing '#' = none */
     char href_base[4096];
@@ -828,25 +833,34 @@ static int process_element_xinclude(LeptrisElement elem,
                         ? leptris_document_root(included_doc)
                         : NULL;
                 if (inc_root) {
-                    /* Phase 4 of TODO 92: xpointer attribute selects
-                     * fragment from the included document. The value
-                     * is evaluated as an XPath expression against the
-                     * included doc. If it returns a nodeset, the
-                     * resulting nodes are spliced into the parent
-                     * (replacing the xi:include). Non-nodeset results
-                     * or missing xpointer fall back to the root element.
+                    /* XPointer selection (XInclude 1.0 §4.2): "The
+                     * document information item of the acquired infoset
+                     * serves as the inclusion target unless the xpointer
+                     * attribute is present and identifies a
+                     * subresource."  The pointer is the xpointer
+                     * attribute (scheme forms) or the href fragment (a
+                     * bare shorthand).  §4.2 requires the XPointer
+                     * Framework forms: the shorthand pointer
+                     * (Framework §3.2 -- "a shorthand pointer ...
+                     * consists of an NCName alone.  It identifies at
+                     * most one element ... that has a matching NCName
+                     * as an identifier"; resolved through the XPath
+                     * id() function, which accepts xml:id and
+                     * DTD-declared ID attributes) and the element()
+                     * scheme (an NCName shorthand or /1/2 child
+                     * sequence).  The optional xpointer() scheme
+                     * (XPath 1.0) and xmlns() prefix bindings are
+                     * supported too.  Pointer parts are tried left to
+                     * right (Framework §3.3).
                      *
-                     * The XPointer framework also defines scheme-
-                     * qualified forms (xpointer(...), element(/1/2),
-                     * xmlns(...)) which we don't support here — the
-                     * raw attribute value is passed straight to the
-                     * XPath engine as a best-effort implementation. */
-                    /* TODO.remaining/04: the pointer is the xpointer
-                     * attribute (scheme forms) or the href fragment
-                     * (a bare shorthand). The scheme evaluator tries
-                     * xpointer()/element()/shorthand left to right and
-                     * returns an ELEMENT for the move path; a match of
-                     * only non-elements counts as no match. */
+                     * §4.2: "An error in the XPointer is a resource
+                     * error" (as is a pointer that identifies only
+                     * non-element nodes, which the single-element move
+                     * path of §4.5 cannot take).  On such an error the
+                     * substitute stays NULL so the §4.4 fallback path
+                     * answers this include -- splicing the whole root
+                     * here would silently include far more than the
+                     * pointer identified. */
                     const char* xp = (xptr_attr && xptr_attr[0])
                                          ? xptr_attr
                                          : (frag ? frag + 1 : NULL);
@@ -862,9 +876,14 @@ static int process_element_xinclude(LeptrisElement elem,
                             substitute = (LeptrisNode*)first;
                             included_doc = NULL;
                         }
-                    }
-                    if (!substitute) {
-                        /* TODO 117 Phase A: pool ownership transfer.
+                        /* else: XPointer error -> resource error;
+                         * included_doc is freed at the end of this
+                         * scope and the fallback path below runs. */
+                    } else if (!substitute) {
+                        /* No pointer: the whole resource is the
+                         * inclusion target (§4.2).
+                         *
+                         * TODO 117 Phase A: pool ownership transfer.
                          *
                          * Move (don't copy) the included root into our
                          * tree.  The child's pool still owns the
