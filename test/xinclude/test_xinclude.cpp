@@ -754,8 +754,11 @@ TEST(XIncludeXpointer, XmlnsBindsExpressionPrefixToNamespace) {
 }
 
 TEST(XIncludeXpointer, XmlnsWrongUriSelectsNothing) {
-    /* A binding to a DIFFERENT namespace must not match: the
-     * fallback-to-root behavior then splices <doc>. */
+    /* A binding to a DIFFERENT namespace matches nothing: the pointer
+     * is in error (XPointer Framework §3.3 "If no pointer part
+     * identifies subresources, it is an error") and an error in the
+     * XPointer is a resource error (XInclude §4.2). Without a
+     * fallback we are lenient and leave the xi:include in place. */
     const char included_xml[] =
         "<doc xmlns:t='http://example.com/ns'><t:section/></doc>";
     const char* path = "/tmp/leptris_xinclude_xpointer_ns2.xml";
@@ -779,15 +782,20 @@ TEST(XIncludeXpointer, XmlnsWrongUriSelectsNothing) {
     ASSERT_NE(root, nullptr);
     LeptrisElement child = leptris_element_first_child_any(root);
     ASSERT_NE(child, nullptr);
-    EXPECT_STREQ(leptris_element_name(child), "doc");
+    /* The unresolved include survives (lenient no-fallback posture);
+     * nothing from the included document was spliced. */
+    EXPECT_STREQ(leptris_element_name(child), "include");
 
     leptris_document_free(doc);
     remove(path);
 }
 
-TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
-    /* If the xpointer matches nothing, the spec is unclear; we fall
-     * back to the included doc's root element. */
+TEST(XIncludeXpointer, EmptyResultIsResourceError) {
+    /* XInclude §4.2: "An error in the XPointer is a resource error";
+     * §4.4: on a resource error the fallback's children replace the
+     * include. (The old behavior spliced the included document's
+     * whole root on a miss -- silently including far more than the
+     * pointer identified.) */
     const char included_xml[] = "<doc><a/></doc>";
     const char* path = "/tmp/leptris_xinclude_xpointer_empty.xml";
     FILE* f = fopen(path, "wb");
@@ -798,7 +806,9 @@ TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
     const char xml[] =
         "<root xmlns:xi='http://www.w3.org/2001/XInclude'>"
         "  <xi:include href='/tmp/leptris_xinclude_xpointer_empty.xml'"
-        "              xpointer=\"//nonexistent\"/>"
+        "              xpointer=\"//nonexistent\">"
+        "    <xi:fallback><nothing/></xi:fallback>"
+        "  </xi:include>"
         "</root>";
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
@@ -806,12 +816,13 @@ TEST(XIncludeXpointer, EmptyResultFallsBackToRoot) {
 
     EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
 
-    /* Expected: root has the included doc's root element <doc>. */
+    /* Expected: the fallback element replaced the include. */
     LeptrisElement root = leptris_document_root(doc);
     ASSERT_NE(root, nullptr);
     LeptrisElement child = leptris_element_first_child_any(root);
     ASSERT_NE(child, nullptr);
-    EXPECT_STREQ(leptris_element_name(child), "doc");
+    EXPECT_STREQ(leptris_element_name(child), "nothing");
+    EXPECT_EQ(leptris_element_first_child_any(child), nullptr);
 
     leptris_document_free(doc);
     remove(path);
@@ -1161,6 +1172,110 @@ TEST(XIncludeXpointerForms, BadEncodingIsResourceError) {
     remove(txt);
 }
 
+
+/* Include a caller-supplied document with the given xi:include
+ * markup ({DOC} substitutes this process's doc path). */
+static std::string splice_doc(const std::string& include_xml,
+                              const char* doc_xml,
+                              const char* attr = nullptr) {
+    std::string doc_path = xptr_unique_path("leptris_xptr_doc2", "xml");
+    std::string markup = include_xml;
+    for (size_t pos; (pos = markup.find("{DOC}")) != std::string::npos;)
+        markup.replace(pos, 5, doc_path);
+    write_file(doc_path.c_str(), doc_xml, strlen(doc_xml));
+
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs + "'>" +
+                      markup + "</root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    if (!doc) return "(parse-failed)";
+    leptris_xinclude_process(doc, nullptr);
+
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement child = leptris_element_first_child_any(root);
+    std::string out;
+    if (!child) out = "(none)";
+    else if (attr) {
+        const char* v = leptris_element_attribute(child, attr);
+        out = v ? v : "(none)";
+    } else {
+        out = leptris_element_name(child);
+    }
+    leptris_document_free(doc);
+    remove(doc_path.c_str());
+    return out;
+}
+
+/* XPointer Framework §3.2: "A shorthand pointer, formerly known as a
+ * barename, consists of an NCName alone. It identifies at most one
+ * element ... that has a matching NCName as an identifier."  XInclude
+ * example C.4 uses exactly this form in the xpointer attribute
+ * (xpointer="w002-description").  Our id() resolves the conventional
+ * unprefixed "id" attribute (xml:id-style) without a DTD, so the
+ * fixture's id='target1' answers the shorthand. */
+TEST(XIncludeXpointerForms, BareNameXpointerAttributeIsShorthand) {
+    EXPECT_EQ(splice("<xi:include href='{DOC}' xpointer='target1'/>"),
+              "section");
+    EXPECT_EQ(splice("<xi:include href='{DOC}' xpointer='target1'/>",
+                     "id"),
+              "target1");
+}
+
+TEST(XIncludeXpointerForms, ShorthandResolvesXmlId) {
+    /* xml:id is the canonical externally-determined ID (XPointer
+     * Framework §3.2 item 4); both the href fragment shorthand and
+     * the bare-name xpointer attribute resolve through it. */
+    static const char kXmlIdDoc[] =
+        "<doc><p>lead</p><section xml:id='sec9'>nine</section>"
+        "<p>tail</p></doc>";
+    EXPECT_EQ(splice_doc("<xi:include href='{DOC}#sec9'/>", kXmlIdDoc),
+              "section");
+    EXPECT_EQ(splice_doc("<xi:include href='{DOC}' xpointer='sec9'/>",
+                         kXmlIdDoc, "xml:id"),
+              "sec9");
+}
+
+/* XInclude §4.2: "An error in the XPointer is a resource error";
+ * §4.4: on a resource error the fallback's children replace the
+ * include.  A pointer that identifies nothing is such an error
+ * (XPointer Framework §3.3). */
+TEST(XIncludeXpointerForms, UnresolvedXpointerSplicesFallback) {
+    /* Bare-name miss. */
+    EXPECT_EQ(splice("<xi:include href='{DOC}' xpointer='nosuchid'>"
+                     "<xi:fallback><missing/></xi:fallback>"
+                     "</xi:include>"),
+              "missing");
+    /* href fragment shorthand miss (element fallback; the text-only
+     * fallback shape is covered by FragmentAndXpointerTogether...). */
+    EXPECT_EQ(splice("<xi:include href='{DOC}#nosuchid'>"
+                     "<xi:fallback><gone/></xi:fallback>"
+                     "</xi:include>"),
+              "gone");
+}
+
+TEST(XIncludeXpointerForms, XpointerOnTextParseIsResourceError) {
+    /* XInclude §3.1: "The xpointer attribute must not be present when
+     * parse='text'."  We treat the violation as a resource error
+     * (lenient posture, matching the href-fragment rule) -> fallback. */
+    std::string txt = xptr_unique_path("leptris_xptr_txtxptr", "txt");
+    write_file(txt.c_str(), "plain", 5);
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs +
+        "'><xi:include href='" + txt + "' parse='text'"
+        " xpointer='xpointer(//x)'>"
+        "<xi:fallback>notext</xi:fallback></xi:include></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    leptris_xinclude_process(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisNodeRef child = leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(leptris_node_get_type(child), LEPTRIS_NODE_TYPE_TEXT);
+    EXPECT_STREQ(leptris_text_node_get_content(child), "notext");
+    leptris_document_free(doc);
+    remove(txt.c_str());
+}
 
 // ---- parse="xml" splice wiring (TODO 92) -------------------------------
 
