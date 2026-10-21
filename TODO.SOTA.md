@@ -143,8 +143,10 @@ three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
       lands), rides lockstep
 - [ ] D2 system packaging: homebrew, conan, deb (apt repo)
 - [ ] D3 cross-runtime differential CI (= A6, wired)
-- [ ] D4 libxml2→libleptris migration guide (docs/guide/) + the
-      nokogiri-compat surface documented
+- [x] D4 libxml2→libleptris migration guide — **shipped 2026-10-21
+      (PR #1810): docs/guide/migrating-from-libxml2.md** (ownership
+      model, parse/tree/XPath/serialize/SAX/DTD mappings, deliberate
+      differences); nokogiri-compat surface documented in the guide
 
 ## Gate E — 1.0 (the seal)
 
