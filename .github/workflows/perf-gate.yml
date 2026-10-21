@@ -1,0 +1,40 @@
+name: Performance Gate
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'benchmarks/**']
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Record current medians as the new baseline'
+        type: boolean
+        default: false
+
+concurrency:
+  group: perf-gate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: pugixml (the benchmark's comparison engine)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libpugixml-dev
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF -DLEPTRIS_BUILD_BENCHMARKS=ON
+      - name: Build benchmarks
+        run: cmake --build build --target dom_benchmark_v2 -j4
+      - name: Measure (5 runs, median per test)
+        working-directory: benchmarks
+        run: |
+          for i in 1 2 3 4 5; do ../build/benchmarks/dom_benchmark_v2; done > /tmp/runs.txt
+          grep -E "===|Leptris:" /tmp/runs.txt
+      - name: Compare against baseline
+        run: python3 scripts/perf_gate.py /tmp/runs.txt benchmarks/baseline.json
+        env:
+          UPDATE_BASELINE: ${{ inputs.update_baseline }}
