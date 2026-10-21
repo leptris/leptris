@@ -2189,6 +2189,90 @@ int validate_compiled(LeptrisXsdSchema s, const char* xml) {
     return ok;
 }
 
+/* XSD 1.0 §3.2.7: the xsi namespace's four attributes — xsi:type,
+ * xsi:nil, xsi:schemaLocation, xsi:noNamespaceSchemaLocation — are
+ * PROCESSOR-HONORED instance attributes, not schema-validated ones:
+ * they pass through content models regardless of attribute
+ * declarations or wildcards. The strict-attribute gate rejected them
+ * as "not declared" (the bug141333/anyAttr-derive2/nvdcve
+ * false-rejection family). */
+TEST(XsdConformanceClauses, XsiNamespaceAttributesExemptFromStrictCheck) {
+    const char schema[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns=\"urn:t\">"
+        " <xs:complexType name=\"T\">"
+        "  <xs:sequence><xs:element name=\"t\" type=\"xs:string\"/></xs:sequence>"
+        " </xs:complexType>"
+        " <xs:element name=\"root\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<root xmlns=\"urn:t\""
+                  " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+                  " xsi:schemaLocation=\"urn:t x.xsd\""
+                  " xsi:noNamespaceSchemaLocation=\"y.xsd\"><t>x</t></root>"),
+              1)
+        << leptris_xsd_error_at(s, 0)
+        << " (xsi:schemaLocation/noNamespaceSchemaLocation must pass "
+           "a wildcard-less content model)";
+    leptris_xsd_free(s);
+}
+
+/* The exemption is scoped to the xsi namespace: a foreign-namespace
+ * attribute stays rejected by the strict gate (pinned on a type that
+ * carries a declared attribute row — the gate walks types with
+ * captured attribute tables). */
+TEST(XsdConformanceClauses, ForeignNamespaceAttributeStillStrict) {
+    const char schema[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns=\"urn:t\">"
+        " <xs:complexType name=\"T\">"
+        "  <xs:sequence><xs:element name=\"t\" type=\"xs:string\"/></xs:sequence>"
+        "  <xs:attribute name=\"id\" type=\"xs:string\"/>"
+        " </xs:complexType>"
+        " <xs:element name=\"root\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<root xmlns=\"urn:t\" xmlns:f=\"urn:foreign\""
+                  " f:note=\"hi\" id=\"x\"><t>x</t></root>"),
+              0)
+        << "a foreign-namespace attribute without a wildcard is still "
+           "undeclared";
+    leptris_xsd_free(s);
+}
+
+/* An EMPTY content model (a complexType with no particles —
+ * attribute-only or attributeGroup-only) allows NO element children:
+ * the anyAttr-derive2 family accepted whole foreign subtrees there. */
+TEST(XsdConformanceClauses, EmptyContentModelRejectsElementChildren) {
+    const char schema[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns=\"urn:t\">"
+        " <xs:complexType name=\"T\">"
+        "  <xs:attribute name=\"id\" type=\"xs:string\"/>"
+        " </xs:complexType>"
+        " <xs:element name=\"root\" type=\"T\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(
+                  s, "<root id=\"x\"><child/></root>"), 0)
+        << "element children of an attribute-only complexType are "
+           "not allowed";
+    leptris_xsd_free(s);
+}
+
 /* imp.xsd carries tns urn:imp and a type whose wildcard uses
  * ##targetNamespace; main.xsd (tns urn:main) imports it. An
  * instance child in urn:imp satisfies the wildcard (declaring

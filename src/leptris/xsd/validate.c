@@ -226,7 +226,22 @@ static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
                               LeptrisElement elem, XsdCm* ct) {
     XsdCm* model = ct->first_child;
-    if (!model) return;
+    /* empty content model: no element children are allowed (the
+     * anyAttr-derive2 family accepted whole foreign subtrees here) */
+    if (!model) {
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(elem));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement ce = (LeptrisElement)c;
+            const char* cl = NULL;
+            leptris_element_expanded_name(ce, &cl, NULL, NULL);
+            verrf_at(v, elem, "element", cl ? cl : "",
+                     "not allowed: the content model is empty");
+        }
+        return;
+    }
     /* collect child names + uris */
     size_t n = 0;
     for (LeptrisNodeRef c =
@@ -475,6 +490,12 @@ static void validate_attributes(struct xsd_validator* v,
         /* namespace of the attribute: engine-side attributes
          * carry their uri through the expanded form */
         const char* auri = leptris_attribute_namespace_uri(at);
+        /* XSD 1.0 §3.2.7: xsi:type, xsi:nil, xsi:schemaLocation and
+         * xsi:noNamespaceSchemaLocation are processor-honored, not
+         * schema-validated — they pass any content model (the
+         * bug141333/anyAttr-derive2/nvdcve false-rejection family). */
+        if (auri && strcmp(auri, "http://www.w3.org/2001/XMLSchema-instance") == 0)
+            continue;
         /* extension union: an attribute is allowed when it matches the
          * derived type's wildcard OR the base type's (the spec's
          * attribute-wildcard union; #1691 anyAttr-derive family) */
