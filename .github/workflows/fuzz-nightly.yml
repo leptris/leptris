@@ -31,21 +31,39 @@ jobs:
             -DLEPTRIS_ENABLE_UTF8PROC=OFF \
             -DLEPTRIS_ENABLE_ICONV=OFF
 
-      - name: Build fuzzer
-        run: cmake --build build --target fuzz_parse
+      - name: Build fuzzers
+        run: cmake --build build --target fuzz_parse fuzz_mutate fuzz_xpath
 
       - name: Seed corpus
         run: |
-          mkdir -p corpus
+          mkdir -p corpus xpath_corpus
           cp test/fixtures/*.xml corpus/ || true
+          printf '%s\n' '//record' '//*[@id="1"]' 'count(//item)' \
+            '//a[1]/following-sibling::*' 'sum(//n)' > xpath_corpus/seeds
 
-      - name: Fuzz (5 minutes)
+      - name: Fuzz parser (3 minutes)
         run: |
           ./build/fuzz_parse \
-            -max_total_time=300 \
+            -max_total_time=180 \
             -max_len=65536 \
             -print_final_stats=1 \
             corpus/
+
+      - name: Fuzz mutation engine (2 minutes)
+        run: |
+          ./build/fuzz_mutate \
+            -max_total_time=120 \
+            -max_len=65536 \
+            -print_final_stats=1 \
+            corpus/
+
+      - name: Fuzz XPath engine (2 minutes)
+        run: |
+          ./build/fuzz_xpath \
+            -max_total_time=120 \
+            -max_len=4096 \
+            -print_final_stats=1 \
+            xpath_corpus/
 
       - name: Upload crashes
         if: always()
