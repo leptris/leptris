@@ -2393,6 +2393,35 @@ TEST(XsdConformanceClauses, AttributeRefPlainStillLoads) {
     leptris_xsd_free(s);
 }
 
+/* The g-regional types all carry the optional timezone (Datatypes
+ * §3.2.14-16: gYearMonth/gYear/gMonthDay/gDay/gMonth end with
+ * timezone?) — --05Z, --01-01, ---31, --02-28Z, --12-31-06:00 (the
+ * date_0 corpus family rejected the zoned spellings). */
+TEST(XsdConformanceClauses, GRegionalLexicalsCarryOptionalTimezone) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\">"
+        " <element name=\"m\" type=\"gMonth\"/>"
+        " <element name=\"md\" type=\"gMonthDay\"/>"
+        " <element name=\"d\" type=\"gDay\"/>"
+        "</schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<m>--05Z</m>"), 1)
+        << leptris_xsd_error_at(s, 0);
+    EXPECT_EQ(validate_compiled(s, "<md>--12-31-06:00</md>"), 1);
+    EXPECT_EQ(validate_compiled(s, "<d>---31</d>"), 1);
+    /* garbage still rejects */
+    EXPECT_EQ(validate_compiled(s, "<m>--5Z</m>"), 0);
+    EXPECT_EQ(validate_compiled(s, "<m>--13Z</m>"), 0)
+        << "month 13 is out of range even zoned";
+    EXPECT_EQ(validate_compiled(s, "<m>--05</m>"), 1);
+    EXPECT_EQ(validate_compiled(s, "<d>--31</d>"), 0)
+        << "two leading dashes is not a gDay";
+    leptris_xsd_free(s);
+}
+
 /* A no-tns unit's ##other wildcard: it excludes only the ABSENT
  * namespace — every attribute that HAS a
  * namespace matches (the anyAttr-derive1 family: the base type
