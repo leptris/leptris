@@ -206,39 +206,6 @@ static LeptrisNode* deep_copy_node(const LeptrisNode* src,
     }
 }
 
-/* Replace one child of `parent` with `new_node`.
- * Walks parent->first_child to find the node before `old_node`,
- * then splices new_node in. */
-static void replace_child_node(LeptrisElement parent,
-                                LeptrisNode* old_node,
-                                LeptrisNode* new_node) {
-    if (!parent || !old_node || !new_node) return;
-
-    LeptrisNode* prev = NULL;
-    LeptrisNode* child = leptris_elem_first_child(parent);
-    while (child && child != old_node) {
-        prev = child;
-        child = leptris_node_get_next_sibling(child);
-    }
-    if (child != old_node) return;  /* old_node not found */
-
-    /* Splice new_node in place of old_node. */
-    LeptrisNode* next = leptris_node_get_next_sibling(old_node);
-    leptris_node_set_next_sibling(new_node, next);
-
-    if (prev) {
-        leptris_node_set_next_sibling(prev, new_node);
-    } else {
-        /* old_node was first_child */
-        leptris_elem_set_first_child(parent, new_node);
-    }
-
-    /* Update last_child if old_node was last. */
-    if (leptris_elem_last_child(parent) == old_node) {
-        leptris_elem_set_last_child(parent, new_node);
-    }
-}
-
 /* Build the full path to an xi:include href relative to base_url.
  * Writes into out (fixed buffer) and returns out on success, NULL on
  * overflow.  No dynamic allocation — keeps the call site simple. */
@@ -831,6 +798,7 @@ static int process_element_xinclude(LeptrisElement elem,
                 /* TODO.assemble 03: nested hrefs inside the included
                  * document resolve against the INCLUDED document's
                  * own location, not the includer's base. */
+                int nested_rc = LEPTRIS_ERROR_IO;
                 {
                     char inc_dir[4096];
                     copy_dir_of(inc_dir, sizeof(inc_dir), full_path);
@@ -840,10 +808,25 @@ static int process_element_xinclude(LeptrisElement elem,
                         inc_dir[dl++] = '/';
                         inc_dir[dl] = 0;
                     }
-                    xinclude_process_internal(included_doc, inc_dir,
-                                              depth + 1, opts);
+                    nested_rc = xinclude_process_internal(included_doc,
+                                                          inc_dir,
+                                                          depth + 1, opts);
                 }
-                LeptrisElement inc_root = leptris_document_root(included_doc);
+                if (nested_rc != LEPTRIS_OK) {
+                    /* TODO 92: the recursion guard tripped inside the
+                     * included document.  Nothing was spliced there,
+                     * so splice nothing here: treat as a resource
+                     * error (substitute stays NULL) and let
+                     * xi:fallback answer this level.  Splicing the
+                     * raw included root would strand an unresolved
+                     * xi:include in the result tree. */
+                    leptris_document_free(included_doc);
+                    included_doc = NULL;
+                }
+                LeptrisElement inc_root =
+                    included_doc
+                        ? leptris_document_root(included_doc)
+                        : NULL;
                 if (inc_root) {
                     /* Phase 4 of TODO 92: xpointer attribute selects
                      * fragment from the included document. The value
@@ -998,15 +981,23 @@ fallback:
     if (substitute) {
         LeptrisElement parent = leptris_element_get_parent(elem);
         if (parent) {
-            replace_child_node(parent, (LeptrisNode*)elem, substitute);
-
-            /* The substitute was allocated from doc->pool but its
-             * document pointer (and the document pointers of every
-             * descendant) is still NULL.  Re-stamp them so future
-             * callers can reach the pool through leptris_element_get_document(element). */
-            if (substitute->type == LEPTRIS_NODE_TYPE_ELEMENT) {
-                leptris_element_set_document_tree((LeptrisElement)substitute, doc);
+            /* Splice through the canonical mutation face:
+             * leptris_element_insert_before maintains the
+             * substitute's parent edge, the parent's child_count and
+             * children memo, the tree version, and the document
+             * index.  The hand-rolled sibling swap left the spliced
+             * subtree's parent edge NULL, so every parent-relative
+             * walk (doc resolution, parent::, removal) broke for the
+             * adopted root.  The substitute is already doc-stamped
+             * on every path that reaches here, so the adoption is
+             * zero-copy. */
+            if (leptris_element_insert_before(
+                    elem, (LeptrisElement)substitute) == LEPTRIS_OK) {
+                leptris_node_unlink((LeptrisNodeRef)elem);
             }
+            /* No fallback and no splice face success: the xi:include
+             * stays in place (lenient posture, see resource-error
+             * note above). */
         }
     }
 
