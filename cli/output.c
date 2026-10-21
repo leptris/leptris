@@ -3,6 +3,17 @@
  * @brief Output formatting implementation for Leptris CLI
  */
 
+/* fileno is POSIX, not ISO C: under -std=c11 (C_EXTENSIONS OFF,
+ * __STRICT_ANSI__) glibc hides its declaration from <stdio.h> and
+ * both gcc-14 and clang-18 reject the implicit call, so declare the
+ * POSIX surface before ANY include pulls a system header in. macOS
+ * never hides fileno, which is why only the Linux lanes caught it
+ * (found by the ci/tsan lane's ubuntu build). Windows reaches
+ * fileno/isatty via <io.h> below. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "output.h"
 #include "error.h"
 #include <stdlib.h>
