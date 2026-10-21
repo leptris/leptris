@@ -27,39 +27,26 @@ docs/MISSION-PLAN.md and is updated at every release.
 
 ## Gate A — Conformance: zero reds everywhere
 
-### A1 WHATWG verdict parity: 1394/1555 → 1555/1555
-**Measured 2026-10-21 (main after #1800): 1535/1555 verdict,
-1555/1555 tree, zero false positives; floor pinned at 1535.** The
-remaining 20 verdict misses: adoption-agency (tests2:10, tests19:98,
-tests19:99, tests26:1, tests26:9), menuitem strays (menuitem:10/12),
-table/caption singletons (tests9:16, tests10:15, tests16:197,
-pending-spec-changes:2, tests20:48), tokenizer singletons (tests10:2,
-tests2:18, tests2:58, tests19:41, tests19:82) and two-heads
-(tests3:13). The remaining ~270 code-set divergences are prose-dialect
-labels from older corpus datasets; the verdict gate is presence-only.
-The slices already shipped: initial mode, raw-text EOF, unterminated
-close, frameset, fenced walk, InBody EOF allowed-set, in-select,
-foster-by-kind, unknown-doctype (#1778-#1791), raw-text strays,
-non-html-root, end-tag-too-early, after-body/frameset phases,
-start-tag phases, select/table/foreign, need-space-after-doctype
-(#1794), misplaced/stray-p, after-html codes, image (#1797, #1800).
-Ground every further slice in html5lib's actual source
-(~/src/external/html5lib):
-- [ ] escaped-state EOF codes (`unexpected-eof-in-text-mode`,
-      `eof-in-script-in-script`) — the script-data state machine's
-      EOF classification
-- [ ] the after-body EOF phase rule (tests1:34 class; the exact
-      phaseAtBody.eof semantics)
-- [ ] in-body `unexpected-start-tag` family (body/frameset/form
-      starts; the startTagBody/Forms/Frameset error sites)
-- [ ] `unexpected-end-tag` family (p-in-button-scope synthesis,
-      form pointer, li/dd/dt scope, endTagOther walk)
-- [ ] foster-parenting sites (start-tag/character/character-in-table)
-- [ ] adoption-agency codes (`adoption-agency-1.3` et al.)
-- [ ] in-table voodoo (`*-implies-table-voodoo`, cells, eof-in-table)
-- [ ] unknown-doctype / unexpected-char-in-doctype (doctype
-      tokenization §13.2.5.28+)
-- [ ] non-html-root, select-mode codes, heading/edge shapes
+### A1 WHATWG verdict parity: DONE — 1555/1555
+**Measured 2026-10-21 (PR #1803, tagged v1.9.378): verdict
+1555/1555, ZERO misses; tree 1555/1555; floor pinned at the full
+corpus count.** The gate is presence-only — every corpus document
+now reports a parse error exactly when html5lib does. The final
+tail closed at the html5lib source sites: adoption-agency-1.3
+(7 cases), menuitem endTagOther pair, tokenizer
+expected-dashes-or-doctype / solidus-in-tag / attributes-in-end-tag,
+AfterAfterFrameset trailing chars, BeforeHead
+end-tag-after-implied-root, BeforeHtml unexpected-end-tag-before-html,
+foreign end-tag mismatch, form-in-table both flavors, </form> table
+voodoo, template foster-parenting-character, two-heads. Earlier
+slices: initial mode, raw-text EOF, unterminated close, frameset,
+fenced walk, InBody EOF allowed-set, in-select, foster-by-kind,
+unknown-doctype (#1778-#1791), raw-text strays, non-html-root,
+end-tag-too-early, after-body/frameset phases, start-tag phases,
+select/table/foreign, need-space-after-doctype (#1794),
+misplaced/stray-p, after-html codes, image (#1797, #1800). The
+~270 remaining code-set divergences are prose-dialect labels from
+older corpus datasets — reported, not gated.
 
 ### A2 QT3 / XQuery 3.1: zero unexplained pins
 - [ ] re-pin fresh (the ~41–99 slice figures are dated)
@@ -136,8 +123,12 @@ scaffolding. Memo law holds (dropping @children memo = 2x GC).
 - [ ] C3 reproducible builds everywhere: darwin toolchain pin done
       (ruby#512) — extend to linux/windows legs; publish a per-
       release build manifest (engine + binding hashes per platform)
-- [ ] C4 security.md: advisory channel, CVE-response process,
-      dependency-free attestation
+- [x] C4 security.md: advisory channel, CVE-response process,
+      dependency-free attestation — **shipped 2026-10-21 (PR #1804,
+      v1.9.378)**: GitHub Security Advisories channel, 5-business-day
+      acknowledgment target, coordinated disclosure, CVE assignment,
+      scope table, hardening inventory tied to the lanes that actually
+      run
 - [ ] C5 the memory story documented: pool arena model, leak gates,
       the borrowed-slice lifetime contract
 

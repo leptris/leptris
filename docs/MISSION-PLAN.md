@@ -24,7 +24,7 @@ nothing to libxml2.
 | A2 | libxslt (XSLT 1.0) | 205/205 pinned (Linux-authoritative; macOS skips bug-169 iconv-encoding) | **done** — 205/205 (v1.9.19) |
 | A3 | XsltFull | 27/27 + full suite green; XSLT gate (v1.10.0) stays met | **done** — gate MET (#1761) |
 | A4 | QT3 / XQuery 3.1 | 0 unexplained pins; every pin has a recorded disposition | pins ~41–99 by slice (2026-09/10) — **re-pin fresh** |
-| A5 | WHATWG/html5lib (#659) | 0 reds on the tree gate; verdict parity climbing on the #1771 error-verdict gate | **tree lane CLOSED** — 1555/1555, redlist retired (found during Phase 0); verdict gate flipped 2026-10-19: 1312/1555, floor pinned |
+| A5 | WHATWG/html5lib (#659) | 0 reds on BOTH gates — tree and error-verdict | **BOTH LANES CLOSED 2026-10-21** — tree 1555/1555; verdict 1555/1555, zero misses (PR #1803), floor pinned at the full corpus count |
 | A6 | XSD conformance lane | suite-complete per the lane's own queue | 769→795 (2026-10-14, queue #1691) |
 | A7 | DTD phase 8 (TODO 91) | ENTITY/ENTITIES attribute resolution, parameter entities, choice-model backtracking | open |
 | A8 | XInclude parse="xml" + xpointer (TODO 92) | spec-complete | open (parse="text" + fallback ship) |
@@ -165,11 +165,12 @@ tag that says so.
 | Gate | Command | Last run | Verdict |
 |------|---------|----------|---------|
 | A1 WHATWG tree parity | `test_html5lib --gtest_filter=Html5LibCorpus.*` | 2026-10-21 | green, 1555/1555 |
-| A1 WHATWG verdict parity | `Html5LibCorpus.ErrorVerdictParity` | 2026-10-21 | 1535/1555 (floor 1535; **red**) |
+| A1 WHATWG verdict parity | `Html5LibCorpus.ErrorVerdictParity` | 2026-10-21 | **green, 1555/1555 — zero misses** (PR #1803; floor pinned at the full corpus) |
 | A7 libxslt | `LibxsltSuite` | 2026-10-20 | 205/205 (204 + 1 macOS skip) |
 | B1 build row | `wt/460-harness/build_bench.rb` | 2026-10-21 | 1.86-1.92x (**red**, sota/04 branch) |
 | B2 walk row | `wt/460-harness/walk_read_bench.rb` | 2026-10-20 | 0.88x (green) |
-| Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; PR #1799) |
-| Rides 1.9.377 | registries | 2026-10-21 | rubygems/PyPI 1.9.377.0, npm 0.1.21 |
-| Issues | all repos | 2026-10-21 | 0 open (ruby#514/#515 closed with gem verification) |
+| Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; **shipped in v1.9.378**) |
+| XPath index vs mutations | `XPathIndexInvalidation.*` | 2026-10-21 | green — splice paths invalidate (PR #1802; ruby#519 closed on the 1.9.378.0 gem) |
+| Rides 1.9.379 | registries | 2026-10-21 | rubygems/PyPI 1.9.379.0, npm 0.1.22 (engine v1.9.379; v1.9.378 rides blocked by the GCC-14 cast, fixed in #1806) |
+| Issues | all repos | 2026-10-21 | 0 open (ruby#519 closed with gem verification) |
 
