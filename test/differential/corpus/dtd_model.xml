@@ -1,0 +1,1 @@
+<!DOCTYPE inventory [<!ELEMENT inventory (item*)><!ELEMENT item (#PCDATA)><!ATTLIST item sku CDATA #REQUIRED><!ENTITY co "Acme Corp">]><inventory><item sku="A-1">Widget from &co;</item><item sku="B-2">Gadget</item></inventory>

@@ -1,0 +1,9 @@
+{
+  "name": "leptris-differential-corpus",
+  "private": true,
+  "type": "module",
+  "description": "Differential corpus runner for the TypeScript/WASM binding. npm install in this directory, then: node run.mjs",
+  "dependencies": {
+    "leptris": "0.1.22"
+  }
+}

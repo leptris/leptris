@@ -1,0 +1,71 @@
+name: differential
+
+# TODO.SOTA A6 / Gate D3 — binding universality proof.
+# One curated corpus through the ruby / python / wasm bindings; the three
+# runners' outputs must be byte-identical. See test/differential/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/differential.yml"
+      - "test/differential/**"
+  pull_request:
+    paths:
+      - ".github/workflows/differential.yml"
+      - "test/differential/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  byte-identical:
+    name: ruby == python == wasm (byte-for-byte)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: test/differential
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the three published bindings
+        run: |
+          set -euo pipefail
+          gem install leptris -v 1.9.379.2
+          pip install "leptris==1.9.379.0"
+          npm install --no-audit --no-fund
+
+      - name: Run the three corpus runners
+        run: |
+          set -euo pipefail
+          ruby run.rb  > /tmp/out.ruby
+          python3 run.py > /tmp/out.python
+          node run.mjs   > /tmp/out.wasm
+
+      - name: Diff byte-for-byte
+        run: |
+          set -euo pipefail
+          diff /tmp/out.ruby /tmp/out.python
+          diff /tmp/out.ruby /tmp/out.wasm
+          echo "All three bindings byte-identical:"
+          cat /tmp/out.ruby
+
+      - name: Pin the canonical output
+        if: failure()
+        run: |
+          echo "=== ruby ===";   cat /tmp/out.ruby   || true
+          echo "=== python ==="; cat /tmp/out.python || true
+          echo "=== wasm ===";   cat /tmp/out.wasm   || true

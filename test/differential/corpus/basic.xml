@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="http://example.com" xmlns:ns="http://ns.example.com">
+  <child id="1" status="active">Hello &amp; world</child>
+  <ns:elem attr="val">UTF8: café ☃</ns:elem>
+  <list>
+    <item>a</item>
+    <item>b</item>
+    <item>c</item>
+  </list>
+  <![CDATA[<not-a-tag>raw</not-a-tag>]]>
+  <!-- a comment -->
+  <?pi target data?>
+</root>
