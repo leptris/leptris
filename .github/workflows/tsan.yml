@@ -1,0 +1,69 @@
+name: ThreadSanitizer
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '**.adoc'
+      - 'docs/**'
+      - 'archive/**'
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tsan:
+    name: ThreadSanitizer (Linux)
+    runs-on: ubuntu-latest
+    # TSAN slows execution roughly 5-15x; the full suite is ~25s
+    # native, so the run plus the instrumented build fits well under
+    # an hour — but leave real headroom for the QT3/libxslt data
+    # suites instead of sharing the ASAN lane's 30.
+    timeout-minutes: 60
+    env:
+      # clang on both languages: the engine is C99, but the gtest
+      # specs are C++ (std::thread) — mixing a gcc-linked libtsan
+      # with clang-instrumented objects is runtime skew we don't want
+      # to debug. Everything clang keeps the compiler-rt TSAN runtime
+      # consistent across the whole link.
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libutf8proc-dev clang
+
+      - name: Configure (TSAN)
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DBUILD_TESTING=ON \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+
+      - name: Build
+        run: cmake --build build -j4
+
+      - name: Test under TSAN
+        run: ctest --test-dir build -j4 --output-on-failure
+        env:
+          # halt_on_error=1: the first race report fails the lane (a
+          # report is a finding, never a warning). second_deadlock_stack=1:
+          # keep the acquiring stack so deadlock-class reports are
+          # actionable from the log alone.
+          TSAN_OPTIONS: "halt_on_error=1 second_deadlock_stack=1"
