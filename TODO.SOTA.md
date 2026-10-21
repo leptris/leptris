@@ -57,8 +57,14 @@ older corpus datasets — reported, not gated.
 - [ ] the lane's own queue (769→795 → its ceiling) to zero
 
 ### A4 DTD phase 8 (TODO 91)
-- [ ] ENTITY/ENTITIES attribute resolution
-- [ ] parameter entities, choice-model backtracking
+- [x] ENTITY/ENTITIES attribute resolution (undeclared entity, parsed
+      entity without NDATA, undeclared notation, bad ENTITIES token —
+      all falsifiably spec'd; shipped bd21acc6/9d3b3a0e)
+- [x] parameter entities (internal, chained, ATTLIST/ELEMENT bodies,
+      SYSTEM PEs via loader, recursion cap, conditional sections) and
+      choice-model backtracking — group-alternative failure walker
+      fixed so a failed parenthesized alternative still reaches later
+      `|` branches (DtdPhase8.GroupAlternativeFailureStillTriesLaterAlternatives)
 
 ### A5 XInclude completeness (TODO 92)
 - [x] `parse="xml"` (ownership-transfer splice + canonical insert face,
