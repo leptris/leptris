@@ -3329,17 +3329,50 @@ void leptris_il_run_free(IlCtx* c, char* scratch) {
  * parse (the old comment assumed ~ms parses). Memoized per
  * process; the interleaved tests toggle the env per-case and bump
  * the memo through leptris_dp_env_cache_reset() (the CI forced
- * gate sets the env before process start). Benign race on the
- * one-word inited flag: concurrent first parses compute identical
- * values unless the environment changes mid-parse, which no
- * supported flow does. */
+ * gate sets the env before process start).
+ *
+ * Once-init discipline: the fast path is a single acquire load.
+ * Racing first parses serialize on the mutex, so only one getenv
+ * pair runs; the release store of the ready flag publishes the
+ * plain-field writes below to every reader. The old "benign race
+ * on the one-word inited flag" was neither benign under TSAN
+ * (halt_on_error flags the unsynchronized read — found by the
+ * ci/tsan lane) nor under reset: a reset landing between the flag
+ * write and a reader could publish a torn memo. A reset racing a
+ * first-parse init still resolves safely: the init's env reads
+ * happen after the test's setenv, so what it publishes is already
+ * fresh, and the next parse re-reads either way. */
 static struct {
-    int inited;
     int interleaved;
     size_t min_len;
 } dp_env_memo;
 
-void leptris_dp_env_cache_reset(void) { dp_env_memo.inited = 0; }
+static leptris_mutex_t g_dp_env_lock = LEPTRIS_MUTEX_INIT;
+/* Ready gate — never read or written directly; only via the
+ * helpers below. long (not int): MSVC's _Interlocked family is
+ * declared on long*, and long is 32-bit on every Windows target.
+ * Portability per root_doc_map.c: __atomic on GCC/Clang,
+ * _Interlocked on MSVC. */
+static long g_dp_env_ready;
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+static int dp_env_ready_load(void) {
+    return _InterlockedCompareExchange(&g_dp_env_ready, 0, 0);
+}
+static void dp_env_ready_store(int v) {
+    _InterlockedExchange(&g_dp_env_ready, v);
+}
+#else
+static int dp_env_ready_load(void) {
+    return __atomic_load_n(&g_dp_env_ready, __ATOMIC_ACQUIRE);
+}
+static void dp_env_ready_store(int v) {
+    __atomic_store_n(&g_dp_env_ready, v, __ATOMIC_RELEASE);
+}
+#endif
+
+void leptris_dp_env_cache_reset(void) { dp_env_ready_store(0); }
 
 static void dp_env_memo_init(void) {
     const char* gate = getenv("LEPTRIS_INTERLEAVED");
@@ -3352,7 +3385,18 @@ static void dp_env_memo_init(void) {
         else min_len = 0;   /* explicit 0 disables */
     }
     dp_env_memo.min_len = min_len;
-    dp_env_memo.inited = 1;
+}
+
+/* Slow path: first parse after process start (or after a reset).
+ * The mutex makes racing first parses run the getenv pair once;
+ * the loser re-checks under the lock and skips straight to use. */
+static void dp_env_memo_ensure(void) {
+    LEPTRIS_MUTEX_LOCK(&g_dp_env_lock);
+    if (!dp_env_ready_load()) {
+        dp_env_memo_init();
+        dp_env_ready_store(1);
+    }
+    LEPTRIS_MUTEX_UNLOCK(&g_dp_env_lock);
 }
 
 static struct leptris_document* dp_il_try(const char* xml, size_t len,
@@ -3360,7 +3404,7 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
                                           int dtd_attrs) {
     /* Empty string counts as unset: MSVC's _putenv_s(k, "") (the
      * only "unset" the CRT offers) leaves an empty value behind. */
-    if (!dp_env_memo.inited) dp_env_memo_init();
+    if (!dp_env_ready_load()) dp_env_memo_ensure();
     if (!dp_env_memo.interleaved) return NULL;
     if (keep_ent || dtd_attrs) return NULL;
     if (len == 0 || len >= 0x7FFFFFFFu) return NULL;
