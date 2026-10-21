@@ -1,0 +1,316 @@
+# Reproducible-build manifests (Gate C3).
+#
+# Builds the library on every platform leg from .github/workflows/build.yml
+# (same toolchain setup per leg) plus the amalgamated single-TU build from
+# test.yml, hashes every produced library artifact (static + shared), and
+# attaches one merged JSON manifest to the GitHub Release for a tag.
+#
+# Why standalone dispatch instead of a hook inside release.yml: release.yml's
+# tag-and-release job fires on the merge of a release-labeled PR. Hanging a
+# six-leg build matrix off it would make "the release succeeded" depend on a
+# large fan-out build that has nothing to do with tagging. The manifest is a
+# post-publish artifact. Supported flow: cut the release, then dispatch:
+#
+#   gh workflow run build-manifests.yml -f tag=v1.9.367
+#
+# (empty tag = latest published release). To wire it into release.yml later,
+# add exactly ONE job there — no other release.yml change is needed:
+#
+#   manifest:
+#     needs: tag-and-release
+#     uses: ./.github/workflows/build-manifests.yml
+#     with:
+#       tag: v${{ needs.tag-and-release.outputs.version }}
+#
+# NOTE: that release.yml hook is untested by construction until a real
+# release cut exercises it; standalone dispatch is the verified path.
+#
+# Manifest schema is documented in scripts/verify_manifest.py.
+
+name: Build manifests
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the manifest to (e.g. v1.9.367). Empty = latest published release.'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the manifest to.'
+        required: false
+        type: string
+        default: ''
+
+# Serialize per tag: a re-run's release upload must never race an in-flight one.
+concurrency:
+  group: build-manifests-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Resolve and validate the target tag (empty input = latest release).
+  # ─────────────────────────────────────────────────────────────────────────
+  resolve-tag:
+    name: Resolve release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$INPUT_TAG" ]; then
+            TAG=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+            echo "No tag given — using latest release: $TAG"
+          else
+            TAG="$INPUT_TAG"
+          fi
+          if ! gh release view "$TAG" --json tagName -q .tagName >/dev/null; then
+            echo "::error::release $TAG not found in $GH_REPO"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # One leg per matrix entry. Toolchain setup per leg is copied from
+  # build.yml (deps, generator, Release flags — including the 1577 /Zi
+  # MSVC flags); the amalgamated leg copies test.yml's test-amalgamated.
+  # Difference vs build.yml: tests/CLI are OFF and both static AND shared
+  # libraries are ON, because the manifest hashes library artifacts.
+  # ─────────────────────────────────────────────────────────────────────────
+  manifest:
+    name: Manifest — ${{ matrix.platform }}
+    needs: resolve-tag
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    platform: linux-amd64,             leg: native }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64,             leg: native }
+          - { os: macos-latest,     platform: macos-arm64,             leg: native }
+          - { os: macos-15-intel,   platform: macos-x86_64,            leg: native }
+          - { os: windows-latest,   platform: windows-amd64,           leg: native }
+          - { os: ubuntu-latest,    platform: amalgamated-linux-amd64, leg: amalgamated }
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libutf8proc-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      # GITHUB_ENV writes land in SUBSEQUENT steps only.
+      - name: Record toolchain (non-Windows)
+        if: runner.os != 'Windows'
+        run: |
+          {
+            echo "MANIFEST_COMPILER=$(cc --version | head -1)"
+            echo "MANIFEST_CMAKE=$(cmake --version | head -1)"
+            echo "MANIFEST_COMMIT=$(git rev-parse HEAD)"
+            echo "MANIFEST_VERSION=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -1 | awk '{print $2}')"
+          } >> "$GITHUB_ENV"
+
+      # Windows has no `cc`; the MSVC cl.exe path comes out of CMakeCache
+      # after configure, and its FileVersion is the compiler version.
+      - name: Record toolchain (Windows / MSVC)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cl = (Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_C_COMPILER:FILEPATH=(.+)$').Matches[0].Groups[1].Value
+          $ver = (Get-Item $cl).VersionInfo.FileVersion
+          Add-Content $env:GITHUB_ENV "MANIFEST_COMPILER=MSVC cl.exe $ver"
+          Add-Content $env:GITHUB_ENV "MANIFEST_CMAKE=$(cmake --version | Select-Object -First 1)"
+          Add-Content $env:GITHUB_ENV "MANIFEST_COMMIT=$(git rev-parse HEAD)"
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          Add-Content $env:GITHUB_ENV "MANIFEST_VERSION=$v"
+
+      - name: Configure (non-Windows)
+        if: runner.os != 'Windows'
+        run: |
+          AMALG_FLAG=""
+          if [ "${{ matrix.leg }}" = "amalgamated" ]; then
+            AMALG_FLAG="-DLEPTRIS_AMALGAMATED=ON"
+          fi
+          cmake -B build -S . -G Ninja \
+            -DLEPTRIS_BUILD_CLI=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            -DLEPTRIS_BUILD_STATIC=ON \
+            -DLEPTRIS_BUILD_SHARED=ON \
+            $AMALG_FLAG
+
+      - name: Configure (Windows / MSVC)
+        if: runner.os == 'Windows'
+        run: |
+          # Same flags as build.yml's configure step (1577 /Zi + /DEBUG),
+          # minus tests/CLI, plus the shared library for hashing.
+          cmake -B build -S . `
+            -DLEPTRIS_BUILD_CLI=OFF `
+            -DBUILD_TESTING=OFF `
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF `
+            -DLEPTRIS_BUILD_STATIC=ON `
+            -DLEPTRIS_BUILD_SHARED=ON `
+            -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      # shell: bash on ALL legs (Windows included) so one script hashes
+      # everything; hashlib keeps the digest identical across platforms.
+      - name: Emit manifest fragment
+        shell: bash
+        env:
+          MANIFEST_FRAGMENT: manifest-fragments/${{ matrix.platform }}.json
+        run: |
+          mkdir -p manifest-fragments
+          # `-` reads the script from stdin; `build` is sys.argv[1].
+          python - build <<'PY'
+          import hashlib, json, os, re, sys
+          from pathlib import Path
+
+          # Library artifacts only (static + shared). Symlinks are skipped:
+          # the versioned real file carries the content, the .so/.dylib
+          # aliases are deterministic pointers to it.
+          ARTIFACT_RE = re.compile(
+              r"^(libleptris\.(a|dll|lib)|libleptris\.so(\.[0-9.]+)?"
+              r"|libleptris\.[0-9.]+\.dylib|leptris\.(lib|dll))$")
+
+          build_root = Path(sys.argv[1])
+          if not build_root.is_dir():
+              raise SystemExit(f"build dir not found: {build_root}")
+
+          artifacts = {}
+          for p in sorted(build_root.rglob("*")):
+              if p.is_symlink() or not p.is_file():
+                  continue
+              if not ARTIFACT_RE.match(p.name):
+                  continue
+              if p.name in artifacts:
+                  raise SystemExit(f"duplicate artifact basename: {p}")
+              h = hashlib.sha256()
+              with p.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              artifacts[p.name] = h.hexdigest()
+
+          if not artifacts:
+              raise SystemExit(f"no leptris library artifacts found under {build_root}")
+
+          fragment = {
+              "platform": os.environ["MANIFEST_PLATFORM"],
+              "leg": os.environ["MANIFEST_LEG"],
+              "compiler": os.environ["MANIFEST_COMPILER"],
+              "cmake": os.environ["MANIFEST_CMAKE"],
+              "commit": os.environ["MANIFEST_COMMIT"],
+              "version": os.environ["MANIFEST_VERSION"],
+              "artifacts": artifacts,
+          }
+          out = Path(os.environ["MANIFEST_FRAGMENT"])
+          out.write_text(json.dumps(fragment, indent=2, sort_keys=True) + "\n")
+          print(out.read_text())
+          PY
+
+      - name: Upload fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-fragment-${{ matrix.platform }}
+          path: manifest-fragments/
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Merge the legs' fragments into one manifest, print it in the job
+  # summary, and attach it to the GitHub Release for the tag.
+  # ─────────────────────────────────────────────────────────────────────────
+  publish:
+    name: Merge and attach manifest
+    needs: [resolve-tag, manifest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Download fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: manifest-fragment-*
+          merge-multiple: true
+          path: manifest-fragments
+
+      - name: Merge fragments
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+          from pathlib import Path
+
+          frag_dir = Path("manifest-fragments")
+          fragments = sorted(frag_dir.glob("*.json"))
+          if not fragments:
+              raise SystemExit("no manifest fragments found")
+
+          platforms = {}
+          for f in fragments:
+              fragment = json.loads(f.read_text())
+              platform = fragment.pop("platform")
+              if platform in platforms:
+                  raise SystemExit(f"duplicate platform fragment: {platform}")
+              platforms[platform] = fragment
+
+          manifest = {
+              "schema": "leptris.build-manifest/1",
+              "tag": os.environ["TAG"],
+              "generated_at_utc": datetime.datetime.now(
+                  datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          Path("build-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          print(Path("build-manifest.json").read_text())
+          PY
+
+      - name: Job summary
+        run: |
+          echo "### Build manifest — ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat build-manifest.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Attach manifest to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: gh release upload "$TAG" build-manifest.json --clobber
