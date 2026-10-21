@@ -1,0 +1,1 @@
+<orders><order id="1" status="active"><item qty="3">Nails</item><item qty="1">Hammer</item></order><order id="2" status="void"><item qty="7">Screws</item></order><order id="3" status="active"><item qty="2">Drill</item></order></orders>

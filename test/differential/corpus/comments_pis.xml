@@ -1,0 +1,1 @@
+<?proc before root?><!-- before root --><doc><!-- inside --><v>text</v><?pi tgt one?><!-- tail --></doc><?proc after root?><!-- after root -->
