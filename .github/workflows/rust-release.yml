@@ -79,6 +79,6 @@ jobs:
       - name: Publish to crates.io
         # stdin is closed so any prompt errors immediately instead of
         # idling to the job timeout.
-        run: cd bindings/rust && cargo publish < /dev/null
+        run: cd bindings/rust && cargo publish -p leptris-descriptor < /dev/null
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

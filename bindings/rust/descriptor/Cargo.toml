@@ -1,6 +1,6 @@
 [package]
 name = "leptris-descriptor"
-version = "0.1.0"
+version = "1.9.379"
 edition = "2021"
 description = "Shared descriptor-plan ABI for the leptris engine family (leptris, yeptris, teptris) — repr(C) mirrors of the tree-shaped descriptor plan records"
 license = "MIT"
