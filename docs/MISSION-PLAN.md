@@ -87,7 +87,7 @@ lands (TAG-RACE).
 | C2 | leptris-rs descriptor crate | `leptris-descriptor` published; safe-wrapper crate rides lockstep | feat/294 in flight, not published |
 | C3 | moxml gem | cut (owner-dispatched) carries the walk+read adoption | merged on main, release pending owner |
 | C4 | Prebuilt binaries everywhere consumers lack compilers | rubygems platform matrix ✓, PyPI wheels ✓, npm WASM ✓ | **done**, keep green |
-| C5 | System packaging | vcpkg ✓; add homebrew / conan / deb formulas so "install libleptris" is one command per platform | open |
+| C5 | System packaging | vcpkg ✓; add homebrew / conan / deb formulas so "install libleptris" is one command per platform | **formulas shipped in-repo; channel submission pending owner (2026-10-22)** |
 | C6 | Cargo publish lane | OIDC-free trusted publishing (crates-io-auth-action@v1) wired into the rust-release workflow; CARGO_REGISTRY_TOKEN secret set once | workflow shipped; secret/token state to verify in Phase 0 |
 
 **Exit:** a consumer on any of the four runtimes installs a prebuilt

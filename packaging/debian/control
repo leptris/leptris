@@ -1,0 +1,55 @@
+Source: leptris
+Section: libs
+Priority: optional
+# NOTE: Maintainer address is a placeholder — set the real owner address
+# before any mentor/Debian submission (see packaging/README.md).
+Maintainer: Leptris maintainers <maintainers@leptris.dev>
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake (>= 3.20),
+ libutf8proc-dev (>= 2.6),
+ pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/leptris/leptris
+Vcs-Browser: https://github.com/leptris/leptris
+Vcs-Git: https://github.com/leptris/leptris.git
+Rules-Requires-Root: no
+
+Package: libleptris1
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
+Description: Fast XML parser and XPath evaluator in pure C — shared library
+ libleptris is a pure C99/C11 XML 1.0 parser, a W3C-conformant XPath 1.0
+ engine, and an event-driven SAX parser, with optional utf8proc-backed
+ Unicode support and iconv-backed encoding conversion.
+ .
+ This package contains the runtime shared library (soname libleptris.so.1).
+
+Package: libleptris-dev
+Section: libdevel
+Architecture: any
+Depends:
+ libleptris1 (= ${binary:Version}),
+ ${misc:Depends}
+Recommends:
+ pkg-config
+Description: Fast XML parser and XPath evaluator in pure C — development files
+ Headers, CMake package config, and pkg-config metadata for building
+ software against libleptris, plus the static library.
+ .
+ Consumers typically use find_package(leptris) (target leptris::leptris)
+ or pkg-config --cflags/--libs leptris.
+
+Package: leptris
+Section: utils
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
+Description: Fast XML parser and XPath evaluator in pure C — command-line tool
+ The leptris CLI parses, formats, validates, and queries XML documents
+ (parse/format/validate/diff/xpath/xquery/xslt subcommands). It goes
+ through the same public API as the library and is useful for scripts
+ and pipelines.
