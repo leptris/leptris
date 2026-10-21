@@ -167,7 +167,8 @@ tag that says so.
 | A1 WHATWG tree parity | `test_html5lib --gtest_filter=Html5LibCorpus.*` | 2026-10-21 | green, 1555/1555 |
 | A1 WHATWG verdict parity | `Html5LibCorpus.ErrorVerdictParity` | 2026-10-21 | **green, 1555/1555 — zero misses** (PR #1803; floor pinned at the full corpus) |
 | A7 libxslt | `LibxsltSuite` | 2026-10-20 | 205/205 (204 + 1 macOS skip) |
-| B1 build row | `wt/460-harness/build_bench.rb` | 2026-10-21 | 1.86-1.92x (**red**, sota/04 branch) |
+| B1 build row | `wt/460-harness/build_bench.rb` | 2026-10-21 | **~1.9x red** (sota/04 after five levers; honest baseline re-measured 2.72x this day — the old 1.86x record is not reproducible) |
+| B3 pipeline row (parse→query→serialize) | `wt/460-harness/pipeline_bench.rb` | 2026-10-21 | **green** — 0.533-0.573x of Nokogiri's time (~1.8x faster), three runs |
 | B2 walk row | `wt/460-harness/walk_read_bench.rb` | 2026-10-20 | 0.88x (green) |
 | Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; **shipped in v1.9.378**) |
 | XPath index vs mutations | `XPathIndexInvalidation.*` | 2026-10-21 | green — splice paths invalidate (PR #1802; ruby#519 closed on the 1.9.378.0 gem) |
