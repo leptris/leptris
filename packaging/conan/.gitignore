@@ -1,0 +1,3 @@
+# Conan-generated local artifacts (from `conan create` / `conan build`)
+CMakeUserPresets.json
+build/
