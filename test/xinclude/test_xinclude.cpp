@@ -1161,4 +1161,153 @@ TEST(XIncludeXpointerForms, BadEncodingIsResourceError) {
     remove(txt);
 }
 
-}  // namespace
+
+// ---- parse="xml" splice wiring (TODO 92) -------------------------------
+
+/* (a) The included root replaces the xi:include at its exact position
+ * and the spliced subtree's parent edge must point at the including
+ * element — the ownership transfer moves nodes across pools, and a
+ * missed parent stamp breaks every parent-relative walk (doc
+ * resolution, removal, parent:: axis) for the adopted root. */
+TEST(XIncludeParseXml, SplicePreservesPositionAndParentWiring) {
+    std::string inc_path = xptr_unique_path("leptris_xinc_wire_doc", "xml");
+    const char inc_xml[] = "<chapter><title>Included</title></chapter>";
+    write_file(inc_path.c_str(), inc_xml, sizeof(inc_xml) - 1);
+
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs + "'>"
+        "<a/><xi:include href='" + inc_path + "' parse='xml'/><b/></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* Position: element children must read a, chapter, b. */
+    LeptrisElement e = leptris_element_first_child_any(root);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "a");
+    e = leptris_element_next_sibling_any(e);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "chapter");
+    LeptrisElement chapter = e;
+    e = leptris_element_next_sibling_any(e);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "b");
+    EXPECT_EQ(leptris_element_next_sibling_any(e), nullptr);
+
+    /* Parent wiring: the spliced root's parent edge is the including
+     * element, same as its new siblings. */
+    EXPECT_EQ(leptris_element_parent(chapter), root);
+    EXPECT_EQ(leptris_node_child_count(leptris_element_as_node(root)),
+              (size_t)3);
+
+    leptris_document_free(doc);
+    remove(inc_path.c_str());
+}
+
+/* (b) A target that EXISTS but is not well-formed XML is a resource
+ * error: xi:fallback applies, same contract as a missing file. */
+TEST(XIncludeParseXml, MalformedTargetSplicesFallback) {
+    std::string inc_path = xptr_unique_path("leptris_xinc_broken", "xml");
+    write_file(inc_path.c_str(), "<broken><unclosed>", 17);
+
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs + "'>"
+        "<xi:include href='" + inc_path + "' parse='xml'>"
+        "<xi:fallback><notavailable/></xi:fallback>"
+        "</xi:include></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisElement child = leptris_element_first_child_any(root);
+    ASSERT_NE(child, nullptr);
+    EXPECT_STREQ(leptris_element_name(child), "notavailable");
+    EXPECT_EQ(leptris_element_first_child_any(child), nullptr);
+    EXPECT_EQ(leptris_element_next_sibling_any(child), nullptr);
+
+    leptris_document_free(doc);
+    remove(inc_path.c_str());
+}
+
+/* (c) The recursion guard bounds include DEPTH (distinct files, so
+ * cycle detection never fires). An include whose nested processing
+ * exceeds the cap is a resource error: its xi:fallback splices and
+ * no unresolved xi:include survives into the result tree. */
+TEST(XIncludeParseXml, DepthGuardBoundsRecursiveChain) {
+    /* chain_1 is a leaf; chain_k includes chain_{k-1} with a
+     * fallback. 40 levels > XINCLUDE_MAX_DEPTH (32), so the deepest
+     * include resolves to its fallback. chain_k is processed at
+     * nested depth 41-k; the guard trips at depth 33 -> chain_8,
+     * leaving chain_9's fallback as the terminal element. */
+    const int kChain = 40;
+    std::string paths[kChain + 1];
+    for (int k = 1; k <= kChain; k++) {
+        paths[k] = xptr_unique_path("leptris_xinc_depth", "xml") + "_" +
+                   std::to_string(k);
+    }
+    for (int k = 1; k <= kChain; k++) {
+        std::string body;
+        if (k == 1) {
+            body = "<c1>leaf</c1>";
+        } else {
+            body = std::string("<c") + std::to_string(k) + " xmlns:xi='" +
+                   kXiNs + "'><xi:include href='" + paths[k - 1] + "'>"
+                   "<xi:fallback><fb" + std::to_string(k - 1) + "/></xi:fallback>"
+                   "</xi:include></c" + std::to_string(k) + ">";
+        }
+        write_file(paths[k].c_str(), body.data(), body.size());
+    }
+
+    std::string xml = std::string("<root xmlns:xi='") + kXiNs + "'>"
+        "<xi:include href='" + paths[kChain] + "' parse='xml'/></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    /* Must terminate (the guard bounds recursion) and succeed (the
+     * over-deep include degrades to its fallback, not an error). */
+    EXPECT_EQ(leptris_xinclude_process(doc, nullptr), LEPTRIS_OK);
+
+    /* Descent root > c40 > c39 > ... > c9 > fb9, then nothing. */
+    LeptrisElement e = leptris_document_root(doc);
+    ASSERT_NE(e, nullptr);
+    for (int k = kChain; k >= 9; k--) {
+        e = leptris_element_first_child_any(e);
+        ASSERT_NE(e, nullptr) << "chain broke at c" << k;
+        EXPECT_STREQ(leptris_element_name(e), ("c" + std::to_string(k)).c_str());
+    }
+    /* chain_9's include exceeded the cap (chain_8's document would
+     * be nested at depth 33): chain_9's own fallback splices. */
+    e = leptris_element_first_child_any(e);
+    ASSERT_NE(e, nullptr);
+    EXPECT_STREQ(leptris_element_name(e), "fb8");
+    EXPECT_EQ(leptris_element_first_child_any(e), nullptr);
+
+    /* No unresolved xi:include anywhere in the result. */
+    int leftover = 0;
+    /* Iterative descent (bounded, but keep it off the C stack). */
+    LeptrisElement stack[128];
+    int sp = 0;
+    stack[sp++] = leptris_document_root(doc);
+    while (sp > 0) {
+        LeptrisElement cur = stack[--sp];
+        for (; cur; cur = leptris_element_next_sibling_any(cur)) {
+            if (leptris_xinclude_is_include_element(cur)) leftover++;
+            LeptrisElement kid = leptris_element_first_child_any(cur);
+            if (kid && sp < 128) stack[sp++] = kid;
+        }
+    }
+    EXPECT_EQ(leftover, 0);
+
+    leptris_document_free(doc);
+    for (int k = 1; k <= kChain; k++) remove(paths[k].c_str());
+}
+
+}  // namespace\n

@@ -61,7 +61,8 @@ older corpus datasets — reported, not gated.
 - [ ] parameter entities, choice-model backtracking
 
 ### A5 XInclude completeness (TODO 92)
-- [ ] `parse="xml"` (ownership-transfer splice exists — wire it)
+- [x] `parse="xml"` (ownership-transfer splice + canonical insert face,
+      depth-guard resource-error fallback; verified by specs)
 - [ ] xpointer
 
 ### A6 The universality proof (differential corpus)
