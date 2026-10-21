@@ -398,14 +398,18 @@ static int simple_is_numeric(struct leptris_xsd_schema* s,
 
 /* xs:anyAttribute grammar: ##any (or an absent attribute),
  * ##other, ##targetNamespace, ##local, or a space-separated URI
- * list. */
+ * list. target_ns may be NULL or "" — an ABSENT unit tns: ##other
+ * then matches every attribute that HAS a namespace (it excludes
+ * only ##local), ##targetNamespace matches nothing. */
 static int any_attr_matches(const char* grammar, const char* uri,
                             const char* target_ns) {
+    int has_tns = target_ns && target_ns[0];
     if (!grammar || strcmp(grammar, "##any") == 0) return 1;
     if (strcmp(grammar, "##other") == 0)
-        return uri && target_ns && strcmp(uri, target_ns) != 0;
+        return uri && uri[0] &&
+               (!has_tns || strcmp(uri, target_ns) != 0);
     if (strcmp(grammar, "##targetNamespace") == 0)
-        return uri && target_ns && strcmp(uri, target_ns) == 0;
+        return has_tns && uri && strcmp(uri, target_ns) == 0;
     if (strcmp(grammar, "##local") == 0) return uri == NULL;
     /* URI list */
     const char* p = grammar;
@@ -421,12 +425,13 @@ static int any_attr_matches(const char* grammar, const char* uri,
         }
         if (len == 17 &&
             strncmp(start, "##targetNamespace", 17) == 0) {
-            if (uri && target_ns && strcmp(uri, target_ns) == 0)
+            if (has_tns && uri && strcmp(uri, target_ns) == 0)
                 return 1;
             continue;
         }
         if (len == 7 && strncmp(start, "##other", 7) == 0) {
-            if (uri && target_ns && strcmp(uri, target_ns) != 0)
+            if (uri && uri[0] &&
+                (!has_tns || strcmp(uri, target_ns) != 0))
                 return 1;
             continue;
         }

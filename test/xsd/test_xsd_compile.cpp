@@ -2305,6 +2305,74 @@ TEST(XsdConformanceClauses, UnprefixedUnknownTypeStillLoud) {
     leptris_xsd_free(s);
 }
 
+/* A wildcard declared in a unit with NO targetNamespace: ##other
+ * excludes only the ABSENT namespace — every attribute that HAS a
+ * namespace matches (the anyAttr-derive1 family: the base type
+ * lives in a no-tns imported unit, the derived type's own ##other
+ * excludes urn:FOO, and the base's must still admit foo:barC).
+ * The unit-tns capture recorded NULL for both "no tns" and "not
+ * captured", so the fallback stamped the MERGED schema's tns onto
+ * the wildcard and the exclusion fired against the wrong
+ * namespace. */
+TEST(XsdConformanceClauses, OtherWildcardInNoTnsUnitMatchesForeignNs) {
+    std::string dir = ::testing::TempDir();
+    FILE* f1 = fopen((dir + "x_notns_base.xsd").c_str(), "wb");
+    ASSERT_NE(f1, nullptr);
+    const char* base =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"baseT\">"
+        "<xs:anyAttribute namespace=\"##other\" processContents=\"lax\"/>"
+        "</xs:complexType>"
+        "</xs:schema>";
+    fwrite(base, 1, strlen(base), f1);
+    fclose(f1);
+    FILE* f2 = fopen((dir + "x_notns_main.xsd").c_str(), "wb");
+    ASSERT_NE(f2, nullptr);
+    const char* mainx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:b=\"urn:base\" targetNamespace=\"urn:t\""
+        " xmlns=\"urn:t\">"
+        "<xs:import namespace=\"urn:base\""
+        " schemaLocation=\"x_notns_base.xsd\"/>"
+        "<xs:complexType name=\"derT\">"
+        "<xs:complexContent>"
+        "<xs:extension base=\"b:baseT\">"
+        "<xs:anyAttribute namespace=\"##other\" processContents=\"lax\"/>"
+        "</xs:extension>"
+        "</xs:complexContent>"
+        "</xs:complexType>"
+        "<xs:element name=\"r\" type=\"derT\"/>"
+        "</xs:schema>";
+    fwrite(mainx, 1, strlen(mainx), f2);
+    fclose(f2);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((dir + "x_notns_main.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    /* the DERIVED ##other (relative to urn:t) rejects urn:t; the
+     * BASE ##other (relative to the ABSENT tns of urn:base's unit)
+     * must admit it through the extension union — the fix target */
+    EXPECT_EQ(validate_compiled(
+                  s, "<r xmlns=\"urn:t\" xmlns:t=\"urn:t\" t:a=\"1\"/>"),
+              1)
+        << leptris_xsd_error_at(s, 0)
+        << " (##other in the no-tns base unit must match urn:t)";
+    /* an attribute in a THIRD namespace passes the derived wildcard
+     * directly (##other relative to urn:t matches urn:f) */
+    EXPECT_EQ(validate_compiled(
+                  s, "<r xmlns=\"urn:t\" xmlns:f=\"urn:f\" f:a=\"1\"/>"),
+              1)
+        << leptris_xsd_error_at(s, 0);
+    /* a NO-NAMESPACE attribute matches neither: ##other never
+     * matches ##local, and the derived wildcard is tns-scoped */
+    EXPECT_EQ(validate_compiled(s, "<r xmlns=\"urn:t\" a=\"1\"/>"), 0)
+        << "##other excludes no-namespace attributes";
+    leptris_xsd_free(s);
+    remove((dir + "x_notns_base.xsd").c_str());
+    remove((dir + "x_notns_main.xsd").c_str());
+}
+
 /* An EMPTY content model (a complexType with no particles —
  * attribute-only or attributeGroup-only) allows NO element children:
  * the anyAttr-derive2 family accepted whole foreign subtrees there. */
