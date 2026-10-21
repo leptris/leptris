@@ -12,6 +12,10 @@
  *                  parent document by pool adoption, and splice it in
  *                  place of the xi:include element.
  *
+ * Nested includes are processed from an explicit heap work stack, not
+ * C recursion (issue #1821): nesting depth is bounded by
+ * XINCLUDE_MAX_DEPTH while the C stack stays flat per level.
+ *
  * XPointer forms: the xpointer attribute and
  * href fragment identifiers support bare shorthand (an NCName,
  * selecting the element with that ID), the element() scheme
@@ -482,7 +486,8 @@ static LeptrisElement xptr_select(LeptrisDocument doc, const char* value) {
     return found;
 }
 
-/* Forward decls: internal recursion variant + catalog lookup. */
+/* Forward decls: internal driver + catalog lookup. The driver is the
+ * iterative work-stack loop at the bottom of this file. */
 static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
                                               const char* base_url,
                                               int depth,
@@ -493,13 +498,15 @@ static void xinclude_catalog_lookup(const char* catalog_path,
 
 /* TODO 117 Phase C: cycle detection.
  *
- * Each include directive resolves to an absolute path.  We thread a
- * singly-linked list of `CycleNode` paths through the recursion so we
- * can reject A -> B -> A without going through the depth guard (which
- * protects against unbounded recursion, not cycles specifically).
+ * Each include directive resolves to an absolute path.  A singly-
+ * linked list of `CycleNode` paths rides along with every deferred
+ * include so we can reject A -> B -> A without going through the
+ * depth guard (which protects against unbounded recursion, not
+ * cycles specifically).
  *
- * Memory: each entry is a malloc'd string, freed when the scope ends
- * (matching push/pop pairing in the recursion). */
+ * Memory: each entry is a malloc'd string, owned by the deferred
+ * frame of the include that created it (freed when the frame pops;
+ * see the work stack below). */
 typedef struct CycleNode {
     char* path;                 /* heap-allocated absolute path */
     struct CycleNode* next;
@@ -512,28 +519,26 @@ static int cycle_contains(CycleNode* ancestors, const char* path) {
     return 0;
 }
 
-static CycleNode* cycle_push(CycleNode* ancestors, const char* path) {
+/* Prepend `path` onto `next`. Returns NULL on allocation failure
+ * (cycle detection then simply misses this link, matching the old
+ * push's lenient OOM posture). */
+static CycleNode* cycle_new(const char* path, CycleNode* next) {
     CycleNode* n = (CycleNode*)malloc(sizeof(CycleNode));
-    if (!n) return ancestors;
+    if (!n) return NULL;
     n->path = strdup(path);
-    n->next = ancestors;
-    if (!n->path) { free(n); return ancestors; }
+    if (!n->path) { free(n); return NULL; }
+    n->next = next;
     return n;
 }
 
-static CycleNode* cycle_pop(CycleNode* ancestors) {
-    if (!ancestors) return NULL;
-    CycleNode* next = ancestors->next;
-    free(ancestors->path);
-    free(ancestors);
-    return next;
-}
-
-/* Recursive walker. Bottom-up so that included content can itself
+/* Element walker. Bottom-up so that included content can itself
  * contain nested xi:include elements.  Returns 0 on first hard failure
- * (parse error, alloc failure), 1 otherwise. The `depth` parameter
+ * (cycle, alloc failure), 1 otherwise. The `depth` parameter
  * (TODO 92 Phase 5) tracks how many xi:include layers we've descended
- * through; XINCLUDE_MAX_DEPTH stops mutual-recursion attacks. */
+ * through; XINCLUDE_MAX_DEPTH stops mutual-recursion attacks. A
+ * successfully loaded nested document is NOT processed here: it is
+ * queued as a frame on `stack` (issue #1821) and the driver walks and
+ * splices it, so include nesting never grows the C stack. */
 /* ---- TODO.assemble 03: xml:base (RFC 3986) ------------------------------
  *
  * The effective base of an element = merge(inherited_base, this
@@ -672,12 +677,238 @@ static void effective_xml_base(LeptrisElement elem, const char* inherited,
     }
 }
 
+/* ---- issue #1821: explicit nesting work stack --------------------------
+ *
+ * Nested xi:include processing used to recurse on the C stack: each
+ * included document was processed inside its includer's frame
+ * (process_element_xinclude -> xinclude_process_internal ->
+ * process_element_xinclude ...).  Every nesting level pinned ~20KB of
+ * fixed path buffers (subtree_base, href_base, full_path, catalog_hit,
+ * inc_dir) to its frame, so a 40-deep include chain burned ~800KB of
+ * stack -- overflowing Windows' 1MB default (SEGV under MSVC, issue
+ * #1821) while passing on 8MB POSIX stacks.
+ *
+ * Nesting is now an explicit HEAP work stack of deferred includes.
+ * Queuing a frame records (includer, xi:include element, parsed
+ * document); the driver loop walks the included document and only
+ * then splices it into the includer.  LIFO order reproduces the old
+ * recursive descent exactly -- an include's fragment is selected and
+ * spliced only after everything beneath it has settled -- while the
+ * C stack cost per nesting level drops to zero.  Runaway nesting
+ * stays bounded by XINCLUDE_MAX_DEPTH, checked before a frame is
+ * queued. */
+enum { XINC_WALK, XINC_SPLICE };
+
+typedef struct XincFrame {
+    struct leptris_document* parent_doc;   /* includer: holds include_elem */
+    LeptrisElement include_elem;           /* the xi:include element */
+    struct leptris_document* included_doc; /* parsed href content */
+    CycleNode* ancestors;                  /* chain for the included walk */
+    CycleNode* own_cycle;                  /* this include's path node */
+    char inc_dir[4096];                    /* included doc's href base */
+    int depth;                             /* nesting depth of included_doc */
+    int state;                             /* XINC_WALK, then XINC_SPLICE */
+    int walk_failed;                       /* hard failure during WALK */
+} XincFrame;
+
+typedef struct XincStack {
+    XincFrame* v;
+    size_t n;
+    size_t cap;
+} XincStack;
+
+/* Grow the stack and return the new top slot (zeroed). Callers fill
+ * it immediately; the pointer is invalid across the NEXT push (the
+ * array reallocs). Returns NULL on allocation failure. */
+static XincFrame* xinc_stack_push(XincStack* s) {
+    if (s->n == s->cap) {
+        size_t cap = s->cap ? s->cap * 2 : 8;
+        XincFrame* v = (XincFrame*)realloc(s->v, cap * sizeof(XincFrame));
+        if (!v) return NULL;
+        s->v = v;
+        s->cap = cap;
+    }
+    XincFrame* f = &s->v[s->n++];
+    memset(f, 0, sizeof(*f));
+    return f;
+}
+
+/* Queue one deferred include: after this, `included_doc` belongs to
+ * the stack. Returns 0 on allocation failure (the caller still owns
+ * included_doc and degrades to a resource error). */
+static int xinc_defer(XincStack* s,
+                      struct leptris_document* parent_doc,
+                      LeptrisElement include_elem,
+                      struct leptris_document* included_doc,
+                      const char* full_path,
+                      CycleNode* ancestors,
+                      int child_depth) {
+    CycleNode* own = cycle_new(full_path, ancestors);
+    XincFrame* f = xinc_stack_push(s);
+    if (!f) {
+        if (own) { free(own->path); free(own); }
+        return 0;
+    }
+    f->parent_doc = parent_doc;
+    f->include_elem = include_elem;
+    f->included_doc = included_doc;
+    f->own_cycle = own;
+    f->ancestors = own ? own : ancestors;
+    /* Nested hrefs inside the included document resolve against the
+     * INCLUDED document's own location (TODO.assemble 03). */
+    copy_dir_of(f->inc_dir, sizeof(f->inc_dir), full_path);
+    {
+        size_t dl = strlen(f->inc_dir);
+        if (dl + 1 < sizeof(f->inc_dir) && (dl == 0 ||
+                                            f->inc_dir[dl - 1] != '/')) {
+            f->inc_dir[dl++] = '/';
+            f->inc_dir[dl] = 0;
+        }
+    }
+    f->depth = child_depth;
+    f->state = XINC_WALK;
+    return 1;
+}
+
+/* Shared tail of include handling. Without a substitute, xi:fallback
+ * answers the resource error: element children splice as-is (same
+ * pool, moved, not copied; ruby#478's <offline/> shape) and a
+ * text-only fallback keeps the historical single text node. With one,
+ * it splices through the canonical mutation face
+ * (leptris_element_insert_before maintains the parent edge, child
+ * counts, memo, tree version, and index; see the Phase A note in the
+ * old inline path). No fallback: the lenient posture leaves the
+ * xi:include in place. Always returns the walker's success code. */
+static int finish_include(LeptrisElement elem,
+                          struct leptris_document* doc,
+                          LeptrisNode* substitute) {
+    if (!substitute) {
+        LeptrisElement fb = find_fallback(elem);
+        if (fb) {
+            /* XInclude §4.5: the fallback's CHILDREN replace the
+             * include; the old path read only TEXT content, so an
+             * element fallback silently vanished together with the
+             * include. */
+            LeptrisNodeRef fbchild =
+                leptris_node_first_child(leptris_element_as_node(fb));
+            LeptrisNodeRef fb_elem_child = NULL;
+            int fb_elem_count = 0;
+            for (LeptrisNodeRef c = fbchild; c;
+                 c = leptris_node_next_sibling(c)) {
+                if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
+                    if (!fb_elem_child) fb_elem_child = c;
+                    fb_elem_count++;
+                }
+            }
+            if (fb_elem_child) {
+                LeptrisElement parent = leptris_element_get_parent(elem);
+                if (parent) {
+                    LeptrisNodeRef c = fbchild;
+                    while (c) {
+                        LeptrisNodeRef next =
+                            leptris_node_next_sibling(c);
+                        if (leptris_node_get_type(c) ==
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            leptris_element_insert_before(
+                                elem, (LeptrisElement)c);
+                        c = next;
+                    }
+                    leptris_node_unlink((LeptrisNodeRef)elem);
+                    leptris_element_set_document_tree(
+                        (LeptrisElement)fb_elem_child, doc);
+                    return 1;
+                }
+            }
+            char* fb_text = leptris_element_get_text_content(fb);
+            if (fb_text) {
+                substitute = (LeptrisNode*)leptris_text_create(
+                    fb_text, strlen(fb_text), doc->pool, doc);
+                leptris_free(fb_text);
+            }
+        }
+    }
+
+    if (substitute) {
+        LeptrisElement parent = leptris_element_get_parent(elem);
+        if (parent) {
+            if (leptris_element_insert_before(
+                    elem, (LeptrisElement)substitute) == LEPTRIS_OK) {
+                leptris_node_unlink((LeptrisNodeRef)elem);
+            }
+            /* Insert-face failure: the xi:include stays in place
+             * (lenient posture, see resource-error note above). */
+        }
+    }
+    return 1;
+}
+
+/* SPLICE phase of a deferred include: the nesting beneath it has
+ * settled, so select the fragment (xpointer attribute, else the href
+ * shorthand), move the chosen root into the includer, adopt the child
+ * document's pool into the includer's lifecycle, and splice.
+ *
+ * XPointer selection (XInclude 1.0 §4.2): "The document information
+ * item of the acquired infoset serves as the inclusion target unless
+ * the xpointer attribute is present and identifies a subresource."
+ * §4.2: "An error in the XPointer is a resource error" (as is a
+ * pointer that identifies only non-element nodes, which the
+ * single-element move path of §4.5 cannot take).  On such an error
+ * the substitute stays NULL so the §4.4 fallback path answers this
+ * include -- splicing the whole root here would silently include far
+ * more than the pointer identified. */
+static void xinc_frame_splice(XincFrame* f) {
+    LeptrisDocument included_doc = f->included_doc;
+    LeptrisNode* substitute = NULL;
+    LeptrisElement inc_root = leptris_document_root(included_doc);
+    if (inc_root) {
+        LeptrisElement elem = f->include_elem;
+        const char* xptr_attr = leptris_xinclude_get_xpointer(elem);
+        const char* href = leptris_xinclude_get_href(elem);
+        const char* frag = href ? strchr(href, '#') : NULL;
+        if (frag && !frag[1]) frag = NULL;
+        const char* xp = (xptr_attr && xptr_attr[0])
+                             ? xptr_attr
+                             : (frag ? frag + 1 : NULL);
+        if (xp && xp[0]) {
+            LeptrisElement first = xptr_select(included_doc, xp);
+            if (first) {
+                /* Move: the fragment still lives in included_doc's
+                 * pool, so adopt included_doc into the includer's
+                 * lifecycle to keep the pool alive. */
+                leptris_element_set_document_tree(first, f->parent_doc);
+                leptris_document_adopt_child(f->parent_doc, included_doc);
+                substitute = (LeptrisNode*)first;
+                included_doc = NULL;
+            }
+            /* else: XPointer error -> resource error; included_doc is
+             * freed below and the fallback path runs. */
+        } else if (!substitute) {
+            /* No pointer: the whole resource is the inclusion target
+             * (§4.2).
+             *
+             * TODO 117 Phase A: pool ownership transfer — move (don't
+             * copy) the included root into the includer's tree. */
+            included_doc->root = NULL;
+            if (included_doc->new_dom_root == (void*)inc_root) {
+                included_doc->new_dom_root = NULL;
+            }
+            leptris_element_set_document_tree(inc_root, f->parent_doc);
+            leptris_document_adopt_child(f->parent_doc, included_doc);
+            substitute = (LeptrisNode*)inc_root;
+            included_doc = NULL;  /* now owned by the includer */
+        }
+    }
+    if (included_doc) leptris_document_free(included_doc);
+    finish_include(f->include_elem, f->parent_doc, substitute);
+}
+
 static int process_element_xinclude(LeptrisElement elem,
                                      struct leptris_document* doc,
                                      const char* base_url,
                                      const leptris_xinclude_opts* opts,
                                      int depth,
-                                     CycleNode* ancestors) {
+                                     CycleNode* ancestors,
+                                     XincStack* stack) {
     if (!elem) return 1;
 
     char subtree_base[4096];
@@ -690,7 +921,7 @@ static int process_element_xinclude(LeptrisElement elem,
         if (leptris_node_get_type(child) == LEPTRIS_NODE_TYPE_ELEMENT) {
             int rc = process_element_xinclude((LeptrisElement)child, doc,
                                               base_url, opts, depth,
-                                              ancestors);
+                                              ancestors, stack);
             if (!rc) return 0;
         }
         child = next;
@@ -788,127 +1019,32 @@ static int process_element_xinclude(LeptrisElement elem,
 
     if (content) {
         if (is_xml) {
-            /* TODO 117 Phase C: push current URI onto ancestor stack so
-             * nested xi:include can detect cycles.  Pop after we're
-             * done with this include (pushed node is the new head;
-             * cycle_pop(ancestors) pops the head). */
-            ancestors = cycle_push(ancestors, full_path);
-
+            /* Issue #1821: no nested recursion here. The parsed
+             * document is queued as a deferred frame; the driver
+             * walks it (depth-guarded) and splices it into `doc`
+             * once everything beneath it has settled. TODO 117
+             * Phase C: the frame carries this include's path
+             * prepended to the ancestor chain, so nested xi:include
+             * elements detect cycles against us. */
             LeptrisStatus st = LEPTRIS_OK;
             LeptrisDocument included_doc = leptris_parse_string(content, content_len, &st);
-            if (included_doc && st == LEPTRIS_OK) {
-                /* Resolve any xi:include nested inside the included doc
-                 * before splicing — XInclude processes recursively.
-                 * Bump depth so mutual-recursion stops at MAX_DEPTH. */
-                /* TODO.assemble 03: nested hrefs inside the included
-                 * document resolve against the INCLUDED document's
-                 * own location, not the includer's base. */
-                int nested_rc = LEPTRIS_ERROR_IO;
-                {
-                    char inc_dir[4096];
-                    copy_dir_of(inc_dir, sizeof(inc_dir), full_path);
-                    size_t dl = strlen(inc_dir);
-                    if (dl + 1 < sizeof(inc_dir) && (dl == 0 ||
-                                                     inc_dir[dl-1] != '/')) {
-                        inc_dir[dl++] = '/';
-                        inc_dir[dl] = 0;
-                    }
-                    nested_rc = xinclude_process_internal(included_doc,
-                                                          inc_dir,
-                                                          depth + 1, opts);
-                }
-                if (nested_rc != LEPTRIS_OK) {
-                    /* TODO 92: the recursion guard tripped inside the
-                     * included document.  Nothing was spliced there,
-                     * so splice nothing here: treat as a resource
-                     * error (substitute stays NULL) and let
-                     * xi:fallback answer this level.  Splicing the
-                     * raw included root would strand an unresolved
-                     * xi:include in the result tree. */
-                    leptris_document_free(included_doc);
-                    included_doc = NULL;
-                }
-                LeptrisElement inc_root =
-                    included_doc
-                        ? leptris_document_root(included_doc)
-                        : NULL;
-                if (inc_root) {
-                    /* XPointer selection (XInclude 1.0 §4.2): "The
-                     * document information item of the acquired infoset
-                     * serves as the inclusion target unless the xpointer
-                     * attribute is present and identifies a
-                     * subresource."  The pointer is the xpointer
-                     * attribute (scheme forms) or the href fragment (a
-                     * bare shorthand).  §4.2 requires the XPointer
-                     * Framework forms: the shorthand pointer
-                     * (Framework §3.2 -- "a shorthand pointer ...
-                     * consists of an NCName alone.  It identifies at
-                     * most one element ... that has a matching NCName
-                     * as an identifier"; resolved through the XPath
-                     * id() function, which accepts xml:id and
-                     * DTD-declared ID attributes) and the element()
-                     * scheme (an NCName shorthand or /1/2 child
-                     * sequence).  The optional xpointer() scheme
-                     * (XPath 1.0) and xmlns() prefix bindings are
-                     * supported too.  Pointer parts are tried left to
-                     * right (Framework §3.3).
-                     *
-                     * §4.2: "An error in the XPointer is a resource
-                     * error" (as is a pointer that identifies only
-                     * non-element nodes, which the single-element move
-                     * path of §4.5 cannot take).  On such an error the
-                     * substitute stays NULL so the §4.4 fallback path
-                     * answers this include -- splicing the whole root
-                     * here would silently include far more than the
-                     * pointer identified. */
-                    const char* xp = (xptr_attr && xptr_attr[0])
-                                         ? xptr_attr
-                                         : (frag ? frag + 1 : NULL);
-                    if (xp && xp[0]) {
-                        LeptrisElement first = xptr_select(included_doc, xp);
-                        if (first) {
-                            /* Move: the fragment still lives in
-                             * included_doc's pool, so we adopt
-                             * included_doc into our lifecycle to keep
-                             * the pool alive. */
-                            leptris_element_set_document_tree(first, doc);
-                            leptris_document_adopt_child(doc, included_doc);
-                            substitute = (LeptrisNode*)first;
-                            included_doc = NULL;
-                        }
-                        /* else: XPointer error -> resource error;
-                         * included_doc is freed at the end of this
-                         * scope and the fallback path below runs. */
-                    } else if (!substitute) {
-                        /* No pointer: the whole resource is the
-                         * inclusion target (§4.2).
-                         *
-                         * TODO 117 Phase A: pool ownership transfer.
-                         *
-                         * Move (don't copy) the included root into our
-                         * tree.  The child's pool still owns the
-                         * memory, so adopt the child document into
-                         * our lifecycle -- it will be freed when we
-                         * are.  Set included_doc = NULL below the
-                         * adoption to skip the early-exit free. */
-                        included_doc->root = NULL;
-                        if (included_doc->new_dom_root ==
-                            (void*)inc_root) {
-                            included_doc->new_dom_root = NULL;
-                        }
-                        leptris_element_set_document_tree(inc_root, doc);
-                        leptris_document_adopt_child(doc, included_doc);
-                        substitute = (LeptrisNode*)inc_root;
-                        included_doc = NULL;  /* now owned by `doc` */
-                    }
-                }
+            LeptrisElement inc_root = (included_doc && st == LEPTRIS_OK)
+                                          ? leptris_document_root(included_doc)
+                                          : NULL;
+            if (inc_root && depth + 1 <= XINCLUDE_MAX_DEPTH &&
+                xinc_defer(stack, doc, elem, included_doc, full_path,
+                           ancestors, depth + 1)) {
+                free(content);
+                return 1;   /* walk + splice happen from the work stack */
             }
             if (included_doc) leptris_document_free(included_doc);
-            /* TODO 117 Phase C: pop the URI we pushed at the start.
-             * cycle_pop pops the head (the pushed node) and returns
-             * the previous head, restoring ancestors to its pre-push
-             * value. */
-            ancestors = cycle_pop(ancestors);
+            free(content);
+            /* Unparseable, rootless, over the depth guard, or out of
+             * memory: treat as a resource error and let xi:fallback
+             * answer this level. Splicing the raw included root
+             * would strand an unresolved xi:include in the result
+             * tree. */
+            return finish_include(elem, doc, NULL);
         } else if (strcmp(parse, "text") == 0) {
             /* TODO.remaining/04: the encoding attribute names the
              * source character set; convert to UTF-8 before splicing.
@@ -916,111 +1052,34 @@ static int process_element_xinclude(LeptrisElement elem,
              * ignored (bytes passed through). Failed conversion is a
              * resource error -> fallback. */
             const char* enc = get_attr_value(elem, "encoding");
+#if defined(LEPTRIS_HAS_ICONV)
             if (enc && enc[0] &&
                 strcmp(enc, "UTF-8") != 0 && strcmp(enc, "utf-8") != 0) {
-#if defined(LEPTRIS_HAS_ICONV)
                 size_t conv_len = 0;
                 char* conv = leptris_encoding_convert(
                     enc, "UTF-8", content, content_len, &conv_len);
-                if (!conv) {
+                if (conv) {
+                    free(content);
+                    content = conv;
+                    content_len = conv_len;
+                } else {
                     free(content);
                     content = NULL;   /* resource error -> fallback */
-                    substitute = NULL;
-                    goto fallback;
                 }
-                free(content);
-                content = conv;
-                content_len = conv_len;
-#endif
             }
-            substitute = (LeptrisNode*)leptris_text_create(content, content_len, doc->pool, doc);
+#endif
+            if (content) {
+                substitute = (LeptrisNode*)leptris_text_create(
+                    content, content_len, doc->pool, doc);
+            }
             /* parse="text" doesn't recurse into another file's body
-             * (no risk of A -> B -> A via text), so no push/pop here. */
+             * (no risk of A -> B -> A via text), so no cycle chain. */
         }
         /* Unknown parse= value: silently skip, per XInclude spec. */
         free(content);
     }
 
-#if defined(LEPTRIS_HAS_ICONV)
-    /* Only referenced by the conversion-failure goto above; without
-     * iconv the goto is compiled out and the label would dangle. */
-fallback:
-#endif
-    if (!substitute) {
-        /* Resource error: try xi:fallback before giving up. */
-        LeptrisElement fb = find_fallback(elem);
-        if (fb) {
-            /* XInclude §4.5: the fallback's CHILDREN replace the
-             * include — element children splice as-is (same pool,
-             * moved, not copied; ruby#478's <offline/> shape), and
-             * a text-only fallback keeps the historical single
-             * text node. The old path read only TEXT content, so
-             * an element fallback silently vanished together with
-             * the include. */
-            LeptrisNodeRef fbchild =
-                leptris_node_first_child(leptris_element_as_node(fb));
-            LeptrisNodeRef fb_elem_child = NULL;
-            int fb_elem_count = 0;
-            for (LeptrisNodeRef c = fbchild; c;
-                 c = leptris_node_next_sibling(c)) {
-                if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) {
-                    if (!fb_elem_child) fb_elem_child = c;
-                    fb_elem_count++;
-                }
-            }
-            if (fb_elem_child) {
-                LeptrisElement parent = leptris_element_get_parent(elem);
-                if (parent) {
-                    LeptrisNodeRef c = fbchild;
-                    while (c) {
-                        LeptrisNodeRef next =
-                            leptris_node_next_sibling(c);
-                        if (leptris_node_get_type(c) ==
-                            LEPTRIS_NODE_TYPE_ELEMENT)
-                            leptris_element_insert_before(
-                                elem, (LeptrisElement)c);
-                        c = next;
-                    }
-                    leptris_node_unlink((LeptrisNodeRef)elem);
-                    leptris_element_set_document_tree(
-                        (LeptrisElement)fb_elem_child, doc);
-                    return 1;
-                }
-            }
-            char* fb_text = leptris_element_get_text_content(fb);
-            if (fb_text) {
-                substitute = (LeptrisNode*)leptris_text_create(fb_text, strlen(fb_text), doc->pool, doc);
-                leptris_free(fb_text);
-            }
-        }
-        /* No fallback: spec says resource error SHOULD be reported; we're
-         * lenient and leave the xi:include in place. */
-    }
-
-    if (substitute) {
-        LeptrisElement parent = leptris_element_get_parent(elem);
-        if (parent) {
-            /* Splice through the canonical mutation face:
-             * leptris_element_insert_before maintains the
-             * substitute's parent edge, the parent's child_count and
-             * children memo, the tree version, and the document
-             * index.  The hand-rolled sibling swap left the spliced
-             * subtree's parent edge NULL, so every parent-relative
-             * walk (doc resolution, parent::, removal) broke for the
-             * adopted root.  The substitute is already doc-stamped
-             * on every path that reaches here, so the adoption is
-             * zero-copy. */
-            if (leptris_element_insert_before(
-                    elem, (LeptrisElement)substitute) == LEPTRIS_OK) {
-                leptris_node_unlink((LeptrisNodeRef)elem);
-            }
-            /* No fallback and no splice face success: the xi:include
-             * stays in place (lenient posture, see resource-error
-             * note above). */
-        }
-    }
-
-    return 1;
+    return finish_include(elem, doc, substitute);
 }
 
 /* ---- TODO.assemble 04: XML Catalog (minimal) ----------------------------
@@ -1095,8 +1154,13 @@ static void xinclude_catalog_lookup(const char* catalog_path,
     free(text);
 }
 
-/* Internal recursion-aware variant. Aborts with LEPTRIS_ERROR_INVALID_ARG
- * if depth exceeds XINCLUDE_MAX_DEPTH (TODO 92 Phase 5). */
+/* Iterative driver (issue #1821). The seed document is walked; every
+ * include that loads queues a deferred frame which the loop below
+ * walks and splices — LIFO, i.e. exactly the old recursive order, but
+ * with the nesting living on the heap instead of the C stack.
+ * Aborts with LEPTRIS_ERROR_INVALID_ARG if the seed depth exceeds
+ * XINCLUDE_MAX_DEPTH (TODO 92 Phase 5); nested depth is bounded when
+ * frames are queued. */
 static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
                                               const char* base_url,
                                               int depth,
@@ -1107,13 +1171,54 @@ static LeptrisStatus xinclude_process_internal(struct leptris_document* doc,
     LeptrisElement root = leptris_document_root(doc);
     if (!root) return LEPTRIS_OK;
 
-    /* TODO 117 Phase C: thread empty ancestor list into the walk.
-     * The first include pushes its own URI, so the second visit to the
-     * same URI is detected as a cycle. */
-    int rc = process_element_xinclude(root, doc, base_url, opts, depth,
-                                      NULL);
-    if (!rc) return LEPTRIS_ERROR_IO;
-    return LEPTRIS_OK;
+    /* TODO 117 Phase C: the seed walk starts with an empty ancestor
+     * list. The first include carries its own URI in its frame, so a
+     * second visit to the same URI is detected as a cycle. */
+    XincStack stack;
+    memset(&stack, 0, sizeof(stack));
+    LeptrisStatus result = LEPTRIS_OK;
+
+    if (!process_element_xinclude(root, doc, base_url, opts, depth, NULL,
+                                  &stack)) {
+        result = LEPTRIS_ERROR_IO;
+    }
+
+    while (stack.n > 0) {
+        size_t idx = stack.n - 1;
+        if (stack.v[idx].state == XINC_WALK) {
+            XincFrame* f = &stack.v[idx];
+            f->state = XINC_SPLICE;
+            LeptrisElement inc_root =
+                leptris_document_root(f->included_doc);
+            /* The walk queues deeper frames, which reallocs the
+             * array — only touch the frame through `idx` after the
+             * call. */
+            int rc = inc_root &&
+                     process_element_xinclude(inc_root, f->included_doc,
+                                              f->inc_dir, opts, f->depth,
+                                              f->ancestors, &stack);
+            if (!rc) stack.v[idx].walk_failed = 1;
+        } else {
+            /* Detach the frame (the array may shrink/realloc), drop
+             * its cycle link, then splice. A failed walk frees the
+             * parsed document unspliced: the fallback already
+             * answered at this level during the walk. */
+            XincFrame fr = stack.v[idx];
+            stack.n = idx;
+            if (fr.own_cycle) {
+                free(fr.own_cycle->path);
+                free(fr.own_cycle);
+            }
+            if (fr.walk_failed) {
+                leptris_document_free(fr.included_doc);
+                finish_include(fr.include_elem, fr.parent_doc, NULL);
+            } else {
+                xinc_frame_splice(&fr);
+            }
+        }
+    }
+    free(stack.v);
+    return result;
 }
 
 LEPTRIS_API LeptrisStatus leptris_xinclude_process(LeptrisDocument doc, const char* base_url) {
