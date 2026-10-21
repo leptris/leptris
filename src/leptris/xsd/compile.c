@@ -943,6 +943,70 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
                 return -1;
             }
         }
+        if (strcmp(local, "attribute") == 0) {
+            const char* ref = leptris_element_attribute(c, "ref");
+            const char* dv = leptris_element_attribute(c, "default");
+            /* 3.2.3:2 — @default requires use=optional (the
+             * src-attribute2 family) */
+            const char* use = leptris_element_attribute(c, "use");
+            if (dv && dv[0] && use && strcmp(use, "required") == 0) {
+                xsd_set_error(
+                    s,
+                    "src-attribute.2: an attribute declaration with "
+                    "use='required' must not carry 'default'");
+                return -1;
+            }
+            /* inline type child (complexType/simpleType) */
+            int has_type_child = 0;
+            int has_non_annotation_child = 0;
+            for (LeptrisNodeRef k = leptris_node_first_child(
+                     leptris_element_as_node(c));
+                 k; k = leptris_node_next_sibling(k)) {
+                if (leptris_node_get_type(k) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                const char* kl = NULL;
+                const char* ku = NULL;
+                leptris_element_expanded_name((LeptrisElement)k, &kl,
+                                              NULL, &ku);
+                if (!kl || !ku || strcmp(ku, XSD_NS) != 0) continue;
+                if (strcmp(kl, "complexType") == 0 ||
+                    strcmp(kl, "simpleType") == 0)
+                    has_type_child = 1;
+                if (strcmp(kl, "annotation") != 0)
+                    has_non_annotation_child = 1;
+            }
+            /* 3.2.3:3.2 — @ref excludes @type, @form and any
+             * non-annotation child (the src-attribute3-2 family) */
+            if (ref && ref[0]) {
+                const char* form =
+                    leptris_element_attribute(c, "form");
+                const char* ty =
+                    leptris_element_attribute(c, "type");
+                if ((ty && ty[0]) || (form && form[0]) ||
+                    has_non_annotation_child) {
+                    xsd_set_error(
+                        s,
+                        "src-attribute.3: an attribute declaration "
+                        "with 'ref' must not carry 'type', 'form' or "
+                        "an inline type child");
+                    return -1;
+                }
+            } else if (has_type_child) {
+                /* 3.2.3:4 — @type excludes the inline type child
+                 * (src-attribute4) */
+                const char* ty =
+                    leptris_element_attribute(c, "type");
+                if (ty && ty[0]) {
+                    xsd_set_error(
+                        s,
+                        "src-attribute.4: xs:attribute cannot carry "
+                        "both a 'type' attribute and an inline type "
+                        "child");
+                    return -1;
+                }
+            }
+        }
         if (strcmp(local, "element") == 0) {
             /* type attribute and an inline type child are mutually
              * exclusive (src-element.3 / src-attribute.4). */

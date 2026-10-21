@@ -156,8 +156,10 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     // 150 -> 147 (slice 4: transitive include-tns, content-type
     // mismatch, attribute-wildcard restriction) -> 142 (slice 5:
     // ref QNames must resolve) -> 139 (slice 6: UPA —
-    // non-deterministic content models rejected).
-    EXPECT_GE(ok, 139u) << "compile-success floor regressed";
+    // non-deterministic content models rejected) -> 136 (the
+    // src-attribute declaration clauses: use=required+default,
+    // @ref with type/form/inline-child, @type with inline child).
+    EXPECT_GE(ok, 136u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -2305,8 +2307,94 @@ TEST(XsdConformanceClauses, UnprefixedUnknownTypeStillLoud) {
     leptris_xsd_free(s);
 }
 
-/* A wildcard declared in a unit with NO targetNamespace: ##other
- * excludes only the ABSENT namespace — every attribute that HAS a
+/* SRC-attribute declaration clauses the oracle enforces at load
+ * (3.2.3) — the 55-row schema-error family (src-attribute2,
+ * 3-2-form, 3-2-type, 3-2-st, src-attribute4):
+ *   .2  @default requires use=optional (or absent)
+ *   .3  @ref excludes @type, @form and any non-annotation child
+ *   .4  @type excludes the inline <simpleType>/<complexType> child
+ */
+TEST(XsdConformanceClauses, AttributeUseRequiredWithDefaultRejected) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\">"
+        "<element name=\"foo\"><complexType>"
+        "<attribute name=\"bar\" type=\"string\" use=\"required\""
+        " default=\"moo\"/></complexType></element></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "src-attribute.2: default requires use=optional";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, AttributeRefWithTypeOrFormOrChildRejected) {
+    const char* t =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:f\" xmlns:f=\"urn:f\">"
+        "<element name=\"foo\"><complexType>"
+        "<attribute ref=\"f:bar\" %s/></complexType></element>"
+        "<attribute name=\"bar\" type=\"string\"/></schema>";
+    char buf[512];
+    const char* variants[] = {"type=\"string\"", "form=\"qualified\""};
+    for (const char* v : variants) {
+        snprintf(buf, sizeof(buf), t, v);
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXsdSchema s =
+            leptris_xsd_compile(buf, strlen(buf), &st);
+        EXPECT_NE(st, LEPTRIS_OK)
+            << "src-attribute.3: @ref must exclude '" << v << "'";
+        leptris_xsd_free(s);
+    }
+    /* the inline <simpleType> child spelling (src-attribute3-2-st) */
+    const char* stchild =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:f\" xmlns:f=\"urn:f\">"
+        "<element name=\"foo\"><complexType>"
+        "<attribute ref=\"f:bar\"><simpleType>"
+        "<restriction base=\"string\"><maxLength value=\"20\"/>"
+        "</restriction></simpleType></attribute>"
+        "</complexType></element>"
+        "<attribute name=\"bar\" type=\"string\"/></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(stchild, strlen(stchild), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "src-attribute.3: @ref must exclude the inline simpleType";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, AttributeTypeWithInlineChildRejected) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\">"
+        "<attribute name=\"bar\" type=\"string\"><simpleType>"
+        "<restriction base=\"string\"><maxLength value=\"20\"/>"
+        "</restriction></simpleType></attribute>"
+        "<element name=\"foo\"/></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "src-attribute.4: @type excludes the inline type child";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+/* An attribute with @ref and NO forbidden extras still loads. */
+TEST(XsdConformanceClauses, AttributeRefPlainStillLoads) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:f\" xmlns:f=\"urn:f\">"
+        "<element name=\"foo\"><complexType>"
+        "<attribute ref=\"f:bar\"/></complexType></element>"
+        "<attribute name=\"bar\" type=\"string\"/></schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    leptris_xsd_free(s);
+}
+
+/* A no-tns unit's ##other wildcard: it excludes only the ABSENT
+ * namespace — every attribute that HAS a
  * namespace matches (the anyAttr-derive1 family: the base type
  * lives in a no-tns imported unit, the derived type's own ##other
  * excludes urn:FOO, and the base's must still admit foo:barC).
