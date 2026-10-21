@@ -2411,6 +2411,11 @@ TEST(XPath20Ledger, ScalarTail) {
     /* codepoint-equal. */
     EXPECT_TRUE(BoolEval("codepoint-equal('ABC', 'ABC')"));
     EXPECT_FALSE(BoolEval("codepoint-equal('ABC', 'abc')"));
+    /* empty operands yield the empty sequence (F&O 7.6.2,
+     * fn-codepoint-equal-2/2a/2b) — the compare() precedent. */
+    EXPECT_EQ(StrEval("codepoint-equal((), 'a')"), "");
+    EXPECT_EQ(StrEval("codepoint-equal('a', ())"), "");
+    EXPECT_EQ(StrEval("codepoint-equal((), ())"), "");
     /* round with precision: decimal places and negative (tens). */
     EXPECT_EQ(NumEval("round(1.25, 1)"), 1.3);
     EXPECT_EQ(NumEval("round(1.24, 1)"), 1.2);

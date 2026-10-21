@@ -23,7 +23,7 @@ nothing to libxml2.
 | A1 | W3C XPath 1.0 | 438/438 pinned in CI | **done** — 438/438 |
 | A2 | libxslt (XSLT 1.0) | 205/205 pinned (Linux-authoritative; macOS skips bug-169 iconv-encoding) | **done** — 205/205 (v1.9.19) |
 | A3 | XsltFull | 27/27 + full suite green; XSLT gate (v1.10.0) stays met | **done** — gate MET (#1761) |
-| A4 | QT3 / XQuery 3.1 | 0 unexplained pins; every pin has a recorded disposition | pins ~41–99 by slice (2026-09/10) — **re-pin fresh** |
+| A4 | QT3 / XQuery 3.1 | 0 unexplained pins; every pin has a recorded disposition | **done** 2026-10-22 — 1723 pins, all dispositioned (test/xquery/qt3-dispositions/); 62/62 DUCET + 59/59 no-utf8proc green |
 | A5 | WHATWG/html5lib (#659) | 0 reds on BOTH gates — tree and error-verdict | **BOTH LANES CLOSED 2026-10-21** — tree 1555/1555; verdict 1555/1555, zero misses (PR #1803), floor pinned at the full corpus count |
 | A6 | XSD conformance lane | suite-complete per the lane's own queue | 769→795 (2026-10-14, queue #1691) |
 | A7 | DTD phase 8 (TODO 91) | ENTITY/ENTITIES attribute resolution, parameter entities, choice-model backtracking | open |
