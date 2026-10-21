@@ -59,6 +59,14 @@ older corpus datasets — reported, not gated.
 
 ### A3 XSD conformance lane: suite-complete
 - [ ] the lane's own queue (769→795 → its ceiling) to zero
+  (2026-10-22: 903 → **989**/1056 — 9 root-caused classes retired:
+  xsi-attr exemption, empty content models, unprefixed builtins,
+  no-tns `##other`, xs:attribute 3.2.3 clauses (+55), g-regional
+  timezone, token whitespace, unknown-xs-builtin refs. 67 left,
+  every row dispositioned in test/xsd/xsd-dispositions/README.md:
+  substitution groups in content models, xsi:type, attribute form
+  defaults, identity-constraint checks, derivation-ok attribute
+  clauses; 1 oracle bug (bug322411) not chased)
 
 ### A4 DTD phase 8 (TODO 91)
 - [x] ENTITY/ENTITIES attribute resolution (undeclared entity, parsed
