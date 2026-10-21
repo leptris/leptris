@@ -77,15 +77,16 @@ older corpus datasets — reported, not gated.
 ## Gate B — Performance: every published row ≥1.00x
 
 ### B1 build row: ~2.9x → ≤1.0x (the #242 campaign)
-**Measured 2026-10-21: 1.86-1.92x** (moxml `sota/04-performance`
-branch + leptris 1.9.376.0; harness `wt/460-harness/build_bench.rb`,
-31 interleaved reps: 4.08ms vs Nokogiri 2.20ms for 250 records).
-Was 2.95x at the 1.9.363 era; the add_child alias and same-doc fast
-path landed since. StackProf attribution: `NativeNode.create_element`
-14.6%, GC mark+sweep 19%, `prime_contract` 7.7%, attach path 45% of
-tree; the `invalidate_namespace_cache!` line attribution is a
-sampling artifact (deleting both attach invalidations gains ~5%).
-Harness: wt/460-harness/build_bench.rb. Decomposition on record.
+**Measured 2026-10-21: honest baseline 2.72x (five fresh runs; the
+old 1.86x record is NOT reproducible with identical code on today's
+machine), ~1.9x after five merged moxml levers** (guard retirement,
+namespace scope gate, nil-ivar priming, children-cache guard, and
+the preprimed mint — the mint measured NEUTRAL and is not counted;
+fast-attach was rejected as noise). Harness `wt/460-harness/build_bench.rb`,
+31 interleaved reps, A/B pairs must alternate within ONE window
+(machine drift is ±20% across session phases). StackProf: mint +
+shape writes, attach pipeline, text= pipeline, GC. Decomposition on
+record.
 - [ ] per-element object budget: one Ruby object per created node
       (drop the shell entirely post-create-priming; the mint cache
       insert policy; the context registration)
@@ -100,7 +101,11 @@ scaffolding. Memo law holds (dropping @children memo = 2x GC).
 - [ ] publish the per-face table (the honest much-faster story)
 
 ### B3 whole-pipeline rows (new, published)
-- [ ] parse→query→serialize pipeline row vs nokogiri/libxml2
+**Measured 2026-10-21: parse→query→serialize is GREEN — leptris
+finishes in 0.533-0.573x of Nokogiri's CPU time (~1.8x faster),
+three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
+250 records, 31 reps; same document and query both sides).**
+- [x] parse→query→serialize pipeline row vs nokogiri (green, dated)
 - [ ] build→transform (XSLT) pipeline row
 - [ ] both to serialbench as the public scoreboard
 
