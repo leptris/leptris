@@ -2250,6 +2250,61 @@ TEST(XsdConformanceClauses, ForeignNamespaceAttributeStillStrict) {
     leptris_xsd_free(s);
 }
 
+/* libxml2-compat: an UNPREFIXED type reference whose local name
+ * matches a built-in datatype resolves to that built-in (the oracle
+ * validates ns1_0's <element name='my' type='string'/> and
+ * seq-dubl-elem1's type='base64Binary' exactly this way). Per QName
+ * rules the name is namespace-less; the strict ladder correctly
+ * fails it, the builtin fallback is the oracle's reading. */
+TEST(XsdConformanceClauses, UnprefixedBuiltinTypeReferenceResolves) {
+    /* the ns1_0 shape: unprefixed 'string' in a namespaced schema */
+    const char schema[] =
+        "<schema xmlns='http://www.w3.org/2001/XMLSchema'"
+        " targetNamespace='http://my.ns/'>"
+        " <element name='my' type='string'/>"
+        "</schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<my xmlns='http://my.ns/'>some</my>"),
+              1)
+        << leptris_xsd_error_at(s, 0)
+        << " (unprefixed type='string' must reach the builtin)";
+    /* the lexical gate still applies: base64Binary rejects garbage */
+    const char schema2[] =
+        "<schema xmlns='http://www.w3.org/2001/XMLSchema'>"
+        " <element name='PGPKeyID' type='base64Binary'/>"
+        "</schema>";
+    LeptrisXsdSchema s2 =
+        leptris_xsd_compile(schema2, strlen(schema2), &st);
+    ASSERT_NE(s2, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s2);
+    EXPECT_EQ(validate_compiled(s2, "<PGPKeyID>!!!</PGPKeyID>"), 0)
+        << "the unprefixed builtin's lexical gate must bite";
+    leptris_xsd_free(s);
+    leptris_xsd_free(s2);
+}
+
+/* An unprefixed type name that matches NO builtin stays loud. */
+TEST(XsdConformanceClauses, UnprefixedUnknownTypeStillLoud) {
+    const char schema[] =
+        "<schema xmlns='http://www.w3.org/2001/XMLSchema'"
+        " targetNamespace='http://my.ns/'>"
+        " <element name='my' type='nosuchtype'/>"
+        "</schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, nullptr);
+    LeptrisDocument d =
+        leptris_parse_string("<my xmlns='http://my.ns/'/>", strlen("<my xmlns='http://my.ns/'/>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0)
+        << "an unresolved unprefixed type must reject the instance";
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 /* An EMPTY content model (a complexType with no particles —
  * attribute-only or attributeGroup-only) allows NO element children:
  * the anyAttr-derive2 family accepted whole foreign subtrees there. */

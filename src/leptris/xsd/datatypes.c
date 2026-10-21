@@ -149,6 +149,12 @@ static int time_tail(const char** p) {
 
 /* ---- the built-in table ------------------------------------------ */
 
+int xsd_builtin_known(const char* type) {
+    /* xsd_builtin_valid returns -1 exactly when the type is not in
+     * the tier-1 table; any other verdict proves existence. */
+    return type && xsd_builtin_valid(type, "x") != -1;
+}
+
 int xsd_builtin_valid(const char* type, const char* v) {
     if (!type || !v) return 0;
     if (strcmp(type, "xs:string") == 0) return 1;
