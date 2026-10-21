@@ -288,22 +288,26 @@ int xsd_builtin_valid(const char* type, const char* v) {
         const char* p = v;
         if (p[0] != '-' || p[1] != '-') return 0;
         p += 2;
-        if (!two_digits(&p)) return 0;
+        if (!two_digits_bounded(&p, 1, 12)) return 0;
         if (*p == 0) return 1;
         if (*p++ != '-') return 0;
-        return two_digits(&p) && *p == 0;
+        /* the g-regional types all carry the optional timezone
+         * (--02-28Z, --12-31-06:00 — the date_0 corpus family) */
+        return two_digits_bounded(&p, 1, 31) && tz_optional(&p);
     }
     if (strcmp(type, "xs:gDay") == 0) {
         const char* p = v;
+        /* the lexical is ---DD (THREE leading dashes) */
         if (*p++ != '-') return 0;
         if (*p++ != '-') return 0;
-        return two_digits(&p) && *p == 0;
+        if (*p++ != '-') return 0;
+        return two_digits_bounded(&p, 1, 31) && tz_optional(&p);
     }
     if (strcmp(type, "xs:gMonth") == 0) {
         const char* p = v;
         if (*p++ != '-') return 0;
         if (*p++ != '-') return 0;
-        return two_digits(&p) && *p == 0;
+        return two_digits_bounded(&p, 1, 12) && tz_optional(&p);
     }
     if (strcmp(type, "xs:dateTime") == 0) {
         const char* p = v;
