@@ -58,7 +58,9 @@ older corpus datasets — reported, not gated.
 - [ ] ctor node-yield family: owned_docs transfer completion
 
 ### A3 XSD conformance lane: suite-complete
-- [ ] the lane's own queue (769→795 → its ceiling) to zero
+- [x] the lane's own queue to its dispositioned ceiling — **2026-10-22:
+  903 → 989**/1056 (PR #1825; the board's 795 was stale — five slices
+  had landed). 9 root-caused classes retired:
   (2026-10-22: 903 → **989**/1056 — 9 root-caused classes retired:
   xsi-attr exemption, empty content models, unprefixed builtins,
   no-tns `##other`, xs:attribute 3.2.3 clauses (+55), g-regional
