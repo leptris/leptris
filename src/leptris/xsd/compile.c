@@ -3012,18 +3012,24 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
 
 /* One container's xs:anyAttribute grammar (NULL when absent). */
 /* #1735: the target namespace of the schema unit containing +e+
- * (the enclosing xs:schema's @targetNamespace; NULL when absent).
- * ##targetNamespace/##other in wildcards resolve against THIS, not
- * the merged schema's main tns — the unit boundary is where
- * provenance is otherwise lost. */
+ * (the enclosing xs:schema's @targetNamespace). ##targetNamespace/
+ * ##other in wildcards resolve against THIS, not the merged
+ * schema's main tns — the unit boundary is where provenance is
+ * otherwise lost. A unit with NO targetNamespace captures "" (the
+ * empty string), NOT NULL: NULL still means "not captured" and
+ * would fall back to the merged schema's tns, aiming the ##other
+ * exclusion at the wrong namespace (the anyAttr-derive1 family —
+ * a no-tns base unit's ##other must admit the main tns). */
 static char* xsd_capture_unit_tns(LeptrisElement e) {
     for (LeptrisElement up = leptris_element_parent(e); up;
          up = leptris_element_parent(up)) {
         const char* local = NULL;
         leptris_element_expanded_name(up, &local, NULL, NULL);
-        if (local && strcmp(local, "schema") == 0)
-            return xsd_strdup(leptris_element_attribute(up,
-                                                        "targetNamespace"));
+        if (local && strcmp(local, "schema") == 0) {
+            const char* tns =
+                leptris_element_attribute(up, "targetNamespace");
+            return xsd_strdup(tns ? tns : "");
+        }
     }
     return NULL;
 }
