@@ -1,0 +1,17 @@
+# Debian build artifacts (debuild/pbuilder output landing in packaging/debian)
+*.debhelper
+*.debhelper.log
+*.substvars
+debhelper-build-stamp
+files
+tmp
+.debhelper
+leptris/
+libleptris1/
+libleptris-dev/
+*.deb
+*.build
+*.buildinfo
+*.changes
+*.dsc
+*.debian.tar.*

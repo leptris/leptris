@@ -1,0 +1,5 @@
+usr/include/*
+usr/lib/*/libleptris.a
+usr/lib/*/libleptris.so
+usr/lib/*/cmake/leptris/*
+usr/lib/*/pkgconfig/leptris.pc

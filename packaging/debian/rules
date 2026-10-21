@@ -1,0 +1,34 @@
+#!/usr/bin/make -f
+# Debian packaging rules for leptris (dh build via the CMake buildsystem).
+#
+# Notes:
+# - LEPTRIS_BUILD_SHARED=ON: upstream defaults to a static-only build and
+#   gates its library targets on its own options (not BUILD_SHARED_LIBS);
+#   Debian needs the shared library split across libleptris1 /
+#   libleptris-dev.
+# - BUILD_TESTING=OFF: upstream tests fall back to FetchContent(googletest)
+#   when no system GTest target exists, which needs network access and is
+#   not allowed in the Debian build sandbox. Flip to ON once a system
+#   libgtest path is wired (see packaging/README.md).
+# - LEPTRIS_ENABLE_UTF8PROC=ON uses the system libutf8proc-dev.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DLEPTRIS_BUILD_SHARED=ON \
+		-DLEPTRIS_BUILD_STATIC=ON \
+		-DBUILD_TESTING=OFF \
+		-DBUILD_EXAMPLES=OFF \
+		-DLEPTRIS_BUILD_CLI=ON \
+		-DLEPTRIS_BUILD_BENCHMARKS=OFF \
+		-DLEPTRIS_BUILD_MAN_PAGES=OFF \
+		-DLEPTRIS_BUILD_DOCS=OFF \
+		-DLEPTRIS_ENABLE_UTF8PROC=ON \
+		-DLEPTRIS_ENABLE_ICONV=ON
+
+# No upstream test suite runs in the sandbox today (see note above).
+override_dh_auto_test:
