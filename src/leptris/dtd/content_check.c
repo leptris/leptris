@@ -293,30 +293,23 @@ static void cm_skip_alternative(CMLexer* lx) {
     }
 }
 
-/* expr := sequence ('|' sequence)* — first match wins; failed
- * alternatives restore the state, and after a SUCCESS the remaining
- * alternatives are skipped lexically so the enclosing group's ')'
- * check lands on the real close. */
+/* expr := sequence ('|' sequence)* — backtracking alternation walk.
+ *
+ * A failed alternative may leave the lexer ANYWHERE inside itself
+ * (cm_try_group_once restores a parenthesized alternative to its own
+ * '(', which sits BEFORE the separating '|'), so the next alternative
+ * is located LEXICALLY: probe from the alternative's start past one
+ * depth-0 '|'. On success the remaining alternatives are skipped
+ * lexically so the enclosing group's ')' check lands on the real
+ * close. */
 static int cm_match_expr(CMState* st) {
-    CMLexer save_lx = st->lx;
-    size_t save_idx = st->idx;
-    if (cm_match_sequence(st)) {
-        for (;;) {
-            cm_skip_ws(&st->lx);
-            if (st->lx.src >= st->lx.end || *st->lx.src != '|') break;
-            st->lx.src++;
-            cm_skip_alternative(&st->lx);
-        }
-        return 1;
-    }
+    CMLexer start_lx = st->lx;
+    size_t start_idx = st->idx;
+
     for (;;) {
-        cm_skip_ws(&st->lx);
-        if (st->lx.src >= st->lx.end || *st->lx.src != '|') {
-            st->lx = save_lx;
-            st->idx = save_idx;
-            return 0;
-        }
-        st->lx.src++;
+        CMLexer alt_start = st->lx;
+        size_t alt_idx = st->idx;
+
         if (cm_match_sequence(st)) {
             for (;;) {
                 cm_skip_ws(&st->lx);
@@ -326,7 +319,22 @@ static int cm_match_expr(CMState* st) {
             }
             return 1;
         }
-        /* this alternative failed — restore and try the next one */
+
+        /* This alternative failed. Restore the children cursor, then
+         * scan from the alternative's START for the next depth-0 '|'
+         * (cm_skip_alternative halts there). No '|' -> the whole expr
+         * fails: restore to the expr start for the caller. */
+        CMLexer probe = alt_start;
+        cm_skip_alternative(&probe);
+        cm_skip_ws(&probe);
+        if (probe.src >= probe.end || *probe.src != '|') {
+            st->lx = start_lx;
+            st->idx = start_idx;
+            return 0;
+        }
+        st->lx = probe;
+        st->lx.src++;      /* past '|' — next alternative starts here */
+        st->idx = alt_idx;
     }
 }
 

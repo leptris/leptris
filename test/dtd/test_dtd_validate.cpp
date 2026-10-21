@@ -1393,6 +1393,45 @@ TEST(DtdPhase8, NestedChoiceWithSequenceParsesAndBacktracks) {
         "<doc><b/></doc>"), 0);
 }
 
+TEST(DtdPhase8, GroupAlternativeFailureStillTriesLaterAlternatives) {
+    /* When the FAILING alternative is a parenthesized group, the
+     * aborted group match restores the lexer to the alternative's
+     * START — before the depth-0 '|'. The alternation walker must
+     * still find and try the later alternatives (both first-alternative
+     * shapes below failed before the fix: the second alternative was
+     * never attempted, so a valid document validated as invalid). */
+    /* sequence-first choice, bare-name fallback: ((b,c)|b)* */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((b,c)|b)*>\n"
+        "<!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><b/><c/><b/></doc>"), 1);
+    /* trailing lone c: no branch accepts it — must stay invalid */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((b,c)|b)*>\n"
+        "<!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><b/><c/><c/></doc>"), 0);
+    /* both alternatives sequences sharing a prefix: ((a,b)|(a,c))* */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((a,b)|(a,c))*>\n"
+        "<!ELEMENT a EMPTY><!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><a/><c/><a/><b/></doc>"), 1);
+    /* negative: trailing lone b belongs to no full branch */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((a,b)|(a,c))*>\n"
+        "<!ELEMENT a EMPTY><!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><a/><c/><a/><b/><b/></doc>"), 0);
+    /* single-instance spelling (no repetition) exercises the same
+     * walker without the group loop on top */
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((b,c)|b)>\n"
+        "<!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><b/></doc>"), 1);
+    EXPECT_EQ(validates(
+        "<!ELEMENT doc ((b,c)|b)>\n"
+        "<!ELEMENT b EMPTY><!ELEMENT c EMPTY>\n",
+        "<doc><c/></doc>"), 0);
+}
+
 TEST(DtdParse, MalformedDeclarationYieldsNull) {
     const char* broken = "<!ELEMENT broken (>";
     EXPECT_EQ(leptris_dtd_parse(broken, std::strlen(broken)),
