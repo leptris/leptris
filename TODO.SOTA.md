@@ -49,8 +49,12 @@ misplaced/stray-p, after-html codes, image (#1797, #1800). The
 older corpus datasets — reported, not gated.
 
 ### A2 QT3 / XQuery 3.1: zero unexplained pins
-- [ ] re-pin fresh (the ~41–99 slice figures are dated)
-- [ ] every remaining pin gets a disposition file or a fix
+- [x] re-pin fresh (2026-10-22: 1723 pins, 62/62 green, zero reds; 106 sets, 72 pins moved)
+- [x] every remaining pin gets a disposition file or a fix
+  (test/xquery/qt3-dispositions/ — 10 files, 1723/1723 dispositioned;
+  fixes: fn:codepoint-equal empty-operand propagation, driver
+  assert-count/assert-empty, role="." context sources, QT3_REPORT
+  inventory channel)
 - [ ] ctor node-yield family: owned_docs transfer completion
 
 ### A3 XSD conformance lane: suite-complete

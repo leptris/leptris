@@ -6467,17 +6467,23 @@ static int str_eq_coll(const char* a, const char* b,
 #endif
 
 static struct leptris_xpath_result* fn_codepoint_equal(XPathContext* ctx,
-        XPathASTNode** args, size_t n) {
-    char* a = re_str_arg(ctx, args, 0);
-    char* b = re_str_arg(ctx, args, 1);
-    struct leptris_xpath_result* out = xpath_result_new(XPATH_RESULT_BOOLEAN);
-    if (!out) { free(a); free(b); return NULL; }
-    out->value.boolean_value =
-        a && b && strcmp(a, b) == 0;  /* empty operand -> false */
-    free(a);
-    free(b);
-    (void)n;
-    return out;
+XPathASTNode** args, size_t n) {
+char* a = re_str_arg_opt(ctx, args, 0);
+char* b = re_str_arg_opt(ctx, args, 1);
+struct leptris_xpath_result* out = NULL;
+if (a && b) {
+out = xpath_result_new(XPATH_RESULT_BOOLEAN);
+if (out) out->value.boolean_value = strcmp(a, b) == 0;
+} else {
+/* an empty operand yields the empty sequence (F&O 7.6.2;
+* fn-codepoint-equal-2/2a/2b — the fn:compare precedent) */
+out = xpath_result_new(XPATH_RESULT_NODESET);
+if (out) out->value.nodeset_value = xpath_nodeset_new();
+}
+free(a);
+free(b);
+(void)n;
+return out;
 }
 
 #ifdef LEPTRIS_HAS_UTF8PROC
