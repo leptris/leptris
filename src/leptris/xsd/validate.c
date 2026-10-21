@@ -22,6 +22,7 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* const* names,
                              const char* const* ns_uris, size_t count);
 extern int xsd_builtin_valid(const char* type, const char* v);
+extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
                                   const XsdSimple* t, const char* v);
 
@@ -439,9 +440,13 @@ static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
                                 const XsdTypeAttrs* ta) {
+    /* ta == NULL (no captured rows — attribute-less complexTypes)
+     * skips the walk entirely; simple/builtin element validation
+     * passes k_no_attrs to run the strict walk with zero declared
+     * rows. */
     if (!ta) return;
     /* declared rows: present? value typed? */
-    for (XsdAttrDecl* a = ta->attrs; a; a = a->next) {
+    for (XsdAttrDecl* a = ta ? ta->attrs : NULL; a; a = a->next) {
         const char* val = leptris_element_attribute(elem, a->name);
         if (!val) {
             /* lenient: the qualified spelling (#1586 semantics) */
@@ -466,7 +471,7 @@ static void validate_attributes(struct xsd_validator* v,
                          "required but absent");
             continue;
         }
-        text_valid(v, s, a->type, val, ta->ns, "attribute",
+        text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
                    a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0)
             verrf_at(v, elem, "attribute", a->name,
@@ -482,7 +487,8 @@ static void validate_attributes(struct xsd_validator* v,
         const char* colon = strchr(qn, ':');
         const char* local = colon ? colon + 1 : qn;
         int declared = 0;
-        for (XsdAttrDecl* a = ta->attrs; a && !declared; a = a->next)
+        for (XsdAttrDecl* a = ta ? ta->attrs : NULL; a && !declared;
+             a = a->next)
             if (strcmp(a->name, local) == 0 ||
                 strcmp(a->name, qn) == 0)
                 declared = 1;
@@ -502,12 +508,12 @@ static void validate_attributes(struct xsd_validator* v,
         /* #1735: each wildcard resolves against its DECLARING
          * unit's tns (recorded at capture); the merged schema's tns
          * is the fallback */
-        if ((ta->any_attr_ns &&
+        if ((ta && ta->any_attr_ns &&
              any_attr_matches(ta->any_attr_ns, auri,
                               ta->any_attr_unit_ns
                                   ? ta->any_attr_unit_ns
                                   : xsd_target_ns(s))) ||
-            (ta->any_attr_base_ns &&
+            (ta && ta->any_attr_base_ns &&
              any_attr_matches(ta->any_attr_base_ns, auri,
                               ta->any_attr_base_unit_ns
                                   ? ta->any_attr_base_unit_ns
@@ -611,14 +617,47 @@ static void validate_local(struct xsd_validator* v,
         return;
     }
 
-    /* simple-typed element: text must be lexically valid */
+    /* the ur-types accept any content and any attributes — no
+     * constraints at all (include2_0's xsd:anyType particle carries
+     * a qualified attribute the strict walk would reject) */
+    if (strcmp(type, "anyType") == 0 ||
+        strcmp(type, "xs:anyType") == 0 ||
+        strcmp(type, "anySimpleType") == 0 ||
+        strcmp(type, "xs:anySimpleType") == 0)
+        return;
+
+    /* simple-typed element: attributes face the strict walk (no
+     * declared rows), text must be lexically valid */
     if (strncmp(type, "xs:", 3) == 0 ||
         xsd_find_simple_pub(s, type)) {
+        static const XsdTypeAttrs k_no_attrs;
+        validate_attributes(v, s, elem, &k_no_attrs);
         const char* text = leptris_element_text(elem);
         if (text && *text)
             text_valid(v, s, type, text, euri, "element", local,
                        elem);
         return;
+    }
+    /* libxml2-compat (#1691 ns1_0/seq-dubl-elem1): an UNPREFIXED
+     * type reference whose local name matches a built-in datatype
+     * resolves to it (type='string', type='base64Binary' in
+     * namespaced schemas). Per QName rules the name is
+     * namespace-less; the strict ladder correctly fails it — this
+     * fallback is the oracle's reading, and only fires when the
+     * name IS a builtin (anything else stays loud below). */
+    if (type[0] != ':') {
+        char builtin[256];
+        if (snprintf(builtin, sizeof(builtin), "xs:%s", type) <
+                (int)sizeof(builtin) &&
+            xsd_builtin_known(builtin)) {
+            static const XsdTypeAttrs k_no_attrs;
+            validate_attributes(v, s, elem, &k_no_attrs);
+            const char* text = leptris_element_text(elem);
+            if (text && *text)
+                text_valid(v, s, builtin, text, euri, "element",
+                           local, elem);
+            return;
+        }
     }
     /* neither complex nor simple nor builtin: the schema is
      * incomplete — loud, never a silent accept (#1615 class) */

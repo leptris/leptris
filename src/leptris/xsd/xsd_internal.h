@@ -219,4 +219,8 @@ typedef struct xsd_type_attrs {
  * for builtin type `type`? */
 int xsd_builtin_valid(const char* type, const char* v);
 
+/* Is `type` ("xs:"-spelled) in the tier-1 builtin table? The
+ * unprefixed-reference fallback needs existence, not validity. */
+int xsd_builtin_known(const char* type);
+
 #endif /* LEPTRIS_XSD_INTERNAL_H */
