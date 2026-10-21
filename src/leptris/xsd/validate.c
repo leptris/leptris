@@ -134,6 +134,34 @@ static void verrf_at(struct xsd_validator* v, LeptrisElement elem,
 static int simple_is_numeric(struct leptris_xsd_schema* s,
                              const XsdSimple* st);
 
+/* The token family — every type derived from xs:token (Datatypes
+ * §4.3.6 facet whitespace=collapse): validation compares the
+ * COLLAPSED value, so element content " xy " reaches the lexical
+ * and facet gates as "xy" (the import0_0 corpus row). */
+static int token_family_builtin(const char* t) {
+    return strcmp(t, "xs:token") == 0 || strcmp(t, "xs:NMTOKEN") == 0 ||
+           strcmp(t, "xs:language") == 0 || strcmp(t, "xs:Name") == 0 ||
+           strcmp(t, "xs:NCName") == 0 || strcmp(t, "xs:ID") == 0 ||
+           strcmp(t, "xs:IDREF") == 0 || strcmp(t, "xs:ENTITY") == 0 ||
+           strcmp(t, "xs:IDREFS") == 0 ||
+           strcmp(t, "xs:NMTOKENS") == 0 ||
+           strcmp(t, "xs:ENTITIES") == 0;
+}
+static int type_collapses_ws(struct leptris_xsd_schema* s,
+                             const char* type, const char* ns) {
+    if (!type) return 0;
+    if (strncmp(type, "xs:", 3) == 0) return token_family_builtin(type);
+    const XsdSimple* st = xsd_find_simple_ns_pub(s, type, ns);
+    int depth = 0;
+    while (st && depth++ < 32) {
+        if (!st->base) return 0;
+        if (strncmp(st->base, "xs:", 3) == 0)
+            return token_family_builtin(st->base);
+        st = xsd_find_simple_pub(s, st->base);
+    }
+    return 0;
+}
+
 static int text_valid(struct xsd_validator* v,
                       struct leptris_xsd_schema* s, const char* type,
                       const char* lexical, const char* ns,
@@ -142,13 +170,37 @@ static int text_valid(struct xsd_validator* v,
     if (!type) return 1;
     int r;
     const XsdSimple* st = NULL;
+    /* token-family collapse: validate the collapsed copy */
+    char* collapsed = NULL;
+    const char* value = lexical;
+    if (type_collapses_ws(s, type, ns) && lexical) {
+        collapsed = strdup(lexical);
+        if (collapsed) {
+            char* out = collapsed;
+            const char* p = lexical;
+            while (*p && isspace((unsigned char)*p)) p++;
+            int spaced = 0;
+            while (*p) {
+                if (isspace((unsigned char)*p)) {
+                    spaced = 1;
+                    p++;
+                    continue;
+                }
+                if (spaced) { *out++ = ' '; spaced = 0; }
+                *out++ = *p++;
+            }
+            *out = 0;
+            value = collapsed;
+        }
+    }
     if (strncmp(type, "xs:", 3) == 0)
-        r = xsd_builtin_valid(type, lexical);
+        r = xsd_builtin_valid(type, value);
     else {
         st = xsd_find_simple_ns_pub(s, type, ns);
-        if (!st) return 1; /* unresolved: accept */
-        r = xsd_simple_valid_chain(s, st, lexical);
+        if (!st) { free(collapsed); return 1; /* unresolved: accept */ }
+        r = xsd_simple_valid_chain(s, st, value);
     }
+    free(collapsed);
     if (r == 0) {
         if (elem)
             verrf_at(v, elem, what, name,

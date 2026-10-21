@@ -2393,6 +2393,36 @@ TEST(XsdConformanceClauses, AttributeRefPlainStillLoads) {
     leptris_xsd_free(s);
 }
 
+/* The token family (everything derived from xs:token) validates
+ * against the COLLAPSED value: element content " xy " against an
+ * NMTOKEN-derived maxLength=2 restriction is valid (the import0_0
+ * corpus row — the oracle collapses before the lexical and facet
+ * checks; we compared the raw text). */
+TEST(XsdConformanceClauses, TokenFamilyCollapsesElementWhitespace) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:i\" xmlns=\"urn:i\">"
+        " <xs:simpleType name=\"tfoo\">"
+        "  <xs:restriction base=\"xs:NMTOKEN\">"
+        "   <xs:maxLength value=\"2\"/>"
+        "  </xs:restriction>"
+        " </xs:simpleType>"
+        " <xs:element name=\"foo1\" type=\"tfoo\"/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s,
+                  "<foo1 xmlns=\"urn:i\">\n    xy\n  </foo1>"), 1)
+        << leptris_xsd_error_at(s, 0)
+        << " (collapsed 'xy' fits maxLength 2)";
+    EXPECT_EQ(validate_compiled(s,
+                  "<foo1 xmlns=\"urn:i\"> xyz </foo1>"), 0)
+        << "collapsed 'xyz' exceeds maxLength 2";
+    leptris_xsd_free(s);
+}
+
 /* The g-regional types all carry the optional timezone (Datatypes
  * §3.2.14-16: gYearMonth/gYear/gMonthDay/gDay/gMonth end with
  * timezone?) — --05Z, --01-01, ---31, --02-28Z, --12-31-06:00 (the
