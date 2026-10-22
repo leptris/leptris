@@ -163,8 +163,12 @@ three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
 
 ## Gate D — Universality: same semantics everywhere
 
-- [ ] D1 leptris-descriptor published (crates.io; feat/294 branch
-      lands), rides lockstep
+- [x] D1 leptris-descriptor published — **2026-10-22: live on
+      crates.io as leptris-descriptor v1.9.379** (lockstep with the
+      engine; #1827 fixed the workspace publish to target the
+      descriptor package; issue #1829 records the one-time manual
+      establishment — crates.io trusted publishing cannot create new
+      crates — after which versions publish via the OIDC workflow)
 - [ ] D2 system packaging: homebrew, conan, deb (apt repo)
 - [ ] D3 cross-runtime differential CI (= A6, wired)
 - [x] D4 libxml2→libleptris migration guide — **shipped 2026-10-21
