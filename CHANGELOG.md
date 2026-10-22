@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.381] - 2026-10-22
+
+### Fixed
+
+- apply xsi:type at every depth in whole-instance validation (xsd)
+
+### Performance
+
+- identity transforms and copy-of were quadratic — three fixes (xslt)
+- lane-18 append/create micro-levers from a fresh profile (dom)
+
+
+
 ## [1.9.380] - 2026-10-22
 
 ### Fixed
