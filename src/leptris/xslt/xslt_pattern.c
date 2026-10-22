@@ -59,6 +59,22 @@ static int parse_pat_step(const char** pp, const char* end,
     if (*p == '@') { s->is_attr = 1; p++; }
     if (p < end && *p == '*') {
         p++;
+    /* Node-type tests FIRST: "node(" also starts with an NCName, so
+     * the name branch below would swallow the keyword and then fail
+     * on its '(' — leaving steps_valid=0 and sending every match of
+     * node()/text()/comment()/processing-instruction() into the
+     * ancestor ladder (O(width) per node: the identity transform's
+     * @*|node() went quadratic). The bare names "node"/"text" still
+     * parse as name tests: the keyword check requires the '('. */
+    } else if (p + 5 <= end && strncmp(p, "node(", 5) == 0) {
+        s->kind = 1; p += 5;
+    } else if (p + 5 <= end && strncmp(p, "text(", 5) == 0) {
+        s->kind = 2; p += 5;
+    } else if (p + 8 <= end && strncmp(p, "comment(", 8) == 0) {
+        s->kind = 3; p += 8;
+    } else if (p + 23 <= end &&
+               strncmp(p, "processing-instruction(", 23) == 0) {
+        s->kind = 4; p += 23;
     } else if (p < end && ncname_char(*p) && *p != '-') {
         const char* st = p;
         while (p < end && ncname_char(*p)) p++;
@@ -72,15 +88,6 @@ static int parse_pat_step(const char** pp, const char* end,
         if (!s->name) return 0;
         memcpy(s->name, st, n);
         s->name[n] = 0;
-    } else if (p + 5 <= end && strncmp(p, "node(", 5) == 0) {
-        s->kind = 1; p += 5;
-    } else if (p + 5 <= end && strncmp(p, "text(", 5) == 0) {
-        s->kind = 2; p += 5;
-    } else if (p + 8 <= end && strncmp(p, "comment(", 8) == 0) {
-        s->kind = 3; p += 8;
-    } else if (p + 21 <= end &&
-               strncmp(p, "processing-instruction(", 23 - 2) == 0) {
-        s->kind = 4; p += 21;
     } else {
         return 0;
     }

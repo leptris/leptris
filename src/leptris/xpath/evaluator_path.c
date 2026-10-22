@@ -508,6 +508,21 @@ static void doc_rank_table_free(DocOrderRankTable* t) {
     free(t->ranks);
 }
 
+/* Mix the pointer before masking. Pool nodes are allocated at a
+ * fixed stride, so the old (ptr >> 4) & mask sent every key to the
+ * same residue class: with a power-of-two capacity and 64/96-byte
+ * strides, only a fraction of the slots were ever reachable and
+ * linear probing degenerated. A 500k-node identity transform spent
+ * 872 ms in the rank build; mixing makes the same build O(1) per
+ * insert. */
+static size_t doc_rank_slot(const void* key, size_t mask) {
+    uint64_t x = (uint64_t)(uintptr_t)key;
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    return (size_t)x & mask;
+}
+
 /* Grow at 70% load so probe chains stay short. */
 static int doc_rank_table_grow(DocOrderRankTable* t) {
     size_t new_cap = (t->mask + 1) << 1;
@@ -521,7 +536,7 @@ static int doc_rank_table_grow(DocOrderRankTable* t) {
     size_t new_mask = new_cap - 1;
     for (size_t i = 0; i <= t->mask; i++) {
         if (!t->keys[i]) continue;
-        size_t j = (size_t)(((uintptr_t)t->keys[i] >> 4) & new_mask);
+        size_t j = doc_rank_slot(t->keys[i], new_mask);
         while (new_keys[j]) j = (j + 1) & new_mask;
         new_keys[j] = t->keys[i];
         new_ranks[j] = t->ranks[i];
@@ -538,7 +553,7 @@ static int doc_rank_table_put(DocOrderRankTable* t, void* key, int64_t rank) {
     if ((t->count + 1) * 10 >= (t->mask + 1) * 7) {
         if (!doc_rank_table_grow(t)) return 0;
     }
-    size_t i = (size_t)(((uintptr_t)key >> 4) & t->mask);
+    size_t i = doc_rank_slot(key, t->mask);
     while (t->keys[i]) {
         if (t->keys[i] == key) return 1;  /* first visit wins */
         i = (i + 1) & t->mask;
@@ -550,7 +565,7 @@ static int doc_rank_table_put(DocOrderRankTable* t, void* key, int64_t rank) {
 }
 
 static int64_t doc_rank_table_get(const DocOrderRankTable* t, void* key) {
-    size_t i = (size_t)(((uintptr_t)key >> 4) & t->mask);
+    size_t i = doc_rank_slot(key, t->mask);
     while (t->keys[i]) {
         if (t->keys[i] == key) return t->ranks[i];
         i = (i + 1) & t->mask;

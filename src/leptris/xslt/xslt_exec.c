@@ -1011,6 +1011,15 @@ static int op_result_elem(XsltExec* ex, const XsltInstr* in,
         }
     }
     ex->pending_parent = parent;
+    /* The content ran only inside e (append-only, strictly nested),
+     * so e is `parent`'s newest child — hand it back as the next
+     * append's tail hint (the single-entry pair otherwise points at
+     * the deepest node the body built, and each append to a wide
+     * parent then walks its whole child chain, #682). */
+    if (parent) {
+        ex->last_append_parent = parent;
+        ex->last_append_child = (LeptrisNodeRef)e;
+    }
     return rc;
 }
 
@@ -2691,6 +2700,16 @@ static int op_copy(XsltExec* ex, const XsltInstr* in, LeptrisElement node) {
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
     ex->pending_parent = saved;
+    /* Result-tree construction is append-only and strictly nested,
+     * so `e` is `saved`'s newest child when the body returns — hand
+     * it back as the next append's tail hint. The single-entry pair
+     * otherwise points at the deepest node the body built, and each
+     * append to a wide parent then walks that parent's whole child
+     * chain (quadratic identity transforms, #682). */
+    if (saved) {
+        ex->last_append_parent = saved;
+        ex->last_append_child = (LeptrisNodeRef)e;
+    }
     return rc;
 }
 
@@ -2763,20 +2782,26 @@ static int copy_node_deep(XsltExec* ex, LeptrisElement node,
             LeptrisNodeRef cc = (LeptrisNodeRef)leptris_cdata_create(
                 t, t ? strlen(t) : 0,
                 ((struct leptris_document*)ex->result)->pool);
-            if (cc) leptris_element_append_child_internal(e, (LeptrisNode*)cc);
+            if (cc) out_append_child(ex, e, (void*)cc);
         } else if (ty == LEPTRIS_NODE_TYPE_COMMENT) {
             LeptrisNodeRef cm = leptris_comment_node_create(
                 ex->result, leptris_comment_node_get_content(c));
-            if (cm) leptris_element_append_child_internal(e, (LeptrisNode*)cm);
+            if (cm) out_append_child(ex, e, (void*)cm);
         } else if (ty == LEPTRIS_NODE_TYPE_PI) {
             LeptrisNodeRef pi = leptris_pi_node_create(
                 ex->result, leptris_pi_node_get_target(c),
                 leptris_pi_node_get_data(c));
-            if (pi) leptris_element_append_child_internal(e, (LeptrisNode*)pi);
+            if (pi) out_append_child(ex, e, (void*)pi);
         } else if (ty == LEPTRIS_NODE_TYPE_TEXT) {
             const char* t = leptris_text_get_content((LeptrisTextNode*)c);
             if (t && t[0]) out_append_text(ex, e, t);
         }
+    }
+    /* The caller's newest child is e — hand it back as the tail
+     * hint so sibling copies append O(1) (see op_copy). */
+    if (parent) {
+        ex->last_append_parent = parent;
+        ex->last_append_child = (LeptrisNodeRef)e;
     }
     return 0;
 }
@@ -3515,6 +3540,10 @@ static int builtin_no_match(XsltExec* ex, const char* mode,
         &(XsltInstr){ .kind = XSLT_INSTR_APPLY_TEMPLATES, .name = mode },
         node);
     ex->pending_parent = saved_parent;
+    if (saved_parent && e) {
+        ex->last_append_parent = saved_parent;
+        ex->last_append_child = (LeptrisNodeRef)e;
+    }
     return rc;
 }
 
@@ -3876,6 +3905,16 @@ static int op_element(XsltExec* ex, const XsltInstr* in,
     ex->pending_parent = e;
     int rc = xslt_exec_instrs(ex, in->child, node);
     ex->pending_parent = saved;
+    /* Result-tree construction is append-only and strictly nested,
+     * so `e` is `saved`'s newest child when the body returns — hand
+     * it back as the next append's tail hint. The single-entry pair
+     * otherwise points at the deepest node the body built, and each
+     * append to a wide parent then walks that parent's whole child
+     * chain (quadratic identity transforms, #682). */
+    if (saved) {
+        ex->last_append_parent = saved;
+        ex->last_append_child = (LeptrisNodeRef)e;
+    }
     return rc;
 }
 
