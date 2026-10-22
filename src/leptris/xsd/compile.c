@@ -3354,6 +3354,16 @@ XsdCm* xsd_find_complex_ref(struct leptris_xsd_schema* s,
     return xsd_ladder_complex(s, type_name, uri, 1);
 }
 
+/* validate.c: instance-side QName resolution (xsi:type, XSD 1.0
+ * §2.6.2/§3.3.4) — the same in-scope prefix ladder the capture
+ * helpers use, exported so instance validation and schema capture
+ * cannot drift. */
+void xsd_resolve_qname_inst(LeptrisElement e, const char* qname,
+                            char* uri, size_t urisz, char* local,
+                            size_t localsz) {
+    xsd_resolve_qname(e, qname, uri, urisz, local, localsz);
+}
+
 const XsdSimple* xsd_find_simple_pub(struct leptris_xsd_schema* s,
                                      const char* name) {
     return xsd_find_simple(s, name);
