@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.380] - 2026-10-22
+
+### Fixed
+
+- assess elements against the instance's xsi:type (moxml#433) (xsd)
+- choice alternatives after a failed parenthesized branch were unreachable (dtd)
+- iterative nested-include processing - no C-stack nesting (xinclude)
+
+
+
 ## [1.9.379] - 2026-10-21
 
 ### Fixed
