@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+## [1.9.381] - 2026-10-22
+
+The XSLT transform engine is no longer slower than libxslt on the
+workload users actually run. The identity transform
+(`match="@*|node()"` + `xsl:copy`) was quadratic: 13.0 s where
+xsltproc takes 65 ms on a 20k-book catalog. Three independent causes
+went in PR #1839, and every measured CLI row now beats xsltproc
+end-to-end:
+
+| stylesheet (20k-book catalog) | xsltproc 1.1.35 | 1.9.380 | 1.9.381 |
+| --- | --- | --- | --- |
+| identity `@*|node()` | 64.5 ms | 13,002 ms | **56.9 ms** |
+| `copy-of //book` | 37.2 ms | 58.8 ms | **25.3 ms** |
+| dispatch (apply-templates) | 63.8 ms | 23.5 ms | **23.6 ms** |
+| 1,000-template sheet | 293.8 ms | 18.7 ms | **17.6 ms** |
+
+### Fixed
+
+- apply xsi:type at every depth in whole-instance validation: an
+  instance document may pin a derived type on any element via
+  `xsi:type`; validation previously honored it only at the root, so
+  deeper particles validated against the declared type (#1838)
+
+### Performance
+
+- **xslt: identity transforms and copy-of were quadratic (#1839).**
+  Three fixes: (1) the pattern fast path never compiled node-type
+  tests — `node(`/`text(`/`processing-instruction(` parsed as NCName
+  and failed on the paren, sending every match through the quadratic
+  ancestor ladder (and `processing-instruction(` compared 21 of its
+  23 prefix characters); (2) the document-order rank table hashed
+  pointers by low bits, which degenerates on fixed-stride pool
+  allocations (872 ms to build for a 500k-node transform); (3) the
+  append-tail pair pointed at the deepest node a body built, so wide
+  parents re-walked their whole child chain on every append after an
+  interleaved child. Full suite 2103/2103, libxslt-205 output parity
+  included.
+- dom: lane-18 append/create micro-levers from a fresh profile
+  (#1836)
+
+
+
 ## [1.9.380] - 2026-10-22
 
 ### Fixed
