@@ -106,7 +106,11 @@ Harness `wt/460-harness/build_bench.rb`; A/B pairs alternate within
 ONE window (drift ±20%). Rejected within noise: fast_attach,
 native-cache deletion, doc_klass memo, identity-probe deletion,
 add_child alias. Residual: wrapper allocation (owner-level node
-layout).
+layout). **Allocation census 2026-10-22: AT FLOOR** — moxml
+0.06 minor GC/build vs nokogiri 0.39 (6.5x fewer), 3420 objects vs
+9907; every named suspect eliminated by the levers; the non-floor
+remainder is 17 objects/build (~0.1% CPU). No lever remains — the
+gap is the wrapper-count/identity-contract decision.
 - [ ] per-element object budget: one Ruby object per created node
       (drop the shell entirely post-create-priming; the mint cache
       insert policy; the context registration)
