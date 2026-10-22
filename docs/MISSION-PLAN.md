@@ -27,7 +27,7 @@ nothing to libxml2.
 | A5 | WHATWG/html5lib (#659) | 0 reds on BOTH gates — tree and error-verdict | **BOTH LANES CLOSED 2026-10-21** — tree 1555/1555; verdict 1555/1555, zero misses (PR #1803), floor pinned at the full corpus count |
 | A6 | XSD conformance lane | suite-complete per the lane's own queue | 769→795 (2026-10-14, queue #1691) |
 | A7 | DTD phase 8 (TODO 91) | ENTITY/ENTITIES attribute resolution, parameter entities, choice-model backtracking | open |
-| A8 | XInclude parse="xml" + xpointer (TODO 92) | spec-complete | open (parse="text" + fallback ship) |
+| A8 | XInclude parse="xml" + xpointer (TODO 92) | spec-complete | **closed 2026-10-22** — parse="xml" splice via canonical insert face + depth-guard fallback (PR #1815); xpointer schemes REC-conformant with pointer-miss=resource-error (PR #1820); windows iterative nesting fix (PR #1822) |
 | A9 | RelaxNG / C14N / SAX | parity maintained, no reds | green |
 
 **Working rule (proven across A1–A3):** suite-driven fixes only —
