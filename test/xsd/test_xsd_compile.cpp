@@ -2855,4 +2855,94 @@ TEST(XsdConformanceClauses, XsiTypeUnknownTypeIsLoud) {
     leptris_xsd_free(s);
 }
 
+TEST(XsdConformanceClauses, XsiTypeAtDepthGlobalChild) {
+  const char schema[] =
+      "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+      " targetNamespace=\"urn:t\" xmlns=\"urn:t\""
+      " elementFormDefault=\"qualified\">"
+      " <xs:complexType name=\"Base\">"
+      "  <xs:sequence><xs:element name=\"a\" type=\"xs:string\"/></xs:sequence>"
+      " </xs:complexType>"
+      " <xs:complexType name=\"Derived\">"
+      "  <xs:complexContent>"
+      "   <xs:extension base=\"Base\">"
+      "    <xs:sequence><xs:element name=\"b\" type=\"xs:string\"/></xs:sequence>"
+      "   </xs:extension>"
+      "  </xs:complexContent>"
+      " </xs:complexType>"
+      " <xs:element name=\"doc\" type=\"Base\"/>"
+      " <xs:element name=\"wrap\">"
+      "  <xs:complexType>"
+      "   <xs:sequence><xs:element ref=\"doc\"/></xs:sequence>"
+      "  </xs:complexType>"
+      " </xs:element>"
+      "</xs:schema>";
+  LeptrisXsdSchema s = compile_string(schema);
+  ASSERT_NE(s, (LeptrisXsdSchema)0);
+  /* leptris-ruby#535 depth case, global-declaration child: the
+   * child walk re-enters validate_element, which reads xsi:type.
+   * The prefix resolves through the ROOT's declaration -- in
+   * scope, not just the bearing element's own. */
+  EXPECT_EQ(validate_compiled(
+                s,
+                "<wrap xmlns=\"urn:t\" xmlns:i=\"urn:t\""
+                " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+                "<doc xsi:type=\"i:Derived\"><a>x</a><b>y</b></doc></wrap>"),
+            1)
+      << "xsi:type must be honored on a global child below the root";
+  /* the declared type governs without xsi:type: b is out of Base. */
+  EXPECT_EQ(validate_compiled(
+                s, "<wrap xmlns=\"urn:t\"><doc><a>x</a><b>y</b></doc></wrap>"),
+            0);
+  leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, XsiTypeAtDepthParticleTypedChild) {
+  const char schema[] =
+      "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+      " targetNamespace=\"urn:t\" xmlns=\"urn:t\""
+      " elementFormDefault=\"qualified\">"
+      " <xs:complexType name=\"Base\">"
+      "  <xs:sequence><xs:element name=\"a\" type=\"xs:string\"/></xs:sequence>"
+      " </xs:complexType>"
+      " <xs:complexType name=\"Derived\">"
+      "  <xs:complexContent>"
+      "   <xs:extension base=\"Base\">"
+      "    <xs:sequence><xs:element name=\"b\" type=\"xs:string\"/></xs:sequence>"
+      "   </xs:extension>"
+      "  </xs:complexContent>"
+      " </xs:complexType>"
+      " <xs:element name=\"wrap\">"
+      "  <xs:complexType>"
+      "   <xs:sequence><xs:element name=\"doc\" type=\"Base\"/></xs:sequence>"
+      "  </xs:complexType>"
+      " </xs:element>"
+      "</xs:schema>";
+  LeptrisXsdSchema s = compile_string(schema);
+  ASSERT_NE(s, (LeptrisXsdSchema)0);
+  /* leptris-ruby#535 depth case, local particle: no global `doc`
+   * exists, so the child is typed by wrap's particle -- xsi:type
+   * must still substitute Derived's model at that depth. */
+  EXPECT_EQ(validate_compiled(
+                s,
+                "<wrap xmlns=\"urn:t\" xmlns:i=\"urn:t\""
+                " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+                "<doc xsi:type=\"i:Derived\"><a>x</a><b>y</b></doc></wrap>"),
+            1)
+      << "xsi:type must substitute on a particle-typed child too";
+  /* the named type's own constraint applies: Derived needs b. */
+  EXPECT_EQ(validate_compiled(
+                s,
+                "<wrap xmlns=\"urn:t\" xmlns:i=\"urn:t\""
+                " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+                "<doc xsi:type=\"i:Derived\"><a>x</a></doc></wrap>"),
+            0);
+  /* without xsi:type the declared particle type governs: b is out
+   * of Base's model. */
+  EXPECT_EQ(validate_compiled(
+                s, "<wrap xmlns=\"urn:t\"><doc><a>x</a><b>y</b></doc></wrap>"),
+            0);
+  leptris_xsd_free(s);
+}
+
 }  // namespace

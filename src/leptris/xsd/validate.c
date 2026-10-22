@@ -423,8 +423,25 @@ static void validate_children(struct xsd_validator* v,
                 }
             }
         }
-        if (ptype)
+        /* leptris-ruby#535 (XSD 1.0 2.6.2): xsi:type applies at every
+         * assessed depth -- a child typed by the parent particle is
+         * substituted exactly like a globally declared one (which
+         * validate_element above already handles). */
+        const char* cxsi = leptris_element_attribute_ns(
+            ce, "http://www.w3.org/2001/XMLSchema-instance", "type");
+        if (cxsi && cxsi[0] && ptype) {
+            char xuri[512], xlocal[256];
+            xsd_resolve_qname_inst(ce, cxsi, xuri, sizeof(xuri),
+                                   xlocal, sizeof(xlocal));
+            if (!xlocal[0]) {
+                verrf_at(v, ce, "element", cl,
+                         "xsi:type prefix is not bound in the instance");
+            } else {
+                validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi);
+            }
+        } else if (ptype) {
             validate_local(v, s, ce, cl, ptype);
+        }
     }
 }
 
