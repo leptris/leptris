@@ -98,16 +98,15 @@ older corpus datasets — reported, not gated.
 ## Gate B — Performance: every published row ≥1.00x
 
 ### B1 build row: ~2.9x → ≤1.0x (the #242 campaign)
-**Measured 2026-10-21: honest baseline 2.72x (five fresh runs; the
-old 1.86x record is NOT reproducible with identical code on today's
-machine), ~1.9x after five merged moxml levers** (guard retirement,
-namespace scope gate, nil-ivar priming, children-cache guard, and
-the preprimed mint — the mint measured NEUTRAL and is not counted;
-fast-attach was rejected as noise). Harness `wt/460-harness/build_bench.rb`,
-31 interleaved reps, A/B pairs must alternate within ONE window
-(machine drift is ±20% across session phases). StackProf: mint +
-shape writes, attach pipeline, text= pipeline, GC. Decomposition on
-record.
+**Measured 2026-10-22: ~1.47-1.54x median after NINE merged levers**
+(honest baseline 2.72x; guard retirement −22%, namespace gate,
+nil-ivar priming, children-cache guard, mint direct-dispatch +
+native set_attribute −19% (PR #431), prepare_node inline (PR #432)).
+Harness `wt/460-harness/build_bench.rb`; A/B pairs alternate within
+ONE window (drift ±20%). Rejected within noise: fast_attach,
+native-cache deletion, doc_klass memo, identity-probe deletion,
+add_child alias. Residual: wrapper allocation (owner-level node
+layout).
 - [ ] per-element object budget: one Ruby object per created node
       (drop the shell entirely post-create-priming; the mint cache
       insert policy; the context registration)
