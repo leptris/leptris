@@ -138,7 +138,15 @@ three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
       build, serialize medians, fail on >5% regression)
 
 ### B5 remaining red rows
-- [ ] pugixml lane-18 append/attr-parse (2.0x/5.9x; hash prefilter)
+- [x] pugixml lane-18 append/attr-parse — **re-dated 2026-10-22: the
+      2.0x/5.9x rows no longer exist.** The named levers shipped in
+      the prior 22-round campaign (dup-check hash PR #1413, FNV-fused
+      lookup PR #1425, append parity PR #1533). Today's in-process
+      alternating rigs (load-immune): attr-lookup **0.99x — parity**
+      (8.55 vs 8.62 ns/query), append **leptris wins** (16.4 vs 17.8
+      ns/child). Residual ~1.9x parse gap = conformance features
+      pugixml doesn't do (dup detection, error positions, NUL writes)
+      — the measured floor; owner decision in #1436.
 - [ ] zero-copy text lever (#1218) — adopt if it wins any row
 
 ## Gate C — Safety: trust is auditable

@@ -58,7 +58,7 @@ from stale build dirs, so the harness protocol is part of the gate.
 | attr listing | ≥ all | 99x — ahead |
 | build | ≥ all | 0.87x — ahead |
 | walk+read (moxml) | ≥ 0.95x nokogiri | **done 2026-10-19** — ~195ns name / ~193ns content, 0.90–0.95x |
-| append / attr-parse (pugixml lane 18) | ≥ parity | **RED 2.0x / 5.9x** — hash-prefilter lever named |
+| append / attr-parse (pugixml lane 18) | ≥ parity | **parity/win 2026-10-22** — lookup 0.99x, append leptris wins; residual parse gap = conformance features (floor, #1436) |
 | DOM mutation rows | ≥ parity | RED — node-layout redesign, owner decision pending |
 | zero-copy text (#1218 lever) | adopt if it wins any row | lever named, unmeasured |
 
