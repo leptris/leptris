@@ -183,7 +183,12 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
          * Same init contract as leptris_element_create_with_view
          * (memset-zero + type/name/name_hash/name_len). Falls back
          * to the plain pool path when a block can't be allocated. */
-        size_t name_len = strlen(name);
+        /* Lane 18: element names are almost always tiny — a bounded
+         * byte scan resolves the length without the strlen call;
+         * anything 8+ bytes pays the same strlen as before. */
+        size_t name_len = 0;
+        while (name_len < 8 && name[name_len]) name_len++;
+        if (name_len == 8 && name[8]) name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
             char* name_copy = mut_name_carve(doc, name, name_len);
@@ -469,6 +474,11 @@ LeptrisStatus leptris_element_add_child_addr_installed(
 LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement child) {
     if (!parent || !child) return LEPTRIS_ERROR_NULL_ARG;
 
+    /* Single document resolution per mutation (TODO 195c): the
+     * root walk + map lookup was paid three times per append
+     * (twice here, once inside the internal for the tail cache). */
+    struct leptris_document* doc = leptris_element_get_document(parent);
+
     /* #1636: appending a node into its own descendant subtree
      * builds a parent cycle — every tree walker (serializer
      * first) then recurses without bound and the process dies
@@ -477,9 +487,24 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
      * ancestor edge: walk child's parent chain for parent. The
      * same-document fast path below never sees foreign copies as
      * ancestors, so the walk runs on the caller's node — O(depth),
-     * depth bounded by the parse cap. */
-    {
-        if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
+     * depth bounded by the parse cap.
+     *
+     * Lane 18: the freshness probe below runs FIRST. A child is
+     * provably childless — and therefore cannot be an ancestor of
+     * parent (nor equal any node that has descendants) — only when
+     * BOTH hold: it was carved from the current mut block (recent
+     * create) AND its child list is still empty. The extent alone is
+     * NOT enough: a block-extent element may have been given
+     * children since its create, and appending an ancestor under its
+     * own descendant must keep rejecting. parent == child stays
+     * unconditional and the walk still sees the ORIGINAL child
+     * before any #1528 adoption, so accept/reject decisions are
+     * identical to the unconditioned guard. */
+    int child_fresh = node_in_current_mut_block(doc, child) &&
+                      (leptris_elem_first_child(child) == NULL);
+
+    if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
+    if (!child_fresh) {
         LeptrisElement p = leptris_element_parent(parent);
         int guard = 0;
         while (p && guard++ < 8192) {
@@ -488,11 +513,6 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
         }
     }
 
-    /* Single document resolution per mutation (TODO 195c): the
-     * root walk + map lookup was paid three times per append
-     * (twice here, once inside the internal for the tail cache). */
-    struct leptris_document* doc = leptris_element_get_document(parent);
-
     /* #1528: a foreign document's node is adopted by copy, never
      * spliced raw. The freshly-created-then-appended shape proves
      * same-doc in two hot loads: a child inside the CURRENT mut
@@ -500,7 +520,7 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
      * THIS document's block by the create call just executed — no
      * foreign allocation can live inside it. Everything else takes
      * the full check (Lane 18 append bar). */
-    if (!(node_in_current_mut_block(doc, child))) {
+    if (!child_fresh) {
         child = (LeptrisElement)adopt_for_splice((LeptrisNode*)child,
                                                  doc);
         if (!child) return LEPTRIS_ERROR_MEMORY;
