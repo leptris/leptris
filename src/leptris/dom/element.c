@@ -59,6 +59,7 @@ LeptrisElement leptris_element_create_with_view(
     memset(elem, 0, sizeof(struct leptris_element));
     elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
     char* nm = leptris_sv_to_cstr_pooled(&name_view, pool);
+    if (!nm) return NULL; /* pool OOM — do not store a NULL name */
     elem_set_name(elem, nm);
     elem->name_hash = leptris_name_hash_compute(nm);
     elem->name_len = (name_view.length > 254)
@@ -107,13 +108,16 @@ LeptrisElement leptris_element_create_zero_copy(LeptrisMemoryPool* pool) {
 LeptrisElement leptris_element_create_pooled(const char* name, LeptrisMemoryPool* pool) {
     if (!name || !pool) return NULL;
 
-    /* Pool-owned copy; lives for the document's lifetime. */
-    char* name_copy = leptris_pool_strdup(pool, name);
-    if (!name_copy) return NULL;
-
-    /* Hand ownership to create_with_view via the inplace path so the
-     * name_view points into pool-owned storage, not the caller's buffer. */
-    return leptris_element_create_pooled_inplace(name_copy, pool);
+    /* Lane 18: ONE strlen + ONE pooled copy. The old route strdup'ed
+     * the name into the pool and then handed that copy to the inplace
+     * path, whose with_view call copies the SAME bytes into the pool
+     * again via sv_to_cstr_pooled — the strdup result was orphaned
+     * (never stored on the element), so every fallback-path create
+     * paid a dead strlen + pool alloc + memcpy. Building the view
+     * over the caller's buffer lands on the identical final name
+     * pointer (same pooled copy, same interning behavior). */
+    return leptris_element_create_with_view(leptris_sv_from_cstr(name),
+                                            pool);
 }
 
 /* Free element - pool allocated, so this is a no-op */
@@ -771,22 +775,16 @@ void leptris_element_append_child_hint_doc(LeptrisElement elem,
                                            LeptrisNode* hint) {
     if (!elem || !child) return;
 
-    /* SAFETY: Verify node type field is valid before accessing it
-     * Small values like 0x4 or 0x1 in the type field suggest the pointer is corrupted */
-    if (child->type < LEPTRIS_NODE_TYPE_ELEMENT ||
-        (child->type > LEPTRIS_NODE_TYPE_DOCTYPE &&
-         child->type != LEPTRIS_NODE_TYPE_ENTITY_REF)) {
-        /* Invalid node type - corrupted pointer */
-        return;
-    }
-
-    if (child->type != LEPTRIS_NODE_TYPE_ELEMENT &&
-        child->type != LEPTRIS_NODE_TYPE_TEXT &&
-        child->type != LEPTRIS_NODE_TYPE_CDATA &&
-        child->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        child->type != LEPTRIS_NODE_TYPE_PI &&
-        child->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
-        return;  /* Only allow these node types as children */
+    /* Type gate, fused (lane 18): the appendable set is
+     * {ELEMENT..PI} ∪ {ENTITY_REF}; the old two-chain form (a range
+     * guard followed by a six-way membership walk) admitted exactly
+     * the same set in ~8 compare/branch pairs. One load + two
+     * compares decide it. */
+    {
+        unsigned t = (unsigned)child->type;
+        if (!(t <= (unsigned)LEPTRIS_NODE_TYPE_PI ||
+              t == (unsigned)LEPTRIS_NODE_TYPE_ENTITY_REF))
+            return; /* corrupted or non-appendable node type */
     }
 
     /* Issue #217: if child is already attached to a parent, unlink
@@ -909,22 +907,16 @@ void leptris_element_append_child_hint_doc(LeptrisElement elem,
 void leptris_element_prepend_child_internal(LeptrisElement elem, LeptrisNode* child) {
     if (!elem || !child) return;
 
-    /* SAFETY: Verify node type field is valid before accessing it
-     * Small values like 0x4 or 0x1 in the type field suggest the pointer is corrupted */
-    if (child->type < LEPTRIS_NODE_TYPE_ELEMENT ||
-        (child->type > LEPTRIS_NODE_TYPE_DOCTYPE &&
-         child->type != LEPTRIS_NODE_TYPE_ENTITY_REF)) {
-        /* Invalid node type - corrupted pointer */
-        return;
-    }
-
-    if (child->type != LEPTRIS_NODE_TYPE_ELEMENT &&
-        child->type != LEPTRIS_NODE_TYPE_TEXT &&
-        child->type != LEPTRIS_NODE_TYPE_CDATA &&
-        child->type != LEPTRIS_NODE_TYPE_COMMENT &&
-        child->type != LEPTRIS_NODE_TYPE_PI &&
-        child->type != LEPTRIS_NODE_TYPE_ENTITY_REF) {
-        return;  /* Only allow these node types as children */
+    /* Type gate, fused (lane 18): the appendable set is
+     * {ELEMENT..PI} ∪ {ENTITY_REF}; the old two-chain form (a range
+     * guard followed by a six-way membership walk) admitted exactly
+     * the same set in ~8 compare/branch pairs. One load + two
+     * compares decide it. */
+    {
+        unsigned t = (unsigned)child->type;
+        if (!(t <= (unsigned)LEPTRIS_NODE_TYPE_PI ||
+              t == (unsigned)LEPTRIS_NODE_TYPE_ENTITY_REF))
+            return; /* corrupted or non-appendable node type */
     }
 
     /* Issue #217: if child is already attached to a parent, unlink

@@ -2966,6 +2966,48 @@ TEST(DomCycleGuard, AncestorAppendRejected) {
     leptris_document_free(d);
 }
 
+/* Lane 18: the append path skips the #1636 ancestor walk when the
+ * child is provably childless (fresh mut-block carve AND empty
+ * child list). An element still sitting inside the mut-block
+ * extent is NOT automatically childless — it may have been given
+ * children since its create — so the walk must still run for it.
+ * Regression pin for the first cut, which keyed the skip on the
+ * extent alone and ACCEPTED root-under-b for mutation-built
+ * trees (parse-built trees never enter the mut block, which is
+ * why the parse-only specs above could not see it). */
+TEST(DomCycleGuard, AncestorAppendRejectedInMutBlockExtent) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+    LeptrisElement a = leptris_element_create(d, "a");
+    LeptrisElement b = leptris_element_create(d, "b");
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, a), LEPTRIS_OK);
+    ASSERT_EQ(leptris_element_append_child(a, b), LEPTRIS_OK);
+
+    /* all three still sit in the current mut-block extent here —
+     * the guard must not trust the extent as childlessness */
+    EXPECT_EQ(leptris_element_append_child(b, root),
+              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_element_append_child(a, a),
+              LEPTRIS_ERROR_INVALID_ARG);
+    EXPECT_EQ(leptris_element_prepend_child(b, root),
+              LEPTRIS_ERROR_INVALID_ARG);
+
+    /* fresh create->append (the fast-path shape) still links */
+    LeptrisElement c = leptris_element_create(d, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_element_append_child(b, c), LEPTRIS_OK);
+    char* out = leptris_document_serialize(d, nullptr);
+    ASSERT_NE(out, nullptr);
+    EXPECT_NE(strstr(out, "<b><c/></b>"), nullptr);
+    leptris_free_string(out);
+    leptris_document_free(d);
+}
+
 TEST(DomCycleGuard, InsertIntoOwnSubtreeRejected) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d =
