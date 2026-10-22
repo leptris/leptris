@@ -55,6 +55,9 @@ extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 extern const XsdElementIcs* xsd_find_element_ics(
     struct leptris_xsd_schema* s, const char* element_name);
+extern void xsd_resolve_qname_inst(LeptrisElement e, const char* qname,
+                                   char* uri, size_t urisz, char* local,
+                                   size_t localsz);
 
 /* ---- error list ---------------------------------------------------- */
 
@@ -274,6 +277,11 @@ static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
                            const char* type);
+static void validate_local_uri(struct xsd_validator* v,
+                               struct leptris_xsd_schema* s,
+                               LeptrisElement elem, const char* local,
+                               const char* type, const char* euri,
+                               const char* xsi_q);
 
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
@@ -623,6 +631,27 @@ static void validate_element(struct xsd_validator* v,
             verrf(v, "element", local,
                   "content does not match the fixed value");
     }
+    /* XSD 1.0 §2.6.2/§3.3.4 (moxml#433): xsi:type on the instance
+     * names the type definition this element is assessed against —
+     * it replaces the declared type and wins over XSD 1.1
+     * conditional alternatives. The QName resolves through the
+     * element's in-scope namespace declarations; derivation-ok from
+     * the declared type is not walked (tier-1 lax direction: the
+     * named type is validated as given). */
+    const char* xsi_q = leptris_element_attribute_ns(
+        elem, "http://www.w3.org/2001/XMLSchema-instance", "type");
+    if (xsi_q && xsi_q[0]) {
+        char xuri[512], xlocal[256];
+        xsd_resolve_qname_inst(elem, xsi_q, xuri, sizeof(xuri),
+                               xlocal, sizeof(xlocal));
+        if (!xlocal[0]) {
+            verrf_at(v, elem, "element", local,
+                     "xsi:type prefix is not bound in the instance");
+            return;
+        }
+        validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q);
+        return;
+    }
     validate_local(v, s, elem, local, eff_type);
 }
 
@@ -633,12 +662,17 @@ static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
                            const char* type) {
-    if (!type) return;
-    /* leptris-ruby#440: resolve the type in the ELEMENT's
-     * namespace — the merged-import schema carries same-name types
-     * from every imported namespace. */
     const char* euri = NULL;
     leptris_element_expanded_name(elem, NULL, NULL, &euri);
+    validate_local_uri(v, s, elem, local, type, euri, NULL);
+}
+
+static void validate_local_uri(struct xsd_validator* v,
+                               struct leptris_xsd_schema* s,
+                               LeptrisElement elem, const char* local,
+                               const char* type, const char* euri,
+                               const char* xsi_q) {
+    if (!type) return;
     /* the type ref may name a FOREIGN namespace's type (OOXML:
      * wp:extent -> a:CT_PositiveSize2D) — resolve through the
      * reference ladder, not the element-ns-strict lookup */
@@ -718,6 +752,15 @@ static void validate_local(struct xsd_validator* v,
     }
     /* neither complex nor simple nor builtin: the schema is
      * incomplete — loud, never a silent accept (#1615 class) */
+    if (xsi_q) {
+        char msg[352];
+        snprintf(msg, sizeof(msg),
+                 "xsi:type '%s' does not resolve to a type in the "
+                 "schema",
+                 xsi_q);
+        verrf_at(v, elem, "element", local, msg);
+        return;
+    }
     verrf_at(v, elem, "element", local,
              "type not found in the schema");
 }

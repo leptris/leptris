@@ -2718,4 +2718,141 @@ TEST(XsdWildcardUnitTns1735, AnyAttrTargetNamespaceInImportedUnit) {
     remove((dir + "x1735amain.xsd").c_str());
 }
 
+// ---- XSD 1.0 §2.6.2/§3.3.4: xsi:type instance type substitution --
+// (moxml#433) An element carrying xsi:type is assessed against the
+// NAMED type, not the declared one. The engine ignored the
+// attribute, so a valid xsi:type-derived instance (Derived extends
+// Base with a required particle) was rejected against Base's
+// content model.
+namespace {
+
+const char* const k_xsi_type_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " elementFormDefault=\"qualified\">"
+    " <xs:complexType name=\"Base\">"
+    "  <xs:sequence><xs:element name=\"a\" type=\"xs:string\"/></xs:sequence>"
+    " </xs:complexType>"
+    " <xs:complexType name=\"Derived\">"
+    "  <xs:complexContent>"
+    "   <xs:extension base=\"Base\">"
+    "    <xs:sequence><xs:element name=\"b\" type=\"xs:string\"/></xs:sequence>"
+    "   </xs:extension>"
+    "  </xs:complexContent>"
+    " </xs:complexType>"
+    " <xs:element name=\"doc\" type=\"Base\"/>"
+    "</xs:schema>";
+
+LeptrisXsdSchema compile_string(const char* xsd) {
+    LeptrisStatus st = LEPTRIS_OK;
+    return leptris_xsd_compile(xsd, strlen(xsd), &st);
+}
+
+}  // namespace
+
+TEST(XsdConformanceClauses, XsiTypeDerivedInstanceValidates) {
+    LeptrisXsdSchema s = compile_string(k_xsi_type_schema);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* xsi:type="Derived" (unprefixed — no-namespace schema): a then
+     * b is exactly Derived's particle sequence. */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<doc xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"Derived\">"
+                  "<a>x</a><b>y</b></doc>"),
+              1)
+        << "xsi:type must replace the declared type for assessment";
+    /* The named type's own constraints apply: Derived requires b. */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<doc xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"Derived\">"
+                  "<a>x</a></doc>"),
+              0);
+    /* Declared Base governs without xsi:type: the extension's b
+     * particle is out of model. */
+    EXPECT_EQ(validate_compiled(
+                  s, "<doc><a>x</a><b>y</b></doc>"),
+              0);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, XsiTypePrefixedResolvesInScope) {
+    const char schema[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns=\"urn:t\" targetNamespace=\"urn:t\">"
+        " <xs:complexType name=\"Base\">"
+        "  <xs:sequence><xs:element name=\"a\" type=\"xs:string\"/></xs:sequence>"
+        " </xs:complexType>"
+        " <xs:complexType name=\"Derived\">"
+        "  <xs:complexContent>"
+        "   <xs:extension base=\"Base\">"
+        "    <xs:sequence><xs:element name=\"b\" type=\"xs:string\"/></xs:sequence>"
+        "   </xs:extension>"
+        "  </xs:complexContent>"
+        " </xs:complexType>"
+        " <xs:element name=\"doc\" type=\"Base\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = compile_string(schema);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* The instance binds its own prefix to the target namespace —
+     * xsi:type resolves through the INSTANCE's in-scope
+     * declarations (the OOXML shape), not the schema document's. */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<doc xmlns:i=\"urn:t\" xmlns:xsi=\"http://www.w3.org/"
+                  "2001/XMLSchema-instance\" xsi:type=\"i:Derived\">"
+                  "<a>x</a><b>y</b></doc>"),
+              1)
+        << "prefixed xsi:type resolves through in-scope bindings";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, XsiTypeSimpleTypeRestrictsText) {
+    const char schema[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        " <xs:element name=\"v\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = compile_string(schema);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* xsi:type to a builtin lexical space: the integer gate fires
+     * where the declared string gate would pass anything. The xs
+     * prefix resolves through the instance's own binding. */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<v xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+                  " xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"xs:integer\">42</v>"),
+              1);
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<v xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+                  " xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"xs:integer\">nope</v>"),
+              0)
+        << "xsi:type to a builtin must enforce that builtin's lexical"
+           " space";
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, XsiTypeUnknownTypeIsLoud) {
+    LeptrisXsdSchema s = compile_string(k_xsi_type_schema);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* xsi:type naming a type the compiled schema never declared:
+     * loud, never a silent accept (#1615 class). */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<doc xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"Missing\">"
+                  "<a>x</a></doc>"),
+              0);
+    /* An unbound prefix cannot resolve: loud as well. */
+    EXPECT_EQ(validate_compiled(
+                  s,
+                  "<doc xmlns:xsi=\"http://www.w3.org/2001/"
+                  "XMLSchema-instance\" xsi:type=\"u:Derived\">"
+                  "<a>x</a></doc>"),
+              0);
+    leptris_xsd_free(s);
+}
+
 }  // namespace
