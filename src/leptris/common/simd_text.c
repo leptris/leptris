@@ -82,6 +82,10 @@ static size_t count_scalar(const char* s, size_t len, char c) {
  * dispatch_init()" pattern raced when two threads hit the same
  * entry point on first call. */
 static void dispatch_init(void);
+static void count3_high_scalar(const char* s, size_t len,
+                               char c0, char c1, char c2,
+                               size_t* n0, size_t* n1, size_t* n2,
+                               int* saw_high);
 
 #if defined(_MSC_VER)
 #  pragma section(".CRT$XCU", read)
@@ -103,6 +107,7 @@ static void dispatch_init(void) {
         g_contains_fn = leptris_text_contains_avx2;
         g_find3_fn = leptris_text_find3_avx2;
         g_count_fn = leptris_text_count_char_avx2;
+        g_count3_high_fn = count3_high_scalar;
         return;
     }
 #endif
@@ -121,20 +126,19 @@ static void dispatch_init(void) {
     g_contains_fn = contains_scalar;
     g_find3_fn = find3_scalar;
     g_count_fn = count_scalar;
+    g_count3_high_fn = count3_high_scalar;
 }
 
-void leptris_text_count3_high(const char* s, size_t len,
-                              char c0, char c1, char c2,
-                              size_t* n0, size_t* n1, size_t* n2,
-                              int* saw_high) {
-    if (!g_count3_high_fn) dispatch_init();
-    if (g_count3_high_fn) {
-        g_count3_high_fn(s, len, c0, c1, c2, n0, n1, n2, saw_high);
-        return;
-    }
-    /* Scalar fallback: one byte loop counts all three chars and
-     * detects high bytes (rare host shapes — the SIMD kernels cover
-     * arm64 and AVX2 builds). */
+/* Scalar kernel: one byte loop counts all three chars and detects
+ * high bytes (host shapes without a count3 SIMD kernel — x86/AVX2
+ * builds have none today). Assigned by dispatch_init so the
+ * constructor fully initializes the slot on every arch: the lazy
+ * if-NULL re-dispatch raced under TSan when two threads hit the
+ * same entry on first call (TODO.concurrency/08 discipline). */
+static void count3_high_scalar(const char* s, size_t len,
+                               char c0, char c1, char c2,
+                               size_t* n0, size_t* n1, size_t* n2,
+                               int* saw_high) {
     size_t a = 0, b = 0, c = 0;
     int h = 0;
     for (size_t i = 0; i < len; i++) {
@@ -148,6 +152,15 @@ void leptris_text_count3_high(const char* s, size_t len,
     *n1 = b;
     *n2 = c;
     *saw_high = h;
+}
+
+void leptris_text_count3_high(const char* s, size_t len,
+                              char c0, char c1, char c2,
+                              size_t* n0, size_t* n1, size_t* n2,
+                              int* saw_high) {
+    if (!g_count3_high_fn) dispatch_init();
+    if (!g_count3_high_fn) g_count3_high_fn = count3_high_scalar;
+    g_count3_high_fn(s, len, c0, c1, c2, n0, n1, n2, saw_high);
 }
 
 int leptris_text_contains(const char* s, size_t len, char c) {
