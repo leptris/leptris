@@ -1400,7 +1400,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      int drop_ws_text,
                                                      int apply_dtd_attrs,
                                                      int keep_entity_refs,
-                                                     int recover) {
+                                                     int recover,
+                                                     size_t lt_count_in,
+                                                     size_t dq_count_in,
+                                                     size_t sq_count_in) {
 
     /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
@@ -1422,7 +1425,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * Slack: len covers all text/name/value copies (they're substrings
      * of the document), plus len/2 mutation headroom (post-parse
      * append/set calls allocate from the same arena). */
-    size_t lt_count, dq_count, sq_count;
     /* #1125 scratch design: the scanner NUL-terminates in place, so
      * it runs on a scratch COPY (+64 zeroed probe slack past the
      * sentinel — probe windows may read up to 48 bytes past p->end;
@@ -1440,8 +1442,10 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * caller's buffer; the copy then reads it warm from L1. */
     char* pristine;
     int const_input = (owns_buffer == 2);   /* needs a pristine carve */
-    leptris_text_count3(buf, len, '<', '"', '\'',
-                       &lt_count, &dq_count, &sq_count);
+    /* Counts arrive precomputed by the entry (the count3_high fused
+     * pre-scan doubles as the UTF-8 fast gate there — #1842). */
+    size_t lt_count = lt_count_in, dq_count = dq_count_in,
+           sq_count = sq_count_in;
     pristine = buf;   /* owns_buffer == 0: caller's buffer — never
                        * written, never freed. const_input overwrites
                        * this below with the arena-carved copy. */
@@ -3598,22 +3602,34 @@ static int dp_input_encoding_ok(const char* s, size_t len) {
  * arena holds only nodes and strings. */
 struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
-    if (!dp_input_encoding_ok(xml, len)) return NULL;
+    size_t lt_count, dq_count, sq_count;
+    int saw_high = 0;
+    leptris_text_count3_high(xml, len, '<', '"', '\'',
+                             &lt_count, &dq_count, &sq_count, &saw_high);
+    if (dp_declares_non_utf8(xml, len) ||
+        (saw_high && !dp_utf8_valid(xml, len)))
+        return NULL;
     {
         struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
         if (d) return d;
     }
-    return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0);
+    return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0,
+                                 lt_count, dq_count, sq_count);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
 struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                            unsigned parse_flags) {
     if (!xml || len == 0) return NULL;
+    size_t lt_count, dq_count, sq_count;
+    int saw_high = 0;
+    leptris_text_count3_high(xml, len, '<', '"', '\'',
+                             &lt_count, &dq_count, &sq_count, &saw_high);
     /* RECOVER keeps the #1660 best-effort contract (never NULL for
      * malformed input); the fatal encoding check is strict-lane. */
     if (!(parse_flags & LEPTRIS_PARSE_RECOVER) &&
-        !dp_input_encoding_ok(xml, len)) {
+        (dp_declares_non_utf8(xml, len) ||
+         (saw_high && !dp_utf8_valid(xml, len)))) {
         return NULL;
     }
     /* The interleaved lane has no recovery support (#1660) — RECOVER
@@ -3637,13 +3653,21 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                  (parse_flags & LEPTRIS_PARSE_KEEP_ENTITY_REFS)
                                      ? 1 : 0,
                                  (parse_flags & LEPTRIS_PARSE_RECOVER)
-                                     ? 1 : 0);
+                                     ? 1 : 0,
+                                 lt_count, dq_count, sq_count);
 }
 
 /* Public: parse a caller-owned writable buffer without copying. */
 struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
-    if (!dp_input_encoding_ok(buf, len)) return NULL;
+    size_t lt_count, dq_count, sq_count;
+    int saw_high = 0;
+    leptris_text_count3_high(buf, len, '<', '"', '\'',
+                             &lt_count, &dq_count, &sq_count, &saw_high);
+    if (dp_declares_non_utf8(buf, len) ||
+        (saw_high && !dp_utf8_valid(buf, len)))
+        return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
-    return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0);
+    return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0,
+                                 lt_count, dq_count, sq_count);
 }

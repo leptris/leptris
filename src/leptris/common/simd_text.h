@@ -48,6 +48,15 @@ void leptris_text_count3(const char* s, size_t len,
                         char c0, char c1, char c2,
                         size_t* n0, size_t* n1, size_t* n2);
 
+/* count3 + "any byte >= 0x80" in one pass (#1842): the parser's
+ * sizing pre-scan doubles as the UTF-8 fast gate — pure-ASCII input
+ * is valid UTF-8 by construction. Falls back to the scalar loop
+ * where no SIMD path is compiled. */
+void leptris_text_count3_high(const char* s, size_t len,
+                              char c0, char c1, char c2,
+                              size_t* n0, size_t* n1, size_t* n2,
+                              int* saw_high);
+
 /* Copy [src, src+len) to dst while counting c0/c1/c2 occurrences —
  * one fused memory pass (falls back to memcpy + count3 where no
  * SIMD path is compiled). The parser's owns-copy path gets its
@@ -103,6 +112,10 @@ size_t leptris_text_count_char_neon(const char* s, size_t len, char c);
 void leptris_text_count3_neon(const char* s, size_t len,
                               char a, char b, char c,
                               size_t* ca, size_t* cb, size_t* cc);
+void leptris_text_count3_high_neon(const char* s, size_t len,
+                                   char a, char b, char c,
+                                   size_t* ca, size_t* cb, size_t* cc,
+                                   int* saw_high);
 void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
                               char a, char b, char c,
                               size_t* ca, size_t* cb, size_t* cc);

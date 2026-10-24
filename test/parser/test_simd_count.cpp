@@ -68,3 +68,71 @@ TEST(Count3Kernels, LargeMixedInput) {
     for (int i = 0; i < 3000; i++) s += pattern;
     expect_counts(s.data(), s.size());
 }
+
+/* count3_high — the #1842 fused sizing+encoding pre-scan: the same
+ * three counts as text_count3 plus whether ANY byte >= 0x80 exists.
+ * Pure-ASCII input is valid UTF-8 by construction, so the parser's
+ * separate SWAR validation pass disappears for the common case.
+ * Counts must match text_count3 EXACTLY at every length (the same
+ * arena-sizing contract), including across the SIMD body / scalar
+ * tail boundary and with high bytes straddling it. */
+extern "C" {
+void leptris_text_count3_high(const char* s, size_t len, char c0,
+                              char c1, char c2, size_t* n0, size_t* n1,
+                              size_t* n2, int* saw_high);
+}
+
+namespace {
+
+void expect_high(const char* s, size_t len) {
+    size_t e0 = 0, e1 = 0, e2 = 0, ehi = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '<') e0++;
+        if (s[i] == '"') e1++;
+        if (s[i] == '\'') e2++;
+        if ((unsigned char)s[i] >= 0x80) ehi++;
+    }
+    size_t a = 1, b = 1, c = 1;
+    int hi = -1;
+    leptris_text_count3_high(s, len, '<', '"', '\'', &a, &b, &c, &hi);
+    EXPECT_EQ(a, e0) << "count3_high c0 len=" << len;
+    EXPECT_EQ(b, e1) << "count3_high c1 len=" << len;
+    EXPECT_EQ(c, e2) << "count3_high c2 len=" << len;
+    EXPECT_EQ(hi, ehi > 0 ? 1 : 0) << "count3_high saw_high len=" << len;
+    // cross-check against the plain kernel
+    size_t p0 = 0, p1 = 0, p2 = 0;
+    leptris_text_count3(s, len, '<', '"', '\'', &p0, &p1, &p2);
+    EXPECT_EQ(a, p0);
+    EXPECT_EQ(b, p1);
+    EXPECT_EQ(c, p2);
+}
+
+TEST(SimdCountHigh, AsciiIsHighFree) {
+    const char s[] = "<root a=\"1\" b='2'>text</root>";
+    expect_high(s, sizeof(s) - 1);
+}
+
+TEST(SimdCountHigh, Utf8BytesDetected) {
+    const char s[] = "<r a=\"é\">naïve — text</r>";
+    expect_high(s, sizeof(s) - 1);
+}
+
+TEST(SimdCountHigh, HighByteAtEveryBoundary) {
+    // a 2-byte UTF-8 char walked across every position relative to
+    // the 16-byte SIMD body and the 3-char tail loop
+    std::string base = "<x a='1' b=\"2\">t</x>";
+    for (size_t pad = 0; pad < 40; pad++) {
+        std::string s(pad, 'y');
+        s += "<é>";
+        expect_high(s.data(), s.size());
+    }
+}
+
+TEST(SimdCountHigh, EmptyAndTiny) {
+    expect_high("", 0);
+    const char* t = "<";
+    expect_high(t, 1);
+    const char* h = "\xc3\xa9";
+    expect_high(h, 2);
+}
+}  // namespace
