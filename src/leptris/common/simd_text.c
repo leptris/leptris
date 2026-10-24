@@ -58,6 +58,9 @@ static ptrdiff_t (*g_find3_fn)(const char*, size_t, char, char, char) = NULL;
 static size_t (*g_count_fn)(const char*, size_t, char) = NULL;
 static void (*g_count3_fn)(const char*, size_t, char, char, char,
                            size_t*, size_t*, size_t*) = NULL;
+static void (*g_count3_high_fn)(const char*, size_t, char, char, char,
+                                size_t*, size_t*, size_t*,
+                                int*) = NULL;
 static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
                           size_t*, size_t*, size_t*) = NULL;
 
@@ -109,6 +112,7 @@ static void dispatch_init(void) {
         g_find3_fn = leptris_text_find3_neon;
         g_count_fn = leptris_text_count_char_neon;
         g_count3_fn = leptris_text_count3_neon;
+        g_count3_high_fn = leptris_text_count3_high_neon;
         g_copy3_fn = leptris_copy_count3_neon;
         return;
     }
@@ -117,6 +121,33 @@ static void dispatch_init(void) {
     g_contains_fn = contains_scalar;
     g_find3_fn = find3_scalar;
     g_count_fn = count_scalar;
+}
+
+void leptris_text_count3_high(const char* s, size_t len,
+                              char c0, char c1, char c2,
+                              size_t* n0, size_t* n1, size_t* n2,
+                              int* saw_high) {
+    if (!g_count3_high_fn) dispatch_init();
+    if (g_count3_high_fn) {
+        g_count3_high_fn(s, len, c0, c1, c2, n0, n1, n2, saw_high);
+        return;
+    }
+    /* Scalar fallback: one byte loop counts all three chars and
+     * detects high bytes (rare host shapes — the SIMD kernels cover
+     * arm64 and AVX2 builds). */
+    size_t a = 0, b = 0, c = 0;
+    int h = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch == (unsigned char)c0) a++;
+        if (ch == (unsigned char)c1) b++;
+        if (ch == (unsigned char)c2) c++;
+        if (ch & 0x80) h = 1;
+    }
+    *n0 = a;
+    *n1 = b;
+    *n2 = c;
+    *saw_high = h;
 }
 
 int leptris_text_contains(const char* s, size_t len, char c) {

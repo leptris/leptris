@@ -144,6 +144,57 @@ void leptris_text_count3_neon(const char* s, size_t len,
     *n2 = c;
 }
 
+/* count3 + high-byte detection in ONE pass (#1842): the parser's
+ * sizing pre-scan doubles as the UTF-8 fast gate — pure-ASCII input
+ * (no byte >= 0x80) is valid UTF-8 by construction, so the separate
+ * SWAR validation pass disappears for the common case. */
+void leptris_text_count3_high_neon(const char* s, size_t len,
+                                   char c0, char c1, char c2,
+                                   size_t* n0, size_t* n1, size_t* n2,
+                                   int* saw_high) {
+    const char* p = s;
+    const char* end = s + len;
+    const uint8x16_t k0 = vdupq_n_u8((uint8_t)c0);
+    const uint8x16_t k1 = vdupq_n_u8((uint8_t)c1);
+    const uint8x16_t k2 = vdupq_n_u8((uint8_t)c2);
+    size_t a = 0, b = 0, c = 0;
+    uint16x8_t a0 = vdupq_n_u16(0), a1 = vdupq_n_u16(0), a2 = vdupq_n_u16(0);
+    uint8x16_t hi = vdupq_n_u8(0);
+    size_t since_flush = 0;
+
+    while (end - p >= 16) {
+        uint8x16_t v = vld1q_u8((const uint8_t*)p);
+        a0 = vpadalq_u8(a0, vshrq_n_u8(vceqq_u8(v, k0), 7));
+        a1 = vpadalq_u8(a1, vshrq_n_u8(vceqq_u8(v, k1), 7));
+        a2 = vpadalq_u8(a2, vshrq_n_u8(vceqq_u8(v, k2), 7));
+        hi = vorrq_u8(hi, vshrq_n_u8(v, 7));
+        p += 16;
+        if (++since_flush == 1024) {
+            a += (size_t)vaddvq_u16(a0);
+            b += (size_t)vaddvq_u16(a1);
+            c += (size_t)vaddvq_u16(a2);
+            a0 = a1 = a2 = vdupq_n_u16(0);
+            since_flush = 0;
+        }
+    }
+    a += (size_t)vaddvq_u16(a0);
+    b += (size_t)vaddvq_u16(a1);
+    c += (size_t)vaddvq_u16(a2);
+    int h = vmaxvq_u8(hi) != 0;
+    while (p < end) {
+        unsigned char ch = (unsigned char)*p;
+        if (ch == (unsigned char)c0) a++;
+        if (ch == (unsigned char)c1) b++;
+        if (ch == (unsigned char)c2) c++;
+        if (ch & 0x80) h = 1;
+        p++;
+    }
+    *n0 = a;
+    *n1 = b;
+    *n2 = c;
+    *saw_high = h;
+}
+
 /* Fused copy + three counters in ONE memory pass (TODO 188). The
  * parser's owns-copy path used to stream the document twice — a
  * count3 pre-scan for arena sizing, then the memcpy into the
