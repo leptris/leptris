@@ -1442,6 +1442,32 @@ TEST(RngParse, FileErrorsPublishToLastError) {
 // open-ended {n,} (the no-comma branch never set the hi bound), so
 // [A-Z]{3} matched ABCD. Any RNG schema with exact bounds silently
 // accepted longer runs. Never-again spec on the direct engine call.
+/* moxml#464: the XSD pattern dialect requires block escapes
+ * \p{IsBLOCK} / \P{IsBLOCK} (Part 2 Appendix F). The engine
+ * rejected them at parse (bad = loud fail), false-positiving valid
+ * instance documents — 330 xsdtests Regex_w3c failures carried the
+ * rejection. Blocks are Unicode ranges; the byte-bitmap engine
+ * serves the two blocks that fit below 0x100 exactly. */
+TEST(RngRegex, BlockEscapes) {
+    /* The byte-class matcher serves the two blocks below 0x100
+     * exactly; codepoint-wide classes (UTF-8-aware matching of
+     * higher blocks) are the next arc (moxml#464). */
+    // IsBasicLatin covers TAB LF CR SPACE DEL (the issue repro)
+    EXPECT_EQ(rng_regex_matches("\\p{IsBasicLatin}+",
+                               "a b\t\n\r\x7F"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{IsBasicLatin}+", "ab"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{IsBasicLatin}", "\xC3"), 0);
+    // \P: the complement of the block in the byte world
+    EXPECT_EQ(rng_regex_matches("\\P{IsBasicLatin}", "\xC3"), 1);
+    EXPECT_EQ(rng_regex_matches("\\P{IsBasicLatin}", "a"), 0);
+    // IsLatin-1Supplement covers 0x80-0xFF (single bytes)
+    EXPECT_EQ(rng_regex_matches("\\p{IsLatin-1Supplement}", "\xC3"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{IsLatin-1Supplement}+", "ab"), 0);
+    // inside a class
+    EXPECT_EQ(rng_regex_matches("[\\p{IsBasicLatin}]{2}", "ab"), 1);
+    EXPECT_EQ(rng_regex_matches("[\\p{IsBasicLatin}]{2}",
+                               "a\xC3"), 0);
+}
 TEST(RngRegex, ExactQuantifierIsClosed) {
     EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABC"), 1);
     EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABCD"), 0);
