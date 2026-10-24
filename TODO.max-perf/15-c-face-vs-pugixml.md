@@ -17,9 +17,12 @@ whole-buffer copies ~5% | count3 sizing pass 4.4% | SWAR utf8
 validation 2.8% | elem_pos journal ~2.5%.
 
 - [x] **A1** journal pre-size from the count3 estimate — PR #1844.
-- [ ] **A2** fold the UTF-8 validation into the count3 pass
-      (`count3_high`: ASCII => valid; high bytes => the existing
-      DFA). Saves one full memory pass (~2.8%).
+- [x] **A2** fused sizing+encoding pre-scan — PR #1848
+      (`leptris_text_count3_high`: the same three exact counts plus
+      "any byte >= 0x80"; ASCII => valid, high bytes => the existing
+      DFA). Counts computed once in the entries and threaded through
+      direct_parse_internal; RECOVER keeps its gate skip. Suite
+      2109/2109 with RED-first unit tests.
 - [ ] **A3** lazy pristine copy. `doc->xml_buffer` is load-bearing
       for lazy LINE resolution; the pristine copy exists because
       `dp_nul` may overwrite a `\n` token terminator. Audit which
