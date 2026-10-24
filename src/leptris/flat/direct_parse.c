@@ -3606,8 +3606,12 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
     int saw_high = 0;
     leptris_text_count3_high(xml, len, '<', '"', '\'',
                              &lt_count, &dq_count, &sq_count, &saw_high);
-    if (dp_declares_non_utf8(xml, len) ||
-        (saw_high && !dp_utf8_valid(xml, len)))
+    /* A declared non-UTF-8 encoding is EXEMPT from validation
+     * (dp_declares_non_utf8 == 1: its bytes are legitimate in the
+     * declared encoding and transcode downstream — leptris-ruby#514).
+     * Only UNDECLARED high-byte input must prove valid UTF-8. */
+    if (!dp_declares_non_utf8(xml, len) && saw_high &&
+        !dp_utf8_valid(xml, len))
         return NULL;
     {
         struct leptris_document* d = dp_il_try(xml, len, 0, 0, 0);
@@ -3628,8 +3632,8 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
     /* RECOVER keeps the #1660 best-effort contract (never NULL for
      * malformed input); the fatal encoding check is strict-lane. */
     if (!(parse_flags & LEPTRIS_PARSE_RECOVER) &&
-        (dp_declares_non_utf8(xml, len) ||
-         (saw_high && !dp_utf8_valid(xml, len)))) {
+        !dp_declares_non_utf8(xml, len) && saw_high &&
+        !dp_utf8_valid(xml, len)) {
         return NULL;
     }
     /* The interleaved lane has no recovery support (#1660) — RECOVER
@@ -3664,8 +3668,9 @@ struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     int saw_high = 0;
     leptris_text_count3_high(buf, len, '<', '"', '\'',
                              &lt_count, &dq_count, &sq_count, &saw_high);
-    if (dp_declares_non_utf8(buf, len) ||
-        (saw_high && !dp_utf8_valid(buf, len)))
+    /* Declared non-UTF-8 is exempt (see direct_parse). */
+    if (!dp_declares_non_utf8(buf, len) && saw_high &&
+        !dp_utf8_valid(buf, len))
         return NULL;
     buf[len] = '\0';  /* Ensure NUL termination */
     return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0,
