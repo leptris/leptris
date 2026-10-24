@@ -604,10 +604,125 @@ void leptris_doc_order_index_free(void* table) {
  * mutation_version so repeated queries don't rewalk the tree
  * (issue #485: a per-call walk made union-heavy benchmark loops
  * quadratic). */
+/* Offset fast path (#1842 Track C2, EXPERIMENT): unmutated
+ * parse-created documents rank by parse-time byte offset. */
+static int doc_order_offset_key(void* node, uint64_t* out) {
+    int tag = (int)XPATH_NODE_TYPE(node);
+    if (tag == (int)LEPTRIS_NODE_TYPE_DOCUMENT) {
+        *out = (uint64_t)INT64_MAX -
+               (((uintptr_t)node >> 4) & 0x3FFFFFFF);
+        return 1;
+    }
+    if (tag == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisNode* o = (LeptrisNode*)((LeptrisAttributeNode*)node)->owner;
+        if (!o || o->line == 0) return 0;
+        *out = ((uint64_t)o->line << 2) | 2u;
+        return 1;
+    }
+    if (tag == LEPTRIS_NODE_NAMESPACE) {
+        LeptrisNode* o = (LeptrisNode*)((LeptrisNamespaceNode*)node)->owner;
+        if (!o || o->line == 0) return 0;
+        *out = ((uint64_t)o->line << 2) | 1u;
+        return 1;
+    }
+    if (tag == LEPTRIS_NODE_TEXT && ((LeptrisNode*)node)->line == 0) {
+        LeptrisNode* o = (LeptrisNode*)((XPathTextNode*)node)->owner;
+        if (!o || o->line == 0) return 0;
+        *out = ((uint64_t)o->line << 2) | 3u;
+        return 1;
+    }
+    uint32_t off = ((LeptrisNode*)node)->line;
+    if (off == 0) return 0;
+    *out = (uint64_t)off << 2;
+    return 1;
+}
+
 int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
                                  int reverse) {
     if (!ns || ns->count < 2) return 0;
     if (!ctx || !ctx->document || !ctx->document->new_dom_root) return 0;
+
+    if (ctx->document->mutation_version == 0 &&
+        !getenv("LEPTRIS_SORT_SLOW")) {
+        size_t n = ns->count;
+        uint64_t* keys = (uint64_t*)malloc(n * sizeof(uint64_t));
+        if (keys) {
+            int ok = 1;
+            for (size_t i = 0; i < n; i++) {
+                if (!doc_order_offset_key(ns->nodes[i], &keys[i])) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (ok) {
+                size_t* idx = (size_t*)malloc(n * sizeof(size_t));
+                size_t* tmp = idx ? (size_t*)malloc(n * sizeof(size_t))
+                                  : NULL;
+                if (idx && tmp) {
+                    /* Merge into tmp, then copy back: an in-place
+                     * idx[k]= write clobbers idx[a]/idx[b] sources
+                     * still unread (the k==a case) — the same
+                     * discipline as the table-path merge below. */
+                    for (size_t i = 0; i < n; i++) idx[i] = i;
+                    for (size_t width = 1; width < n; width <<= 1) {
+                        for (size_t lo = 0; lo < n; lo += width << 1) {
+                            size_t mid =
+                                lo + width < n ? lo + width : n;
+                            size_t hi =
+                                lo + (width << 1) < n ? lo + (width << 1)
+                                                      : n;
+                            size_t a = lo, b = mid;
+                            for (size_t k = lo; k < hi; k++) {
+                                tmp[k] =
+                                    (a < mid && (b >= hi ||
+                                     keys[idx[a]] <= keys[idx[b]]))
+                                        ? idx[a++]
+                                        : idx[b++];
+                            }
+                        }
+                        memcpy(idx, tmp, n * sizeof(size_t));
+                    }
+                    void** ordered =
+                        (void**)malloc(n * sizeof(void*));
+                    if (ordered) {
+                        for (size_t i = 0; i < n; i++)
+                            ordered[i] = ns->nodes[idx[i]];
+                        if (reverse) {
+                            for (size_t i = 0; i < n; i++)
+                                ns->nodes[i] =
+                                    ordered[n - 1 - i];
+                        } else {
+                            memcpy(ns->nodes, ordered,
+                                   n * sizeof(void*));
+                        }
+                        /* The table path compacts duplicate pointers
+                         * after sorting (adjacency) — multi-context
+                         * steps rely on it to drop cross-context
+                         * duplicates. Same contract here. */
+                        size_t w = 0;
+                        for (size_t i = 0; i < n; i++) {
+                            if (i == 0 ||
+                                ns->nodes[i] != ns->nodes[i - 1]) {
+                                ns->nodes[w++] = ns->nodes[i];
+                            }
+                        }
+                        ns->count = w;
+                        free(ordered);
+                    }
+                    free(tmp);
+                    free(idx);
+                    free(keys);
+                    return ordered ? 0 : -1;
+                }
+                free(tmp);
+                free(idx);
+                free(keys);
+                return -1;
+            }
+            free(keys);
+        }
+        /* fall through to the walked-table path */
+    }
 
     DocOrderRankTable* t = (DocOrderRankTable*)ctx->document->doc_order_index;
     if (t && t->built_version != ctx->document->mutation_version) {
@@ -998,7 +1113,7 @@ struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
                        strcmp(axis_name, "ancestor-or-self") == 0 ||
                        strcmp(axis_name, "preceding") == 0 ||
                        strcmp(axis_name, "preceding-sibling") == 0);
-        xpath_nodeset_sort_doc_order(ctx, result, reverse);
+                xpath_nodeset_sort_doc_order(ctx, result, reverse);
     }
 
     DEBUG_LOG("  === evaluate_step END ===");
