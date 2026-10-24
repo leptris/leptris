@@ -26,6 +26,8 @@ extern struct xsd_validator* xsd_validator_new(
 extern void xsd_validator_free(struct xsd_validator* v);
 extern int xsd_validator_run(struct xsd_validator* v, LeptrisDocument doc);
 extern size_t xsd_validator_error_count(struct xsd_validator* v);
+extern const struct xsd_error* xsd_validator_error_entry(
+    struct xsd_validator* v, size_t i);
 extern const char* xsd_validator_error_at(struct xsd_validator* v,
                                           size_t i);
 
@@ -58,6 +60,11 @@ struct leptris_xsd_schema {
     size_t visited_len, visited_cap;
     void* validator; /* slice-4 parked error list */
     char* error;
+    /* #1841: materialized structured report — rebuilt per
+     * leptris_xsd_error_report call, freed with the schema.
+     * void* to avoid a public-header dependency here. */
+    void* report;
+    size_t report_count;
 };
 
 /* ---- slice 3: content-model capture ------------------------------ */
@@ -2417,6 +2424,7 @@ static void xsd_free_simple_one(XsdSimple* t) {
 LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return;
+    free(s->report);
     xsd_cm_free(s->complex_types);
     XsdElementIcs* slot = s->element_ics;
     while (slot) {
@@ -3417,6 +3425,42 @@ LEPTRIS_API const char* leptris_xsd_error_at(LeptrisXsdSchema schema,
     if (!s) return NULL;
     return xsd_validator_error_at((struct xsd_validator*)s->validator,
                                   i);
+}
+
+LEPTRIS_API size_t leptris_xsd_error_report(
+    LeptrisXsdSchema schema, const LeptrisXsdErrorRecord** out) {
+    struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
+    if (!s || !out) return 0;
+    free(s->report);
+    s->report = NULL;
+    s->report_count = 0;
+    struct xsd_validator* v = (struct xsd_validator*)s->validator;
+    size_t n = xsd_validator_error_count(v);
+    if (n == 0) {
+        *out = NULL;
+        return 0;
+    }
+    LeptrisXsdErrorRecord* rows =
+        (LeptrisXsdErrorRecord*)calloc(n, sizeof(*rows));
+    if (!rows) {
+        *out = NULL;
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        /* walk the list in order — the accessors index the same way */
+        const struct xsd_error* e =
+            xsd_validator_error_entry(v, i);
+        if (!e) break;
+        rows[i].kind = e->kind;
+        rows[i].component = e->component;
+        rows[i].line = (unsigned)(e->line > 0 ? e->line : 0);
+        rows[i].column = (unsigned)(e->column > 0 ? e->column : 0);
+        rows[i].message = e->text;
+    }
+    s->report = rows;
+    s->report_count = n;
+    *out = rows;
+    return n;
 }
 
 LEPTRIS_API int leptris_xsd_content_valid(
