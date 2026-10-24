@@ -1481,6 +1481,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     /* Round 8: the scratch (+ pristine) live INSIDE the arena —
      * size them in. Only ADD to the estimate (#1218: never
      * undersize; over-reservation lands in retained slack). */
+    /* #1842 sprint 1: the element-position journal rides the same
+     * upfront sizing (it records one entry per element; starting at
+     * cap 32 paid ~17 doubling copies + live-prefix recopies on a
+     * 100k-element document). */
+    size_t pos_bytes = (est_elems + 8) * sizeof(struct leptris_elem_pos_entry);
     size_t scratch_bytes = (len + 1 + 64 + 15u) & ~(size_t)15u;
     size_t pristine_bytes =
         const_input ? ((len + 1 + 15u) & ~(size_t)15u) : 0u;
@@ -1488,7 +1493,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     size_t pool_bytes =
         (sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u;
     size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room
-        + slack + scratch_bytes + pristine_bytes + pool_bytes;
+        + slack + scratch_bytes + pristine_bytes + pos_bytes + pool_bytes;
     LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) return NULL;   /* nothing owned yet */
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
@@ -1581,8 +1586,15 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
          * the reader gates on [0]; one byte buys back 255. */
         memset(doc, 0, sizeof(*doc) - sizeof(doc->last_error_message));
         doc->last_error_message[0] = '\0';
-    /* elem_pos journal: pool-carved lazily on first record
-     * (elem_pos.c) — nothing to initialize here. */
+    /* #1842 sprint 1: pre-size the position journal from the
+     * count3 element estimate; elem_pos_grow only fires for
+     * documents that exceed the estimate (pathological shapes). */
+    if (est_elems > 32) {
+        size_t pos_cap = est_elems + 8;
+        doc->elem_pos = (struct leptris_elem_pos_entry*)
+            leptris_pool_alloc(pool, pos_cap * sizeof(*doc->elem_pos));
+        if (doc->elem_pos) doc->elem_pos_cap = pos_cap;
+    }
     doc->doc_pool_allocated = 1;
     doc->strict_mode = g_leptris_strict_mode;
     doc->pool = pool;
