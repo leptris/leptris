@@ -53,7 +53,20 @@ whole tree to assign ranks (#485 table).
 - [x] **C1** exact-ops profile (scratch_sb_repro vs serialbench-c
       bench.c BENCH bodies; fixture = serialbench/fixtures
       medium.xml).
-- [ ] **C2** offset fast path (DESIGNED, NOT LANDED — see below):
+- [x] **C2** offset fast path — PR #1847: unmutated documents
+      (mutation_version == 0) rank by `(base.line << 2 | bias)`;
+      mutated/unstamped take the table path unchanged. The hidden
+      consumer from the first attempt was the TABLE PATH ITSELF:
+      its post-sort adjacent-pointer compaction is load-bearing
+      (multi-context steps shed cross-context duplicates through
+      it), and the sort's merge must write into tmp — an in-place
+      merge clobbers unread idx[a] sources (the k==a case). doc
+      node ranks to the outside-the-tree tail exactly like the
+      table's INT64_MAX miss. Suite 2105/2105; doc_rank_table_put
+      gone from the exact-ops profile. The NEXT non-parse cost in
+      the row is the TODO-190 element-index build (axis_query_count
+      >= 2 builds it even for 3-query-fresh-doc workloads where it
+      never amortizes — a tuning lever, not a bug).
       unmutated parse-created documents (mutation_version == 0)
       rank by parse-time byte offset `(base.line << 2 | kind_bias)`
       — byte offsets ARE XPath document order (attrs sit inside the
