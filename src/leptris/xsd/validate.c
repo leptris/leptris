@@ -490,6 +490,35 @@ static int simple_is_numeric(struct leptris_xsd_schema* s,
     return 0;
 }
 
+/* XSD 1.1 xs:anyAttribute/@notQName hit test (moxml#460):
+ * ##defined resolves against the schema's top-level attribute
+ * declarations; prefix-less literals match no-namespace attribute
+ * names; prefixed QNames are deferred (instance-side prefix
+ * resolution). */
+static int attr_not_qname_hits(const char* tokens,
+                               struct leptris_xsd_schema* s,
+                               const char* local) {
+    const char* p = tokens;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+               *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (len == 9 && strncmp(start, "##defined", 9) == 0) {
+            if (xsd_attr_name_defined(s, local)) return 1;
+            continue;
+        }
+        if (memchr(start, ':', len)) continue; /* prefixed: deferred */
+        if (strlen(local) == len && strncmp(local, start, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 /* xs:anyAttribute grammar: ##any (or an absent attribute),
  * ##other, ##targetNamespace, ##local, or a space-separated URI
  * list. target_ns may be NULL or "" — an ABSENT unit tns: ##other
@@ -601,13 +630,23 @@ static void validate_attributes(struct xsd_validator* v,
          * bug141333/anyAttr-derive2/nvdcve false-rejection family). */
         if (auri && strcmp(auri, "http://www.w3.org/2001/XMLSchema-instance") == 0)
             continue;
+        if (ta && ta->any_attr_not_qname &&
+            attr_not_qname_hits(ta->any_attr_not_qname, s, local)) {
+            /* XSD 1.1 notQName: the wildcard never admits this
+             * name, declared or not (moxml#460). */
+            verrf_atk(v, elem, "attribute-use", local, "attribute",
+                      local, "excluded by notQName");
+            continue;
+        }
         /* extension union: an attribute is allowed when it matches the
          * derived type's wildcard OR the base type's (the spec's
          * attribute-wildcard union; #1691 anyAttr-derive family) */
         /* #1735: each wildcard resolves against its DECLARING
          * unit's tns (recorded at capture); the merged schema's tns
          * is the fallback */
-        if ((ta && ta->any_attr_ns &&
+        /* moxml#460: a notQName-only wildcard (no @namespace) is
+         * still a live wildcard — absent @namespace means ##any. */
+        if ((ta && (ta->any_attr_ns || ta->any_attr_not_qname) &&
              any_attr_matches(ta->any_attr_ns, auri,
                               ta->any_attr_unit_ns
                                   ? ta->any_attr_unit_ns

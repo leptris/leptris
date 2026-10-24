@@ -148,6 +148,34 @@ static void cm_build_occurrence(CmNfa* n, XsdCm* node, int from, int to) {
 
 /* ---- namespace filter (xs:any/@namespace) ------------------------ */
 
+/* XSD 1.1 notQName hit test (moxml#460): ##defined matches a name
+ * the schema declares globally; prefix-less literals match
+ * no-namespace names; prefixed QNames are not resolved here. */
+static int cm_not_qname_hits(const char* tokens,
+                             struct leptris_xsd_schema* s,
+                             const char* local, const char* uri) {
+    const char* p = tokens;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+               *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (len == 9 && strncmp(start, "##defined", 9) == 0) {
+            if (xsd_element_name_defined(s, local, uri)) return 1;
+            continue;
+        }
+        if (memchr(start, ':', len)) continue; /* prefixed: deferred */
+        if (uri == NULL && strlen(local) == len &&
+            strncmp(local, start, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 static int any_ns_matches(XsdCm* any, const char* uri,
                           const char* target_ns) {
     const char* f = any->any_ns ? any->any_ns : "##any";
@@ -291,10 +319,23 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                 } else if (p->kind == XSD_CM_ANY) {
                     /* #1735: ##targetNamespace/##other are relative
                      * to the DECLARING unit's tns */
-                    if (any_ns_matches(p, uri,
-                                       p->any_unit_tns ? p->any_unit_tns
-                                                       : target_ns))
-                        ss_add(&next, tr->to);
+                    if (!any_ns_matches(p, uri,
+                                        p->any_unit_tns
+                                            ? p->any_unit_tns
+                                            : target_ns))
+                        continue;
+                    /* XSD 1.1 notQName (moxml#460): a hit on the
+                     * negative list excludes the name regardless of
+                     * the positive filter. ##defined resolves against
+                     * the schema's global element declarations;
+                     * prefix-less literals compare no-namespace
+                     * names; prefixed QNames are deferred (they need
+                     * instance-side prefix resolution). */
+                    if (p->not_qname &&
+                        cm_not_qname_hits(p->not_qname, n.s,
+                                          names[c], uri))
+                        continue;
+                    ss_add(&next, tr->to);
                 }
             }
         }
