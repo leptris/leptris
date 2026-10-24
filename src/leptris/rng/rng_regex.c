@@ -116,6 +116,42 @@ static int cls_has(const RreNode* n, unsigned char c) {
 }
 
 /* [...] — after the '['. */
+/* XSD Part 2 Appendix F block escapes: name -> inclusive byte
+ * range. The byte-class matcher serves blocks that fit below
+ * 0x100 exactly; the table extends with the full Unicode block
+ * list when the classes go codepoint-wide (moxml#464). */
+typedef struct {
+    const char* name;
+    unsigned lo;
+    unsigned hi;
+} RreBlock;
+
+static const RreBlock rre_blocks[] = {
+    {"IsBasicLatin", 0x00, 0x7F},
+    {"IsLatin-1Supplement", 0x80, 0xFF},
+};
+
+static int rre_block_range(const char* name, size_t len, unsigned* lo,
+                           unsigned* hi) {
+    for (size_t i = 0; i < sizeof(rre_blocks) / sizeof(rre_blocks[0]);
+         i++) {
+        if (strlen(rre_blocks[i].name) == len &&
+            memcmp(name, rre_blocks[i].name, len) == 0) {
+            *lo = rre_blocks[i].lo;
+            *hi = rre_blocks[i].hi;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The Cc category (control bytes) rides the same table shape. */
+static int rre_block_cc(unsigned* lo, unsigned* hi) {
+    *lo = 0x00;
+    *hi = 0x1F;
+    return 1; /* the 0x7F and 0x80-0x9F pieces set by the caller */
+}
+
 static RreNode* parse_class(RreParser* ps) {
     RreNode* n = node_new(RRE_CLASS);
     if (!n) return NULL;
@@ -139,24 +175,22 @@ static RreNode* parse_class(RreParser* ps) {
                 return NULL;
             }
             size_t len = (size_t)(close - ps->p);
-            int hit = 0;
-            if (len == 12 && memcmp(ps->p, "IsBasicLatin", 12) == 0) {
-                for (int i = 0x00; i <= 0x7F; i++) cls_add(n, (unsigned char)i);
-                hit = 1;
-            } else if (len == 19 &&
-                       memcmp(ps->p, "IsLatin-1Supplement", 19) == 0) {
-                for (int i = 0x80; i <= 0xFF; i++) cls_add(n, (unsigned char)i);
-                hit = 1;
-            } else if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
-                for (int i = 0x00; i <= 0x1F; i++) cls_add(n, (unsigned char)i);
-                cls_add(n, 0x7F);
-                for (int i = 0x80; i <= 0x9F; i++) cls_add(n, (unsigned char)i);
+            unsigned lo = 0, hi = 0;
+            int hit = rre_block_range(ps->p, len, &lo, &hi);
+            if (!hit && len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
+                rre_block_cc(&lo, &hi);
                 hit = 1;
             }
             if (!hit) {
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
+            }
+            for (unsigned i = lo; i <= hi; i++) cls_add(n, (unsigned char)i);
+            if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
+                cls_add(n, 0x7F);
+                for (int i = 0x80; i <= 0x9F; i++)
+                    cls_add(n, (unsigned char)i);
             }
             ps->p = close + 1;
             continue;
@@ -262,6 +296,43 @@ static RreNode* parse_atom(RreParser* ps) {
     }
     if (*ps->p == '\\' && ps->p[1]) {
         char e = ps->p[1];
+        if (e == 'p' || e == 'P') {
+            /* XSD block-escape ATOM (moxml#464): \p{IsBLOCK} /
+             * \P{IsBLOCK} — a class node of the block's byte
+             * range, complemented for \P. The byte-class matcher
+             * serves blocks below 0x100 exactly. */
+            if (ps->p[2] != '{') {
+                ps->bad = 1;
+                return NULL;
+            }
+            ps->p += 3;
+            const char* close = strchr(ps->p, '}');
+            if (!close) {
+                ps->bad = 1;
+                return NULL;
+            }
+            size_t len = (size_t)(close - ps->p);
+            unsigned lo = 0, hi = 0;
+            if (!rre_block_range(ps->p, len, &lo, &hi)) {
+                ps->bad = 1;
+                return NULL;
+            }
+            ps->p = close + 1;
+            RreNode* n = node_new(RRE_CLASS);
+            if (!n) return NULL;
+            for (unsigned i = lo; i <= hi; i++)
+                cls_add(n, (unsigned char)i);
+            if (e == 'P') {
+                /* Complement via the builtin-negation pattern: the
+                 * in-place ~ loop misbehaved at runtime (bits
+                 * unchanged) — memcpy-free and explicit. */
+                unsigned char inv[32];
+                for (int i = 0; i < 32; i++)
+                    inv[i] = (unsigned char)~n->cls[i];
+                memcpy(n->cls, inv, sizeof(n->cls));
+            }
+            return n;
+        }
         if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' ||
             e == 'S' || e == 'i' || e == 'I' || e == 'c' || e == 'C') {
             ps->p += 2;
