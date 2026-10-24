@@ -79,8 +79,10 @@ static struct {
 #include <intrin.h>
 static volatile long g_retain_lock;
 static void retain_lock(void) {
+    /* Pure-CAS spin: the secondary plain read of the lock variable
+     * is a non-atomic access racing the atomics on other threads
+     * (TSan, surfaced by the worker-exit drain). CAS-only spins. */
     while (_InterlockedCompareExchange(&g_retain_lock, 1, 0)) {
-        while (g_retain_lock) { /* spin */ }
     }
 }
 static void retain_unlock(void) { _InterlockedExchange(&g_retain_lock, 0); }
@@ -88,7 +90,6 @@ static void retain_unlock(void) { _InterlockedExchange(&g_retain_lock, 0); }
 static volatile int g_retain_lock;
 static void retain_lock(void) {
     while (!__sync_bool_compare_and_swap(&g_retain_lock, 0, 1)) {
-        while (g_retain_lock) { /* spin */ }
     }
 }
 static void retain_unlock(void) { __sync_lock_release(&g_retain_lock); }
