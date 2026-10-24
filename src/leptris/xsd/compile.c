@@ -3412,6 +3412,12 @@ LEPTRIS_API int leptris_xsd_validate(LeptrisXsdSchema schema,
     return r;
 }
 
+LEPTRIS_API const char* leptris_xsd_version(LeptrisXsdSchema schema) {
+    struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
+    if (!s) return NULL;
+    return s->version_11 ? "1.1" : "1.0";
+}
+
 LEPTRIS_API size_t leptris_xsd_error_count(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return 0;

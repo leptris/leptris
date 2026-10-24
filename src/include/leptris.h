@@ -952,6 +952,16 @@ LEPTRIS_API int leptris_xsd_content_valid(
  * the schema). */
 LEPTRIS_API int leptris_xsd_validate(LeptrisXsdSchema schema,
                                      LeptrisDocument doc);
+/**
+ * Effective XSD version of a compiled schema ("1.1" or "1.0").
+ *
+ * "1.1" when the schema root carries @version="1.1" — the engine
+ * then applies 1.1 semantics (xs:alternative conditional type
+ * assignment, xs:assert evaluation). Any other root version, or no
+ * version attribute, is "1.0". The returned string is static and
+ * schema-independent; NULL for a NULL schema (moxml#460).
+ */
+LEPTRIS_API const char* leptris_xsd_version(LeptrisXsdSchema schema);
 LEPTRIS_API size_t leptris_xsd_error_count(LeptrisXsdSchema schema);
 LEPTRIS_API const char* leptris_xsd_error_at(LeptrisXsdSchema schema,
                                              size_t i);

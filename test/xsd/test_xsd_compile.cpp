@@ -3027,3 +3027,43 @@ TEST(XsdErrorReport, ValidDocumentYieldsZeroRows) {
     leptris_document_free(d);
     leptris_xsd_free(s);
 }
+
+// moxml#460 (1): version reporting — the facade and lutaml-xsd scope
+// 1.0-only checks against the effective version. "1.1" when the
+// schema root carries @version="1.1" (the engine applies 1.1
+// semantics for that flag: xs:alternative CTA, xs:assert), else
+// "1.0". The strings are static; NULL schema tolerated.
+TEST(XsdVersion, ReportsEffectiveVersion) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char v11[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " version=\"1.1\">"
+        "<xs:element name=\"e\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s11 = leptris_xsd_compile(v11, strlen(v11), &st);
+    ASSERT_NE(s11, (LeptrisXsdSchema)0) << "status " << (int)st;
+    EXPECT_STREQ(leptris_xsd_version(s11), "1.1");
+    leptris_xsd_free(s11);
+
+    const char v10[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"e\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s10 = leptris_xsd_compile(v10, strlen(v10), &st);
+    ASSERT_NE(s10, (LeptrisXsdSchema)0) << "status " << (int)st;
+    EXPECT_STREQ(leptris_xsd_version(s10), "1.0");
+    leptris_xsd_free(s10);
+
+    // a 1.0-style non-1.1 version string stays "1.0"
+    const char vother[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " version=\"1.0\">"
+        "<xs:element name=\"e\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema so = leptris_xsd_compile(vother, strlen(vother), &st);
+    ASSERT_NE(so, (LeptrisXsdSchema)0) << "status " << (int)st;
+    EXPECT_STREQ(leptris_xsd_version(so), "1.0");
+    leptris_xsd_free(so);
+
+    EXPECT_EQ(leptris_xsd_version(NULL), (const char*)0);
+}
