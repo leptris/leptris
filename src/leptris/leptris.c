@@ -561,8 +561,14 @@ LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length,
         return NULL;
     }
 
-    /* Parse the UTF-8 content */
-    struct leptris_document* doc = leptris_parse(utf8_xml, utf8_len);
+    /* Parse the UTF-8 content. The conversion buffer is heap-owned and
+     * the doc ADOPTS it as its xml_buffer (in-place discipline: the
+     * scanner mutates its own arena scratch and the parser NULs are
+     * restored, so xml_buffer stays byte-identical) — dropping the
+     * copy-in AND the arena's pristine carve (leptris#1846 slice 2:
+     * the input rode three spans per parse; allocation calls drop
+     * 125 -> 43 per parse). */
+    struct leptris_document* doc = leptris_parse_inplace(utf8_xml, utf8_len);
 
     /* Store detected encoding in document if parsed successfully */
     if (doc && detected_encoding) {
@@ -572,11 +578,10 @@ LEPTRIS_API LeptrisDocument leptris_parse_string(const char* xml, size_t length,
         doc->encoding = leptris_strdup(detected_encoding);
     }
 
-    /* leptris_parse() already heap-copied utf8_xml into doc->xml_buffer;
-     * the document's StringViews point into that inner copy.  Our
-     * conversion buffer is redundant — free it. */
-    if (utf8_xml != xml) {
-        free(utf8_xml);
+    if (doc) {
+        doc->xml_buffer_needs_free = 1; /* the doc owns the conversion buffer */
+    } else {
+        free(utf8_xml); /* no doc to adopt it */
     }
 
     if (detected_encoding) {
