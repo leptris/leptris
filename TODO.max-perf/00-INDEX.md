@@ -28,3 +28,7 @@ TODO.max-perf/node-layout-fork.md — 5 slices, addresses #1222 +
 The interleaved-parse rewrite (owner-directed 2026-09-20):
 TODO.max-perf/interleaved-parse.md — the #1222 step-change; slices 0-4,
 each CI-benchmark-gated.
+
+The C-face vs pugixml campaign (serialbench fair-flags wave, 2026-10-24):
+TODO.max-perf/15-c-face-vs-pugixml.md — parse 2.81x / generation 2.23x /
+xpath 3.48x; three tracks, CI-bench-gated. Track A1 shipped (PR #1844).
