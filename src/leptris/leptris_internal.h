@@ -363,6 +363,13 @@ struct leptris_document {
      * queries pay for the index. NULL until then. */
     struct leptris_element_index* element_index;
     unsigned axis_query_count;  /* axis queries seen without an index */
+/* The subtree index amortizes only when a document takes MORE axis
+ * queries than the build costs (~2 whole-tree walks, TODO 190
+ * profile). Parse-then-query-once-or-thrice workloads (serialbench's
+ * exact shape) never recover the build — the threshold keeps them on
+ * the walk path; long-lived documents build at the fourth and
+ * amortize from there. (#1842 Track C-tail.) */
+#define LEPTRIS_ELEMENT_INDEX_MIN_QUERIES 8u
 
     /* Document-order rank table (issue #485) — one preorder walk
      * assigns every node an integer rank used to sort merged
