@@ -80,6 +80,13 @@ typedef struct xsd_assert {
     struct xsd_assert* next;
 } XsdAssert;
 
+/* Negative-wildcard predicates (moxml#460): the schema struct is
+ * compile.c-owned; the matchers see these two. */
+int xsd_element_name_defined(struct leptris_xsd_schema* s,
+                             const char* local, const char* uri);
+int xsd_attr_name_defined(struct leptris_xsd_schema* s,
+                          const char* local);
+
 /* One validation finding (slice 4). text is malloc'd; kind and
  * component are BORROWED (static names / schema-owned component
  * names — both outlive the per-validate list). #1841 added the
@@ -114,6 +121,9 @@ typedef struct xsd_cm {
                      * capture time (forward ref) — folded by the
                      * post-capture resolver (leptris-ruby#440 A) */
     char* any_ns; /* CM_ANY: the namespace attribute grammar */
+    char* not_qname; /* XSD 1.1 xs:any/@notQName (moxml#460): space-
+                      * separated ##defined / no-prefix literals;
+                      * prefixed QNames need instance-ns resolution */
     /* #1735: the target namespace of the unit DECLARING the
      * wildcard — ##targetNamespace/##other are unit-relative and
      * the merged schema keeps only the main unit's tns */
@@ -214,6 +224,7 @@ typedef struct xsd_type_attrs {
     char* type_name;
     char* ns;           /* leptris-ruby#440: declaring schema's tns */
     char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
+    char* any_attr_not_qname; /* XSD 1.1 xs:anyAttribute/@notQName */
     char* any_attr_base_ns; /* extension: the base type's wildcard (union) */
     /* #1735: declaring unit's tns for each wildcard above */
     char* any_attr_unit_ns;

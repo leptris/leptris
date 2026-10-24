@@ -3067,3 +3067,102 @@ TEST(XsdVersion, ReportsEffectiveVersion) {
 
     EXPECT_EQ(leptris_xsd_version(NULL), (const char*)0);
 }
+
+// moxml#460: XSD 1.1 negative wildcards — notQName on xs:any and
+// xs:anyAttribute. A name hit on the negative list rejects the
+// particle REGARDLESS of the positive namespace filter; ##defined
+// resolves against the schema's own declarations. Prefixed literal
+// QNames need instance-side prefix resolution and are deferred.
+TEST(XsdNegativeWildcard, NotQNameDefinedRejectsDeclaredElement) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"known\" type=\"xs:string\"/>"
+        "<xs:element name=\"holder\">"
+        "<xs:complexType>"
+        "<xs:sequence>"
+        "<xs:any namespace=\"##any\" notQName=\"##defined\""
+        " minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+
+    // an UNDEFINED foreign element passes the wildcard
+    const char ok[] = "<holder><undefined/></holder>";
+    LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+
+    // the DECLARED element is excluded by notQName="##defined"
+    const char bad[] = "<holder><known/></holder>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdNegativeWildcard, NotQNameLiteralExcludesNoNamespaceName) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"holder\">"
+        "<xs:complexType>"
+        "<xs:sequence>"
+        "<xs:any namespace=\"##any\" notQName=\"banned\""
+        " minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+
+    const char ok[] = "<holder><fine/></holder>";
+    LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+
+    const char bad[] = "<holder><banned/></holder>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdNegativeWildcard, AnyAttributeNotQNameDefined) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:attribute name=\"kind\" type=\"xs:string\"/>"
+        "<xs:element name=\"holder\">"
+        "<xs:complexType>"
+        "<xs:attribute name=\"own\" type=\"xs:string\"/>"
+        "<xs:anyAttribute notQName=\"##defined\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+
+    // an undefined foreign attribute passes the wildcard
+    const char ok[] = "<holder own=\"1\" foreign=\"2\"/>";
+    LeptrisDocument d = leptris_parse_string(ok, strlen(ok), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+
+    // the DECLARED global attribute is excluded by ##defined
+    const char bad[] = "<holder own=\"1\" kind=\"x\"/>";
+    LeptrisDocument b = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
