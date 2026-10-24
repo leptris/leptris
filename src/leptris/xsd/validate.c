@@ -26,10 +26,7 @@ extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
                                   const XsdSimple* t, const char* v);
 
-struct xsd_error {
-    char* text;
-    struct xsd_error* next;
-};
+
 
 struct leptris_xsd_schema; /* opaque here; compile.c owns the struct */
 
@@ -71,7 +68,9 @@ struct xsd_validator {
     size_t count;
 };
 
-static void verr_push(struct xsd_validator* v, const char* msg) {
+static void verr_push_full(struct xsd_validator* v, const char* kind,
+                           const char* component, int line, int column,
+                           const char* msg) {
     struct xsd_error* e = (struct xsd_error*)malloc(sizeof(*e));
     if (!e) return;
     size_t n = strlen(msg) + 1;
@@ -81,6 +80,10 @@ static void verr_push(struct xsd_validator* v, const char* msg) {
         return;
     }
     memcpy(e->text, msg, n);
+    e->kind = kind;
+    e->component = component;
+    e->line = line;
+    e->column = column;
     e->next = NULL;
     if (v->tail)
         v->tail->next = e;
@@ -90,23 +93,25 @@ static void verr_push(struct xsd_validator* v, const char* msg) {
     v->count++;
 }
 
-static void verrf(struct xsd_validator* v, const char* what,
-                  const char* name, const char* detail) {
+static void verrfk(struct xsd_validator* v, const char* kind,
+                   const char* what, const char* name,
+                   const char* detail) {
     /* "element 'x': detail" — bounded composition */
     char buf[256];
     int w = snprintf(buf, sizeof(buf), "%s '%s': %s", what,
                      name ? name : "?", detail ? detail : "invalid");
     (void)w;
-    verr_push(v, buf);
+    verr_push_full(v, kind, name, 0, 0, buf);
 }
 
 /* leptris-ruby#419: instance-side errors carry the owning element
  * and its source position (libxml2/Nokogiri shape). The element's
  * own name rides the prefix; the position comes from the recorded
  * source stamp (0 = unlocated — a skipped-positions parse). */
-static void verrf_at(struct xsd_validator* v, LeptrisElement elem,
-                     const char* what, const char* name,
-                     const char* detail) {
+static void verrf_atk(struct xsd_validator* v, LeptrisElement elem,
+                      const char* kind, const char* component,
+                      const char* what, const char* name,
+                      const char* detail) {
     char buf[320];
     const char* el = NULL;
     leptris_element_expanded_name(elem, &el, NULL, NULL);
@@ -129,7 +134,7 @@ static void verrf_at(struct xsd_validator* v, LeptrisElement elem,
                      el, what, name ? name : "?",
                      detail ? detail : "invalid");
     (void)w;
-    verr_push(v, buf);
+    verr_push_full(v, kind, component, line, col, buf);
 }
 
 /* ---- lexical helpers ---------------------------------------------- */
@@ -206,11 +211,19 @@ static int text_valid(struct xsd_validator* v,
     free(collapsed);
     if (r == 0) {
         if (elem)
-            verrf_at(v, elem, what, name,
-                     "lexical value does not match its type");
+            verrf_atk(v, elem,
+                      strcmp(what, "attribute") == 0
+                          ? "attribute-use"
+                          : "simpleType-facet",
+                      name, what, name,
+                      "lexical value does not match its type");
         else
-            verrf(v, what, name,
-                  "lexical value does not match its type");
+            verrfk(v,
+                   strcmp(what, "attribute") == 0
+                       ? "attribute-use"
+                       : "simpleType-facet",
+                   what, name,
+                   "lexical value does not match its type");
         return 0;
     }
     /* XSD 1.1 xs:assertion facet (document validation only):
@@ -261,7 +274,7 @@ static int text_valid(struct xsd_validator* v,
                 leptris_xpath_result_free(r2);
             }
             if (!ebv) {
-                verrf(v, what, name, "assertion failed");
+                verrfk(v, "assertion", what, name, "assertion failed");
                 return 0;
             }
         }
@@ -298,8 +311,11 @@ static void validate_children(struct xsd_validator* v,
             LeptrisElement ce = (LeptrisElement)c;
             const char* cl = NULL;
             leptris_element_expanded_name(ce, &cl, NULL, NULL);
-            verrf_at(v, elem, "element", cl ? cl : "",
-                     "not allowed: the content model is empty");
+            const char* pn = NULL;
+            leptris_element_expanded_name(elem, &pn, NULL, NULL);
+            verrf_atk(v, elem, "content-model", pn ? pn : "",
+                      "element", cl ? cl : "",
+                      "not allowed: the content model is empty");
         }
         return;
     }
@@ -379,7 +395,8 @@ static void validate_children(struct xsd_validator* v,
                      ? "children do not match the content model (at '%s')"
                      : "children do not match the content model",
                  culprit ? culprit : "");
-        verrf_at(v, elem, "element", local, msg);
+        verrf_atk(v, elem, "content-model", local, "element", local,
+                  msg);
         free(names);
         free(uris);
     }
@@ -434,8 +451,8 @@ static void validate_children(struct xsd_validator* v,
             xsd_resolve_qname_inst(ce, cxsi, xuri, sizeof(xuri),
                                    xlocal, sizeof(xlocal));
             if (!xlocal[0]) {
-                verrf_at(v, ce, "element", cl,
-                         "xsi:type prefix is not bound in the instance");
+                verrf_atk(v, ce, "type-resolution", cl, "element", cl,
+                          "xsi:type prefix is not bound in the instance");
             } else {
                 validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi);
             }
@@ -549,15 +566,15 @@ static void validate_attributes(struct xsd_validator* v,
         }
         if (!val) {
             if (a->required)
-                verrf_at(v, elem, "attribute", a->name,
-                         "required but absent");
+                verrf_atk(v, elem, "attribute-use", a->name, "attribute",
+                          a->name, "required but absent");
             continue;
         }
         text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
                    a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0)
-            verrf_at(v, elem, "attribute", a->name,
-                     "value does not match the fixed value");
+            verrf_atk(v, elem, "attribute-use", a->name, "attribute",
+                      a->name, "value does not match the fixed value");
     }
     /* strict: every instance attribute must be declared (or pass
      * the type's xs:anyAttribute grammar). Namespace declarations
@@ -601,8 +618,8 @@ static void validate_attributes(struct xsd_validator* v,
                                   ? ta->any_attr_base_unit_ns
                                   : xsd_target_ns(s))))
             continue;
-        verrf_at(v, elem, "attribute", local,
-                 "not declared (strict)");
+        verrf_atk(v, elem, "attribute-use", local, "attribute", local,
+                  "not declared (strict)");
     }
 }
 
@@ -619,7 +636,8 @@ static void validate_element(struct xsd_validator* v,
     if (!d) {
         /* strict: the instance uses an element the schema never
          * declared (a local particle would have typed it) */
-        verrf_at(v, elem, "element", local, "not declared (strict)");
+        verrf_atk(v, elem, "element-decl", local, "element", local,
+                  "not declared (strict)");
         return;
     }
 
@@ -645,8 +663,8 @@ static void validate_element(struct xsd_validator* v,
     if (d->fixed) {
         const char* text = leptris_element_text(elem);
         if (text && *text && strcmp(text, d->fixed) != 0)
-            verrf(v, "element", local,
-                  "content does not match the fixed value");
+            verrfk(v, "content-model", "element", local,
+               "content does not match the fixed value");
     }
     /* XSD 1.0 §2.6.2/§3.3.4 (moxml#433): xsi:type on the instance
      * names the type definition this element is assessed against —
@@ -662,8 +680,9 @@ static void validate_element(struct xsd_validator* v,
         xsd_resolve_qname_inst(elem, xsi_q, xuri, sizeof(xuri),
                                xlocal, sizeof(xlocal));
         if (!xlocal[0]) {
-            verrf_at(v, elem, "element", local,
-                     "xsi:type prefix is not bound in the instance");
+            verrf_atk(v, elem, "type-resolution", local, "element",
+                      local,
+                      "xsi:type prefix is not bound in the instance");
             return;
         }
         validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q);
@@ -713,7 +732,8 @@ static void validate_local_uri(struct xsd_validator* v,
                 }
             }
             if (!ebv)
-                verrf(v, "assertion", local, a->test ? a->test
+                verrfk(v, "assertion", "assertion", local,
+                       a->test ? a->test
                                                      : "(invalid)");
         }
         if (ct->text_type) {
@@ -775,11 +795,12 @@ static void validate_local_uri(struct xsd_validator* v,
                  "xsi:type '%s' does not resolve to a type in the "
                  "schema",
                  xsi_q);
-        verrf_at(v, elem, "element", local, msg);
+        verrf_atk(v, elem, "type-resolution", local, "element", local,
+                  msg);
         return;
     }
-    verrf_at(v, elem, "element", local,
-             "type not found in the schema");
+    verrf_atk(v, elem, "type-resolution", local, "element", local,
+              "type not found in the schema");
 }
 
 /* ---- slice 6: identity constraints -------------------------------- */
@@ -886,8 +907,8 @@ static void validate_ics(struct xsd_validator* v,
                 if (!vals[k] || !vals[k][0]) missing = 1;
             if (missing) {
                 if (ic->kind == 0)
-                    verrf(v, "key", ic->name,
-                          "a selected node is missing a field value");
+                    verrfk(v, "identity-constraint", "key", ic->name,
+                           "a selected node is missing a field value");
                 for (size_t k = 0; k < nv; k++) free(vals[k]);
                 continue;
             }
@@ -906,7 +927,8 @@ static void validate_ics(struct xsd_validator* v,
                     }
                 }
                 if (dup) {
-                    verrf(v, ic->kind == 0 ? "key" : "unique",
+                    verrfk(v, "identity-constraint",
+                       ic->kind == 0 ? "key" : "unique",
                           ic->name, "duplicate key tuple");
                 }
                 table_add(tables, ic->name, vals, nv);
@@ -942,7 +964,7 @@ static void resolve_keyrefs(struct xsd_validator* v,
                 if (eq) { found = 1; break; }
             }
             if (!found)
-                verrf(v, "keyref", rt->name,
+                verrfk(v, "identity-constraint", "keyref", rt->name,
                       "reference does not resolve to any key");
         }
     }
@@ -1028,4 +1050,14 @@ const char* xsd_validator_error_at(struct xsd_validator* v, size_t i) {
     struct xsd_error* e = v->errors;
     for (size_t k = 0; e && k < i; k++) e = e->next;
     return e ? e->text : NULL;
+}
+
+/* #1841: the whole node — the report materializer reads the
+ * structured fields beside the text. */
+const struct xsd_error* xsd_validator_error_entry(
+    struct xsd_validator* v, size_t i) {
+    if (!v) return NULL;
+    struct xsd_error* e = v->errors;
+    for (size_t k = 0; e && k < i; k++) e = e->next;
+    return e;
 }

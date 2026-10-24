@@ -80,6 +80,19 @@ typedef struct xsd_assert {
     struct xsd_assert* next;
 } XsdAssert;
 
+/* One validation finding (slice 4). text is malloc'd; kind and
+ * component are BORROWED (static names / schema-owned component
+ * names — both outlive the per-validate list). #1841 added the
+ * structured fields beside the text. */
+struct xsd_error {
+    char* text;
+    const char* kind;
+    const char* component;
+    int line;
+    int column;
+    struct xsd_error* next;
+};
+
 /* Content-model node: a particle (element ref / wildcard) or a
  * group (sequence | choice | all). Owned by the schema; freed
  * with the schema. */

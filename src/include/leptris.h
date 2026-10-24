@@ -955,6 +955,37 @@ LEPTRIS_API int leptris_xsd_validate(LeptrisXsdSchema schema,
 LEPTRIS_API size_t leptris_xsd_error_count(LeptrisXsdSchema schema);
 LEPTRIS_API const char* leptris_xsd_error_at(LeptrisXsdSchema schema,
                                              size_t i);
+
+/**
+ * One XSD validation finding, in the structured report shape
+ * (#1841 — mirrors LeptrisRngErrorRecord). Returned as a
+ * whole-list report via leptris_xsd_error_report(); no
+ * per-index stitching. All strings are schema-owned and live
+ * until the next validate call or leptris_xsd_free.
+ */
+typedef struct {
+    const char* kind;     /* failure class, stable name:
+                           * "element-decl", "attribute-use",
+                           * "content-model", "simpleType-facet",
+                           * "type-resolution", "assertion",
+                           * "identity-constraint" */
+    const char* component; /* declaring schema component's name
+                            * (qualified where namespaced), or NULL */
+    unsigned line;        /* instance source line, 0 when unknown */
+    unsigned column;      /* instance source column, 0 when unknown */
+    const char* message;  /* unchanged leptris_xsd_error_at text */
+} LeptrisXsdErrorRecord;
+
+/**
+ * Get the full XSD validation report in one call (#1841).
+ *
+ * @param schema  schema handle after a leptris_xsd_validate call
+ * @param out     receives the schema-owned record array (NULL when
+ *                the count is 0; left untouched on a NULL schema)
+ * @return        record count; 0 for a valid document
+ */
+LEPTRIS_API size_t leptris_xsd_error_report(
+    LeptrisXsdSchema schema, const LeptrisXsdErrorRecord** out);
 /* Validate an instance document against the parsed schema
  * (phase-2 core subset: element/attribute/text/data/value/
  * choice/group/interleave/repeats/ref). Returns 1 valid; on 0,

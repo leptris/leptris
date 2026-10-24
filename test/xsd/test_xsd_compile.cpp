@@ -2946,3 +2946,84 @@ TEST(XsdConformanceClauses, XsiTypeAtDepthParticleTypedChild) {
 }
 
 }  // namespace
+
+// #1841: structured error rows — {kind, component, line, column,
+// message} mirrors the RNG report shape (#1126). The message text
+// stays byte-identical to leptris_xsd_error_at (compat); the new
+// fields carry what verrf already knew at push time, un-flattened.
+TEST(XsdErrorReport, StructuredRowsCarryKindComponentPosition) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"note\">"
+        "<xs:complexType>"
+        "<xs:sequence>"
+        "<xs:element name=\"to\" type=\"xs:string\"/>"
+        "<xs:element name=\"from\" type=\"xs:string\"/>"
+        "</xs:sequence>"
+        "<xs:attribute name=\"id\" type=\"xs:integer\" use=\"required\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    // id="abc" fails the integer lexical; <to> is missing from the
+    // sequence — two findings, two classes, same instance position.
+    const char doc[] =
+        "<note id=\"abc\"><from>a</from></note>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    size_t n = leptris_xsd_error_count(s);
+    ASSERT_EQ(n, (size_t)2);
+
+    const LeptrisXsdErrorRecord* rows = NULL;
+    size_t rn = leptris_xsd_error_report(s, &rows);
+    ASSERT_EQ(rn, (size_t)2);
+    ASSERT_NE(rows, (const LeptrisXsdErrorRecord*)0);
+
+    int saw_attr = 0, saw_model = 0;
+    for (size_t i = 0; i < rn; i++) {
+        // message compat: the row text IS the enumerated string
+        EXPECT_STREQ(rows[i].message, leptris_xsd_error_at(s, i));
+        // instance position carried structurally, not just in prose
+        EXPECT_EQ(rows[i].line, 1u);
+        EXPECT_GT(rows[i].column, 0u);
+        if (strcmp(rows[i].kind, "attribute-use") == 0) {
+            saw_attr = 1;
+            EXPECT_STREQ(rows[i].component, "id");
+        } else if (strcmp(rows[i].kind, "content-model") == 0) {
+            saw_model = 1;
+            EXPECT_STREQ(rows[i].component, "note");
+        } else {
+            ADD_FAILURE() << "unexpected kind " << rows[i].kind;
+        }
+    }
+    EXPECT_TRUE(saw_attr);
+    EXPECT_TRUE(saw_model);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// A valid document reports zero rows and leaves the out-pointer
+// untouched-NULL; the handle stays reusable for the next validate.
+TEST(XsdErrorReport, ValidDocumentYieldsZeroRows) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"note\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char doc[] = "<note>hi</note>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    const LeptrisXsdErrorRecord* rows = (const LeptrisXsdErrorRecord*)1;
+    EXPECT_EQ(leptris_xsd_error_report(s, &rows), (size_t)0);
+    EXPECT_EQ(rows, (const LeptrisXsdErrorRecord*)0);
+    // NULL schema tolerated like the count accessor.
+    EXPECT_EQ(leptris_xsd_error_report(NULL, &rows), (size_t)0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
