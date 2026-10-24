@@ -41,12 +41,36 @@ validation 2.8% | elem_pos journal ~2.5%.
 
 ## Track C — xpath (3.48x — the widest)
 
-- [ ] **C1** profile the three serialbench queries on the parsed DOM
-      (compile once + eval per iteration vs the harness's exact
-      call shape; pins whether compile or eval dominates).
-- [ ] **C2** levers from C1: expected candidates — axis step
-      dispatch (indirect calls), node-set assembly allocs per step,
-      the doc-order rank table, predicate evaluation allocs.
+**C0 (measured, 2026-10-24):** the serialbench xpath ROW re-parses
+inside the timed loop (bench.c: `leptris_parse_string` + 3 evals per
+iteration) — the row inherits the parse gap. On the exact ops
+(306KB canonical medium.xml), the dominant NON-parse cost is the
+document-order rank-table build per fresh document:
+`doc_rank_table_put` 337 + `index_walk` 78 + zeroing 29 of ~900
+non-parse samples — every query on every fresh doc re-walks the
+whole tree to assign ranks (#485 table).
+
+- [x] **C1** exact-ops profile (scratch_sb_repro vs serialbench-c
+      bench.c BENCH bodies; fixture = serialbench/fixtures
+      medium.xml).
+- [ ] **C2** offset fast path (DESIGNED, NOT LANDED — see below):
+      unmutated parse-created documents (mutation_version == 0)
+      rank by parse-time byte offset `(base.line << 2 | kind_bias)`
+      — byte offsets ARE XPath document order (attrs sit inside the
+      start tag; ns/attr/xpath-text biases 1/2/3 on the owner's
+      offset). No walk, no hash. A first implementation reproduced
+      EXACTLY (doc node must rank to the outside-the-tree tail like
+      the table path) but 8 XPathResults/SubtreeIndex/Ledger tests
+      still failed: the eval ITSELF produced different node sets
+      when the sort skipped the table build — some step-dedup or
+      ordering consumer depends on the table's side effect
+      (doc_order_index population), not just the ranks. The
+      reproduce-in-one-file probe: parse kSubtree (test_xpath.cpp),
+      eval //item then //section//item — fast mode duplicates the
+      nested item 5x. NEXT SESSION: find the consumer (candidates:
+      the vm's descendant chain dedup assumptions, or a hidden
+      doc_order_index reader behind a macro), or gate the fast path
+      to the FINAL result sort only.
 - [ ] **C3** mingw/Windows parity investigation: we are AT parity
       there — diff the codegen assumptions (branch-heavy loops?
       LTO behavior on gcc-win vs clang-mac?) and port whatever
