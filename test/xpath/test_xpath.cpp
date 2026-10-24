@@ -725,9 +725,14 @@ const char kSubtree[] =
  * would be tested. */
 LeptrisXPathResult EvalWarm(LeptrisDocument doc, LeptrisElement ctx,
                            const char* expr) {
-    LeptrisXPathResult warm =
-        leptris_xpath_eval(doc, nullptr, "//warmup-absent");
-    if (warm) leptris_xpath_result_free(warm);
+    /* One warm-up per query below the index threshold
+     * (LEPTRIS_ELEMENT_INDEX_MIN_QUERIES): the warm-ups + the real
+     * query cross it, so the asserted path IS the index path. */
+    for (int i = 0; i < 7; i++) {  /* threshold is 8 (internal.h) */
+        LeptrisXPathResult warm =
+            leptris_xpath_eval(doc, nullptr, "//warmup-absent");
+        if (warm) leptris_xpath_result_free(warm);
+    }
     return leptris_xpath_eval(doc, ctx, expr);
 }
 

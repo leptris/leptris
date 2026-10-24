@@ -410,7 +410,7 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
     /* TODO 190: build on the SECOND axis query. The build costs
      * two tree walks + per-name bucket allocations; a document
      * that sees one query pays less walking directly. */
-    if (!idx && ++ctx_doc->axis_query_count >= 2) {
+    if (!idx && ++ctx_doc->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
         idx = leptris_element_index_build(ctx_doc);
         ctx_doc->element_index = idx;
     }
@@ -908,7 +908,7 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
         /* TODO 190: build on the SECOND axis query. The build costs
          * two tree walks + per-name bucket allocations; a document
          * that sees one query pays less walking directly. */
-        if (!idx && ++ctx->document->axis_query_count >= 2) {
+        if (!idx && ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
             idx = leptris_element_index_build(ctx->document);
             ctx->document->element_index = idx;
         }
@@ -1017,7 +1017,7 @@ struct leptris_xpath_result* vm_apply_axis_descendant(XPathContext* ctx, XPathVM
      * hits instead of a subtree walk. */
     if (!wild && ctx && ctx->document && input->count > 0) {
         struct leptris_element_index* idx = ctx->document->element_index;
-        if (!idx && ++ctx->document->axis_query_count >= 2) {
+        if (!idx && ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
             idx = leptris_element_index_build(ctx->document);
             ctx->document->element_index = idx;
         }
@@ -1241,7 +1241,7 @@ static struct leptris_xpath_result* vm_apply_axis_descendant_pred_attr(
         /* TODO 190: build on the SECOND axis query. The build costs
          * two tree walks + per-name bucket allocations; a document
          * that sees one query pays less walking directly. */
-        if (!idx && ++ctx->document->axis_query_count >= 2) {
+        if (!idx && ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
             idx = leptris_element_index_build(ctx->document);
             ctx->document->element_index = idx;
         }
@@ -1815,7 +1815,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 struct leptris_element_index* index =
                     (ctx && ctx->document) ? ctx->document->element_index : NULL;
                 if (!index && ctx && ctx->document &&
-                    ++ctx->document->axis_query_count >= 2) {
+                    ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
                     index = leptris_element_index_build(ctx->document);
                     ctx->document->element_index = index;
                 }
@@ -2151,7 +2151,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 struct leptris_element_index* index =
                     (ctx && ctx->document) ? ctx->document->element_index : NULL;
                 if (!index && ctx && ctx->document &&
-                    ++ctx->document->axis_query_count >= 2) {
+                    ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
                     index = leptris_element_index_build(ctx->document);
                     ctx->document->element_index = index;
                 }
@@ -2303,7 +2303,7 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                 struct leptris_element_index* index =
                     (ctx && ctx->document) ? ctx->document->element_index : NULL;
                 if (!index && ctx && ctx->document &&
-                    ++ctx->document->axis_query_count >= 2) {
+                    ++ctx->document->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
                     index = leptris_element_index_build(ctx->document);
                     ctx->document->element_index = index;
                 }
