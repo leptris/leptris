@@ -1468,6 +1468,26 @@ TEST(RngRegex, BlockEscapes) {
     EXPECT_EQ(rng_regex_matches("[\\p{IsBasicLatin}]{2}",
                                "a\xC3"), 0);
 }
+/* moxml#464 codepoint-wide: blocks above 0xFF ride the unicode
+ * ranges with UTF-8 decoding at match time. */
+TEST(RngRegex, BlockEscapesUnicode) {
+    // Greek: CE B1 = alpha
+    EXPECT_EQ(rng_regex_matches("\\p{IsGreek}", "\xCE\xB1"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{IsGreek}", "a"), 0);
+    EXPECT_EQ(rng_regex_matches("\\p{IsGreek}+", "\xCE\xB1\xCE\xB2"), 1);
+    // Cyrillic: D0 B4 = de
+    EXPECT_EQ(rng_regex_matches("\\p{IsCyrillic}+", "\xD0\xB4\xD0\xB0"), 1);
+    // negated atom: a is NOT Greek
+    EXPECT_EQ(rng_regex_matches("\\P{IsGreek}", "a"), 1);
+    EXPECT_EQ(rng_regex_matches("\\P{IsGreek}", "\xCE\xB1"), 0);
+    // mixed class: greek letters and ascii lowercase
+    EXPECT_EQ(rng_regex_matches("[\\p{IsGreek}a-z]+",
+                               "\xCE\xB1" "b" "\xCE\xB2"), 1);
+    // CJK smoke
+    EXPECT_EQ(rng_regex_matches("\\p{IsCJKUnifiedIdeographs}",
+                               "\xE4\xB8\x80"), 1);
+}
+
 TEST(RngRegex, ExactQuantifierIsClosed) {
     EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABC"), 1);
     EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABCD"), 0);

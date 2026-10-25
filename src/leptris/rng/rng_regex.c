@@ -39,7 +39,13 @@ typedef struct RreNode {
     struct RreNode* l;   /* CAT: first; ALT: left; REP: child */
     struct RreNode* r;   /* CAT: rest; ALT: right */
     unsigned char ch;    /* RRE_CHAR */
-    unsigned char cls[32]; /* RRE_CLASS bitmap */
+    unsigned char cls[32]; /* RRE_CLASS bitmap (bytes 0x00-0xFF) */
+    /* RRE_CLASS unicode ranges (blocks above 0xFF, moxml#464):
+     * a codepoint matches the class when it is in the bitmap OR in
+     * any uni range; neg flips the combined result. */
+    unsigned char uni_n;
+    unsigned uni_lo[4];
+    unsigned uni_hi[4];
     int neg;
     int lo, hi;          /* RRE_REP bounds; hi < 0 = unbounded */
 } RreNode;
@@ -115,6 +121,79 @@ static int cls_has(const RreNode* n, unsigned char c) {
     return n->neg ? !hit : hit;
 }
 
+/* Codepoint form (moxml#464): bytes 0x00-0xFF check the bitmap,
+ * higher codepoints check the unicode ranges; neg flips the
+ * combined result. */
+static int cls_has_cp(const RreNode* n, unsigned cp) {
+    int hit;
+    if (cp < 0x100) {
+        hit = (n->cls[cp >> 3] >> (cp & 7)) & 1;
+    } else {
+        hit = 0;
+        for (int i = 0; i < n->uni_n; i++) {
+            if (cp >= n->uni_lo[i] && cp <= n->uni_hi[i]) {
+                hit = 1;
+                break;
+            }
+        }
+    }
+    return n->neg ? !hit : hit;
+}
+
+/* Strict UTF-8 decode at s (text is well-formed UTF-8; malformed
+ * lead/continuation bytes degrade to single-byte handling). */
+static unsigned rre_decode_cp(const char* s, size_t avail, int* len) {
+    unsigned char c = (unsigned char)s[0];
+    int n;
+    unsigned cp;
+    if (c < 0x80) {
+        *len = 1;
+        return c;
+    }
+    if ((c & 0xE0) == 0xC0) {
+        n = 2;
+        cp = c & 0x1F;
+    } else if ((c & 0xF0) == 0xE0) {
+        n = 3;
+        cp = c & 0x0F;
+    } else if ((c & 0xF8) == 0xF0) {
+        n = 4;
+        cp = c & 0x07;
+    } else {
+        *len = 1;
+        return c;
+    }
+    if ((size_t)n > avail) {
+        *len = 1;
+        return c;
+    }
+    for (int i = 1; i < n; i++) {
+        unsigned char cc = (unsigned char)s[i];
+        if ((cc & 0xC0) != 0x80) {
+            *len = 1;
+            return c;
+        }
+        cp = (cp << 6) | (cc & 0x3F);
+    }
+    *len = n;
+    return cp;
+}
+
+/* Add a block range: byte-fitting blocks join the bitmap, higher
+ * blocks join the unicode ranges (cap 4 — one class atom carries at
+ * most a handful of block escapes; more fail loudly as before). */
+static int cls_add_block(RreNode* n, unsigned lo, unsigned hi) {
+    if (hi < 0x100) {
+        for (unsigned i = lo; i <= hi; i++) cls_add(n, (unsigned char)i);
+        return 1;
+    }
+    if (n->uni_n >= 4) return 0;
+    n->uni_lo[n->uni_n] = lo;
+    n->uni_hi[n->uni_n] = hi;
+    n->uni_n++;
+    return 1;
+}
+
 /* [...] — after the '['. */
 /* XSD Part 2 Appendix F block escapes: name -> inclusive byte
  * range. The byte-class matcher serves blocks that fit below
@@ -126,9 +205,101 @@ typedef struct {
     unsigned hi;
 } RreBlock;
 
+/* XSD 1.0 Part 2 Appendix F.1 — the block-escape name list
+ * (moxml#464). Byte-fitting blocks serve the byte bitmap; the rest
+ * ride the class node's unicode ranges. */
 static const RreBlock rre_blocks[] = {
-    {"IsBasicLatin", 0x00, 0x7F},
-    {"IsLatin-1Supplement", 0x80, 0xFF},
+    {"IsBasicLatin", 0x0000, 0x007F},
+    {"IsLatin-1Supplement", 0x0080, 0x00FF},
+    {"IsLatinExtended-A", 0x0100, 0x017F},
+    {"IsLatinExtended-B", 0x0180, 0x024F},
+    {"IsIPAExtensions", 0x0250, 0x02AF},
+    {"IsSpacingModifierLetters", 0x02B0, 0x02FF},
+    {"IsCombiningDiacriticalMarks", 0x0300, 0x036F},
+    {"IsGreek", 0x0370, 0x03FF},
+    {"IsGreekandCoptic", 0x0370, 0x03FF},
+    {"IsCyrillic", 0x0400, 0x04FF},
+    {"IsCyrillicSupplement", 0x0500, 0x052F},
+    {"IsArmenian", 0x0530, 0x058F},
+    {"IsHebrew", 0x0590, 0x05FF},
+    {"IsArabic", 0x0600, 0x06FF},
+    {"IsSyriac", 0x0700, 0x074F},
+    {"IsThaana", 0x0780, 0x07BF},
+    {"IsDevanagari", 0x0900, 0x097F},
+    {"IsBengali", 0x0980, 0x09FF},
+    {"IsGurmukhi", 0x0A00, 0x0A7F},
+    {"IsGujarati", 0x0A80, 0x0AFF},
+    {"IsOriya", 0x0B00, 0x0B7F},
+    {"IsTamil", 0x0B80, 0x0BFF},
+    {"IsTelugu", 0x0C00, 0x0C7F},
+    {"IsKannada", 0x0C80, 0x0CFF},
+    {"IsMalayalam", 0x0D00, 0x0D7F},
+    {"IsSinhala", 0x0D80, 0x0DFF},
+    {"IsThai", 0x0E00, 0x0E7F},
+    {"IsLao", 0x0E80, 0x0EFF},
+    {"IsTibetan", 0x0F00, 0x0FFF},
+    {"IsMyanmar", 0x1000, 0x109F},
+    {"IsGeorgian", 0x10A0, 0x10FF},
+    {"IsHangulJamo", 0x1100, 0x11FF},
+    {"IsEthiopic", 0x1200, 0x137F},
+    {"IsCherokee", 0x13A0, 0x13FF},
+    {"IsUnifiedCanadianAboriginalSyllabics", 0x1400, 0x167F},
+    {"IsOgham", 0x1680, 0x169F},
+    {"IsRunic", 0x16A0, 0x16FF},
+    {"IsKhmer", 0x1780, 0x17FF},
+    {"IsMongolian", 0x1800, 0x18AF},
+    {"IsLatinExtendedAdditional", 0x1E00, 0x1EFF},
+    {"IsGreekExtended", 0x1F00, 0x1FFF},
+    {"IsGeneralPunctuation", 0x2000, 0x206F},
+    {"IsSuperscriptsandSubscripts", 0x2070, 0x209F},
+    {"IsCurrencySymbols", 0x20A0, 0x20CF},
+    {"IsCombiningMarksforSymbols", 0x20D0, 0x20FF},
+    {"IsLetterlikeSymbols", 0x2100, 0x214F},
+    {"IsNumberForms", 0x2150, 0x218F},
+    {"IsArrows", 0x2190, 0x21FF},
+    {"IsMathematicalOperators", 0x2200, 0x22FF},
+    {"IsMiscellaneousTechnical", 0x2300, 0x23FF},
+    {"IsControlPictures", 0x2400, 0x243F},
+    {"IsOpticalCharacterRecognition", 0x2440, 0x245F},
+    {"IsEnclosedAlphanumerics", 0x2460, 0x24FF},
+    {"IsBoxDrawing", 0x2500, 0x257F},
+    {"IsBlockElements", 0x2580, 0x259F},
+    {"IsGeometricShapes", 0x25A0, 0x25FF},
+    {"IsMiscellaneousSymbols", 0x2600, 0x26FF},
+    {"IsDingbats", 0x2700, 0x27BF},
+    {"IsBraillePatterns", 0x2800, 0x28FF},
+    {"IsCJKRadicalsSupplement", 0x2E80, 0x2EFF},
+    {"IsKangxiRadicals", 0x2F00, 0x2FDF},
+    {"IsIdeographicDescriptionCharacters", 0x2FF0, 0x2FFF},
+    {"IsCJKSymbolsandPunctuation", 0x3000, 0x303F},
+    {"IsHiragana", 0x3040, 0x309F},
+    {"IsKatakana", 0x30A0, 0x30FF},
+    {"IsBopomofo", 0x3100, 0x312F},
+    {"IsHangulCompatibilityJamo", 0x3130, 0x318F},
+    {"IsKanbun", 0x3190, 0x319F},
+    {"IsBopomofoExtended", 0x31A0, 0x31BF},
+    {"IsKatakanaPhoneticExtensions", 0x31D0, 0x31FF},
+    {"IsEnclosedCJKLettersandMonths", 0x3200, 0x32FF},
+    {"IsCJKCompatibility", 0x3300, 0x33FF},
+    {"IsCJKUnifiedIdeographsExtensionA", 0x3400, 0x4DBF},
+    {"IsYijingHexagramSymbols", 0x4DC0, 0x4DFF},
+    {"IsCJKUnifiedIdeographs", 0x4E00, 0x9FFF},
+    {"IsYiSyllables", 0xA000, 0xA48F},
+    {"IsYiRadicals", 0xA490, 0xA4CF},
+    {"IsHangulSyllables", 0xAC00, 0xD7AF},
+    {"IsHighSurrogates", 0xD800, 0xDB7F},
+    {"IsHighPrivateUseSurrogates", 0xDB80, 0xDBFF},
+    {"IsLowSurrogates", 0xDC00, 0xDFFF},
+    {"IsPrivateUse", 0xE000, 0xF8FF},
+    {"IsCJKCompatibilityIdeographs", 0xF900, 0xFAFF},
+    {"IsAlphabeticPresentationForms", 0xFB00, 0xFB4F},
+    {"IsArabicPresentationForms-A", 0xFB50, 0xFDFF},
+    {"IsCombiningHalfMarks", 0xFE20, 0xFE2F},
+    {"IsCJKCompatibilityForms", 0xFE30, 0xFE4F},
+    {"IsSmallFormVariants", 0xFE50, 0xFE6F},
+    {"IsArabicPresentationForms-B", 0xFE70, 0xFEFF},
+    {"IsHalfwidthandFullwidthForms", 0xFF00, 0xFFEF},
+    {"IsSpecials", 0xFFF0, 0xFFFF},
 };
 
 static int rre_block_range(const char* name, size_t len, unsigned* lo,
@@ -181,12 +352,11 @@ static RreNode* parse_class(RreParser* ps) {
                 rre_block_cc(&lo, &hi);
                 hit = 1;
             }
-            if (!hit) {
+            if (!hit || !cls_add_block(n, lo, hi)) {
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
             }
-            for (unsigned i = lo; i <= hi; i++) cls_add(n, (unsigned char)i);
             if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
                 cls_add(n, 0x7F);
                 for (int i = 0x80; i <= 0x9F; i++)
@@ -320,17 +490,12 @@ static RreNode* parse_atom(RreParser* ps) {
             ps->p = close + 1;
             RreNode* n = node_new(RRE_CLASS);
             if (!n) return NULL;
-            for (unsigned i = lo; i <= hi; i++)
-                cls_add(n, (unsigned char)i);
-            if (e == 'P') {
-                /* Complement via the builtin-negation pattern: the
-                 * in-place ~ loop misbehaved at runtime (bits
-                 * unchanged) — memcpy-free and explicit. */
-                unsigned char inv[32];
-                for (int i = 0; i < 32; i++)
-                    inv[i] = (unsigned char)~n->cls[i];
-                memcpy(n->cls, inv, sizeof(n->cls));
+            if (!cls_add_block(n, lo, hi)) {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
             }
+            if (e == 'P') n->neg = 1; /* complement over all codepoints */
             return n;
         }
         if (e == 'd' || e == 'D' || e == 'w' || e == 'W' || e == 's' ||
@@ -515,10 +680,20 @@ static const char* rre_match(RreNode* n, const char* s,
         case RRE_DOT:
             if (*s) return rre_run(k, s + 1);
             return NULL;
-        case RRE_CLASS:
-            if (*s && cls_has(n, (unsigned char)*s))
-                return rre_run(k, s + 1);
+        case RRE_CLASS: {
+            if (!*s) return NULL;
+            if ((unsigned char)*s < 0x80) {
+                if (cls_has(n, (unsigned char)*s))
+                    return rre_run(k, s + 1);
+                return NULL;
+            }
+            /* moxml#464: multibyte codepoints check the unicode
+             * ranges and advance the full sequence. */
+            int len = 0;
+            unsigned cp = rre_decode_cp(s, strlen(s), &len);
+            if (cls_has_cp(n, cp)) return rre_run(k, s + len);
             return NULL;
+        }
         case RRE_ALT: {
             const char* r = rre_match(n->l, s, k);
             return r ? r : rre_match(n->r, s, k);
