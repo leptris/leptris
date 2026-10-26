@@ -1493,6 +1493,7 @@ TEST(RngRegex, BlockEscapesUnicode) {
 
 /* moxml#464 category escapes: \p{L} family masks over the
  * utf8proc categories (LEPTRIS_HAS_UTF8PROC builds). */
+#if defined(LEPTRIS_HAS_UTF8PROC)
 TEST(RngRegex, CategoryEscapes) {
     EXPECT_EQ(rng_regex_matches("\\p{L}+", "abc"), 1);
     EXPECT_EQ(rng_regex_matches("\\p{L}+", "a1"), 0);
@@ -1505,6 +1506,9 @@ TEST(RngRegex, CategoryEscapes) {
     EXPECT_EQ(rng_regex_matches("\\P{L}", "a"), 0);
     EXPECT_EQ(rng_regex_matches("[\\p{L}\\p{Nd}]+", "a7"), 1);
 }
+#else
+TEST(RngRegex, CategoryEscapesRequiresUtf8proc) { GTEST_SKIP(); }
+#endif
 
 TEST(RngRegex, ExactQuantifierIsClosed) {
     EXPECT_EQ(rng_regex_matches("[A-Z]{3}", "ABC"), 1);
