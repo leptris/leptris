@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.383] - 2026-10-26
+
+### Fixed
+
+- an xs:all with minOccurs=0 may be absent (xsd)
+- \d is the Nd category; complements are exact; in-class \P works (rng)
+- charClassSub is codepoint-exact; \i/\c become real XML NameChars (rng)
+- substitution-group members on type-less globals; restriction no longer defers its base (xsd)
+- an empty instance no longer bypasses the content model (xsd)
+
+
+
 ## [1.9.382] - 2026-10-26
 
 ### Added
