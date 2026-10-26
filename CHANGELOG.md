@@ -1,5 +1,33 @@
 ## [Unreleased]
 
+## [1.9.382] - 2026-10-26
+
+### Added
+
+- category escapes — \p{L}, \p{Nd}, families (moxml#464) (xsd)
+- codepoint-wide \p{Is...} blocks — the full F.1 table (moxml#464) (xsd)
+- \p{Is...} block escapes in the pattern-facet regex (moxml#464) (xsd)
+- XSD 1.1 negative wildcards — notQName on xs:any and xs:anyAttribute (moxml#460) (xsd)
+- leptris_xsd_version — effective version reporting (moxml#460) (xsd)
+- structured error rows — {kind, component, line, column, message} (xsd)
+
+### Fixed
+
+- gate the category table on LEPTRIS_HAS_UTF8PROC (simd)
+- CAS-only retain spinlock — the plain spin read raced the atomics (memory)
+- dispatch_init fully initializes the count3_high slot on every arch (simd)
+- declared non-UTF-8 encodings are EXEMPT from the fused gate (parse)
+
+### Performance
+
+- parse_string adopts the conversion buffer — the copy-in chain and the pristine carve drop out (#1846)
+- raise the element-index build threshold to 8 axis queries (xpath)
+- fuse the UTF-8 fast gate into the count3 sizing pass (parse)
+- rank unmutated documents by parse-time byte offset (xpath)
+- pre-size the element-position journal from the count3 estimate (parse)
+
+
+
 ## [1.9.381] - 2026-10-22
 
 The XSLT transform engine is no longer slower than libxslt on the
