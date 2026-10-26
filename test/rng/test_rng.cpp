@@ -1407,10 +1407,13 @@ TEST(RngParse, XmlNameClassesInPatterns) {
 }
 
 TEST(RngParse, RejectsUnsupportedPatternConstruct) {
+    /* moxml#464 superseded the \\p{...} rejection (the block and
+     * category escapes are supported now); the loud-fail contract
+     * holds for the still-unsupported constructs — backreferences. */
     LeptrisStatus st = LEPTRIS_OK;
     const char sch[] = SCHEMA(
         "<start><element name='n'><data type='string'>"
-        "<param name='pattern'>\\p{L}+</param></data>"
+        "<param name='pattern'>(a)\\1</param></data>"
         "</element></start>");
     LeptrisRelaxNG rng = leptris_rng_parse(sch, sizeof(sch) - 1, &st);
     EXPECT_EQ(st, LEPTRIS_ERROR_PARSE);
@@ -1486,6 +1489,21 @@ TEST(RngRegex, BlockEscapesUnicode) {
     // CJK smoke
     EXPECT_EQ(rng_regex_matches("\\p{IsCJKUnifiedIdeographs}",
                                "\xE4\xB8\x80"), 1);
+}
+
+/* moxml#464 category escapes: \p{L} family masks over the
+ * utf8proc categories (LEPTRIS_HAS_UTF8PROC builds). */
+TEST(RngRegex, CategoryEscapes) {
+    EXPECT_EQ(rng_regex_matches("\\p{L}+", "abc"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{L}+", "a1"), 0);
+    EXPECT_EQ(rng_regex_matches("\\p{L}", "\xC3\xA9"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{Lu}", "A"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{Lu}", "a"), 0);
+    EXPECT_EQ(rng_regex_matches("\\p{Nd}+", "123"), 1);
+    EXPECT_EQ(rng_regex_matches("\\p{Nd}+", "abc"), 0);
+    EXPECT_EQ(rng_regex_matches("\\P{L}", "7"), 1);
+    EXPECT_EQ(rng_regex_matches("\\P{L}", "a"), 0);
+    EXPECT_EQ(rng_regex_matches("[\\p{L}\\p{Nd}]+", "a7"), 1);
 }
 
 TEST(RngRegex, ExactQuantifierIsClosed) {

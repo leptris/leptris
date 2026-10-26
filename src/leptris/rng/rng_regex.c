@@ -17,6 +17,10 @@
  * (classes, bounded repeats, alternation of literals) are covered.
  */
 #include "rng_internal.h"
+
+#if defined(LEPTRIS_HAS_UTF8PROC)
+#include <utf8proc.h>
+#endif
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +50,11 @@ typedef struct RreNode {
     unsigned char uni_n;
     unsigned uni_lo[4];
     unsigned uni_hi[4];
+    /* XSD category escapes (\p{L}, \p{Nd}, ...): a mask over the
+     * utf8proc category codes, consulted per codepoint. Requires
+     * LEPTRIS_HAS_UTF8PROC (without it the escapes fail loudly). */
+    unsigned cat_set;
+    unsigned cat_mask;
     int neg;
     int lo, hi;          /* RRE_REP bounds; hi < 0 = unbounded */
 } RreNode;
@@ -137,6 +146,15 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
             }
         }
     }
+#if defined(LEPTRIS_HAS_UTF8PROC)
+    if (!hit && n->cat_set) {
+        hit = (n->cat_mask &
+               (1u << utf8proc_get_property((utf8proc_int32_t)cp)
+                    ->category)) != 0;
+    }
+#else
+    (void)0;
+#endif
     return n->neg ? !hit : hit;
 }
 
@@ -182,6 +200,96 @@ static unsigned rre_decode_cp(const char* s, size_t avail, int* len) {
 /* Add a block range: byte-fitting blocks join the bitmap, higher
  * blocks join the unicode ranges (cap 4 — one class atom carries at
  * most a handful of block escapes; more fail loudly as before). */
+/* XSD Part 2 F.1 general-category escapes: exact two-letter tokens
+ * and single-letter family masks, over the utf8proc categories. */
+static const struct {
+    const char* tok;
+    unsigned cat;
+} rre_cats[] = {
+    {"Lu", UTF8PROC_CATEGORY_LU}, {"Ll", UTF8PROC_CATEGORY_LL},
+    {"Lt", UTF8PROC_CATEGORY_LT}, {"Lm", UTF8PROC_CATEGORY_LM},
+    {"Lo", UTF8PROC_CATEGORY_LO},
+    {"Mn", UTF8PROC_CATEGORY_MN}, {"Mc", UTF8PROC_CATEGORY_MC},
+    {"Me", UTF8PROC_CATEGORY_ME},
+    {"Nd", UTF8PROC_CATEGORY_ND}, {"Nl", UTF8PROC_CATEGORY_NL},
+    {"No", UTF8PROC_CATEGORY_NO},
+    {"Pc", UTF8PROC_CATEGORY_PC}, {"Pd", UTF8PROC_CATEGORY_PD},
+    {"Ps", UTF8PROC_CATEGORY_PS}, {"Pe", UTF8PROC_CATEGORY_PE},
+    {"Pi", UTF8PROC_CATEGORY_PI}, {"Pf", UTF8PROC_CATEGORY_PF},
+    {"Po", UTF8PROC_CATEGORY_PO},
+    {"Zs", UTF8PROC_CATEGORY_ZS}, {"Zl", UTF8PROC_CATEGORY_ZL},
+    {"Zp", UTF8PROC_CATEGORY_ZP},
+    {"Sm", UTF8PROC_CATEGORY_SM}, {"Sc", UTF8PROC_CATEGORY_SC},
+    {"Sk", UTF8PROC_CATEGORY_SK}, {"So", UTF8PROC_CATEGORY_SO},
+    {"Cc", UTF8PROC_CATEGORY_CC}, {"Cf", UTF8PROC_CATEGORY_CF},
+    {"Co", UTF8PROC_CATEGORY_CO}, {"Cs", UTF8PROC_CATEGORY_CS},
+    {"Cn", UTF8PROC_CATEGORY_CN},
+};
+
+static int rre_category_mask(const char* tok, size_t len,
+                             unsigned* mask) {
+    if (len == 2) {
+        for (size_t i = 0; i < sizeof(rre_cats) / sizeof(rre_cats[0]);
+             i++) {
+            if (tok[0] == rre_cats[i].tok[0] &&
+                tok[1] == rre_cats[i].tok[1]) {
+                *mask = 1u << rre_cats[i].cat;
+                return 1;
+            }
+        }
+        return 0;
+    }
+    if (len != 1) return 0;
+    switch (tok[0]) {
+        case 'L':
+            *mask = (1u << UTF8PROC_CATEGORY_LU) |
+                    (1u << UTF8PROC_CATEGORY_LL) |
+                    (1u << UTF8PROC_CATEGORY_LT) |
+                    (1u << UTF8PROC_CATEGORY_LM) |
+                    (1u << UTF8PROC_CATEGORY_LO);
+            return 1;
+        case 'M':
+            *mask = (1u << UTF8PROC_CATEGORY_MN) |
+                    (1u << UTF8PROC_CATEGORY_MC) |
+                    (1u << UTF8PROC_CATEGORY_ME);
+            return 1;
+        case 'N':
+            *mask = (1u << UTF8PROC_CATEGORY_ND) |
+                    (1u << UTF8PROC_CATEGORY_NL) |
+                    (1u << UTF8PROC_CATEGORY_NO);
+            return 1;
+        case 'P':
+            *mask = (1u << UTF8PROC_CATEGORY_PC) |
+                    (1u << UTF8PROC_CATEGORY_PD) |
+                    (1u << UTF8PROC_CATEGORY_PS) |
+                    (1u << UTF8PROC_CATEGORY_PE) |
+                    (1u << UTF8PROC_CATEGORY_PI) |
+                    (1u << UTF8PROC_CATEGORY_PF) |
+                    (1u << UTF8PROC_CATEGORY_PO);
+            return 1;
+        case 'S':
+            *mask = (1u << UTF8PROC_CATEGORY_SM) |
+                    (1u << UTF8PROC_CATEGORY_SC) |
+                    (1u << UTF8PROC_CATEGORY_SK) |
+                    (1u << UTF8PROC_CATEGORY_SO);
+            return 1;
+        case 'Z':
+            *mask = (1u << UTF8PROC_CATEGORY_ZS) |
+                    (1u << UTF8PROC_CATEGORY_ZL) |
+                    (1u << UTF8PROC_CATEGORY_ZP);
+            return 1;
+        case 'C':
+            *mask = (1u << UTF8PROC_CATEGORY_CC) |
+                    (1u << UTF8PROC_CATEGORY_CF) |
+                    (1u << UTF8PROC_CATEGORY_CS) |
+                    (1u << UTF8PROC_CATEGORY_CO) |
+                    (1u << UTF8PROC_CATEGORY_CN);
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static int cls_add_block(RreNode* n, unsigned lo, unsigned hi) {
     if (hi < 0x100) {
         for (unsigned i = lo; i <= hi; i++) cls_add(n, (unsigned char)i);
@@ -352,10 +460,29 @@ static RreNode* parse_class(RreParser* ps) {
                 rre_block_cc(&lo, &hi);
                 hit = 1;
             }
-            if (!hit || !cls_add_block(n, lo, hi)) {
+            if (hit) {
+                if (!cls_add_block(n, lo, hi)) {
+                    node_free(n);
+                    ps->bad = 1;
+                    return NULL;
+                }
+            } else {
+                /* category escape (\p{L}, \p{Nd}, ...): utf8proc-
+                 * gated — without it the escape fails loudly */
+#if defined(LEPTRIS_HAS_UTF8PROC)
+                unsigned mask = 0;
+                if (!rre_category_mask(ps->p, len, &mask)) {
+                    node_free(n);
+                    ps->bad = 1;
+                    return NULL;
+                }
+                n->cat_set = 1;
+                n->cat_mask |= mask;
+#else
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
+#endif
             }
             if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
                 cls_add(n, 0x7F);
@@ -483,17 +610,36 @@ static RreNode* parse_atom(RreParser* ps) {
             }
             size_t len = (size_t)(close - ps->p);
             unsigned lo = 0, hi = 0;
-            if (!rre_block_range(ps->p, len, &lo, &hi)) {
+            int is_block = rre_block_range(ps->p, len, &lo, &hi);
+            unsigned cat_mask = 0;
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            int is_cat = 0;
+            if (!is_block &&
+                rre_category_mask(ps->p, len, &cat_mask))
+                is_cat = 1;
+#endif
+            if (!is_block
+#if defined(LEPTRIS_HAS_UTF8PROC)
+                && !is_cat
+#endif
+            ) {
                 ps->bad = 1;
                 return NULL;
             }
             ps->p = close + 1;
             RreNode* n = node_new(RRE_CLASS);
             if (!n) return NULL;
-            if (!cls_add_block(n, lo, hi)) {
-                node_free(n);
-                ps->bad = 1;
-                return NULL;
+            if (is_block) {
+                if (!cls_add_block(n, lo, hi)) {
+                    node_free(n);
+                    ps->bad = 1;
+                    return NULL;
+                }
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            } else {
+                n->cat_set = 1;
+                n->cat_mask = cat_mask;
+#endif
             }
             if (e == 'P') n->neg = 1; /* complement over all codepoints */
             return n;
@@ -682,7 +828,7 @@ static const char* rre_match(RreNode* n, const char* s,
             return NULL;
         case RRE_CLASS: {
             if (!*s) return NULL;
-            if ((unsigned char)*s < 0x80) {
+            if ((unsigned char)*s < 0x80 && !n->cat_set) {
                 if (cls_has(n, (unsigned char)*s))
                     return rre_run(k, s + 1);
                 return NULL;
