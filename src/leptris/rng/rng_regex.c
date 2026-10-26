@@ -55,6 +55,11 @@ typedef struct RreNode {
      * LEPTRIS_HAS_UTF8PROC (without it the escapes fail loudly). */
     unsigned cat_set;
     unsigned cat_mask;
+    /* XSD charClassSub: the bracketed subtrahend (moxml#464). The
+     * node is consulted at match time so its ranges, blocks and
+     * categories all subtract — the old byte-bitmap merge ignored
+     * them. */
+    struct RreNode* subtract;
     int neg;
     int lo, hi;          /* RRE_REP bounds; hi < 0 = unbounded */
 } RreNode;
@@ -77,6 +82,7 @@ static void node_free(RreNode* n) {
     if (!n) return;
     node_free(n->l);
     node_free(n->r);
+    node_free(n->subtract);
     free(n);
 }
 
@@ -108,9 +114,21 @@ static void cls_add_builtin(RreNode* n, char c) {
             for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
             cls_add(n, '_');
             cls_add(n, ':');
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            /* letters above the bitmap: the old 0x80-0xFF blanket
+             * also accepted symbols like U+00D7 (moxml#464) */
+            n->cat_set = 1;
+            n->cat_mask = (1u << UTF8PROC_CATEGORY_LU) |
+                          (1u << UTF8PROC_CATEGORY_LL) |
+                          (1u << UTF8PROC_CATEGORY_LT) |
+                          (1u << UTF8PROC_CATEGORY_LM) |
+                          (1u << UTF8PROC_CATEGORY_LO) |
+                          (1u << UTF8PROC_CATEGORY_NL);
+#else
             for (int i = 0x80; i < 0x100; i++) cls_add(n, (unsigned char)i);
+#endif
             break;
-        case 'c':   /* XML NameChar = \i + digits . - */
+        case 'c':   /* XML NameChar = \i + digits . - + combining */
             for (int i = 'a'; i <= 'z'; i++) cls_add(n, (unsigned char)i);
             for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
             for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
@@ -118,7 +136,20 @@ static void cls_add_builtin(RreNode* n, char c) {
             cls_add(n, ':');
             cls_add(n, '.');
             cls_add(n, '-');
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            n->cat_set = 1;
+            n->cat_mask = (1u << UTF8PROC_CATEGORY_LU) |
+                          (1u << UTF8PROC_CATEGORY_LL) |
+                          (1u << UTF8PROC_CATEGORY_LT) |
+                          (1u << UTF8PROC_CATEGORY_LM) |
+                          (1u << UTF8PROC_CATEGORY_LO) |
+                          (1u << UTF8PROC_CATEGORY_NL) |
+                          (1u << UTF8PROC_CATEGORY_ND) |
+                          (1u << UTF8PROC_CATEGORY_MN) |
+                          (1u << UTF8PROC_CATEGORY_MC);
+#else
             for (int i = 0x80; i < 0x100; i++) cls_add(n, (unsigned char)i);
+#endif
             break;
         default:
             break;
@@ -155,6 +186,8 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
 #else
     (void)0;
 #endif
+    if (hit && n->subtract)
+        hit = !cls_has_cp(n->subtract, cp);
     return n->neg ? !hit : hit;
 }
 
@@ -543,10 +576,9 @@ static RreNode* parse_class(RreParser* ps) {
                 node_free(n);
                 return NULL;
             }
-            for (int i = 0; i < 256; i++)
-                if ((sub->cls[i >> 3] >> (i & 7)) & 1)
-                    n->cls[i >> 3] &= (unsigned char)~(1u << (i & 7));
-            node_free(sub);
+            /* owned: the matcher consults it codepoint-wide, so
+             * ranges/blocks/categories subtract exactly */
+            n->subtract = sub;
             if (*ps->p != ']') {
                 node_free(n);
                 ps->bad = 1;
@@ -830,7 +862,8 @@ static const char* rre_match(RreNode* n, const char* s,
             return NULL;
         case RRE_CLASS: {
             if (!*s) return NULL;
-            if ((unsigned char)*s < 0x80 && !n->cat_set) {
+            if ((unsigned char)*s < 0x80 && !n->cat_set &&
+                !n->subtract) {
                 if (cls_has(n, (unsigned char)*s))
                     return rre_run(k, s + 1);
                 return NULL;
