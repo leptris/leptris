@@ -143,6 +143,17 @@ target_compile_definitions(test_rng_corpus PRIVATE
 leptris_add_test(test_rng_corpus_msg rng/test_rng_corpus_msg.cpp)
 target_compile_definitions(test_rng_corpus_msg PRIVATE
     LEPTRIS_RNG_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/jing-cases")
+if(LEPTRIS_ENABLE_UTF8PROC)
+    # the regex suites gate their unicode-escape assertions on the
+    # same macro the ENGINE was built with — a mismatch silently
+    # compiles out the assertions (the gtest then "passes" while
+    # the engine behavior goes unverified).
+    target_compile_definitions(test_rng PRIVATE LEPTRIS_HAS_UTF8PROC=1)
+    target_compile_definitions(test_rng_corpus
+        PRIVATE LEPTRIS_HAS_UTF8PROC=1)
+    target_compile_definitions(test_rng_corpus_msg
+        PRIVATE LEPTRIS_HAS_UTF8PROC=1)
+endif()
 leptris_add_test(test_simd_text  common/test_simd_text.cpp)
 leptris_add_test(test_simd_spans common/test_simd_spans.cpp)
 leptris_add_test(test_pool       memory/test_pool.cpp)

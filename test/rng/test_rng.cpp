@@ -1491,6 +1491,52 @@ TEST(RngRegex, BlockEscapesUnicode) {
                                "\xE4\xB8\x80"), 1);
 }
 
+/* moxml#464 subtraction edges: the subtrahend carries RANGES and
+ * categories, not just byte bits — the byte-bitmap merge ignored
+ * them, so subtracting a range subtracted nothing. */
+TEST(RngRegex, SubtractionWithRangesAndCats) {
+    /* byte-only subtraction still exact */
+    EXPECT_EQ(rng_regex_matches("[a-z-[aeiou]]+", "bcd"), 1);
+    EXPECT_EQ(rng_regex_matches("[a-z-[aeiou]]+", "axe"), 0);
+    /* range in the subtrahend: subtract ALL lowercase from the
+     * printable-ASCII range */
+    EXPECT_EQ(rng_regex_matches("[!-~-[a-z]]+", "AB1!"), 1);
+    EXPECT_EQ(rng_regex_matches("[!-~-[a-z]]+", "ab"), 0);
+    EXPECT_EQ(rng_regex_matches("[!-~-[a-z]]+", "\xCE\xB1"), 0);
+#if defined(LEPTRIS_HAS_UTF8PROC)
+    /* category in the subtrahend: letters minus uppercase */
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{Lu}]]+", "abc"), 1);
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{Lu}]]+", "ABC"), 0);
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{Lu}]]+", "\xCE\xB1"), 1);
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{Lu}]]+", "\xCE\x91"), 0);
+    /* block in the subtrahend */
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{IsGreek}]]+", "abc"), 1);
+    EXPECT_EQ(rng_regex_matches("[\\p{L}-[\\p{IsGreek}]]+",
+                               "\xCE\xB1"), 0);
+#endif
+}
+
+/* moxml#464 \i / \c: XML NameStartChar / NameChar escapes. */
+TEST(RngRegex, NameCharEscapes) {
+    EXPECT_EQ(rng_regex_matches("\\i+", "abc_:def"), 1);
+    EXPECT_EQ(rng_regex_matches("\\i", "9"), 0);
+    EXPECT_EQ(rng_regex_matches("\\c+", "a-b.c9_d:e"), 1);
+    EXPECT_EQ(rng_regex_matches("\\c", "*"), 0);
+#if defined(LEPTRIS_HAS_UTF8PROC)
+    /* non-ASCII letters are NameStartChars */
+    EXPECT_EQ(rng_regex_matches("\\i", "\xCE\xB1"), 1);
+    EXPECT_EQ(rng_regex_matches("\\c", "\xCE\xB1"), 1);
+    /* Latin-1 symbols are NOT NameStartChars (the old 0x80-0xFF
+     * blanket accepted them): U+00D7 multiplication sign is Sm */
+    EXPECT_EQ(rng_regex_matches("\\i", "\xC3\x97"), 0);
+    EXPECT_EQ(rng_regex_matches("\\c", "\xC3\x97"), 0);
+    /* combining marks are NameChars but not NameStartChars:
+     * U+0300 combining grave is Mn */
+    EXPECT_EQ(rng_regex_matches("\\i", "\xCC\x80"), 0);
+    EXPECT_EQ(rng_regex_matches("\\c", "\xCC\x80"), 1);
+#endif
+}
+
 /* moxml#464 category escapes: \p{L} family masks over the
  * utf8proc categories (LEPTRIS_HAS_UTF8PROC builds). */
 #if defined(LEPTRIS_HAS_UTF8PROC)
