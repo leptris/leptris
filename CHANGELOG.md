@@ -4,11 +4,24 @@
 
 ### Fixed
 
-- an xs:all with minOccurs=0 may be absent (xsd)
-- \d is the Nd category; complements are exact; in-class \P works (rng)
-- charClassSub is codepoint-exact; \i/\c become real XML NameChars (rng)
-- substitution-group members on type-less globals; restriction no longer defers its base (xsd)
-- an empty instance no longer bypasses the content model (xsd)
+- XSD: an empty instance no longer bypasses the content model —
+  `<note/>` validated clean against a required-particle sequence
+  (#1860; found by the moxml#460 facade tests).
+- XSD: substitution-group members on type-less globals are captured
+  (particlesDc001) and a complexContent RESTRICTION no longer
+  defers its base — the fold prepended the base's model and
+  demanded the base content next to the derived content (#1861;
+  moxml#466). modelGroups sweep 145/145 expected-valid.
+- XSD: an `xs:all` with `minOccurs="0"` may be absent — an empty
+  instance validates even when the particles carry min=1 (#1863;
+  mgAa003/mgD013).
+- XSD regex (moxml#464): `charClassSub` is codepoint-exact (ranges,
+  blocks and categories in the subtrahend now subtract); `\d` is
+  the Unicode Nd category; complement escapes (`\D \W \S \I \C`)
+  are exact over categories; `\P` works inside classes; an empty
+  pattern branch matches only the empty string; class members and
+  range endpoints accept escaped `]`/`}` and astral characters.
+  Regex_w3c expected-valid sweep: 98 -> 17 rejections.
 
 
 
