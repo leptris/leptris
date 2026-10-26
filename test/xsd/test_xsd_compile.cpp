@@ -3166,3 +3166,36 @@ TEST(XsdNegativeWildcard, AnyAttributeNotQNameDefined) {
     leptris_document_free(b);
     leptris_xsd_free(s);
 }
+
+// moxml#464-adjacent false-valid: an EMPTY instance against a
+// required-particle content model must fail — the walk's `!n`
+// early-return let it pass (the NFA never saw the instance).
+TEST(XsdContentModel, EmptyInstanceAgainstRequiredSequenceFails) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"note\">"
+        "<xs:complexType>"
+        "<xs:sequence>"
+        "<xs:element name=\"to\" type=\"xs:string\"/>"
+        "</xs:sequence>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+
+    const char empty[] = "<note/>";
+    LeptrisDocument d = leptris_parse_string(empty, strlen(empty), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+
+    // the satisfied model stays valid
+    const char full[] = "<note><to>x</to></note>";
+    LeptrisDocument f = leptris_parse_string(full, strlen(full), &st);
+    ASSERT_NE(f, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, f), 1);
+    leptris_document_free(f);
+    leptris_xsd_free(s);
+}

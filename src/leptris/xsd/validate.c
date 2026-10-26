@@ -325,15 +325,18 @@ static void validate_children(struct xsd_validator* v,
              leptris_node_first_child(leptris_element_as_node(elem));
          c; c = leptris_node_next_sibling(c))
         if (leptris_node_get_type(c) == LEPTRIS_NODE_TYPE_ELEMENT) n++;
-    if (!n) return;
-    const char** names = (const char**)malloc(n * sizeof(char*));
-    const char** uris = (const char**)calloc(n, sizeof(char*));
-    if (!names || !uris) {
-        free(names);
-        free(uris);
-        return;
-    }
+    const char** names = NULL;
+    const char** uris = NULL;
     size_t i = 0;
+    if (n > 0) {
+        names = (const char**)malloc(n * sizeof(char*));
+        uris = (const char**)calloc(n, sizeof(char*));
+        if (!names || !uris) {
+            free(names);
+            free(uris);
+            return;
+        }
+    }
     for (LeptrisNodeRef c =
              leptris_node_first_child(leptris_element_as_node(elem));
          c; c = leptris_node_next_sibling(c)) {
@@ -346,6 +349,11 @@ static void validate_children(struct xsd_validator* v,
         uris[i] = uri;
         i++;
     }
+    /* moxml#464-adjacent false-valid: the early return on !n let an
+     * empty instance pass ANY content model — required particles
+     * never failed. Zero children still walks: the NFA accepts the
+     * empty string only when every particle reaches accept with
+     * min == 0. names/uris stay NULL (never dereferenced at n==0). */
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
                                n);
     if (ok) {
