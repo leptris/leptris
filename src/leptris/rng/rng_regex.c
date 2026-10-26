@@ -200,6 +200,7 @@ static unsigned rre_decode_cp(const char* s, size_t avail, int* len) {
 /* Add a block range: byte-fitting blocks join the bitmap, higher
  * blocks join the unicode ranges (cap 4 — one class atom carries at
  * most a handful of block escapes; more fail loudly as before). */
+#if defined(LEPTRIS_HAS_UTF8PROC)
 /* XSD Part 2 F.1 general-category escapes: exact two-letter tokens
  * and single-letter family masks, over the utf8proc categories. */
 static const struct {
@@ -289,6 +290,7 @@ static int rre_category_mask(const char* tok, size_t len,
             return 0;
     }
 }
+#endif /* LEPTRIS_HAS_UTF8PROC */
 
 static int cls_add_block(RreNode* n, unsigned lo, unsigned hi) {
     if (hi < 0x100) {
