@@ -1516,6 +1516,50 @@ TEST(RngRegex, SubtractionWithRangesAndCats) {
 #endif
 }
 
+/* moxml#464 \d / \D: XML decimal = Nd category — Arabic-Indic
+ * and the other unicode digit families are \\d too. */
+#if defined(LEPTRIS_HAS_UTF8PROC)
+TEST(RngRegex, DigitEscapesAreUnicode) {
+    /* U+0660 Arabic-Indic zero = D9 A0 */
+    EXPECT_EQ(rng_regex_matches("\\d", "\xD9\xA0"), 1);
+    EXPECT_EQ(rng_regex_matches("\\d+", "\xD9\xA0\xD9\xA1"), 1);
+    EXPECT_EQ(rng_regex_matches("\\d", "a"), 0);
+    EXPECT_EQ(rng_regex_matches("\\D", "\xD9\xA0"), 0);
+    EXPECT_EQ(rng_regex_matches("\\D", "a"), 1);
+}
+
+TEST(RngRegex, EmptyPatternMatchesEmptyOnly) {
+    EXPECT_EQ(rng_regex_matches("", ""), 1);
+    EXPECT_EQ(rng_regex_matches("", "a"), 0);
+}
+
+TEST(RngRegex, EscapedBracketInRange) {
+    EXPECT_EQ(rng_regex_matches("[a-\\}]+", "abc}"), 1);
+    EXPECT_EQ(rng_regex_matches("[a-\\}]+", "!"), 0);
+    EXPECT_EQ(rng_regex_matches("[1-\\]]+", "12]"), 1);
+}
+
+#if defined(LEPTRIS_HAS_UTF8PROC)
+/* moxml#464 in-class \P: complement member (reF43/reK4). Exact as
+ * the class's only member; the class negation composes. */
+TEST(RngRegex, NegatedPropertyInsideClass) {
+    EXPECT_EQ(rng_regex_matches("[^\\P{IsBasicLatin}]", "a"), 1);
+    EXPECT_EQ(rng_regex_matches("[^\\P{IsBasicLatin}]", "\xC3"), 0);
+    EXPECT_EQ(rng_regex_matches("[\\P{L}*]", "*"), 1);
+    EXPECT_EQ(rng_regex_matches("[\\P{L}*]", "a"), 0);
+    EXPECT_EQ(rng_regex_matches("[\\P{L}]", "\xCE\xB1"), 0);
+    EXPECT_EQ(rng_regex_matches("[\\P{L}]{0,2}", "*!"), 1);
+}
+#endif
+
+TEST(RngRegex, AstralCharClassMember) {
+    /* U+10000 = F0 90 80 80 */
+    EXPECT_EQ(rng_regex_matches("[\xF0\x90\x80\x80]",
+                               "\xF0\x90\x80\x80"), 1);
+    EXPECT_EQ(rng_regex_matches("[\xF0\x90\x80\x80]", "a"), 0);
+}
+#endif
+
 /* moxml#464 \i / \c: XML NameStartChar / NameChar escapes. */
 TEST(RngRegex, NameCharEscapes) {
     EXPECT_EQ(rng_regex_matches("\\i+", "abc_:def"), 1);

@@ -55,11 +55,21 @@ typedef struct RreNode {
      * LEPTRIS_HAS_UTF8PROC (without it the escapes fail loudly). */
     unsigned cat_set;
     unsigned cat_mask;
+    /* cat_strict (moxml#464): a class-internal COMPLEMENT builtin
+     * ([\I], [\D]) needs bitmap AND cats to agree — the normal
+     * union can't express "not in the set" once the bitmap holds
+     * the complement's high bytes (U+00AA is in ~ASCII-bits but
+     * excluded by the category). */
+    unsigned cat_strict;
     /* XSD charClassSub: the bracketed subtrahend (moxml#464). The
      * node is consulted at match time so its ranges, blocks and
      * categories all subtract — the old byte-bitmap merge ignored
      * them. */
     struct RreNode* subtract;
+    /* in-class \P member (moxml#464): the class matches the
+     * positive members UNIONED WITH the complement of this set —
+     * [\P{L}*] = not-L OR '*'. Class negation flips the union. */
+    struct RreNode* negm;
     int neg;
     int lo, hi;          /* RRE_REP bounds; hi < 0 = unbounded */
 } RreNode;
@@ -83,6 +93,7 @@ static void node_free(RreNode* n) {
     node_free(n->l);
     node_free(n->r);
     node_free(n->subtract);
+    node_free(n->negm);
     free(n);
 }
 
@@ -94,6 +105,13 @@ static void cls_add_builtin(RreNode* n, char c) {
     switch (c) {
         case 'd':
             for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            /* XSD \d = XML decimal = Nd: Arabic-Indic and the
+             * other unicode digit families are \\d too
+             * (moxml#464, the reZ/reC \d rows) */
+            n->cat_set = 1;
+            n->cat_mask |= 1u << UTF8PROC_CATEGORY_ND;
+#endif
             break;
         case 'w':
             for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
@@ -156,9 +174,54 @@ static void cls_add_builtin(RreNode* n, char c) {
     }
 }
 
+static unsigned rre_decode_cp(const char* s, size_t avail, int* len);
+
 static int cls_has(const RreNode* n, unsigned char c) {
     int hit = (n->cls[c >> 3] >> (c & 7)) & 1;
     return n->neg ? !hit : hit;
+}
+
+/* One class MEMBER as a codepoint: singleCharEsc punctuation and
+ * control escapes, otherwise the raw (multi-byte) character
+ * (moxml#464: [\]} ranges and astral char-ref members). */
+static int cls_read_cp(RreParser* ps, unsigned* out) {
+    if (*ps->p == '\\') {
+        char e = ps->p[1];
+        if (!e) return 0;
+        ps->p += 2;
+        switch (e) {
+            case 't': *out = '\t'; return 1;
+            case 'n': *out = '\n'; return 1;
+            case 'r': *out = '\r'; return 1;
+            case '\\': case '.': case '-': case '^':
+            case '?': case '*': case '+': case '(': case ')':
+            case '[': case ']': case '{': case '}': case '|':
+                *out = (unsigned char)e; return 1;
+            default: return 0; /* classes (\d...) are not members */
+        }
+    }
+    if (((unsigned char)*ps->p) < 0x80) {
+        *out = (unsigned char)*ps->p++;
+        return 1;
+    }
+    int len = 0;
+    unsigned cp = rre_decode_cp(ps->p, strlen(ps->p), &len);
+    if (!len) return 0;
+    ps->p += len;
+    *out = cp;
+    return 1;
+}
+
+static void cls_add_cp(RreNode* n, unsigned cp) {
+    if (cp < 0x100) {
+        cls_add(n, (unsigned char)cp);
+        return;
+    }
+    if (n->uni_n < 4) {
+        n->uni_lo[n->uni_n] = cp;
+        n->uni_hi[n->uni_n] = cp;
+        n->uni_n++;
+    }
 }
 
 /* Codepoint form (moxml#464): bytes 0x00-0xFF check the bitmap,
@@ -178,14 +241,17 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
         }
     }
 #if defined(LEPTRIS_HAS_UTF8PROC)
-    if (!hit && n->cat_set) {
-        hit = (n->cat_mask &
-               (1u << utf8proc_get_property((utf8proc_int32_t)cp)
-                    ->category)) != 0;
+    if (n->cat_set) {
+        int c = (n->cat_mask &
+                 (1u << utf8proc_get_property((utf8proc_int32_t)cp)
+                      ->category)) != 0;
+        hit = n->cat_strict ? (hit && c) : (hit || c);
     }
 #else
     (void)0;
 #endif
+    if (n->negm)
+        hit = hit || !cls_has_cp(n->negm, cp);
     if (hit && n->subtract)
         hit = !cls_has_cp(n->subtract, cp);
     return n->neg ? !hit : hit;
@@ -476,7 +542,8 @@ static RreNode* parse_class(RreParser* ps) {
     int first = 1;
     while (*ps->p && (*ps->p != ']' || first)) {
         first = 0;
-        if (*ps->p == '\\' && ps->p[1] == 'p' && ps->p[2] == '{') {
+        if (*ps->p == '\\' && (ps->p[1] == 'p' || ps->p[1] == 'P') &&
+            ps->p[2] == '{') {
             /* XSD property classes for the Latin-1 byte world —
              * the byte-class matcher covers these exactly
              * (leptris-ruby#434, ST_ContentType). Other blocks
@@ -489,6 +556,12 @@ static RreNode* parse_class(RreParser* ps) {
                 return NULL;
             }
             size_t len = (size_t)(close - ps->p);
+            char pc = ps->p[-2]; /* 'p' or 'P' */
+            RreNode* tmp = node_new(RRE_CLASS);
+            if (!tmp) {
+                node_free(n);
+                return NULL;
+            }
             unsigned lo = 0, hi = 0;
             int hit = rre_block_range(ps->p, len, &lo, &hi);
             if (!hit && len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
@@ -496,7 +569,8 @@ static RreNode* parse_class(RreParser* ps) {
                 hit = 1;
             }
             if (hit) {
-                if (!cls_add_block(n, lo, hi)) {
+                if (!cls_add_block(tmp, lo, hi)) {
+                    node_free(tmp);
                     node_free(n);
                     ps->bad = 1;
                     return NULL;
@@ -507,24 +581,47 @@ static RreNode* parse_class(RreParser* ps) {
 #if defined(LEPTRIS_HAS_UTF8PROC)
                 unsigned mask = 0;
                 if (!rre_category_mask(ps->p, len, &mask)) {
+                    node_free(tmp);
                     node_free(n);
                     ps->bad = 1;
                     return NULL;
                 }
-                n->cat_set = 1;
-                n->cat_mask |= mask;
+                tmp->cat_set = 1;
+                tmp->cat_mask |= mask;
 #else
+                node_free(tmp);
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
 #endif
             }
             if (len == 2 && ps->p[0] == 'C' && ps->p[1] == 'c') {
-                cls_add(n, 0x7F);
+                cls_add(tmp, 0x7F);
                 for (int i = 0x80; i <= 0x9F; i++)
-                    cls_add(n, (unsigned char)i);
+                    cls_add(tmp, (unsigned char)i);
             }
             ps->p = close + 1;
+            /* in-class \P (moxml#464, reF43/reK4): the member is
+             * the complement of the parsed set — stored as negm and
+             * unioned at match time. A second \P member degrades to
+             * the positive spelling (single negm slot). */
+            if (pc == 'P' && !n->negm) {
+                n->negm = tmp;
+                continue;
+            }
+            for (int i = 0; i < 256; i++)
+                if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
+                    cls_add(n, (unsigned char)i);
+            for (int i = 0; i < tmp->uni_n && n->uni_n < 4; i++) {
+                n->uni_lo[n->uni_n] = tmp->uni_lo[i];
+                n->uni_hi[n->uni_n] = tmp->uni_hi[i];
+                n->uni_n++;
+            }
+            if (tmp->cat_set) {
+                n->cat_set = 1;
+                n->cat_mask |= tmp->cat_mask;
+            }
+            node_free(tmp);
             continue;
         }
         if (*ps->p == '\\' && ps->p[1]) {
@@ -541,6 +638,16 @@ static RreNode* parse_class(RreParser* ps) {
                 cls_add_builtin(tmp, e);
                 int neg_b = e == 'D' || e == 'W' || e == 'S' ||
                             e == 'I' || e == 'C';
+#if defined(LEPTRIS_HAS_UTF8PROC)
+                if (!neg_b && tmp->cat_set) {
+                    n->cat_set = 1;
+                    n->cat_mask |= tmp->cat_mask;
+                } else if (neg_b && tmp->cat_set && !n->cat_set) {
+                    n->cat_set = 1;
+                    n->cat_strict = 1;
+                    n->cat_mask = (~tmp->cat_mask) & 0x7FFFFFFFu;
+                }
+#endif
                 for (int i = 0; i < 256; i++)
                     if (((tmp->cls[i >> 3] >> (i & 7)) & 1) ==
                         (neg_b ? 0 : 1))
@@ -586,13 +693,30 @@ static RreNode* parse_class(RreParser* ps) {
             }
             break;
         }
-        unsigned char c = (unsigned char)*ps->p++;
+        unsigned lo = 0;
+        if (!cls_read_cp(ps, &lo)) {
+            node_free(n);
+            ps->bad = 1;
+            return NULL;
+        }
         if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
             ps->p++;
-            unsigned char hi = (unsigned char)*ps->p++;
-            for (unsigned int i = c; i <= hi; i++) cls_add(n, (unsigned char)i);
+            unsigned hi = 0;
+            if (!cls_read_cp(ps, &hi) || hi < lo) {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
+            if (lo < 0x100 && hi < 0x100) {
+                for (unsigned int i = lo; i <= hi; i++)
+                    cls_add(n, (unsigned char)i);
+            } else if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = lo;
+                n->uni_hi[n->uni_n] = hi;
+                n->uni_n++;
+            }
         } else {
-            cls_add(n, c);
+            cls_add_cp(n, lo);
         }
     }
     if (*ps->p != ']') {
@@ -683,25 +807,18 @@ static RreNode* parse_atom(RreParser* ps) {
             ps->p += 2;
             RreNode* n = node_new(RRE_CLASS);
             if (!n) return NULL;
-            if (e == 'd' || e == 'w' || e == 's' || e == 'i' ||
-                e == 'c') {
-                cls_add_builtin(n, e);
-            } else {
-                memset(n->cls, 0xff, sizeof(n->cls));
-                RreNode* tmp = node_new(RRE_CLASS);
-                if (!tmp) {
-                    node_free(n);
-                    return NULL;
-                }
-                cls_add_builtin(tmp, e == 'D' ? 'd'
-                                  : e == 'W' ? 'w'
-                                  : e == 'S' ? 's'
-                                  : e == 'I' ? 'i' : 'c');
-                for (int i = 0; i < 256; i++)
-                    if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
-                        n->cls[i >> 3] &= (unsigned char)~(1u << (i & 7));
-                node_free(tmp);
-            }
+            /* complement atoms are the builtin with neg: cls_has_cp
+             * flips the combined bitmap/range/categorie result, so
+             * the class members stay exact (the old bitmap memset
+             * could not represent the category complement) */
+            cls_add_builtin(n, e == 'D' ? 'd'
+                              : e == 'W' ? 'w'
+                              : e == 'S' ? 's'
+                              : e == 'I' ? 'i'
+                              : e == 'C' ? 'c' : e);
+            if (e == 'D' || e == 'W' || e == 'S' || e == 'I' ||
+                e == 'C')
+                n->neg = 1;
             return n;
         }
         ps->p += 2;
@@ -863,7 +980,7 @@ static const char* rre_match(RreNode* n, const char* s,
         case RRE_CLASS: {
             if (!*s) return NULL;
             if ((unsigned char)*s < 0x80 && !n->cat_set &&
-                !n->subtract) {
+                !n->subtract && !n->negm) {
                 if (cls_has(n, (unsigned char)*s))
                     return rre_run(k, s + 1);
                 return NULL;
@@ -933,6 +1050,10 @@ int rng_regex_supported(const char* pat) {
 
 int rng_regex_matches(const char* pat, const char* text) {
     if (!pat || !text) return 0;
+    /* XSD Appendix F.1: an EMPTY pattern branch matches only the
+     * empty string (the reA1 corpus shape: pattern="" with
+     * value="") */
+    if (!*pat) return !*text;
     RreParser ps;
     ps.p = pat;
     ps.depth = 0;
