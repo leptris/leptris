@@ -255,6 +255,11 @@ static void ss_close(StateSet* ss, CmNfa* n) {
 static int all_root_valid(XsdCm* all, const char* target_ns,
                           const char* const* names,
                           const char* const* ns_uris, size_t count) {
+    /* the whole all is ABSENT (moxml#466, mgAa003/mgD013): with
+     * minOccurs="0" an empty instance validates even when the
+     * particles carry min=1 — their bounds apply only when the all
+     * is present */
+    if (count == 0 && all->min == 0) return 1;
     for (XsdCm* p = all->first_child; p; p = p->next) {
         size_t hits = 0;
         for (size_t i = 0; i < count; i++) {

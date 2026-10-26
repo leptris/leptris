@@ -723,6 +723,47 @@ TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema, "<count>3</count>"), 1);
 }
 
+// moxml#466: an xs:all with minOccurs="0" may be ABSENT — an empty
+// instance validates even when its particles carry min=1 (the
+// mgAa003/mgD013 corpus shapes).
+TEST(XsdValidate, AllMinOccursZeroMayBeAbsent) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"doc\" type=\"foo\"/>"
+        "<xsd:complexType name=\"foo\">"
+        "<xsd:all minOccurs=\"0\">"
+        "<xsd:element name=\"t1\"/>"
+        "</xsd:all></xsd:complexType>"
+        "</xsd:schema>";
+    EXPECT_EQ(validate_doc(sch, "<doc/>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<doc><t1/></doc>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<doc><t1/><t1/></doc>"), 0);
+}
+
+TEST(XsdValidate, AllMinOccursZeroAbsentWithRequiredParticles) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"root\">"
+        "<xsd:complexType><xsd:choice minOccurs=\"1\""
+        " maxOccurs=\"unbounded\">"
+        "<xsd:element name=\"elt1\">"
+        "<xsd:complexType>"
+        "<xsd:all minOccurs=\"0\">"
+        "<xsd:element name=\"elt2\"/>"
+        "<xsd:element name=\"elt3\"/>"
+        "<xsd:element name=\"elt4\"/>"
+        "</xsd:all></xsd:complexType>"
+        "</xsd:element>"
+        "</xsd:choice></xsd:complexType>"
+        "</xsd:element></xsd:schema>";
+    EXPECT_EQ(validate_doc(sch, "<root><elt1/></root>"), 1);
+    EXPECT_EQ(validate_doc(
+                  sch, "<root><elt1><elt2/><elt3/><elt4/></elt1>"
+                       "</root>"), 1);
+    EXPECT_EQ(validate_doc(
+                  sch, "<root><elt1><elt2/></elt1></root>"), 0);
+}
+
 TEST(XsdValidate, ContentModelViolationReports) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"1\">"
