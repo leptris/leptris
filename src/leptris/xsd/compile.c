@@ -2294,16 +2294,29 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                  * synthesized slot and point the declaration at it. */
                 char synth[512];
                 snprintf(synth, sizeof(synth), "element:%s", nm);
-                if (xsd_capture_inline(s, (LeptrisElement)n, synth)) {
-                    XsdElementDecl* d =
-                        (XsdElementDecl*)calloc(1, sizeof(*d));
-                    if (d) {
-                        d->name = xsd_strdup(nm);
-                        if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
+                /* moxml#466: the declaration is captured even when
+                 * the element carries no inline type (a bare
+                 * <xs:element name=... substitutionGroup=.../> member
+                 * has none) — the strict root walk and the head
+                 * chain both need the row to exist. */
+                int has_inline =
+                    xsd_capture_inline(s, (LeptrisElement)n, synth);
+                XsdElementDecl* d =
+                    (XsdElementDecl*)calloc(1, sizeof(*d));
+                if (d) {
+                    d->name = xsd_strdup(nm);
+                    if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
+                    if (has_inline)
                         d->type = xsd_strdup(synth);
-                        d->next = s->elements;
-                        s->elements = d;
+                    const char* sg = leptris_element_attribute(
+                        (LeptrisElement)n, "substitutionGroup");
+                    if (sg) {
+                        const char* colon = strchr(sg, ':');
+                        d->sub_head = xsd_strdup(
+                            colon ? colon + 1 : sg);
                     }
+                    d->next = s->elements;
+                    s->elements = d;
                 }
             }
         } else if (strcmp(local, "complexType") == 0 && uri &&
@@ -2746,12 +2759,16 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                  * half-captured base silently truncates the model.
                  * The visited memo means each file merges once, so
                  * the double capture that used to mask this is
-                 * gone. */
+                 * gone. EXTENSION ONLY (moxml#466): a restriction's
+                 * model REPLACES the base's — folding it in prepends
+                 * a duplicate particle sequence and demands the base
+                 * content next to the derived content. */
                 int defer_base =
                     base_root
                         ? base_root->ext_base != NULL
                         : (base && strncmp(base, "xs:", 3) != 0);
-                if (defer_base && base) {
+                if (defer_base && base &&
+                    strcmp(dl, "extension") == 0) {
                     free(root->ext_base);
                     root->ext_base = xsd_strdup(base);
                 }

@@ -1314,6 +1314,98 @@ TEST(XsdValidate, SubstitutionGroupMembersBind) {
                            "<box><other>z</other></box>"), 0);
 }
 
+// moxml#466 class 1: a member of a substitution group binds a
+// ref-particle in a NAMESPACED schema (particlesDc001 family) —
+// elementFormDefault="qualified" + targetNamespace, head reached
+// through x:elem1.
+const char* k_subst_ns_schema =
+    "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+    " xmlns=\"http://xsdtesting\""
+    " xmlns:x=\"http://xsdtesting\""
+    " targetNamespace=\"http://xsdtesting\""
+    " elementFormDefault=\"qualified\">"
+    "<xs:element name=\"doc\">"
+    "<xs:complexType><xs:sequence>"
+    "<xs:element ref=\"x:elem1\"/>"
+    "</xs:sequence></xs:complexType>"
+    "</xs:element>"
+    "<xs:element name=\"elem1\" abstract=\"false\"/>"
+    "<xs:element name=\"elem2\" substitutionGroup=\"x:elem1\"/>"
+    "</xs:schema>";
+
+TEST(XsdValidate, SubstitutionGroupMemberBindsRefParticleQualified) {
+    EXPECT_EQ(validate_doc(
+                  k_subst_ns_schema,
+                  "<x:doc xmlns:x=\"http://xsdtesting\">"
+                  "<x:elem1/></x:doc>"), 1);
+    EXPECT_EQ(validate_doc(
+                  k_subst_ns_schema,
+                  "<x:doc xmlns:x=\"http://xsdtesting\">"
+                  "<x:elem2/></x:doc>"), 1);
+    EXPECT_EQ(validate_doc(
+                  k_subst_ns_schema,
+                  "<x:doc xmlns:x=\"http://xsdtesting\">"
+                  "<x:other/></x:doc>"), 0);
+}
+
+// moxml#466 class 2: a complexContent RESTRICTION whose base is a
+// forward reference must not defer-fold — the derived model
+// REPLACES the base's. The fold prepended the base's particles and
+// demanded the base content next to the derived content
+// (instance <e1/> rejected against SEQ(e1) restriction of
+// SEQ(e1) base because the fold produced SEQ(SEQ(e1), SEQ(e1))).
+TEST(XsdValidate, RestrictionReplacesForwardBaseModel) {
+    const char* fwd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"doc\" type=\"foo\"/>"
+        "<xs:complexType name=\"foo\"><xs:complexContent>"
+        "<xs:restriction base=\"bar\">"
+        "<xs:sequence><xs:element name=\"e1\"/></xs:sequence>"
+        "</xs:restriction></xs:complexContent></xs:complexType>"
+        "<xs:complexType name=\"bar\"><xs:sequence>"
+        "<xs:element name=\"e1\"/><xs:element name=\"e2\"/>"
+        "</xs:sequence></xs:complexType>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(fwd, "<doc><e1/></doc>"), 1);
+    /* the base's model must NOT ride along */
+    EXPECT_EQ(validate_doc(fwd, "<doc><e1/><e2/></doc>"), 0);
+    /* resolved (non-forward) base: same replace semantics */
+    const char* resolved =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"doc\" type=\"foo\"/>"
+        "<xs:complexType name=\"bar\"><xs:sequence>"
+        "<xs:element name=\"e1\"/><xs:element name=\"e2\"/>"
+        "</xs:sequence></xs:complexType>"
+        "<xs:complexType name=\"foo\"><xs:complexContent>"
+        "<xs:restriction base=\"bar\">"
+        "<xs:sequence><xs:element name=\"e1\"/></xs:sequence>"
+        "</xs:restriction></xs:complexContent></xs:complexType>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(resolved, "<doc><e1/></doc>"), 1);
+    EXPECT_EQ(validate_doc(resolved, "<doc><e1/><e2/></doc>"), 0);
+}
+
+/* mgO008 family: restriction through a group-ref particle — the
+ * derived model (the group's all) is the whole content model. */
+TEST(XsdValidate, RestrictionGroupRefParticleReplaces) {
+    const char* grp =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"doc\" type=\"foo\"/>"
+        "<xsd:complexType name=\"foo\"><xsd:complexContent>"
+        "<xsd:restriction base=\"bar\">"
+        "<xsd:group ref=\"group\"/>"
+        "</xsd:restriction></xsd:complexContent></xsd:complexType>"
+        "<xsd:complexType name=\"bar\">"
+        "<xsd:all minOccurs=\"1\" maxOccurs=\"1\">"
+        "<xsd:element name=\"e1\"/><xsd:element name=\"e2\"/>"
+        "</xsd:all></xsd:complexType>"
+        "<xsd:group name=\"group\"><xsd:all>"
+        "<xsd:element name=\"e1\"/></xsd:all></xsd:group>"
+        "</xsd:schema>";
+    EXPECT_EQ(validate_doc(grp, "<doc><e1/></doc>"), 1);
+    EXPECT_EQ(validate_doc(grp, "<doc><e1/><e2/></doc>"), 0);
+}
+
 }  // namespace
 
 // ---- tier-1 charter: include/import via compile_file ---------------
