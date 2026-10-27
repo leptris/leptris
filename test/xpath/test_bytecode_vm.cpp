@@ -114,6 +114,42 @@ TEST(XPathBytecodeSpecializedAxes, AttributeNameMatches) {
     leptris_document_free(doc);
 }
 
+TEST(XPathBytecodeSpecializedAxes, ParentAfterAttributeStep) {
+    const char xml[] =
+        "<root><child id=\"a\"><leaf/></child></root>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* leptris#1866: `..` after an attribute step yields the OWNING
+     * element (XPath 1.0 §2.2). The VM parent axis handled
+     * namespace/element/text contexts but attributes fell through
+     * to the child-tree parent link (NULL for attrs) — the step
+     * came back empty (standoc svg cleanup: `./@id/..`). */
+    LeptrisXPathResult r1 = leptris_xpath_eval(
+        doc, nullptr, "count(//child/@id/..)");
+    ASSERT_NE(r1, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r1), 1.0);
+    leptris_xpath_result_free(r1);
+
+    LeptrisXPathResult r2 = leptris_xpath_eval(
+        doc, nullptr, "name(//child/@id/..)");
+    ASSERT_NE(r2, nullptr);
+    char* s = leptris_xpath_result_string(r2);
+    EXPECT_STREQ(s, "child");
+    leptris_free_string(s);
+    leptris_xpath_result_free(r2);
+
+    /* a bare parent step on the element itself is unchanged */
+    LeptrisXPathResult r3 = leptris_xpath_eval(
+        doc, nullptr, "count(//leaf/..)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r3), 1.0);
+    leptris_xpath_result_free(r3);
+
+    leptris_document_free(doc);
+}
+
 TEST(XPathBytecodeSpecializedAxes, SelfAndParentAxes) {
     const char xml[] =
         "<root><child><leaf/></child></root>";
