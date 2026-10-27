@@ -269,6 +269,78 @@ TEST(DocumentChildren, PublicFirstChildWalksTheChain) {
     leptris_document_free(doc);
 }
 
+/* leptris#1866: a cross-doc adopt whose subtree carries MIXED plain
+ * and namespaced attributes lost every attribute wired after the
+ * first namespaced one. copy_subtree_detached wired direct-placed
+ * attrs onto a LOCAL tail while namespaced attrs appended via the
+ * element's cached tail (add_attribute) — the two wirings never
+ * synced, so a `<use xlink:href id>` copy orphaned the id: invisible
+ * to the @-axis XPath, dropped at serialize, and attr_count=2 over a
+ * 1-entry chain fed the O(1) attribute index an empty name (the
+ * `<use ="">` serialization). Both wirings now resync at each
+ * switch. */
+TEST(DocumentChildren, AdoptKeepsMixedPlainAndNamespacedAttrs) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char host_xml[] = "<host><anchor/>t</host>";
+    LeptrisDocument doc =
+        leptris_parse_string(host_xml, std::strlen(host_xml), &st);
+    ASSERT_NE(doc, nullptr);
+    const char new_xml[] =
+        "<svg xmlns:xlink='urn:x' id='s' class='c'>"
+        "<use xlink:href='#g' id='u0'/>"
+        "<use xlink:href='#g' id='u1'/>"
+        "<g id='g'/>"
+        "</svg>";
+    LeptrisDocument other =
+        leptris_parse_string(new_xml, std::strlen(new_xml), &st);
+    ASSERT_NE(other, nullptr);
+    LeptrisElement foreign = leptris_document_root(other);
+    ASSERT_NE(foreign, nullptr);
+
+    /* the cross-doc adopt: insert_after's foreign gate deep-copies
+     * the foreign subtree into doc's pool (#1528) */
+    LeptrisElement anchor =
+        leptris_element_first_child_any(leptris_document_root(doc));
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(leptris_element_insert_after(anchor, foreign), LEPTRIS_OK);
+
+    /* every attribute of the adopted subtree survives the copy —
+     * both wirings, both orders */
+    char* ser = leptris_document_serialize(doc, nullptr);
+    ASSERT_NE(ser, nullptr);
+    EXPECT_NE(strstr(ser, "id=\"u0\""), nullptr) << ser;
+    EXPECT_NE(strstr(ser, "id=\"u1\""), nullptr) << ser;
+    EXPECT_NE(strstr(ser, "xlink:href=\"#g\""), nullptr) << ser;
+    EXPECT_NE(strstr(ser, "id=\"g\""), nullptr) << ser;
+    EXPECT_NE(strstr(ser, "id=\"s\""), nullptr) << ser;
+    /* no empty attribute names (the O(1)-index misread) */
+    EXPECT_EQ(strstr(ser, "=\"\""), nullptr) << ser;
+    leptris_free_string(ser);
+
+    /* the attribute-axis union query from the adopted root: the
+     * descendant @id carriers (use, use, g) plus the parent-of-own-@id
+     * arm (svg itself) — the face standoc runs after the swap */
+    LeptrisElement installed =
+        leptris_element_next_sibling_any(anchor);
+    ASSERT_NE(installed, nullptr);
+    EXPECT_STREQ(leptris_element_name(installed), "svg");
+    LeptrisXPathResult r = leptris_xpath_eval(
+        doc, installed, ".//*[@id] | ./@id/..");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_count(r), 4u);
+    leptris_xpath_result_free(r);
+
+    /* the attribute getter reads the copied chain directly */
+    LeptrisElement use0 =
+        leptris_element_find_child(installed, "use");
+    ASSERT_NE(use0, nullptr);
+    EXPECT_STREQ(leptris_element_attribute(use0, "id"), "u0");
+    EXPECT_STREQ(leptris_element_attribute(use0, "xlink:href"), "#g");
+
+    leptris_document_free(other);
+    leptris_document_free(doc);
+}
+
 /* leptris-ruby #371: set_root on a foreign element adopts it. Pool
  * ownership makes a MOVE impossible (the subtree's memory belongs to
  * the source document's arena and would dangle after its free), so
