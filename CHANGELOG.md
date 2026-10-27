@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.384] - 2026-10-27
+
+### Fixed
+
+- a parent step after an attribute step yields the owning element (xpath)
+
+
+
 ## [1.9.383] - 2026-10-26
 
 ### Fixed
