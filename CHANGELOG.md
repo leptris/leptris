@@ -4,7 +4,13 @@
 
 ### Fixed
 
-- a parent step after an attribute step yields the owning element (xpath)
+- XPath: a parent step after an attribute step (`./@id/..`) yields
+  the OWNING element (XPath 1.0 section 2.2) — the VM parent axis
+  handled namespace/element/text contexts but attributes fell
+  through to the child-tree parent link (NULL for attributes), so
+  the step came back empty. Metanorma-standoc's SVG id
+  disambiguation drives exactly this shape and consumed the wrong
+  results downstream (#1867; the wrong-answer half of #1866).
 
 
 
