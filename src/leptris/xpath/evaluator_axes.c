@@ -755,6 +755,21 @@ XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisNode* node,
         return xpath_nodeset_new();
     }
 
+    /* Attribute inputs: the parent axis resolves through the OWNER
+     * element (XPath 1.0 §2.2 — `./@id/..` names the attribute's
+     * element). The element-typed dispatch below would read the
+     * parent field in element form off the attribute struct and
+     * return empty (leptris#1866, the standoc svg-uniqueids face). */
+    if (axis_id == XPATH_AXIS_PARENT && node && node->type == LEPTRIS_NODE_ATTRIBUTE) {
+        LeptrisElement owner = ((LeptrisAttributeNode*)node)->owner;
+        XPathNodeSet* result = xpath_nodeset_new();
+        if (!result) return result;
+        if (owner && matches_node_test(ctx, (LeptrisNode*)owner, test)) {
+            xpath_nodeset_add(result, owner);
+        }
+        return result;
+    }
+
     LeptrisElement elem = (LeptrisElement)node;
     switch (axis_id) {
         case XPATH_AXIS_DESCENDANT:

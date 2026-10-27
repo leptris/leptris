@@ -2475,6 +2475,16 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
                 v ? leptris_sv_from_ptr(v, sav_.length)
                   : leptris_sv_from_cstr("");
             leptris_element_add_attribute(copy, nv, vv, pool);
+            /* leptris#1866: add_attribute appends via the element's
+             * cached last_attribute — the LOCAL tail below is now
+             * stale. A following direct placement linked onto the
+             * stale tail and orphaned every attribute between the
+             * two wirings (a `<use xlink:href id>` copy lost the id:
+             * invisible to the @-axis XPath, dropped at serialize,
+             * and the attr_count-vs-chain mismatch fed the O(1)
+             * index an empty name — `<use ="">`). Resync from the
+             * element's cached tail, which add_attribute maintains. */
+            last_attr = leptris_elem_last_attribute(copy);
             continue;
         }
         /* Direct placement: the source attr is already decoded and
@@ -2509,6 +2519,11 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
                 (int32_t)((char*)attr - (char*)copy);
         }
         last_attr = attr;
+        /* leptris#1866: keep the element's cached tail in step with
+         * the local chain tail — a following add_attribute appends
+         * via the cached tail, and a stale one orphans everything
+         * wired since. */
+        leptris_elem_set_last_attribute(copy, attr);
         /* add_attribute's increment — attr_count is what the count
          * accessor and the O(1) index fast path read (uint8 wrap
          * at 255 latches the walk, same convention). */
