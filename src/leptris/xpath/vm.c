@@ -768,6 +768,14 @@ struct leptris_xpath_result* vm_apply_axis_parent(XPathContext* ctx, XPathVM* vm
         if (in && (int)in->type == (int)LEPTRIS_NODE_NAMESPACE) {
             /* Namespace nodes' parent is the OWNER element (63). */
             parent = ((LeptrisNamespaceNode*)in)->owner;
+        } else if (in && (int)in->type == (int)LEPTRIS_NODE_ATTRIBUTE) {
+            /* Attribute nodes' parent is the OWNER element (XPath
+             * 1.0 §2.2: `../` after an attribute step names the
+             * element carrying the attribute). Attributes are not
+             * in the child tree, so the any-kind parent link below
+             * is NULL for them (leptris#1866, standoc svg cleanup:
+             * `./@id/..`). */
+            parent = ((LeptrisAttributeNode*)in)->owner;
         } else if (node_is_element(in)) {
             parent = leptris_element_get_parent((LeptrisElement)in);
         } else {
