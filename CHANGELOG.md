@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.385] - 2026-10-27
+
+### Fixed
+
+- the cross-doc adopt keeps its attribute chain; @id/.. names the owner
+
+
+
 ## [1.9.384] - 2026-10-27
 
 ### Fixed
