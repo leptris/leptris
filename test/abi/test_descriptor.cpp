@@ -2834,3 +2834,204 @@ TEST(Plan1677, WindowSurvivesMultipleRootsBuildFailure) {
     leptris_plan_free(plan);
     leptris_document_free(doc);
 }
+
+// ---- #1854: packed op-blob build (one crossing, Integers only) -------
+namespace {
+
+/* Blob layout: per op, five native-order u32s (kind, plan_index,
+ * row_index, name_len, value_len), the name bytes plus a NUL
+ * terminator, then the raw value bytes. The Ruby side emits this
+ * with String#pack — no FFI struct writes, no FFI::Pointer#+, no
+ * per-string MemoryPointer. */
+void pack_u32(std::string& b, uint32_t v) {
+    char tmp[4];
+    memcpy(tmp, &v, 4);
+    b.append(tmp, 4);
+}
+
+void pack_op(std::string& b, uint32_t kind, uint32_t plan_index,
+             uint32_t row_index, const char* name, const char* value) {
+    uint32_t nl = name ? (uint32_t)strlen(name) : 0;
+    uint32_t vl = value ? (uint32_t)strlen(value) : 0;
+    pack_u32(b, kind);
+    pack_u32(b, plan_index);
+    pack_u32(b, row_index);
+    pack_u32(b, nl);
+    pack_u32(b, vl);
+    if (nl) {
+        b.append(name, nl);
+        b.push_back('\0');
+    }
+    if (vl) b.append(value, vl);
+}
+
+}  // namespace
+
+TEST(Plan1854, PackedBuildFeedsSerializeByteParity) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].type_tag = 1;
+    kids[0].child_plan_index = -1;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "b";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    /* the exact Plan408 program, packed */
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ATTR, 0, UINT32_MAX, "id", "7", 1},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "alpha", 5},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "beta", 4},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "", 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 6, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+
+    std::string blob;
+    pack_op(blob, LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL);
+    pack_op(blob, LEPTRIS_PLAN_OP_ATTR, 0, UINT32_MAX, "id", "7");
+    pack_op(blob, LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "alpha");
+    pack_op(blob, LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "beta");
+    pack_op(blob, LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "");
+    pack_op(blob, LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL);
+    LeptrisPlanResult pr =
+        leptris_plan_result_build_packed(plan, blob.data(), blob.size(), &st);
+    ASSERT_NE(pr, nullptr);
+    char* pout = leptris_plan_serialize(plan, pr, &st);
+    ASSERT_NE(pout, nullptr);
+
+    EXPECT_STREQ(pout, out);
+    leptris_free_string(out);
+    leptris_free_string(pout);
+    leptris_plan_result_free(r);
+    leptris_plan_result_free(pr);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan1854, PackedBuildNestedElementShapeParity) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan inner_kids[1] = {};
+    inner_kids[0].wire_name = "s";
+    inner_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    inner_kids[0].child_plan_index = -1;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    kids[0].child_plan_index = 1;
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "b";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    plans[1].element_name = "p";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_ANY;
+    plans[1].child_count = 1;
+    plans[1].child_plans = inner_kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 1, 0, NULL, "deep", 4},
+        {LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 5, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+
+    std::string blob;
+    pack_op(blob, LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL);
+    pack_op(blob, LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL);
+    pack_op(blob, LEPTRIS_PLAN_OP_SCALAR, 1, 0, NULL, "deep");
+    pack_op(blob, LEPTRIS_PLAN_OP_END, 0, 0, NULL, NULL);
+    pack_op(blob, LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL);
+    LeptrisPlanResult pr =
+        leptris_plan_result_build_packed(plan, blob.data(), blob.size(), &st);
+    ASSERT_NE(pr, nullptr);
+    char* pout = leptris_plan_serialize(plan, pr, &st);
+    ASSERT_NE(pout, nullptr);
+
+    EXPECT_STREQ(pout, "<b><p><s>deep</s></p></b>");
+    EXPECT_STREQ(pout, out);
+    leptris_free_string(out);
+    leptris_free_string(pout);
+    leptris_plan_result_free(r);
+    leptris_plan_result_free(pr);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan1854, PackedBuildRejectsBadBlobs) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "b";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_ANY;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    /* NULL / empty blobs */
+    EXPECT_EQ(leptris_plan_result_build_packed(plan, NULL, 4, &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+    const char* one = "x";
+    EXPECT_EQ(leptris_plan_result_build_packed(plan, one, 0, &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    /* header truncation: 3 bytes can't hold the five u32s */
+    EXPECT_EQ(leptris_plan_result_build_packed(plan, one, 3, &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    /* declared value_len runs past the end of the blob */
+    std::string short_value;
+    pack_op(short_value, LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "alpha");
+    short_value.resize(short_value.size() - 2);
+    EXPECT_EQ(leptris_plan_result_build_packed(
+                  plan, short_value.data(), short_value.size(), &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    /* declared name_len runs past the end of the blob */
+    std::string short_name;
+    pack_op(short_name, LEPTRIS_PLAN_OP_ATTR, 0, UINT32_MAX, "id", "7");
+    short_name.resize(short_name.size() - 1);
+    EXPECT_EQ(leptris_plan_result_build_packed(
+                  plan, short_name.data(), short_name.size(), &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    /* NULL plan */
+    std::string blob;
+    pack_op(blob, LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL);
+    pack_op(blob, LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL);
+    EXPECT_EQ(leptris_plan_result_build_packed(NULL, blob.data(),
+                                               blob.size(), &st),
+              nullptr);
+    EXPECT_EQ(st, LEPTRIS_ERROR_INVALID_ARG);
+
+    leptris_plan_free(plan);
+}
