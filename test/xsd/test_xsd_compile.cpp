@@ -3491,3 +3491,26 @@ TEST(XsdCompile, SchemaSetSeesImportingDocumentsMembers) {
     leptris_xsd_free(s);
     leptris_xsd_free(s2);
 }
+
+/* leptris#1878: an element declaration with no type= and no inline
+ * type has {type definition} = xs:anyType (XSD 1.0 section 3.3.2) —
+ * any attributes, lax content. It must not be reported undeclared. */
+TEST(XsdValidate, TypelessElementDeclarationIsAnyType) {
+    const char* sch =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(sch, "<root/>"), 1);
+    /* anyType accepts any attributes and any lax content */
+    EXPECT_EQ(validate_doc(sch, "<root anything='1'><x/></root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root>text<Y a='b'/></root>"), 1);
+    /* spelling the default explicitly keeps working */
+    const char* sch2 =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\" type=\"xs:anyType\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(sch2, "<root/>"), 1);
+    EXPECT_EQ(validate_doc(sch2, "<root a='1'><x/></root>"), 1);
+    /* a wrong root name is still undeclared */
+    EXPECT_EQ(validate_doc(sch, "<other/>"), 0);
+}
