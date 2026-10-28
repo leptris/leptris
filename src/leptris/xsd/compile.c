@@ -20,7 +20,7 @@
 void xsd_capture_ics(struct leptris_xsd_schema* s,
                      LeptrisElement elem, const char* element_name);
 extern int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                            const char* terminal_base);
+                            const char* terminal_base, int chain_is_list);
 extern struct xsd_validator* xsd_validator_new(
     struct leptris_xsd_schema* s);
 extern void xsd_validator_free(struct xsd_validator* v);
@@ -569,6 +569,25 @@ static int xsd_item_valid(struct leptris_xsd_schema* s,
     return 1;
 }
 
+/* #1882: does the base chain resolve to a LIST type? A restriction
+ * OF a list keeps deriv RESTRICT, but its length facets still count
+ * items — the value space is the list's. */
+static int xsd_chain_is_list(struct leptris_xsd_schema* s,
+                             const XsdSimple* t) {
+    int depth = 0;
+    while (t && depth < 32) {
+        if (t->deriv == XSD_SIMPLE_LIST) return 1;
+        if (!t->base) return 0;
+        if (strncmp(t->base, "xs:", 3) == 0)
+            return strcmp(t->base, "xs:IDREFS") == 0 ||
+                   strcmp(t->base, "xs:NMTOKENS") == 0 ||
+                   strcmp(t->base, "xs:ENTITIES") == 0;
+        t = xsd_find_simple(s, t->base);
+        depth++;
+    }
+    return 0;
+}
+
 /* The chain's terminal builtin (NULL = none resolved): the length
  * family needs it to count octets for the binary bases
  * (leptris-ruby#434). */
@@ -625,7 +644,7 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
                 return 1;
         return 0;
     }
-    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t));
+    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t), 0);
 }
 
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
@@ -637,7 +656,8 @@ static int xsd_valid_chain(struct leptris_xsd_schema* s,
     }
     if (t->deriv != XSD_SIMPLE_RESTRICT)
         return xsd_deriv_valid(s, t, v, depth);
-    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t));
+    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t),
+                            xsd_chain_is_list(s, t));
 }
 
 static void xsd_set_error(struct leptris_xsd_schema* s, const char* msg) {
