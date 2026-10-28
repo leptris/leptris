@@ -129,6 +129,9 @@ typedef struct xsd_cm {
      * the merged schema keeps only the main unit's tns */
     char* any_unit_tns;
     int process_skip; /* CM_ANY: processContents="skip" or "lax" */
+    int pc_level; /* CM_ANY: 0 strict (default), 1 lax, 2 skip
+                   * (#1879 — skip imposes no constraint on the
+                   * matched element, even a declared one) */
     int min, max; /* occurrence bounds; max < 0 = unbounded */
     struct xsd_cm* first_child; /* group children list */
     struct xsd_cm* next;        /* sibling link within the parent group */

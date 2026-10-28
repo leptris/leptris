@@ -3370,3 +3370,49 @@ TEST(XsdContentModel, EmptyInstanceAgainstRequiredSequenceFails) {
     leptris_document_free(f);
     leptris_xsd_free(s);
 }
+
+/* leptris#1879: processContents="skip" imposes NO constraint on the
+ * matched element — even when a global declaration exists (XSD 1.0
+ * section 3.9.4.2). The engine found the declaration and validated
+ * its lexical type anyway. */
+TEST(XsdValidate, SkipWildcardSuppressesChildValidation) {
+    const char* sch =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\"><xs:complexType><xs:sequence>"
+        "<xs:any processContents=\"skip\" minOccurs=\"0\""
+        " maxOccurs=\"unbounded\"/>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "<xs:element name=\"a\" type=\"xs:ID\"/>"
+        "</xs:schema>";
+    /* '1' is not a valid ID — but the skip wildcard forbids the check */
+    EXPECT_EQ(validate_doc(sch, "<root><a>1</a></root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root><x><y/></x></root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root/>"), 1);
+
+    /* control: the default (strict) still validates a DECLARED child
+     * through the global declaration; wildcard-admitted undeclared
+     * names pass under every processContents (the pinned moxml#460
+     * semantics) */
+    const char* strict =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\"><xs:complexType><xs:sequence>"
+        "<xs:any minOccurs=\"0\" maxOccurs=\"unbounded\"/>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "<xs:element name=\"a\" type=\"xs:ID\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(strict, "<root><a>1</a></root>"), 0);
+    EXPECT_EQ(validate_doc(strict, "<root><x><y/></x></root>"), 1);
+
+    /* lax validates DECLARED children, skips undeclared ones */
+    const char* lax =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\"><xs:complexType><xs:sequence>"
+        "<xs:any processContents=\"lax\" minOccurs=\"0\""
+        " maxOccurs=\"unbounded\"/>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "<xs:element name=\"a\" type=\"xs:ID\"/>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(lax, "<root><a>1</a></root>"), 0);
+    EXPECT_EQ(validate_doc(lax, "<root><undeclared><y/></undeclared></root>"),
+              1);
+}

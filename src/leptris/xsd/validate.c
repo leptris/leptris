@@ -52,6 +52,8 @@ extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 extern const XsdElementIcs* xsd_find_element_ics(
     struct leptris_xsd_schema* s, const char* element_name);
+static int any_attr_matches(const char* grammar, const char* uri,
+                            const char* target_ns);
 extern void xsd_resolve_qname_inst(LeptrisElement e, const char* qname,
                                    char* uri, size_t urisz, char* local,
                                    size_t localsz);
@@ -296,6 +298,39 @@ static void validate_local_uri(struct xsd_validator* v,
                                const char* type, const char* euri,
                                const char* xsi_q);
 
+/* #1879: the strongest processContents among the model's wildcards
+ * whose namespace grammar admits (uri) — 2 skip, 1 lax, 0 strict,
+ * -1 when no wildcard admits the name. XSD 1.0 section 3.9.4.2:
+ * skip imposes NO constraint on the matched element (even a
+ * declared one); strict requires a declaration; lax validates
+ * declared children only. */
+static int model_wildcard_pc(const XsdCm* model, const char* uri,
+                             const char* tns) {
+    if (!model) return -1;
+    int best = -1;
+    const XsdCm* stack[64];
+    int sp = 0;
+    stack[sp++] = model;
+    while (sp > 0 && best < 2) {
+        const XsdCm* p = stack[--sp];
+        for (; p; p = p->next) {
+            if (p->kind == XSD_CM_ANY) {
+                const char* grammar =
+                    p->any_ns ? p->any_ns : "##any";
+                const char* unit =
+                    p->any_unit_tns ? p->any_unit_tns : tns;
+                if (any_attr_matches(grammar, uri, unit)) {
+                    int pc = p->pc_level;
+                    if (pc > best) best = pc;
+                }
+            }
+            if (p->first_child && sp < 64)
+                stack[sp++] = p->first_child;
+        }
+    }
+    return best;
+}
+
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
                               LeptrisElement elem, XsdCm* ct) {
@@ -425,6 +460,12 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
+        /* #1879: wildcard processContents gates the child — skip
+         * imposes no constraint at all (even a declared child);
+         * strict demands a declaration when no particle/global
+         * types it; lax validates declared children only. */
+        int wpc = model_wildcard_pc(model, cu, xsd_target_ns(s));
+        if (wpc == 2) continue;
         const char* ptype = NULL;
         if (model) {
             XsdCm* stack[64];
@@ -470,6 +511,9 @@ static void validate_children(struct xsd_validator* v,
         } else if (xsd_find_element_ns(s, cl, cu)) {
             validate_element(v, s, ce, 0);
         }
+        /* wildcard-admitted children without a declaration pass:
+         * strict and lax alike admit undeclared names (the pinned
+         * moxml#460 notQName semantics — tier-1 lax direction) */
     }
 }
 
