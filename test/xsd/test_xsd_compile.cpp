@@ -3549,3 +3549,78 @@ TEST(XsdValidate, AttributeGroupRefResolvesRegardlessOfOrder) {
     EXPECT_EQ(validate_doc(before, "<root b='1'/>"), 1);
     EXPECT_EQ(validate_doc(after, "<root b='1'/>"), 1);
 }
+
+/* leptris#1882: length facets on LIST types count items, not
+ * characters; on QName/NOTATION the length family does not apply. */
+TEST(XsdValidate, LengthFacetsCountListItemsNotCharacters) {
+    /* IDREFS list: "a b" is 2 items (3 characters) */
+    const char* t2 =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:IDREFS\"><xs:length value=\"2\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(t2, "<test a='a b'/>"), 1);
+    /* length=3 rejects the 2-item list */
+    const char* t3 =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:IDREFS\"><xs:length value=\"3\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(t3, "<test a='a b'/>"), 0);
+    /* minLength/maxLength on NMTOKENS count items */
+    const char* mn =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:NMTOKENS\"><xs:minLength value=\"3\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(mn, "<test a='foofo more'/>"), 0);
+    const char* mx =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:NMTOKENS\"><xs:maxLength value=\"5\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(mx, "<test a='foofo more'/>"), 1);
+}
+
+TEST(XsdValidate, QNameNotationIgnoreLengthFacets) {
+    const char* qn =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:QName\"><xs:length value=\"4\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(qn, "<test a='foofo'/>"), 1);
+    const char* nt =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:t=\"urn:t\">"
+        "<xs:notation name=\"g\" public=\"p\" system=\"s\"/>"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"xs:NOTATION\">"
+        "<xs:enumeration value=\"g\"/>"
+        "<xs:length value=\"4\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(nt, "<test a='g'/>"), 1);
+    /* user LIST type: facets count items too */
+    const char* ul =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"two\"><xs:list itemType=\"xs:token\"/>"
+        "</xs:simpleType>"
+        "<xs:element name=\"test\"><xs:complexType>"
+        "<xs:attribute name=\"a\"><xs:simpleType>"
+        "<xs:restriction base=\"two\"><xs:length value=\"2\"/>"
+        "</xs:restriction></xs:simpleType></xs:attribute>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(ul, "<test a='x y'/>"), 1);
+    EXPECT_EQ(validate_doc(ul, "<test a='x'/>"), 0);
+}

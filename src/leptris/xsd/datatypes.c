@@ -10,6 +10,7 @@
  * exclusive, the length family, total/fractionDigits. */
 #include <ctype.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -485,7 +486,7 @@ int xsd_builtin_valid(const char* type, const char* v) {
 /* ---- facet checking on a captured simpleType --------------------- */
 
 int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                     const char* terminal_base);
+                     const char* terminal_base, int chain_is_list);
 
 /* The base chain resolves to a built-in reference: validate the
  * lexical against it first. */
@@ -495,8 +496,16 @@ static int base_valid(const char* base, const char* v) {
     return -1; /* local base — the resolver walks the chain */
 }
 
+static int facet_check_body(const XsdSimple* s, const char* v,
+                            const char* terminal_base, int chain_is_list);
 static int facet_check(const XsdSimple* s, const char* v,
-                       const char* terminal_base) {
+                       const char* terminal_base, int chain_is_list) {
+    int rc = facet_check_body(s, v, terminal_base, chain_is_list);
+    return rc;
+}
+static int facet_check_body(const XsdSimple* s, const char* v,
+                            const char* terminal_base,
+                            int chain_is_list) {
     if (s->pattern && !rng_regex_matches(s->pattern, v)) return 0;
     if (s->enum_values) {
         int found = 0;
@@ -507,8 +516,28 @@ static int facet_check(const XsdSimple* s, const char* v,
     /* Length family: character count (string-family semantics) —
      * except the binary types, where XML Schema Part 2 counts
      * OCTETS (the wml ST_LongHexNumber shape: hexBinary + length 4
-     * accepts 8 hex digits; leptris-ruby#434). */
+     * accepts 8 hex digits; leptris-ruby#434). #1882: the facets
+     * measure the VALUE SPACE — list types count whitespace-
+     * separated items, and QName/NOTATION have no length family
+     * at all (Part 2 sections 4.3.1-4.3.3 applicability). */
     size_t n = strlen(v);
+    if (chain_is_list || s->deriv == XSD_SIMPLE_LIST ||
+        (terminal_base &&
+         (strcmp(terminal_base, "xs:IDREFS") == 0 ||
+          strcmp(terminal_base, "xs:NMTOKENS") == 0 ||
+          strcmp(terminal_base, "xs:ENTITIES") == 0))) {
+        size_t items = 0;
+        int in_item = 0;
+        for (const char* q = v; *q; q++) {
+            if (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')
+                in_item = 0;
+            else if (!in_item) {
+                in_item = 1;
+                items++;
+            }
+        }
+        n = items;
+    }
     if (terminal_base && (strcmp(terminal_base, "xs:hexBinary") == 0 ||
                           strcmp(terminal_base, "xs:base64Binary") == 0)) {
         if (strcmp(terminal_base, "xs:hexBinary") == 0) {
@@ -525,9 +554,15 @@ static int facet_check(const XsdSimple* s, const char* v,
             n = octets;
         }
     }
-    if (s->length >= 0 && (long)n != s->length) return 0;
-    if (s->min_length >= 0 && (long)n < s->min_length) return 0;
-    if (s->max_length >= 0 && (long)n > s->max_length) return 0;
+    /* #1882: QName/NOTATION have no length family — the facets
+     * do not apply (Part 2 sections 4.3.1-4.3.3). */
+    if (!(terminal_base &&
+          (strcmp(terminal_base, "xs:QName") == 0 ||
+           strcmp(terminal_base, "xs:NOTATION") == 0))) {
+        if (s->length >= 0 && (long)n != s->length) return 0;
+        if (s->min_length >= 0 && (long)n < s->min_length) return 0;
+        if (s->max_length >= 0 && (long)n > s->max_length) return 0;
+    }
 
     /* Numeric min/max when the value parses as a double. */
     char* end = NULL;
@@ -560,13 +595,13 @@ static int facet_check(const XsdSimple* s, const char* v,
 }
 
 int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                     const char* terminal_base) {
+                     const char* terminal_base, int chain_is_list) {
     if (!simple || !v) return 0;
     int base = base_valid(simple->base, v);
     if (base == 0) return 0;
     /* base == -1 (local base) delegates to the resolver's chain in
      * the caller; facets still apply here. */
-    return facet_check(simple, v, terminal_base);
+    return facet_check(simple, v, terminal_base, chain_is_list);
 }
 
 /* Pattern/enumeration defaults for whitespace — slice 3 grows the
