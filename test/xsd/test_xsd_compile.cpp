@@ -876,6 +876,44 @@ TEST(XsdValidate, AnonymousInlineValidatesEndToEnd) {
     leptris_xsd_free(s);
 }
 
+/* leptris#1871: a local particle declaration is a component distinct
+ * from a global element of the same name. Per Element Locally Valid
+ * (Complex Type) the particle's own declaration governs its instance
+ * element — an anonymous local type must not be assessed as the
+ * global declaration's type. */
+TEST(XsdValidate, LocalAnonymousTypeShadowsGlobalSameNameElement) {
+    const char* sch =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:t\" xmlns:t=\"urn:t\""
+        " elementFormDefault=\"qualified\">"
+        "<xs:complexType name=\"full\"><xs:sequence>"
+        "<xs:element name=\"code\" type=\"xs:string\"/>"
+        "</xs:sequence></xs:complexType>"
+        "<xs:element name=\"widget\" type=\"t:full\"/>"
+        "<xs:complexType name=\"holder\"><xs:sequence>"
+        "<xs:element name=\"widget\">"
+        "<xs:complexType>"
+        "<xs:attribute name=\"ref\" type=\"xs:IDREF\" use=\"optional\"/>"
+        "</xs:complexType>"
+        "</xs:element>"
+        "</xs:sequence></xs:complexType>"
+        "<xs:element name=\"holder\" type=\"t:holder\"/>"
+        "</xs:schema>";
+    /* the issue's instance: the local empty-content type accepts it */
+    EXPECT_EQ(validate_doc(
+                  sch, "<t:holder xmlns:t=\"urn:t\">"
+                       "<widget ref=\"w1\"/></t:holder>"), 1);
+    /* the local type forbids children the global type would allow */
+    EXPECT_EQ(validate_doc(
+                  sch, "<t:holder xmlns:t=\"urn:t\">"
+                       "<widget><code>c</code></widget></t:holder>"), 0);
+    /* top-level widgets still assess against the global declaration */
+    EXPECT_EQ(validate_doc(
+                  sch, "<t:widget xmlns:t=\"urn:t\"><code>c</code>"
+                       "</t:widget>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<t:widget xmlns:t=\"urn:t\"/>"), 0);
+}
+
 TEST(XsdDatatypes, AnonymousInlineSimpleTypeOnParticle) {
     LeptrisStatus st = LEPTRIS_OK;
     const char* xsd =
