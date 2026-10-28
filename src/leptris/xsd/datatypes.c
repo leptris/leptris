@@ -9,6 +9,7 @@
  * subset is exactly its dialect), enumeration, min/max inclusive/
  * exclusive, the length family, total/fractionDigits. */
 #include <ctype.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -51,25 +52,59 @@ static int xsd_signed_integer(const char* s) {
 typedef struct {
     const char* name;
     long long lo, hi;
-    int integer; /* 1 = integer lexical; 0 = decimal lexical */
+    int bounded; /* 0 = the derivation is unbounded (arbitrary
+                  * precision) — only the lexical shape applies */
 } NumType;
 
 static const NumType k_numerics[] = {
-    {"xs:integer", -9223372036854775807LL - 1, 9223372036854775807LL, 1},
-    {"xs:nonNegativeInteger", 0, 9223372036854775807LL, 1},
-    {"xs:positiveInteger", 1, 9223372036854775807LL, 1},
-    {"xs:nonPositiveInteger", -9223372036854775807LL - 1, 0, 1},
-    {"xs:negativeInteger", -9223372036854775807LL - 1, -1, 1},
+    {"xs:integer", 0, 0, 0},
+    {"xs:nonNegativeInteger", 0, 0, 0},
+    {"xs:positiveInteger", 0, 0, 0},
+    {"xs:nonPositiveInteger", 0, 0, 0},
+    {"xs:negativeInteger", 0, 0, 0},
     {"xs:long", -9223372036854775807LL - 1, 9223372036854775807LL, 1},
     {"xs:int", -2147483648LL, 2147483647LL, 1},
     {"xs:short", -32768, 32767, 1},
     {"xs:byte", -128, 127, 1},
-    {"xs:unsignedLong", 0, 9223372036854775807LL, 1},
+    {"xs:unsignedLong", 0, 0, 2}, /* 2^64-1: string-compared */
     {"xs:unsignedInt", 0, 4294967295LL, 1},
     {"xs:unsignedShort", 0, 65535, 1},
     {"xs:unsignedByte", 0, 255, 1},
     {NULL, 0, 0, 0},
 };
+
+/* #1883: the unbounded integer family keeps its SIGN class even
+ * with arbitrary precision (positiveInteger excludes 0). */
+static int unbounded_sign_ok(const char* name, const char* s) {
+    int neg = *s == '-';
+    int zero_only = 1;
+    const char* d = (*s == '+' || *s == '-') ? s + 1 : s;
+    for (; *d; d++)
+        if (*d != '0') { zero_only = 0; break; }
+    if (strcmp(name, "xs:integer") == 0) return 1;
+    if (strcmp(name, "xs:nonNegativeInteger") == 0) return !neg;
+    if (strcmp(name, "xs:positiveInteger") == 0)
+        return !neg && !zero_only;
+    if (strcmp(name, "xs:nonPositiveInteger") == 0)
+        return neg || zero_only;
+    if (strcmp(name, "xs:negativeInteger") == 0)
+        return neg && !zero_only;
+    return 1;
+}
+
+/* unsignedLong's bound is 2^64-1 — beyond long long. Decimal
+ * string compare against the exact bound. */
+static int ulong_in_range(const char* s) {
+    if (!xsd_signed_integer(s)) return 0;
+    if (*s == '-') return 0;
+    const char* digits = *s == '+' ? s + 1 : s;
+    while (*digits == '0' && digits[1]) digits++;
+    size_t nd = strlen(digits);
+    static const char k_max[] = "18446744073709551615";
+    if (nd < sizeof(k_max) - 1) return 1;
+    if (nd > sizeof(k_max) - 1) return 0;
+    return strcmp(digits, k_max) <= 0;
+}
 
 /* XSD digits: no leading-zero rule beyond the sign for zero, but
  * "007" is a valid integer lexical in XSD (unlike most languages). */
@@ -84,8 +119,10 @@ static int value_in_range(const char* s, long long lo, long long hi) {
     while (nd > 1 && digits[0] == '0') { digits++; nd--; }
     if (nd > 19) return 0;
     char* end = NULL;
+    errno = 0;
     long long v = strtoll(s, &end, 10);
     if (end && *end) return 0;
+    if (errno == ERANGE) return 0; /* #1883: 2^63 is outside long */
     return v >= lo && v <= hi;
 }
 
@@ -119,31 +156,62 @@ static int two_digits_bounded(const char** p, int lo, int hi) {
     int v = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
     return v >= lo && v <= hi;
 }
+/* #1883: calendar-aware day bounds — 1999-02-29 is invalid, the
+ * leap years are not. */
 static int ymd(const char** p, int need_month, int need_day) {
     if (!four_digits(p)) return 0;
+    int month = 1, day = 1;
     if (need_month) {
         if (*(*p)++ != '-') return 0;
         if (!two_digits_bounded(p, 1, 12)) return 0;
+        month = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
     }
     if (need_day) {
         if (*(*p)++ != '-') return 0;
         if (!two_digits_bounded(p, 1, 31)) return 0;
+        day = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
+    }
+    if (need_day) {
+        static const int k_days[13] = {0, 31, 28, 31, 30, 31, 30,
+                                       31, 31, 30, 31, 30, 31};
+        int y = 0;
+        const char* ys = (*p) - (need_month ? 5 : 2) - 4 -
+                         (need_month ? 0 : 0);
+        /* the year digits start at p - 4 - (month+day consumed) */
+        (void)ys;
+        /* recompute from the front: four_digits consumed exactly 4 */
+        ys = (*p) - 4 - (need_month ? 3 : 0) - (need_day ? 3 : 0);
+        for (int k = 0; k < 4; k++)
+            y = y * 10 + (ys[k] - '0');
+        int leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        int dim = k_days[month] + (month == 2 ? leap : 0);
+        if (day > dim) return 0;
     }
     return 1;
 }
 static int time_tail(const char** p) {
-    if (!two_digits(p)) return 0;
+    /* #1883: hour 0-23 (24:00:00 is the end-of-day spelling and
+     * must carry 00 minutes and 00 seconds), minute 0-59, second
+     * 0-60 (60 = leap second). */
+    if (!two_digits_bounded(p, 0, 24)) return 0;
+    int hour = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
     if (*(*p)++ != ':') return 0;
-    if (!two_digits(p)) return 0;
+    if (!two_digits_bounded(p, 0, 59)) return 0;
+    int minute = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
+    int second = 0;
     if (**p == ':') {
         (*p)++;
-        if (!two_digits(p)) return 0;
+        if (!two_digits_bounded(p, 0, 60)) return 0;
+        second = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
         if (**p == '.') {
             (*p)++;
             if (!xsd_digits_only(*p)) return 0;
             while (isdigit((unsigned char)**p)) (*p)++;
         }
     }
+    if (hour == 24 && (minute != 0 || second != 0)) return 0;
+    /* #1883: second 60 is the leap second — only at 23:59 */
+    if (second == 60 && (hour != 23 || minute != 59)) return 0;
     return tz_optional(p);
 }
 
@@ -160,16 +228,10 @@ int xsd_builtin_valid(const char* type, const char* v) {
     if (strcmp(type, "xs:string") == 0) return 1;
     if (strcmp(type, "xs:normalizedString") == 0) return 1;
     if (strcmp(type, "xs:token") == 0) {
-        if (*v == 0) return 1;
-        if (isspace((unsigned char)v[0]) ||
-            isspace((unsigned char)v[strlen(v) - 1]))
-            return 0;
-        for (const char* p = v; *p; p++) {
-            if (isspace((unsigned char)*p) &&
-                isspace((unsigned char)p[1]))
-                return 0;
-            if (*p == '\n' || *p == '\r' || *p == '\t') return 0;
-        }
+        /* #1883: whiteSpace=collapse is TOTAL — every string has a
+         * collapsed value, so the lexical space is every string
+         * (the old leading/trailing/double-space rejections
+         * over-stricted Part 2 3.3.2). */
         return 1;
     }
     if (strcmp(type, "xs:Name") == 0) {
@@ -187,8 +249,23 @@ int xsd_builtin_valid(const char* type, const char* v) {
         return 1;
     }
     if (strcmp(type, "xs:NCName") == 0 || strcmp(type, "xs:ID") == 0 ||
-        strcmp(type, "xs:IDREF") == 0 || strcmp(type, "xs:ENTITY") == 0)
-        return xsd_is_ncname(v);
+        strcmp(type, "xs:IDREF") == 0 || strcmp(type, "xs:ENTITY") == 0) {
+        /* #1883: token-family collapse precedes the NCName check —
+         * " id " validates as the NCName "id". */
+        while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r')
+            v++;
+        size_t vn = strlen(v);
+        while (vn > 0 && (v[vn - 1] == ' ' || v[vn - 1] == '\t' ||
+                          v[vn - 1] == '\n' || v[vn - 1] == '\r'))
+            vn--;
+        char* buf = (char*)malloc(vn + 1);
+        if (!buf) return 0;
+        memcpy(buf, v, vn);
+        buf[vn] = 0;
+        int rc = xsd_is_ncname(buf);
+        free(buf);
+        return rc;
+    }
     if (strcmp(type, "xs:language") == 0) {
         /* [a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})* */
         const char* p = v;
@@ -217,6 +294,8 @@ int xsd_builtin_valid(const char* type, const char* v) {
         const char* colon = strchr(v, ':');
         if (!colon) return xsd_is_ncname(v);
         size_t plen = (size_t)(colon - v);
+        /* #1883: "xmlns" is a reserved prefix (Part 2 3.2.18) */
+        if (plen == 5 && strncmp(v, "xmlns", 5) == 0) return 0;
         char pfx[256];
         if (plen >= sizeof(pfx)) return 0;
         memcpy(pfx, v, plen);
@@ -241,11 +320,17 @@ int xsd_builtin_valid(const char* type, const char* v) {
         return lead || frac;
     }
     for (const NumType* t = k_numerics; t->name; t++) {
-        if (strcmp(type, t->name) == 0) return value_in_range(v, t->lo, t->hi);
+        if (strcmp(type, t->name) != 0) continue;
+        /* #1883: the integer family is arbitrary precision — the
+         * sign class applies, the magnitude does not. */
+        if (t->bounded == 0)
+            return xsd_signed_integer(v) && unbounded_sign_ok(t->name, v);
+        if (t->bounded == 2) return ulong_in_range(v);
+        return value_in_range(v, t->lo, t->hi);
     }
     if (strcmp(type, "xs:float") == 0 || strcmp(type, "xs:double") == 0) {
         if (strcmp(v, "INF") == 0 || strcmp(v, "-INF") == 0 ||
-            strcmp(v, "NaN") == 0)
+            strcmp(v, "+INF") == 0 || strcmp(v, "NaN") == 0)
             return 1;
         /* decimal or scientific */
         const char* p = v;
@@ -330,26 +415,40 @@ int xsd_builtin_valid(const char* type, const char* v) {
         if (*p++ != 'P') return 0;
         int any = 0;
         int in_time = 0;
+        int t_seen = 0;
+        int any_time = 0;
         for (;;) {
             if (*p == 'T') {
                 if (in_time) return 0;
                 in_time = 1;
+                t_seen = 1;
                 p++;
                 continue;
             }
             if (!isdigit((unsigned char)*p)) break;
             while (isdigit((unsigned char)*p)) p++;
-            if (*p == '.') { p++; while (isdigit((unsigned char)*p)) p++; }
+            int saw_fraction = 0;
+            if (*p == '.') {
+                p++;
+                saw_fraction = 1;
+                while (isdigit((unsigned char)*p)) p++;
+            }
             char unit = *p;
             if (!unit) return 0;
+            /* #1883: fraction only on seconds (P200.5Y is invalid) */
+            if (saw_fraction && unit != 'S') return 0;
             /* Months (date) and minutes (time) share 'M' — the
              * in_time flag disambiguates, so only the unambiguous
              * units are side-checked. */
             if (in_time && unit == 'Y') return 0;
             if (!in_time && (unit == 'H' || unit == 'S')) return 0;
+            if (in_time) any_time = 1;
             p++;
             any = 1;
         }
+        /* #1883: a bare T with no time component is invalid
+         * (P1Y2MT) */
+        if (t_seen && !any_time) return 0;
         return any && *p == 0;
     }
     if (strcmp(type, "xs:hexBinary") == 0) {
@@ -360,24 +459,24 @@ int xsd_builtin_valid(const char* type, const char* v) {
         return 1;
     }
     if (strcmp(type, "xs:base64Binary") == 0) {
+        /* #1883: the padded alphabet — '=' only terminates the
+         * final group; a remainder of 1 byte cannot form a group
+         * ("abcde"), and nothing may follow padding. */
         size_t n = strlen(v);
         if (!n) return 1;
-        size_t i = 0;
-        while (i + 4 <= n) {
-            for (int k = 0; k < 4; k++) {
-                char c = v[i + k];
-                if (!isalnum((unsigned char)c) && c != '+' && c != '/' &&
-                    !(k == 3 && c == '='))
-                    return 0;
-            }
-            i += 4;
-        }
-        for (; i < n; i++) {
+        size_t eq = 0;
+        for (size_t i = 0; i < n; i++) {
             char c = v[i];
-            if (!isalnum((unsigned char)c) && c != '+' && c != '/' &&
-                c != '=')
+            if (c == '=') {
+                eq++;
+                continue;
+            }
+            if (eq) return 0; /* data after padding */
+            if (!isalnum((unsigned char)c) && c != '+' && c != '/')
                 return 0;
         }
+        if (eq > 2) return 0;
+        if ((n - eq) % 4 == 1) return 0;
         return 1;
     }
     return -1; /* not in the tier-1 table */
