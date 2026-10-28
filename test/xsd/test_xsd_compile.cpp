@@ -447,12 +447,50 @@ TEST(XsdDatatypes, BuiltinsLexicalMatrix) {
         {"xs:hexBinary", "0A1F", 1},     {"xs:hexBinary", "0A1", 0},
         {"xs:base64Binary", "QUJD", 1},  {"xs:base64Binary", "!", 0},
         {"xs:NCName", "_a1", 1},         {"xs:NCName", "1a", 0},
-        {"xs:token", "a b", 1},          {"xs:token", "a  b", 0},
+        {"xs:token", "a b", 1},          {"xs:token", "a  b", 1},
         {"xs:language", "en", 1},        {"xs:language", "e!", 0},
         {"xs:anyURI", "http://x/y", 1},
         {"xs:notAThing", "x", -1},
     };
     for (const BuiltinCase& c : cases) {
+        SCOPED_TRACE(std::string(c.type) + " : " + c.value);
+        EXPECT_EQ(leptris_xsd_builtin_valid(c.type, c.value), c.expect)
+            << c.type << " : " << c.value;
+    }
+}
+
+/* leptris#1883: the builtin lexical table converges on Datatypes
+ * Part 2 — collapse semantics, unbounded integers, +INF spelling,
+ * 64-bit bounds, calendar/duration/binary grammars, xmlns prefix. */
+TEST(XsdDatatypes, BuiltinTableConvergesOnPart2) {
+    const BuiltinCase rows[] = {
+        /* over-strict: valid lexicals must pass */
+        {"xs:token", "a  b", 1},
+        {"xs:ID", " id ", 1},
+        {"xs:integer",
+         "12345678901234567890123456789", 1},
+        {"xs:positiveInteger",
+         "12345678901234567890123456789", 1},
+        {"xs:float", "+INF", 1},
+        /* too lenient: invalid lexicals must fail */
+        {"xs:long", "9223372036854775808", 0},
+        {"xs:unsignedLong", "18446744073709551616", 0},
+        {"xs:date", "1999-02-29", 0},
+        {"xs:time", "25:20:00", 0},
+        {"xs:time", "13:20:60", 0},
+        {"xs:duration", "P1Y2MT", 0},
+        {"xs:duration", "P200.5Y", 0},
+        {"xs:base64Binary", "abcde", 0},
+        {"xs:QName", "xmlns:xsi", 0},
+        /* the valid twins stay valid */
+        {"xs:long", "9223372036854775807", 1},
+        {"xs:date", "2000-02-29", 1},
+        {"xs:time", "23:59:60", 1},  /* leap second */
+        {"xs:duration", "PT1.5S", 1},
+        {"xs:base64Binary", "QUJD", 1},
+        {"xs:QName", "xsi:attr", 1},
+    };
+    for (const BuiltinCase& c : rows) {
         SCOPED_TRACE(std::string(c.type) + " : " + c.value);
         EXPECT_EQ(leptris_xsd_builtin_valid(c.type, c.value), c.expect)
             << c.type << " : " << c.value;
