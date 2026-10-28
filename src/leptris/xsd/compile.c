@@ -2173,8 +2173,43 @@ static void xsd_visited_add(struct leptris_xsd_schema* s,
     s->visited[s->visited_len++] = dup;
 }
 
+static XsdAttrDecl* xsd_capture_attr_rows(
+    struct leptris_xsd_schema* s, LeptrisElement container, int depth);
+/* #1880: top-level attributeGroup definitions are captured in a
+ * PRE-PASS — the symbol space is order-free, but the ref expansion
+ * in xsd_capture_attr_rows looks up s->attr_groups at capture time,
+ * so a group declared AFTER the referencing type used to vanish. */
+static void xsd_capture_attr_group_def(struct leptris_xsd_schema* s,
+                                       LeptrisElement n,
+                                       const char* nm) {
+    XsdAttrGroupDef* g = (XsdAttrGroupDef*)calloc(1, sizeof(*g));
+    if (!g) return;
+    g->name = xsd_strdup(nm);
+    g->attrs = xsd_capture_attr_rows(s, n, 0);
+    g->next = s->attr_groups;
+    s->attr_groups = g;
+}
+
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
+    /* pre-pass: every top-level attributeGroup def, document order */
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* local = NULL;
+        const char* uri = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &local,
+                                      NULL, &uri);
+        if (!local || strcmp(local, "attributeGroup") != 0 ||
+            !uri || strcmp(uri, XSD_NS) != 0)
+            continue;
+        const char* nm = leptris_element_attribute((LeptrisElement)n,
+                                                   "name");
+        if (!nm) continue;
+        xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
+    }
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -2385,16 +2420,13 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         } else if (strcmp(local, "attributeGroup") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
+            /* the #1880 pre-pass already captured it — a second
+             * registration would shadow the first */
             if (nm) {
-                XsdAttrGroupDef* g =
-                    (XsdAttrGroupDef*)calloc(1, sizeof(*g));
-                if (g) {
-                    g->name = xsd_strdup(nm);
-                    g->attrs = xsd_capture_attr_rows(
-                        s, (LeptrisElement)n, 0);
-                    g->next = s->attr_groups;
-                    s->attr_groups = g;
-                }
+                XsdAttrGroupDef* seen = s->attr_groups;
+                for (; seen; seen = seen->next)
+                    if (strcmp(seen->name, nm) == 0) break;
+                if (!seen) xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
             }
         } else if (strcmp(local, "group") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm =

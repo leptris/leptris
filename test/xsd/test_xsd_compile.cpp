@@ -3514,3 +3514,38 @@ TEST(XsdValidate, TypelessElementDeclarationIsAnyType) {
     /* a wrong root name is still undeclared */
     EXPECT_EQ(validate_doc(sch, "<other/>"), 0);
 }
+
+/* leptris#1880: top-level declarations form one symbol space — an
+ * attributeGroup ref must resolve regardless of declaration order
+ * (W3C suite addB096). The ref was expanded at capture time against
+ * the groups captured so far, so a group declared AFTER the
+ * referencing type vanished. */
+TEST(XsdValidate, AttributeGroupRefResolvesRegardlessOfOrder) {
+    const char* before =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:attributeGroup name=\"g\"><xs:attribute name=\"b\"/>"
+        "</xs:attributeGroup>"
+        "<xs:complexType name=\"base\"><xs:attribute name=\"a\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"root\"><xs:complexType><xs:complexContent>"
+        "<xs:extension base=\"base\"><xs:attributeGroup ref=\"g\"/>"
+        "</xs:extension>"
+        "</xs:complexContent></xs:complexType></xs:element>"
+        "</xs:schema>";
+    const char* after =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:complexType name=\"base\"><xs:attribute name=\"a\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"root\"><xs:complexType><xs:complexContent>"
+        "<xs:extension base=\"base\"><xs:attributeGroup ref=\"g\"/>"
+        "</xs:extension>"
+        "</xs:complexContent></xs:complexType></xs:element>"
+        "<xs:attributeGroup name=\"g\"><xs:attribute name=\"b\"/>"
+        "</xs:attributeGroup>"
+        "</xs:schema>";
+    EXPECT_EQ(validate_doc(before, "<root/>"), 1);
+    EXPECT_EQ(validate_doc(after, "<root/>"), 1);
+    /* the group's rows actually apply in both orders */
+    EXPECT_EQ(validate_doc(before, "<root b='1'/>"), 1);
+    EXPECT_EQ(validate_doc(after, "<root b='1'/>"), 1);
+}
