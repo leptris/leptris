@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.387] - 2026-10-28
+
+### Added
+
+- schema-set compilation — leptris_xsd_compile_set (xsd)
+
+### Fixed
+
+- length facets measure the value space — list items, and no family for QName/NOTATION (xsd)
+- attributeGroup refs resolve regardless of declaration order (xsd)
+- builtin lexical table converges on Datatypes Part 2 (xsd)
+- bulk namespace-declaration snapshot — one crossing per subtree (dom)
+- processContents=skip wildcards impose no constraint on matched children (xsd)
+- address-Integer batch faces — children_batch and name_compare (dom)
+
+
+
 ## [1.9.386] - 2026-10-28
 
 ### Fixed
