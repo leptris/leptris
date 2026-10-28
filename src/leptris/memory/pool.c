@@ -340,6 +340,33 @@ LeptrisMemoryPool* leptris_pool_create_with_page_size(size_t page_size) {
     return pool;
 }
 
+int leptris_pool_contains(const LeptrisMemoryPool* pool,
+                          const void* addr) {
+    if (!pool || !addr) return 0;
+    for (const MemoryPage* p = pool->first_page; p; p = p->next) {
+        if (p->busy_size <= sizeof(struct memory_page)) continue;
+        const char* lo = p->data;
+        const char* hi =
+            p->data + (p->busy_size - sizeof(struct memory_page));
+        if ((const char*)addr >= lo && (const char*)addr < hi) return 1;
+    }
+    /* Post-parse growth (arena extensions, oversized requests) lives
+     * in tracked malloc blocks outside the span — still pool-owned,
+     * still freed by leptris_pool_destroy. Callers use this predicate
+     * to answer "did this pointer die with the document?"
+     * (leptris#1866). */
+    for (const LeptrisBigAlloc* b = pool->first_big_alloc; b; b = b->next) {
+        if ((const char*)addr >= (const char*)b->ptr &&
+            (const char*)addr < (const char*)b->ptr + b->size) return 1;
+    }
+    if (pool->arena && pool->arena->base) {
+        if ((const char*)addr >= pool->arena->base &&
+            (const char*)addr < pool->arena->base + pool->arena->used)
+            return 1;
+    }
+    return 0;
+}
+
 void leptris_pool_destroy(LeptrisMemoryPool* pool) {
     if (!pool) return;
 

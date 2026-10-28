@@ -7,8 +7,15 @@
 
 #include "leptris.h"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+
+extern "C" {
+#include "../leptris/leptris_internal.h"
+#include "element.h"
+}
 
 namespace {
 
@@ -431,4 +438,181 @@ TEST(DocumentChildren, SetRootAdoptsDetachedForeignElement) {
     EXPECT_STREQ(leptris_element_name(leptris_document_root(doc)),
                  "detached");
     leptris_document_free(doc);
+}
+
+namespace {
+
+/* The host shape metanorma's SVG rewrite runs on: every inline <svg>
+ * carries the gradient/clip/filter targets its <use> references. */
+constexpr char kSvgSwapHost[] =
+    "<root xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n"
+    "  <p id=\"g\">host text</p>\n"
+    "  <svg xmlns=\"http://www.w3.org/2000/svg\" "
+    "xmlns:xlink=\"http://www.w3.org/1999/xlink\" id=\"s1\">"
+    "<style>.k { fill: url(#g) } .m { stroke: red }</style>"
+    "<defs><linearGradient id=\"g\"/><clipPath id=\"cp\"><rect/></clipPath>"
+    "<filter id=\"uniq1\"/></defs>"
+    "<circle class=\"k m\" fill=\"url(#g)\" clip-path=\"url(#cp)\" "
+    "filter=\"url(#uniq1)\"/>"
+    "<use xlink:href=\"#g\"/><use href=\"#cp\"/><use xlink:href=\"#uniq1\"/>"
+    "<a href=\"http://example.com/#g\"/></svg>\n"
+    "  <svg xmlns=\"http://www.w3.org/2000/svg\" "
+    "xmlns:xlink=\"http://www.w3.org/1999/xlink\" id=\"mid\">"
+    "<defs><rect id=\"solo\"/></defs><use href=\"#solo\"/></svg>\n"
+    "  <svg xmlns=\"http://www.w3.org/2000/svg\" "
+    "xmlns:xlink=\"http://www.w3.org/1999/xlink\" id=\"s3\">"
+    "<style>.k { fill: url(#g) } .m { stroke: red }</style>"
+    "<defs><linearGradient id=\"g\"/><clipPath id=\"cp\"><rect/></clipPath>"
+    "<filter id=\"uniq3\"/></defs>"
+    "<circle class=\"k m\" fill=\"url(#g)\" clip-path=\"url(#cp)\" "
+    "filter=\"url(#uniq3)\"/>"
+    "<use xlink:href=\"#g\"/><use href=\"#cp\"/><use xlink:href=\"#uniq3\"/>"
+    "<a href=\"http://example.com/#g\"/></svg>\n"
+    "  <p id=\"tail\">tail text</p>\n"
+    "</root>";
+
+std::string SvgRewriteScratch(int idx) {
+    char buf[2048];
+    std::snprintf(
+        buf, sizeof buf,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+        "xmlns:xlink=\"http://www.w3.org/1999/xlink\" id=\"s%d_inject_%d\">"
+        "<style>.k_inject_%d { fill: url(#g_inject_%d) } "
+        ".m_inject_%d { stroke: red }</style>"
+        "<defs><linearGradient id=\"g_inject_%d\"/>"
+        "<clipPath id=\"cp_inject_%d\"><rect/></clipPath>"
+        "<filter id=\"uniq%d_inject_%d\"/></defs>"
+        "<circle class=\"k_inject_%d m_inject_%d\" "
+        "fill=\"url(#g_inject_%d)\" clip-path=\"url(#cp_inject_%d)\" "
+        "filter=\"url(#uniq%d_inject_%d)\"/>"
+        "<use xlink:href=\"#g_inject_%d\"/><use href=\"#cp_inject_%d\"/>"
+        "<use xlink:href=\"#uniq%d_inject_%d\"/>"
+        "<a href=\"http://example.com/#g_inject_%d\"/></svg>",
+        idx + 1, idx, idx, idx, idx, idx, idx, idx + 1, idx, idx, idx, idx,
+        idx, idx + 1, idx, idx, idx, idx + 1, idx, idx);
+    return std::string(buf);
+}
+
+/* Walk the subtree reading only what the compact encoding hands back.
+ * A truncated first-attribute delta decodes to a wild pointer, so the
+ * pool-owned checks run before any attribute field outside the pool is
+ * touched — a regression then fails the test instead of SEGV-ing the
+ * runner. */
+bool AttrsArePoolOwned(LeptrisElement elem, LeptrisMemoryPool* pool,
+                       std::string* why) {
+    struct leptris_attribute* attr = leptris_element_get_first_attribute(elem);
+    for (size_t n = 0; attr; ++n) {
+        if (n > 512 || !leptris_pool_contains(pool, attr)) {
+            *why = std::string("attribute chain of <") +
+                   leptris_element_name(elem) + "> leaves the pool";
+            return false;
+        }
+        if (attr->name_view.length == 0 || !attr->name_view.data ||
+            !leptris_pool_contains(pool, attr->name_view.data)) {
+            *why = std::string("attribute name of <") +
+                   leptris_element_name(elem) + "> is not pool-owned";
+            return false;
+        }
+        attr = leptris_attr_next(attr);
+    }
+    for (LeptrisElement c = leptris_element_first_child_any(elem); c;
+         c = leptris_element_next_sibling_any(c)) {
+        if (!AttrsArePoolOwned(c, pool, why)) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+/* leptris#1866: the standoc SVG-rewrite loop replaces inline <svg>
+ * elements one at a time. Each replace parses a scratch document and
+ * adopts its root into the host by deep copy (#1528). Once the host
+ * pool's sized arena is full, copy allocations spill into tracked
+ * malloc extension blocks — on 64-bit hosts often farther from the
+ * arena span than int32 can express, so the compact first-attribute
+ * delta cannot be stored inline. A raw truncating cast wrote garbage
+ * there; decoding produced a wild pointer (blank attribute names in
+ * the output, serializer SEGV). The copy must store the edge through
+ * the overflow-aware setter so cross-region deltas survive.
+ *
+ * The sweep parks the bump pointer at every offset on the 8-byte
+ * allocation grid so the boundary is guaranteed to fall inside the
+ * copy sequence — including between an element struct in the span and
+ * its first attribute struct in an extension block. */
+TEST(DocumentChildren, AdoptedAttrsStayPoolOwnedAtEveryArenaBoundary) {
+    const std::string scratch_xml = SvgRewriteScratch(0);
+    size_t crossed = 0;
+
+    for (size_t headroom = 0; headroom <= 4096; headroom += 8) {
+        SCOPED_TRACE(::testing::Message() << "arena headroom " << headroom);
+
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument host =
+            leptris_parse_string(kSvgSwapHost, std::strlen(kSvgSwapHost), &st);
+        ASSERT_NE(host, nullptr);
+
+        LeptrisMemoryPool* pool =
+            reinterpret_cast<struct leptris_document*>(host)->pool;
+        ASSERT_NE(pool, nullptr);
+        ASSERT_TRUE(leptris_pool_is_arena_backed(pool));
+        ASSERT_NE(pool->arena, nullptr);
+
+        LeptrisElement root = leptris_document_root(host);
+        ASSERT_NE(root, nullptr);
+        LeptrisElement svg = nullptr;
+        for (LeptrisElement c = leptris_element_first_child_any(root); c;
+             c = leptris_element_next_sibling_any(c)) {
+            if (std::strcmp(leptris_element_name(c), "svg") == 0) {
+                svg = c;
+                break;
+            }
+        }
+        ASSERT_NE(svg, nullptr);
+
+        const size_t remaining = pool->arena->size - pool->arena->used;
+        if (remaining > headroom) {
+            ASSERT_NE(leptris_pool_alloc(pool, remaining - headroom),
+                      nullptr);
+        }
+
+        LeptrisDocument scratch =
+            leptris_parse_string(scratch_xml.data(), scratch_xml.size(), &st);
+        ASSERT_NE(scratch, nullptr);
+        LeptrisElement sroot = leptris_document_root(scratch);
+        ASSERT_NE(sroot, nullptr);
+
+        ASSERT_EQ(leptris_element_insert_after(svg, sroot), LEPTRIS_OK);
+        /* the rewritten-document query standoc runs on the scratch root */
+        LeptrisXPathResult r =
+            leptris_xpath_eval(scratch, sroot, ".//*[@id] | ./@id/..");
+        ASSERT_NE(r, nullptr);
+        leptris_xpath_result_free(r);
+
+        ASSERT_EQ(leptris_element_remove_child(root, svg), LEPTRIS_OK);
+        leptris_document_free(scratch);
+
+        if (pool->first_big_alloc) ++crossed;
+
+        std::string why;
+        const bool owned = AttrsArePoolOwned(root, pool, &why);
+        EXPECT_TRUE(owned) << why;
+        if (owned) {
+            char* ser = leptris_element_serialize(root, nullptr);
+            ASSERT_NE(ser, nullptr);
+            EXPECT_EQ(std::strstr(ser, "=\"\""), nullptr) << ser;
+            EXPECT_EQ(std::strstr(ser, "<use >"), nullptr) << ser;
+            EXPECT_NE(std::strstr(ser, "id=\"s1_inject_0\""), nullptr)
+                << ser;
+            EXPECT_NE(std::strstr(ser, "xlink:href=\"#g_inject_0\""),
+                      nullptr)
+                << ser;
+            leptris_free_string(ser);
+        }
+
+        leptris_document_free(host);
+    }
+
+    /* The sweep must actually reach extension blocks, or it proves
+     * nothing about cross-region deltas. */
+    EXPECT_GT(crossed, 0u);
 }

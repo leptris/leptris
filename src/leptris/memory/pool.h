@@ -172,6 +172,11 @@ int leptris_pool_is_arena_backed(const LeptrisMemoryPool* pool);
  * @param pool Pool to destroy (NULL is safe)
  */
 void leptris_pool_destroy(LeptrisMemoryPool* pool);
+/* leptris#1866: nonzero when addr lies within the pool's handed-out
+ * memory — any page's live span, the arena bump region, or a tracked
+ * extension block (freed with the pool like the rest). */
+int leptris_pool_contains(const LeptrisMemoryPool* pool,
+                          const void* addr);
 
 /* Release this thread's recycler pages back to the global pool
  * (leptris_thread_cleanup). */
