@@ -4,16 +4,97 @@
 
 ### Added
 
-- schema-set compilation — leptris_xsd_compile_set (xsd)
+- **XSD: schema-set compilation — `leptris_xsd_compile_set(paths, count,
+  status)` (leptris#1881).** A head document cannot see
+  substitution-group members declared in schemas that IMPORT it —
+  nothing loads those from the head alone, so the head's content model
+  could never match the member. The set face merges every listed
+  document into ONE schema: per-document checks and capture with
+  per-unit target namespaces, a shared visited-set so each unit
+  captures exactly once in either member order, and extension bases
+  resolving once after all units are in. The deferred extension-base
+  fold now records the base QName's RESOLVED namespace
+  (`ext_base_ns`, prefix resolved against the extension element's
+  in-scope declarations) — set compilation extends ACROSS units
+  (g:foo1 extends f:foo), which the old same-ns fallback silently
+  dropped into an empty model.
 
 ### Fixed
 
-- length facets measure the value space — list items, and no family for QName/NOTATION (xsd)
-- attributeGroup refs resolve regardless of declaration order (xsd)
-- builtin lexical table converges on Datatypes Part 2 (xsd)
-- bulk namespace-declaration snapshot — one crossing per subtree (dom)
-- processContents=skip wildcards impose no constraint on matched children (xsd)
-- address-Integer batch faces — children_batch and name_compare (dom)
+- **XSD: `processContents="skip"` wildcards impose no constraint on
+  matched children (leptris#1879).** XSD 1.0 §3.9.4.2 — the engine
+  found the child's global declaration and validated its lexical type
+  anyway (`<a>1</a>` under a skip wildcard rejected `1` as a bad
+  xs:ID; the W3C suite addB130/addB140 expect it valid).
+  `XsdCm` records the processContents level (strict/lax/skip) at both
+  wildcard capture sites; validate_children computes the strongest
+  level among the wildcards admitting each child (the attribute
+  wildcard's namespace-grammar matcher, unit-tns aware) and skips
+  skip-admitted children entirely. Lax keeps validating declared
+  children; wildcard-admitted undeclared names pass under every
+  level (the pinned moxml#460 notQName semantics).
+
+- **XSD: attributeGroup refs resolve regardless of declaration order
+  (leptris#1880).** Top-level declarations form one symbol space, but
+  the ref expansion looked up `s->attr_groups` at capture time — a
+  group declared AFTER the referencing type was silently dropped
+  (W3C suite addB096). Top-level `xs:attributeGroup` definitions are
+  now captured in a pre-pass at the head of `xsd_capture_root`;
+  the main walk skips already-captured names instead of shadowing.
+
+- **XSD: length facets measure the VALUE SPACE (leptris#1882).** On
+  list types the length family counts whitespace-separated ITEMS, not
+  characters (`xs:IDREFS` + `length=2` accepts `a b`, was rejected as
+  3 characters; the minLength/maxLength NMTOKENS rows flip likewise).
+  The list detection walks the base chain — a restriction OF a list
+  keeps `deriv=RESTRICT`, so `xsd_chain_is_list` resolves through
+  local bases and threads a flag into the facet gate. And
+  `xs:QName`/`xs:NOTATION` have no length family at all (Part 2
+  §4.3.1–4.3.3 applicability): the gate skips those comparisons
+  entirely.
+
+- **XSD: the builtin lexical table converges on Datatypes Part 2
+  (leptris#1883)** — thirteen rows disagreed in both directions.
+  Over-strict, now valid: `xs:token` accepts any whitespace shape
+  (collapse is total); `xs:ID` collapses before the NCName check; the
+  unbounded integer family accepts arbitrary precision with the sign
+  class intact; `xs:float`/`xs:double` accept `+INF` (float018).
+  Too lenient, now invalid: `xs:long` rejects 2^63 (strtoll ERANGE)
+  and `xs:unsignedLong` string-compares against 2^64−1; `xs:date`
+  applies calendar-aware day bounds with leap years; `xs:time` bounds
+  hour 0–23 (`24:00:00` exact), minute 0–59, second 0–60 with 60
+  reserved for `23:59:60`; `xs:duration` rejects a bare `T` (P1Y2MT)
+  and fractions on anything but seconds (P200.5Y); `xs:base64Binary`
+  rejects a one-byte remainder (`abcde`) and data after padding;
+  `xs:QName` rejects the reserved `xmlns` prefix.
+
+- **DOM: bulk namespace-declaration snapshot — one crossing per
+  subtree (leptris#1874).**
+  `leptris_element_namespace_declarations_snapshot(elem, ...)` walks
+  the subtree in pre-order once and returns one row per (element
+  carrying declarations, declaration) with path depth, ancestor name
+  chain, and NUL-terminated prefix/URI lanes — the same rows the
+  binding's collect_native_namespaces produces today with one
+  `namespace_definitions` FFI round trip per node plus a
+  whole-subtree Ruby recursion. attributes_snapshot retry discipline;
+  default-ns and xmlns="" undeclaration markers included.
+
+- **DOM: address-Integer batch faces (leptris#1855).**
+  `leptris_element_children_batch(elem_addr, ...)` returns every
+  child's address + node kind in document order from ONE crossing per
+  parent (the binding's plan-path hydration measured ~35% FFI
+  materialization; `bulk_children` was 12.4% of self-time) — NODE-level
+  walk, all five child kinds ride the batch.
+  `leptris_node_name_compare(node_addr, name, len)` compares names
+  inside the engine with strcmp semantics — the `fast_name` band (4.5%)
+  was Ruby constructing Strings that mostly feed `==`.
+
+- **XSD: test pin — a type-less element declaration defaults to
+  xs:anyType (leptris#1878).** XSD 1.0 §3.3.2: any attributes, lax
+  content, never an undeclared-element error. The moxml 0.5.153 repro
+  fails on the bundled engine 1.9.381.0 and passes since e5762cdc;
+  the moxml Gemfile already allows `~> 1.9.351` (a `bundle update
+  leptris` picks the fixed engine).
 
 
 
