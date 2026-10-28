@@ -408,10 +408,14 @@ static void validate_children(struct xsd_validator* v,
         free(names);
         free(uris);
     }
-    /* recurse: a global declaration governs the child when one
-     * exists; otherwise the parent's particle declaration does
-     * (first-name-match DFS — position-exact particle typing
-     * arrives with the NFA trace). */
+    /* recurse: the parent's matched particle declaration governs its
+     * instance element — Element Locally Valid (Complex Type), XSD 1.0
+     * §3.4.4 — so a local anonymous (or named) type shadows a global
+     * element declaration of the same name (#1871). Only a particle
+     * carrying no type (a ref, which always resolves to a global
+     * declaration) falls through to the global lookup here.
+     * (first-name-match DFS — position-exact particle typing arrives
+     * with the NFA trace.) */
     for (LeptrisNodeRef c =
              leptris_node_first_child(leptris_element_as_node(elem));
          c; c = leptris_node_next_sibling(c)) {
@@ -421,10 +425,6 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
-        if (xsd_find_element_ns(s, cl, cu)) {
-            validate_element(v, s, ce, 0);
-            continue;
-        }
         const char* ptype = NULL;
         if (model) {
             XsdCm* stack[64];
@@ -450,22 +450,25 @@ static void validate_children(struct xsd_validator* v,
         }
         /* leptris-ruby#535 (XSD 1.0 2.6.2): xsi:type applies at every
          * assessed depth -- a child typed by the parent particle is
-         * substituted exactly like a globally declared one (which
-         * validate_element above already handles). */
-        const char* cxsi = leptris_element_attribute_ns(
-            ce, "http://www.w3.org/2001/XMLSchema-instance", "type");
-        if (cxsi && cxsi[0] && ptype) {
-            char xuri[512], xlocal[256];
-            xsd_resolve_qname_inst(ce, cxsi, xuri, sizeof(xuri),
-                                   xlocal, sizeof(xlocal));
-            if (!xlocal[0]) {
-                verrf_atk(v, ce, "type-resolution", cl, "element", cl,
-                          "xsi:type prefix is not bound in the instance");
+         * substituted exactly like a globally declared one. */
+        if (ptype) {
+            const char* cxsi = leptris_element_attribute_ns(
+                ce, "http://www.w3.org/2001/XMLSchema-instance", "type");
+            if (cxsi && cxsi[0]) {
+                char xuri[512], xlocal[256];
+                xsd_resolve_qname_inst(ce, cxsi, xuri, sizeof(xuri),
+                                       xlocal, sizeof(xlocal));
+                if (!xlocal[0]) {
+                    verrf_atk(v, ce, "type-resolution", cl, "element", cl,
+                              "xsi:type prefix is not bound in the instance");
+                } else {
+                    validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi);
+                }
             } else {
-                validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi);
+                validate_local(v, s, ce, cl, ptype);
             }
-        } else if (ptype) {
-            validate_local(v, s, ce, cl, ptype);
+        } else if (xsd_find_element_ns(s, cl, cu)) {
+            validate_element(v, s, ce, 0);
         }
     }
 }
