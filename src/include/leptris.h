@@ -2038,6 +2038,49 @@ LEPTRIS_API size_t leptris_element_children_batch(
 LEPTRIS_API int leptris_node_name_compare(uintptr_t node_addr,
                                           const char* name, size_t len);
 
+/* leptris#1874: bulk namespace-declaration snapshot — the whole
+ * subtree's declared namespaces in ONE crossing (the binding's
+ * collect_native_namespaces walk paid one namespace_definitions FFI
+ * round trip per node). Pre-order DFS under `elem`; one row per
+ * (element carrying declarations, declaration) in document order,
+ * exactly the rows the binding's per-node namespace_definitions
+ * union produces.
+ *
+ * Each row carries the element's path depth (0 = `elem` itself, 1 =
+ * a child, ...) and blob offsets: the path names (depth NUL-
+ * terminated components in ancestor-first order, `names_off`), the
+ * prefix (`prefix_off`/`prefix_len`, NUL-terminated in the blob;
+ * 0xFFFFFFFFu off = a default-namespace declaration, no prefix),
+ * and the URI (`href_off`/`href_len`, NUL-terminated in the blob;
+ * len 0 = an xmlns="" undeclaration). Legacy xmlns:* attributes
+ * added through the attribute API are included (same union as
+ * leptris_element_namespace_count).
+ *
+ * Contract (the attributes_snapshot discipline): with `rows == NULL`
+ * returns 0 and writes the required row count to *out_row_count and
+ * the required blob bytes to *blob_used (either pointer may be
+ * NULL); with non-NULL buffers smaller than required returns
+ * (size_t)-1 and writes nothing; on success returns 0 and writes
+ * the used blob bytes to *blob_used when non-NULL.
+ *
+ * Memory: the snapshot copies strings into the caller's blob;
+ * nothing borrows the document.
+ */
+typedef struct {
+    uint32_t depth;       /* 0 = elem itself, 1 = child, ... */
+    uint32_t name_count;  /* == depth */
+    uint32_t names_off;   /* blob offset of the first path name */
+    uint32_t prefix_off;  /* 0xFFFFFFFFu = default-ns declaration */
+    uint32_t prefix_len;
+    uint32_t href_off;
+    uint32_t href_len;
+} leptris_ns_decl_row;
+
+LEPTRIS_API size_t leptris_element_namespace_declarations_snapshot(
+    LeptrisElement elem,
+    leptris_ns_decl_row* rows, size_t rows_cap, size_t* out_row_count,
+    char* blob, size_t blob_cap, size_t* blob_used);
+
 /**
  * Get name of attribute by index
  *
