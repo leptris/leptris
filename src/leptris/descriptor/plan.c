@@ -2126,6 +2126,88 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
     return (LeptrisPlanResult)r;
 }
 
+/* leptris#1854: decode the packed blob into borrowed op rows
+ * (name/value point INTO the blob — the windowed builder dup's
+ * every string) and hand the IDENTICAL op stream to the IDENTICAL
+ * builder, so byte parity with leptris_plan_result_build holds by
+ * construction. */
+LEPTRIS_API LeptrisPlanResult leptris_plan_result_build_packed(
+    LeptrisPlan plan, const void* blob, size_t blob_len,
+    LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!plan || !blob || blob_len < 5 * sizeof(uint32_t)) {
+        if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+        return NULL;
+    }
+    /* Two passes: count ops to size the row array, then decode with
+     * a bounds check on every field. */
+    const uint8_t* p = (const uint8_t*)blob;
+    const uint8_t* const end = p + blob_len;
+    size_t op_count = 0;
+    for (const uint8_t* q = p; q < end;) {
+        if ((size_t)(end - q) < 5 * sizeof(uint32_t)) {
+            if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+            return NULL;
+        }
+        uint32_t nl, vl;
+        memcpy(&nl, q + 12, sizeof(nl));
+        memcpy(&vl, q + 16, sizeof(vl));
+        q += 5 * sizeof(uint32_t);
+        /* name bytes + their NUL (none when nl == 0) + value bytes
+         * <= remaining: size_t math, no overflow (lens < 4G) */
+        size_t name_span = nl ? (size_t)nl + 1 : 0;
+        if ((size_t)(end - q) < name_span + (size_t)vl) {
+            if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+            return NULL;
+        }
+        q += name_span + (size_t)vl;
+        op_count++;
+    }
+    leptris_plan_row_op* ops =
+        (leptris_plan_row_op*)malloc(op_count * sizeof(*ops));
+    if (!ops) {
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    const uint8_t* q = p;
+    for (size_t i = 0; i < op_count; i++) {
+        uint32_t kind, pi, ri, nl, vl;
+        memcpy(&kind, q, sizeof(kind));
+        memcpy(&pi, q + 4, sizeof(pi));
+        memcpy(&ri, q + 8, sizeof(ri));
+        memcpy(&nl, q + 12, sizeof(nl));
+        memcpy(&vl, q + 16, sizeof(vl));
+        q += 5 * sizeof(uint32_t);
+        ops[i].kind = (LeptrisPlanRowOpKind)kind;
+        ops[i].plan_index = pi;
+        ops[i].row_index = ri;
+        ops[i].name = nl ? (const char*)q : NULL; /* NUL at q[nl] */
+        q += nl ? (size_t)nl + 1 : 0;
+        ops[i].value = vl ? (const char*)q : NULL;
+        ops[i].value_len = vl;
+        q += vl;
+    }
+    /* Same arena/window discipline as the struct face (#1677). */
+    struct dp_arena* arena = dp_arena_new(DP_ARENA_CHUNK);
+    if (!arena) {
+        free(ops);
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    struct dp_arena* saved_arena = dp_cur_arena;
+    dp_cur_arena = arena;
+    struct leptris_plan_result* r =
+        plan_result_build_windowed(plan, ops, op_count, status, arena);
+    dp_cur_arena = saved_arena;
+    free(ops);
+    if (!r) {
+        dp_arena_free_all(arena);
+        return NULL;
+    }
+    if (r->arena == arena) r->arena_owner = 1;
+    return (LeptrisPlanResult)r;
+}
+
 LEPTRIS_API void leptris_plan_result_free(LeptrisPlanResult result) {
     dp_result_free_rec((struct leptris_plan_result*)result);
 }

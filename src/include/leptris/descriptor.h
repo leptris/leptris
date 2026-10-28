@@ -293,6 +293,22 @@ LEPTRIS_API LeptrisPlanResult leptris_plan_result_build(
     LeptrisPlan plan, const leptris_plan_row_op* ops, size_t count,
     LeptrisStatus* status);
 
+/* leptris#1854: build a result from a PACKED op blob — the whole
+ * emission crosses in one call and no per-op host struct writes
+ * (the #408 address-Integer law applied to the build side; the
+ * binding's emission loop was 37% FFI::Pointer#+). Same program
+ * semantics as leptris_plan_result_build. Blob layout, per op:
+ * five native-byte-order uint32_t (kind, plan_index, row_index,
+ * name_len, value_len), then name_len name bytes PLUS a NUL
+ * terminator (the ATTR path dup's names NUL-terminated), then
+ * value_len raw value bytes; a zero length omits the bytes and
+ * reads as NULL. Bounds-checked: a truncated blob fails
+ * INVALID_ARG. Strings are copied; the blob is only read during
+ * the call. Memory: free with leptris_plan_result_free. */
+LEPTRIS_API LeptrisPlanResult leptris_plan_result_build_packed(
+    LeptrisPlan plan, const void* blob, size_t blob_len,
+    LeptrisStatus* status);
+
 /* #1551: serialize a walk result back to XML, guided by its plan.
  * The plan supplies element wrappers (row wire_name + ns_prefix)
  * and the result supplies content; children emit in document order
