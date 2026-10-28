@@ -1790,3 +1790,45 @@ LEPTRIS_API size_t leptris_element_attributes_raw(
     }
     return written;
 }
+
+/* ---- #1855: address-Integer batch faces ------------------------------ */
+
+LEPTRIS_API size_t leptris_element_children_batch(
+    uintptr_t elem_addr,
+    uintptr_t* child_addrs, uint8_t* child_kinds, size_t cap) {
+    if (!elem_addr) return 0;
+    LeptrisElement e = (LeptrisElement)elem_addr;
+    size_t count = 0;
+    /* NODE-level walk: the batch carries every child kind (text,
+     * comment, PI, CDATA included) — first_child_any is
+     * element-only. */
+    for (LeptrisNode* c = leptris_node_first_child((LeptrisNode*)e); c;
+         c = leptris_node_next_sibling(c)) {
+        if (child_addrs && child_kinds && count < cap) {
+            child_addrs[count] = (uintptr_t)c;
+            child_kinds[count] = (uint8_t)c->type;
+        }
+        count++;
+    }
+    /* Undersized cap: write nothing and hand back the count so the
+     * caller sizes and retries (the snapshot-face discipline). */
+    if (count > cap) return count;
+    return count;
+}
+
+LEPTRIS_API int leptris_node_name_compare(uintptr_t node_addr,
+                                          const char* name, size_t len) {
+    if (!node_addr) return -2;
+    const char* node_name = "";
+    if (leptris_node_get_type((LeptrisNodeRef)node_addr) ==
+        LEPTRIS_NODE_TYPE_ELEMENT) {
+        node_name = leptris_element_get_name((LeptrisElement)node_addr);
+        if (!node_name) node_name = "";
+    }
+    size_t node_len = strlen(node_name);
+    size_t min = node_len < len ? node_len : len;
+    int rc = strncmp(node_name, name ? name : "", min);
+    if (rc != 0) return rc < 0 ? -1 : 1;
+    if (node_len == len) return 0;
+    return node_len < len ? -1 : 1;
+}
