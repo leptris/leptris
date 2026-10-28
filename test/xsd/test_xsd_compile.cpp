@@ -3416,3 +3416,40 @@ TEST(XsdValidate, SkipWildcardSuppressesChildValidation) {
     EXPECT_EQ(validate_doc(lax, "<root><undeclared><y/></undeclared></root>"),
               1);
 }
+
+/* leptris#1881: schema-SET compilation — a head document cannot see
+ * substitution-group members declared in schemas that IMPORT it,
+ * because nothing loads those. leptris_xsd_compile_set merges every
+ * listed document into one schema; the member (g:foo1) then rides
+ * the head's content model (f:bar's choice over f:foo). */
+TEST(XsdCompile, SchemaSetSeesImportingDocumentsMembers) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* paths[] = {
+        LEPTRIS_XSD_CASES_DIR "/schema_set/f.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schema_set/g.xsd",
+    };
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_set(paths, 2, &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* inst =
+        "<f:foo xmlns:f=\"f\" xmlns:g=\"g\">"
+        "<f:bar><g:foo1 x=\"1\"><f:bar/></g:foo1></f:bar></f:foo>";
+    LeptrisDocument d = leptris_parse_string(inst, strlen(inst), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+
+    /* order independence: the importing document first */
+    const char* paths2[] = {
+        LEPTRIS_XSD_CASES_DIR "/schema_set/g.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schema_set/f.xsd",
+    };
+    LeptrisXsdSchema s2 = leptris_xsd_compile_set(paths2, 2, &st);
+    ASSERT_NE(s2, (LeptrisXsdSchema)0) << "status " << (int)st;
+    d = leptris_parse_string(inst, strlen(inst), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s2, d), 1);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    leptris_xsd_free(s2);
+}

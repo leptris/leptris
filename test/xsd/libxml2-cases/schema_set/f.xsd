@@ -1,0 +1,13 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="f"
+           xmlns="f" xmlns:f="f" elementFormDefault="qualified">
+  <xs:complexType name="foo"><xs:sequence><xs:any/></xs:sequence></xs:complexType>
+  <xs:element name="foo" type="foo"/>
+  <xs:element name="bar">
+    <xs:complexType>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element ref="f:foo"/>
+        <xs:element ref="f:bar"/>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

@@ -913,6 +913,21 @@ LEPTRIS_API void leptris_rng_free(LeptrisRelaxNG rng);
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(const char* path,
                                                      LeptrisStatus* status);
 
+/* leptris#1881: compile a schema SET — every listed document's
+ * declarations merge into ONE schema, in order, with the shared
+ * visited-set closing include/import cycles across members. A head
+ * document cannot see substitution-group members declared in
+ * schemas that import it (nothing loads those from the head alone);
+ * a set compilation does. Per-unit target namespaces are honored
+ * during each document's capture; the FIRST document's
+ * targetNamespace remains the schema's. Relative schemaLocations
+ * resolve against each document's own directory. NULL paths or
+ * count 0 return NULL; an unreadable or malformed member yields an
+ * error-carrying handle like leptris_xsd_compile_file.
+ * (Memory: free with leptris_xsd_free.) */
+LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_set(
+    const char* const* paths, size_t count, LeptrisStatus* status);
+
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                                                  size_t len,
                                                  LeptrisStatus* status);

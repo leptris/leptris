@@ -1,0 +1,9 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="g"
+           xmlns:g="g" xmlns:f="f" elementFormDefault="qualified">
+  <xs:import namespace="f" schemaLocation="f.xsd"/>
+  <xs:element name="foo1" substitutionGroup="f:foo">
+    <xs:complexType><xs:complexContent>
+      <xs:extension base="f:foo"><xs:attribute name="x" type="xs:int"/></xs:extension>
+    </xs:complexContent></xs:complexType>
+  </xs:element>
+</xs:schema>
