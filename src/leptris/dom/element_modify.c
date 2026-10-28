@@ -2515,8 +2515,14 @@ static LeptrisElement copy_subtree_detached(LeptrisElement source,
         if (copy->first_attribute_off != 0) {
             leptris_attr_set_next(last_attr, attr);
         } else {
-            copy->first_attribute_off =
-                (int32_t)((char*)attr - (char*)copy);
+            /* The destination pool may hand this allocation from an
+             * arena EXTENSION block — malloc'd far from the arena
+             * span (leptris#1866: macOS puts it ~105 TB away, beyond
+             * int32). The raw cast truncated that delta and decode
+             * produced a wild pointer (blank names, serializer SEGV);
+             * the setter spills out-of-range deltas to the overflow
+             * table. */
+            leptris_elem_set_first_attribute(copy, attr);
         }
         last_attr = attr;
         /* leptris#1866: keep the element's cached tail in step with
