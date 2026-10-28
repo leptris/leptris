@@ -377,3 +377,41 @@ TEST(ArenaSmallRecycle, BulkDestroyParksUpToTheBound) {
     leptris_arena_retain_drain();
 }
 
+
+// ---- #1846 slice 4: mixed-size traffic must not evict arena spans ---
+// The single 4-slot global pool mixes every parked block kind (parse
+// input copies never get taken back; they just occupy slots). With
+// more block kinds than slots the FULL path frees ARENA spans and the
+// next same-size create lands on a cold mapping. The fix splits the
+// global tier by size class: mid [256KB, 2MB) and large [2MB, ..),
+// each with its own slots — the four mid kinds churn among
+// themselves and the large span keeps its slot.
+TEST(LeptrisArena, SameSizeReuseSurvivesMixedSizeTraffic) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "retain cache disabled under ASAN";
+#endif
+    const size_t huge = 4u * 1024u * 1024u;
+    void* huge_base = nullptr;
+    for (int round = 0; round < 3; round++) {
+        /* mid-class traffic: four distinct sizes, one per slot */
+        for (size_t mid : {300u * 1024u, 350u * 1024u, 400u * 1024u,
+                           450u * 1024u}) {
+            LeptrisArena* m = leptris_arena_create(mid);
+            ASSERT_NE(m, nullptr);
+            memset(leptris_arena_base(m), 1, mid);
+            leptris_arena_destroy(m);
+        }
+        /* the large arena: after warmup its mapping must repeat */
+        LeptrisArena* h = leptris_arena_create(huge);
+        ASSERT_NE(h, nullptr);
+        memset(leptris_arena_base(h), 1, huge);
+        if (round == 0) {
+            huge_base = leptris_arena_base(h);
+        } else {
+            EXPECT_EQ(leptris_arena_base(h), huge_base)
+                << "round " << round
+                << ": the large span was evicted by mid traffic";
+        }
+        leptris_arena_destroy(h);
+    }
+}

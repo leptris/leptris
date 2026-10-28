@@ -5,6 +5,13 @@
  * runners; the interleaved lane's slices are gated on THESE
  * numbers, never a loaded dev machine (2026-09-20: a Mac at load
  * 340 measured a 472 MB/s build at 46-85).
+ *
+ * leptris#1846: `argv[1]` switches to file mode — parse+free one
+ * fixture in a loop (median of N in-process runs, best-of-5
+ * batches) and print one `FILE <path> <bytes> <MB/s>` row. The
+ * arena-sizing A/B runner (arena_ab.sh) interleaves two builds of
+ * this binary and takes the median of per-pair ratios, so runner
+ * load cannot fake or hide the effect.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +27,41 @@ static double now_us(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+}
+
+static int file_mode(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "cannot open %s\n", path); return 1; }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* doc = (char*)malloc((size_t)sz);
+    if (!doc || fread(doc, 1, (size_t)sz, f) != (size_t)sz) {
+        fprintf(stderr, "cannot read %s\n", path);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    double best = 1e18;
+    double sum = 0;
+    for (int r = 0; r < 5; r++) {
+        double a = now_us();
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(doc, (size_t)sz, &st);
+        double b = now_us();
+        if (!d) { printf("PARSE FAILED\n"); return 1; }
+        leptris_document_free(d);
+        if (b - a < best) best = b - a;
+        sum += b - a;
+    }
+    /* #1846: the MEAN prices in the cold parses (fresh span + full
+     * first-touch) that a best-of hides — the warm-span retention fix
+     * lives exactly there. */
+    printf("FILE %s %ld %.1f MB/s mean %.1f MB/s\n", path, sz,
+           sz / 1048576.0 / (best / 1e6),
+           sz / 1048576.0 / ((sum / 5.0) / 1e6));
+    free(doc);
+    return 0;
 }
 
 static size_t gen(char* out, size_t target, int text_shape) {
@@ -40,7 +82,8 @@ static size_t gen(char* out, size_t target, int text_shape) {
     return len;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    if (argc > 1) return file_mode(argv[1]);
     const size_t sizes[3] = {1500 * 1024, 5000 * 1024, 13000 * 1024};
     const char* names[2] = {"attr", "text"};
     printf("%-6s %9s %12s %12s\n", "shape", "bytes", "leptris", "pugixml");

@@ -6,6 +6,7 @@
 #include "../common/port.h" /* LEPTRIS_THREAD_LOCAL */
 #include <stdint.h> /* uintptr_t: was transitive via glibc's mman graph */
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #if defined(__linux__)
 #include <sys/mman.h>   /* madvise(MADV_HUGEPAGE) — Linux only */
@@ -53,6 +54,14 @@ static inline size_t align_up(size_t n) {
  * twice per document lifetime, so contention is irrelevant. */
 #define ARENA_RETAIN_MIN (256u * 1024u)
 #define ARENA_RETAIN_MAX_BLOCKS 4u
+/* #1846 slice 4: the global tier is split by size class. With ONE
+ * 4-slot pool, every parked block kind competes for the same slots —
+ * and parse input copies (freed at document close, never taken back)
+ * permanently occupy slots, so arena spans hit the FULL free path and
+ * the next same-size parse lands on a cold mapping (fresh mmap +
+ * full first-touch: 2 of 5 takes missed on the 306KB fixture). Mid
+ * [256KB, 2MB) and large [2MB, ..) now churn among themselves. */
+#define ARENA_RETAIN_LARGE_MIN (2u * 1024u * 1024u)
 /* 96MB: a large-document parse arena (~4x input with the
  * pre-sized estimate) must survive the free to be reused by the
  * next parse — at the old 32MB ceiling, every big-doc cycle
@@ -73,7 +82,12 @@ static struct {
     size_t size[ARENA_RETAIN_MAX_BLOCKS];
     size_t count;
     size_t bytes;
-} g_retain;
+} g_retain_mid, g_retain_large;
+
+/* Shared byte ceiling across both tiers (the footprint bound). */
+static size_t retain_bytes_total(void) {
+    return g_retain_mid.bytes + g_retain_large.bytes;
+}
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -171,18 +185,43 @@ static char* retain_take(size_t request, size_t* capacity) {
     char* found = NULL;
     size_t found_size = 0;
     retain_lock();
-    for (size_t i = 0; i < g_retain.count; i++) {
-        if (g_retain.size[i] >= request &&
-            (found_size == 0 || g_retain.size[i] < found_size)) {
-            found = g_retain.base[i];
-            found_size = g_retain.size[i];
-            g_retain.base[i] = g_retain.base[g_retain.count - 1];
-            g_retain.size[i] = g_retain.size[g_retain.count - 1];
-            g_retain.count--;
+    /* #1846: search ONLY the request's size class — mid blocks can't
+     * serve large requests, and a large block must never serve a mid
+     * request (it would burn the only large slots on input-copy
+     * churn). */
+    struct {
+        char** base;
+        size_t* size;
+        size_t* count;
+    } t;
+    size_t tcount;
+    if (request >= ARENA_RETAIN_LARGE_MIN) {
+        t.base = g_retain_large.base;
+        t.size = g_retain_large.size;
+        tcount = g_retain_large.count;
+    } else {
+        t.base = g_retain_mid.base;
+        t.size = g_retain_mid.size;
+        tcount = g_retain_mid.count;
+    }
+    for (size_t i = 0; i < tcount; i++) {
+        if (t.size[i] >= request &&
+            (found_size == 0 || t.size[i] < found_size)) {
+            found = t.base[i];
+            found_size = t.size[i];
+            t.base[i] = t.base[tcount - 1];
+            t.size[i] = t.size[tcount - 1];
+            tcount--;
             break;
         }
     }
-    g_retain.bytes -= found_size;
+    if (request >= ARENA_RETAIN_LARGE_MIN) {
+        g_retain_large.count = tcount;
+        g_retain_large.bytes -= found_size;
+    } else {
+        g_retain_mid.count = tcount;
+        g_retain_mid.bytes -= found_size;
+    }
     retain_unlock();
     if (found) *capacity = found_size;
     return found;
@@ -203,16 +242,25 @@ static void retain_give(char* base, size_t size) {
         return;
     }
     retain_lock();
-    if (g_retain.count >= ARENA_RETAIN_MAX_BLOCKS ||
-        g_retain.bytes + size > ARENA_RETAIN_MAX_BYTES) {
+    const int large_class = size >= ARENA_RETAIN_LARGE_MIN;
+    size_t count = large_class ? g_retain_large.count : g_retain_mid.count;
+    if (count >= ARENA_RETAIN_MAX_BLOCKS ||
+        retain_bytes_total() + size > ARENA_RETAIN_MAX_BYTES) {
         retain_unlock();
         leptris_free_hook(base);
         return;
     }
-    g_retain.base[g_retain.count] = base;
-    g_retain.size[g_retain.count] = size;
-    g_retain.count++;
-    g_retain.bytes += size;
+    if (large_class) {
+        g_retain_large.base[count] = base;
+        g_retain_large.size[count] = size;
+        g_retain_large.count = count + 1;
+        g_retain_large.bytes += size;
+    } else {
+        g_retain_mid.base[count] = base;
+        g_retain_mid.size[count] = size;
+        g_retain_mid.count = count + 1;
+        g_retain_mid.bytes += size;
+    }
     retain_unlock();
 }
 
@@ -231,10 +279,14 @@ void leptris_arena_retain_drain(void) {
     g_small.bytes = 0;
 
     retain_lock();
-    for (size_t i = 0; i < g_retain.count; i++)
-        leptris_free_hook(g_retain.base[i]);
-    g_retain.count = 0;
-    g_retain.bytes = 0;
+    for (size_t i = 0; i < g_retain_mid.count; i++)
+        leptris_free_hook(g_retain_mid.base[i]);
+    g_retain_mid.count = 0;
+    g_retain_mid.bytes = 0;
+    for (size_t i = 0; i < g_retain_large.count; i++)
+        leptris_free_hook(g_retain_large.base[i]);
+    g_retain_large.count = 0;
+    g_retain_large.bytes = 0;
     retain_unlock();
 }
 
