@@ -179,6 +179,7 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->type);
         free(cm->ns);
         free(cm->ext_base);
+        free(cm->ext_base_ns);
         free(cm->any_ns);
         free(cm->not_qname);
         free(cm->any_unit_tns);
@@ -2033,7 +2034,13 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
         progressed = 0;
         for (XsdCm* c = s->complex_types; c; c = c->next) {
             if (!c->ext_base) continue;
-            XsdCm* base = xsd_find_complex_ns(s, c->ext_base, c->ns);
+            /* #1881: the fold resolves in the BASE's namespace —
+             * recorded at capture from the base QName's prefix —
+             * falling back to the deriver's ns (same-unit refs,
+             * where the old behavior lives). */
+            const char* bns = c->ext_base_ns ? c->ext_base_ns : c->ns;
+            XsdCm* base = xsd_find_complex_ns(s, c->ext_base, bns);
+            if (!base) base = xsd_find_complex_ns(s, c->ext_base, c->ns);
             if (!base || base->ext_base) continue;
             XsdCm* copied = xsd_cm_copy_list(base->first_child);
             if (copied) {
@@ -2053,7 +2060,9 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                 }
             }
             const XsdTypeAttrs* bt =
-                xsd_find_type_attrs_ns(s, c->ext_base, c->ns);
+                xsd_find_type_attrs_ns(s, c->ext_base, bns);
+            if (!bt)
+                bt = xsd_find_type_attrs_ns(s, c->ext_base, c->ns);
             if (bt) {
                 XsdTypeAttrs* mine = NULL;
                 for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
@@ -2097,6 +2106,8 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
             }
             free(c->ext_base);
             c->ext_base = NULL;
+            free(c->ext_base_ns);
+            c->ext_base_ns = NULL;
             progressed = 1;
         }
     }
@@ -2752,7 +2763,21 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     continue;
                 const char* base_raw =
                     leptris_element_attribute(dq, "base");
-                const char* base = xsd_local_name(base_raw);
+                /* #1881: resolve the base QName against the
+                 * extension element's in-scope declarations — the
+                 * resolved namespace rides the deferral so the
+                 * post-capture fold can cross units (g:foo1 extends
+                 * f:foo). */
+                char buri[256], blocal[256];
+                buri[0] = 0;
+                blocal[0] = 0;
+                if (base_raw)
+                    xsd_resolve_qname(dq, base_raw, buri, sizeof(buri),
+                                      blocal, sizeof(blocal));
+                const char* base =
+                    base_raw ? (blocal[0] ? blocal
+                                          : xsd_local_name(base_raw))
+                             : NULL;
                 XsdCm* base_root =
                     (base && strncmp(base, "xs:", 3) != 0)
                         ? xsd_find_complex_ns(s, base, s->target_ns)
@@ -2777,6 +2802,9 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     strcmp(dl, "extension") == 0) {
                     free(root->ext_base);
                     root->ext_base = xsd_strdup(base);
+                    free(root->ext_base_ns);
+                    root->ext_base_ns =
+                        buri[0] ? xsd_strdup(buri) : NULL;
                 }
                 if (strcmp(dl, "extension") == 0) {
                     /* base content first, derived content after */
@@ -3583,4 +3611,135 @@ LEPTRIS_API size_t leptris_xsd_declaration_count(LeptrisXsdSchema schema) {
 LEPTRIS_API const char* leptris_xsd_error(LeptrisXsdSchema schema) {
     if (!schema) return NULL;
     return ((struct leptris_xsd_schema*)schema)->error;
+}
+
+/* leptris#1881: schema-set compilation — every listed document's
+ * declarations merge into ONE schema. The per-document pipeline is
+ * the single-compile one (checks, per-unit tns, capture); the
+ * visited-set is seeded with every member path first so an import
+ * chain back to a set member does not recapture it, and extension
+ * bases resolve ONCE after all units are in (type references
+ * resolve against the whole schema, the leptris-ruby#440 law). */
+LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_set(
+    const char* const* paths, size_t count, LeptrisStatus* status) {
+    if (status) *status = LEPTRIS_OK;
+    if (!paths || count == 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        return NULL;
+    }
+    struct leptris_xsd_schema* s =
+        (struct leptris_xsd_schema*)calloc(1, sizeof(*s));
+    if (!s) {
+        if (status) *status = LEPTRIS_ERROR_MEMORY;
+        return NULL;
+    }
+    const char* main_tns = NULL;
+    for (size_t i = 0; i < count; i++) {
+        const char* path = paths[i];
+        if (!path || !*path) {
+            xsd_set_error(s, "schema set member path is empty");
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            return s;
+        }
+        size_t len = 0;
+        char* text = xsd_read_file(path, &len);
+        if (!text) {
+            xsd_set_error(s, "schema set member cannot be read");
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            return s;
+        }
+        const char* slash = strrchr(path, '/');
+        const char* bslash = strrchr(path, '\\');
+        if (bslash && (!slash || bslash > slash)) slash = bslash;
+        char* base_dir = NULL;
+        if (slash) {
+            size_t n = (size_t)(slash - path);
+            if (n == 0) n = 1;
+            base_dir = (char*)malloc(n + 1);
+            if (base_dir) {
+                memcpy(base_dir, path, n);
+                base_dir[n] = 0;
+            }
+        } else {
+            base_dir = xsd_strdup(".");
+        }
+
+        LeptrisDocument doc =
+            leptris_parse_string(text, len, status);
+        free(text);
+        if (!doc) {
+            xsd_set_error(s,
+                          "schema set member is not well-formed XML");
+            free(base_dir);
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            return s;
+        }
+        LeptrisElement root = leptris_document_root(doc);
+        if (!root) {
+            xsd_set_error(s, "schema set member has no root element");
+            leptris_document_free(doc);
+            free(base_dir);
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            return s;
+        }
+        const char* local = NULL;
+        const char* uri = NULL;
+        leptris_element_expanded_name(root, &local, NULL, &uri);
+        if (!local || strcmp(local, "schema") != 0 ||
+            (uri && strcmp(uri, XSD_NS) != 0)) {
+            xsd_set_error(s, "schema set member root is not xs:schema");
+            leptris_document_free(doc);
+            free(base_dir);
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            return s;
+        }
+        const char* doc_tns =
+            leptris_element_attribute(root, "targetNamespace");
+        char* saved = s->base_dir;
+        s->base_dir = base_dir;
+        if (i == 0) {
+            main_tns = doc_tns;
+            s->target_ns = xsd_strdup(doc_tns);
+        }
+        /* Per-unit tns during checks + capture; the visited-set
+         * seeds each member so import chains close (the import in
+         * g.xsd would otherwise re-capture f.xsd mid-set). */
+        {
+            char* saved_ns = s->target_ns;
+            s->target_ns = xsd_strdup(doc_tns);
+            char canon[4096];
+            xsd_path_normalize(path, canon, sizeof(canon));
+            /* An earlier member's import may have captured this
+             * document already (order [importer, imported]) — the
+             * visited check keeps each unit to one capture. */
+            if (xsd_visited_has(s, canon)) {
+                free(s->target_ns);
+                s->target_ns = saved_ns;
+                leptris_document_free(doc);
+                free(base_dir);
+                s->base_dir = saved;
+                continue;
+            }
+            xsd_visited_add(s, canon);
+            int bad = xsd_check_structure(s, root, 0) != 0 ||
+                      xsd_check_derivation(s, root) != 0 ||
+                      xsd_check_refs(s, root) != 0 ||
+                      xsd_check_upa(s, root) != 0 ||
+                      xsd_check_include_tns(s, root) != 0;
+            if (!bad) xsd_capture_root(s, root);
+            free(s->target_ns);
+            s->target_ns = saved_ns;
+            if (bad) {
+                leptris_document_free(doc);
+                free(base_dir);
+                if (status) *status = LEPTRIS_ERROR_PARSE;
+                return s;
+            }
+        }
+        leptris_document_free(doc);
+        free(base_dir);
+        s->base_dir = saved;
+    }
+    xsd_resolve_extension_bases(s);
+    return s;
 }

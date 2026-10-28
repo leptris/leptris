@@ -120,6 +120,13 @@ typedef struct xsd_cm {
     char* ext_base; /* extension whose base was not yet captured at
                      * capture time (forward ref) — folded by the
                      * post-capture resolver (leptris-ruby#440 A) */
+    char* ext_base_ns; /* #1881: the base QName's RESOLVED namespace
+                        * (prefix resolved against the extension
+                        * element's in-scope declarations) — a set
+                        * compilation extends ACROSS units (g:foo1
+                        * extends f:foo), so the fold resolves in
+                        * the base's namespace, not the deriver's;
+                        * NULL = the declaring unit's tns */
     char* any_ns; /* CM_ANY: the namespace attribute grammar */
     char* not_qname; /* XSD 1.1 xs:any/@notQName (moxml#460): space-
                       * separated ##defined / no-prefix literals;
