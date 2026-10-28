@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.386] - 2026-10-28
+
+### Fixed
+
+- local particle types shadow global same-name element declarations (xsd)
+- adopt cross-arena attributes through the overflow-aware setter (dom)
+
+
+
 ## [1.9.385] - 2026-10-27
 
 ### Fixed
