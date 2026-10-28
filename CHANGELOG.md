@@ -4,8 +4,28 @@
 
 ### Fixed
 
-- local particle types shadow global same-name element declarations (xsd)
-- adopt cross-arena attributes through the overflow-aware setter (dom)
+- **DOM: cross-document subtree adoption no longer corrupts attribute
+  chains when the destination arena spills into extension blocks
+  (leptris#1866).** `copy_subtree_detached` wired the first-attribute
+  edge with a truncating `int32_t` cast; once the sized arena was
+  exhausted, copy allocations landed in tracked malloc blocks that on
+  64-bit hosts sit farther from the arena span than int32 can express
+  (~105 TB on macOS). The truncated delta decoded to a wild pointer —
+  blank attribute names (`<use ="">`) and a serializer SEGV in
+  mutation-heavy SVG-rewrite loops. The edge now goes through
+  `leptris_elem_set_first_attribute`, which spills out-of-range deltas
+  to the compact overflow table, and `leptris_pool_contains`
+  recognizes extension blocks as pool-owned.
+
+- **XSD: a local element particle with its own type shadows a
+  same-named global element declaration (leptris#1871).** Per Element
+  Locally Valid (Complex Type), XSD 1.0 §3.4.4, the matched
+  particle's declaration governs its instance element — an inline
+  anonymous (or named `type=`) local type was previously assessed as
+  the global declaration's type, rejecting valid instances and
+  accepting invalid ones. Resolution order is particle-type-first
+  (with `xsi:type` substitution applied there); `ref` particles,
+  which carry no type, keep the global lookup unchanged.
 
 
 
