@@ -3472,3 +3472,102 @@ TEST(DomTextMutate, DetachedTextNodeSetContent) {
     EXPECT_EQ(leptris_text_node_set_content(t, "solo"), LEPTRIS_OK);
     leptris_document_free(doc);
 }
+
+// ---- #1855: address-Integer batch faces ------------------------------
+
+TEST(DomChildrenBatch, MatchesPerChildWalkWithKinds) {
+    const char xml[] =
+        "<r><a/>text<c p='1'/><!--cm--><?pi x?>"
+        "<![CDATA[cd]]><d/><e/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    /* Sizing: cap smaller than the child count writes nothing and
+     * returns the count. */
+    uintptr_t addrs[2];
+    uint8_t kinds[2];
+    size_t n = leptris_element_children_batch(
+        (uintptr_t)root, addrs, kinds, 2);
+    ASSERT_GT(n, 2u);
+
+    std::vector<uintptr_t> buf_addrs(n);
+    std::vector<uint8_t> buf_kinds(n);
+    ASSERT_EQ(leptris_element_children_batch(
+                  (uintptr_t)root, buf_addrs.data(), buf_kinds.data(), n),
+              n);
+
+    /* Parity with the per-child walk, in document order. */
+    size_t i = 0;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             (LeptrisNodeRef)root);
+         c; c = leptris_node_next_sibling(c), i++) {
+        ASSERT_LT(i, n);
+        EXPECT_EQ(buf_addrs[i], (uintptr_t)c) << "child " << i;
+        EXPECT_EQ(buf_kinds[i],
+                  (uint8_t)leptris_node_get_type(c))
+            << "child " << i;
+    }
+    EXPECT_EQ(i, n);
+    /* The batch saw elements, text, comment, PI, CDATA kinds. */
+    EXPECT_EQ(buf_kinds[0], (uint8_t)LEPTRIS_NODE_TYPE_ELEMENT);
+    bool saw_text = false, saw_comment = false, saw_cdata = false;
+    for (size_t k = 0; k < n; k++) {
+        if (buf_kinds[k] == (uint8_t)LEPTRIS_NODE_TYPE_TEXT) saw_text = true;
+        if (buf_kinds[k] == (uint8_t)LEPTRIS_NODE_TYPE_COMMENT) saw_comment = true;
+        if (buf_kinds[k] == (uint8_t)LEPTRIS_NODE_TYPE_CDATA) saw_cdata = true;
+    }
+    EXPECT_TRUE(saw_text);
+    EXPECT_TRUE(saw_comment);
+    EXPECT_TRUE(saw_cdata);
+
+    leptris_document_free(doc);
+}
+
+TEST(DomChildrenBatch, NullAndLeafContracts) {
+    uintptr_t addrs[4];
+    uint8_t kinds[4];
+    EXPECT_EQ(leptris_element_children_batch(0, addrs, kinds, 4), 0u);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, &st);
+    ASSERT_NE(doc, nullptr);
+    EXPECT_EQ(leptris_element_children_batch(
+                  (uintptr_t)leptris_document_root(doc), addrs, kinds, 4),
+              0u);
+    leptris_document_free(doc);
+}
+
+TEST(DomNameCompare, ComparesInsideTheEngine) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(
+        "<r><alpha/><beta/></r>", 22, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement a = leptris_element_first_child_any(root);
+
+    EXPECT_EQ(leptris_node_name_compare((uintptr_t)a, "alpha", 5), 0);
+    EXPECT_EQ(leptris_node_name_compare((uintptr_t)a, "beta", 4) < 0, 1);
+    EXPECT_EQ(leptris_node_name_compare(
+                  (uintptr_t)leptris_element_next_sibling_any(a),
+                  "beta", 4),
+              0);
+    /* length-delimited compare: a longer caller lens on a prefix
+     * never equals */
+    EXPECT_EQ(leptris_node_name_compare((uintptr_t)a, "alphas", 6) < 0, 1);
+    /* non-element nodes compare as the empty string */
+    LeptrisDocument doc2 = leptris_parse_string(
+        "<r>txt</r>", 10, &st);
+    ASSERT_NE(doc2, nullptr);
+    LeptrisElement t = (LeptrisElement)leptris_node_first_child(
+        (LeptrisNodeRef)leptris_document_root(doc2));
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(leptris_node_name_compare((uintptr_t)t, "", 0), 0);
+    EXPECT_NE(leptris_node_name_compare((uintptr_t)t, "x", 1), 0);
+    /* NULL address is an error lane, not a match */
+    EXPECT_EQ(leptris_node_name_compare(0, "alpha", 5), -2);
+
+    leptris_document_free(doc);
+    leptris_document_free(doc2);
+}

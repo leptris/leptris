@@ -2019,6 +2019,25 @@ LEPTRIS_API size_t leptris_element_attributes_snapshot(
     char* ns_prefixes, size_t prefixes_cap, size_t* prefix_offsets,
     char* ns_uris, size_t uris_cap, size_t* uri_offsets);
 
+/* leptris#1855 (ask 1): batched child materialization under the
+ * #408 address-Integer law — one crossing per PARENT returns every
+ * child's address and node kind, replacing the binding's per-child
+ * FFI walk. Returns the element's child count; the (addr, kind)
+ * pairs are written in document order only when cap >= count —
+ * otherwise nothing is written and the count comes back so the
+ * caller sizes and retries. A 0 address reads as "no children". */
+LEPTRIS_API size_t leptris_element_children_batch(
+    uintptr_t elem_addr,
+    uintptr_t* child_addrs, uint8_t* child_kinds, size_t cap);
+
+/* leptris#1855 (ask 2): engine-side name comparison — strcmp
+ * semantics (-1/0/1) between the node's name and the caller's
+ * (name, len) lens, with no String constructed on either side.
+ * Element nodes compare their name; non-element nodes compare as
+ * the empty string. A 0 address is an error lane: -2. */
+LEPTRIS_API int leptris_node_name_compare(uintptr_t node_addr,
+                                          const char* name, size_t len);
+
 /**
  * Get name of attribute by index
  *
