@@ -1616,6 +1616,165 @@ LEPTRIS_API const char* leptris_element_namespace_decl_uri(
     return uri;
 }
 
+/* #1874: pre-order DFS over the subtree, one row per (element with
+ * declarations, declaration). The explicit stack (elements + the
+ * borrowed path-name chain) keeps arbitrarily deep trees off the C
+ * stack. First pass counts rows and blob bytes; the second fills —
+ * the two passes walk identically, so sizing and filling agree. */
+LEPTRIS_API size_t leptris_element_namespace_declarations_snapshot(
+    LeptrisElement elem,
+    leptris_ns_decl_row* rows, size_t rows_cap, size_t* out_row_count,
+    char* blob, size_t blob_cap, size_t* blob_used_out) {
+    size_t row_count = 0;
+    size_t blob_used = 0;
+
+    /* Dynamic DFS stack: element + depth. The path-name chain rides
+     * a parallel array of borrowed name pointers indexed by depth. */
+    struct dfs_entry {
+        LeptrisElement e;
+        uint32_t depth;
+    };
+    size_t stack_cap = 64, names_cap = 64;
+    struct dfs_entry* stack = (struct dfs_entry*)malloc(
+        stack_cap * sizeof(*stack));
+    const char** names = (const char**)malloc(names_cap * sizeof(*names));
+    if (!stack || !names) {
+        free(stack);
+        free(names);
+        if (out_row_count) *out_row_count = 0;
+        if (blob_used_out) *blob_used_out = 0;
+        return (size_t)-1;
+    }
+    size_t sp = 0;
+
+    if (elem) {
+        stack[sp].e = elem;
+        stack[sp].depth = 0;
+        sp++;
+    }
+
+    while (sp > 0) {
+        sp--;
+        LeptrisElement e = stack[sp].e;
+        uint32_t depth = stack[sp].depth;
+
+        /* Path name for this element (depth 0 writes nothing); DFS
+         * visits the parent first, so ancestors are recorded. */
+        if (depth > 0) {
+            if (depth >= names_cap) {
+                size_t nc = names_cap * 2;
+                while (nc <= depth) nc *= 2;
+                const char** grown = (const char**)realloc(
+                    names, nc * sizeof(*names));
+                if (!grown) goto oom;
+                names = grown;
+                names_cap = nc;
+            }
+            names[depth] = leptris_element_name(e);
+        }
+
+        /* Count (or emit) this element's declarations. */
+        size_t decls = leptris_element_namespace_count(e);
+        for (size_t i = 0; i < decls; i++) {
+            const char* prefix = NULL;
+            const char* uri = NULL;
+            element_namespace_decl_at(e, i, &prefix, &uri);
+            size_t prefix_len = prefix ? strlen(prefix) : 0;
+            size_t uri_len = uri ? strlen(uri) : 0;
+            /* Row bytes: the path names + prefix + href, the
+             * prefix/href NUL-terminated like the attributes_snapshot
+             * lane blobs (bindings read C strings straight out). */
+            size_t row_bytes = (prefix ? prefix_len + 1 : 0) +
+                uri_len + 1;
+            for (uint32_t d = 1; d <= depth; d++) {
+                const char* nm = names[d] ? names[d] : "";
+                row_bytes += strlen(nm) + 1;
+            }
+            if (rows) {
+                if (row_count >= rows_cap ||
+                    blob_used + row_bytes > blob_cap) {
+                    free(stack);
+                    free(names);
+                    return (size_t)-1;
+                }
+                leptris_ns_decl_row* r = &rows[row_count];
+                r->depth = depth;
+                r->name_count = depth;
+                /* Path names: depth components, ancestor-first,
+                 * each NUL-terminated. */
+                r->names_off = (uint32_t)blob_used;
+                for (uint32_t d = 1; d <= depth; d++) {
+                    const char* nm = names[d] ? names[d] : "";
+                    size_t nl = strlen(nm) + 1;
+                    memcpy(blob + blob_used, nm, nl);
+                    blob_used += nl;
+                }
+                if (prefix) {
+                    r->prefix_off = (uint32_t)blob_used;
+                    r->prefix_len = (uint32_t)prefix_len;
+                    memcpy(blob + blob_used, prefix, prefix_len);
+                    blob_used += prefix_len;
+                    blob[blob_used++] = '\0';
+                } else {
+                    r->prefix_off = 0xFFFFFFFFu;
+                    r->prefix_len = 0;
+                }
+                r->href_off = (uint32_t)blob_used;
+                r->href_len = (uint32_t)uri_len;
+                if (uri_len) {
+                    memcpy(blob + blob_used, uri, uri_len);
+                    blob_used += uri_len;
+                }
+                blob[blob_used++] = '\0';
+            } else {
+                /* Sizing pass: measure the same bytes the fill pass
+                 * writes (those advance blob_used inline). */
+                blob_used += row_bytes;
+            }
+            row_count++;
+        }
+
+        /* Push children in REVERSE so the pop order is document
+         * order. */
+        size_t nkids = 0;
+        for (LeptrisElement c = leptris_element_first_child_any(e); c;
+             c = leptris_element_next_sibling_any(c)) {
+            nkids++;
+        }
+        if (sp + nkids > stack_cap) {
+            size_t nc = stack_cap * 2;
+            while (nc < sp + nkids) nc *= 2;
+            struct dfs_entry* grown = (struct dfs_entry*)realloc(
+                stack, nc * sizeof(*stack));
+            if (!grown) goto oom;
+            stack = grown;
+            stack_cap = nc;
+        }
+        /* Collect children into the stack tail backwards. */
+        size_t w = sp + nkids;
+        for (LeptrisElement c = leptris_element_first_child_any(e); c;
+             c = leptris_element_next_sibling_any(c)) {
+            w--;
+            stack[w].e = c;
+            stack[w].depth = depth + 1;
+        }
+        sp += nkids;
+    }
+
+    free(stack);
+    free(names);
+    if (out_row_count) *out_row_count = row_count;
+    if (blob_used_out) *blob_used_out = blob_used;
+    return 0;
+
+oom:
+    free(stack);
+    free(names);
+    if (out_row_count) *out_row_count = 0;
+    if (blob_used_out) *blob_used_out = 0;
+    return (size_t)-1;
+}
+
 /* ============================================================================
  * Namespace mutation (issue #186).
  *

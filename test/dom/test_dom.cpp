@@ -3571,3 +3571,167 @@ TEST(DomNameCompare, ComparesInsideTheEngine) {
     leptris_document_free(doc);
     leptris_document_free(doc2);
 }
+// ---- #1874: bulk namespace-declaration snapshot ----------------------
+
+TEST(DomNsSnapshot, DeclaredRowsInPreOrderWithPaths) {
+    const char xml[] =
+        "<r xmlns='urn:d' xmlns:a='urn:a'>"
+        "<a:c1 xmlns:b='urn:b'><a:g/></a:c1>"
+        "<c2 xmlns='urn:d2'/>"
+        "</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    /* Sizing probe: rows NULL -> required row count. */
+    size_t need_rows = 0, need_blob = 0;
+    ASSERT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, NULL, 0, &need_rows, NULL, 0, &need_blob),
+              0u);
+    ASSERT_GT(need_rows, 0u);
+    ASSERT_GT(need_blob, 0u);
+    ASSERT_EQ(need_rows, 4u);  /* r(2 decls), c1(1), c2(1); g has none */
+
+    std::vector<leptris_ns_decl_row> rows(need_rows);
+    std::vector<char> blob(need_blob);
+    size_t blob_used = 0;
+    ASSERT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, rows.data(), need_rows, NULL, blob.data(),
+                  need_blob, &blob_used),
+              0u);
+
+    /* r: default ns + a prefix (decl order) */
+    EXPECT_EQ(rows[0].depth, 0u);
+    EXPECT_EQ(rows[0].prefix_off, 0xFFFFFFFFu);  /* default */
+    EXPECT_EQ(rows[0].href_len, 5u);
+    EXPECT_EQ(std::string(blob.data() + rows[0].href_off, 5), "urn:d");
+    EXPECT_EQ(rows[1].depth, 0u);
+    EXPECT_EQ(std::string(blob.data() + rows[1].prefix_off, 1), "a");
+    EXPECT_EQ(std::string(blob.data() + rows[1].href_off, 5), "urn:a");
+    /* c1 at depth 1, prefixed b, names blob carries "c1" */
+    EXPECT_EQ(rows[2].depth, 1u);
+    EXPECT_EQ(std::string(blob.data() + rows[2].prefix_off, 1), "b");
+    EXPECT_EQ(std::string(blob.data() + rows[2].href_off, 5), "urn:b");
+    EXPECT_EQ(std::string(blob.data() + rows[2].names_off), "c1");
+    /* c2 re-declares the default ns */
+    EXPECT_EQ(rows[3].depth, 1u);
+    EXPECT_EQ(rows[3].prefix_off, 0xFFFFFFFFu);
+    EXPECT_EQ(std::string(blob.data() + rows[3].href_off), "urn:d2");
+    EXPECT_EQ(std::string(blob.data() + rows[3].names_off), "c2");
+    EXPECT_EQ(blob_used, need_blob);
+
+    leptris_document_free(doc);
+}
+
+TEST(DomNsSnapshot, DeepPathsCarryEveryComponent) {
+    const char xml[] =
+        "<r><x><y><z xmlns:p='urn:p'/></y></x></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    size_t need_rows = 0, need_blob = 0;
+    leptris_element_namespace_declarations_snapshot(
+        root, NULL, 0, &need_rows, NULL, 0, &need_blob);
+    ASSERT_EQ(need_rows, 1u);
+    std::vector<leptris_ns_decl_row> rows(need_rows);
+    std::vector<char> blob(need_blob);
+    ASSERT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, rows.data(), need_rows, NULL, blob.data(),
+                  need_blob, NULL),
+              0u);
+    EXPECT_EQ(rows[0].depth, 3u);
+    EXPECT_EQ(rows[0].name_count, 3u);
+    /* names blob: "x\0y\0z\0" in ancestor order */
+    EXPECT_EQ(std::string(blob.data() + rows[0].names_off), "x");
+    EXPECT_EQ(std::string(blob.data() + rows[0].names_off + 2), "y");
+    EXPECT_EQ(std::string(blob.data() + rows[0].names_off + 4), "z");
+    leptris_document_free(doc);
+}
+
+TEST(DomNsSnapshot, LegacyXmlnsAttrsAndUndeclare) {
+    const char xml[] = "<r><c/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement c = leptris_element_first_child_any(root);
+    ASSERT_NE(c, nullptr);
+    /* legacy lane: xmlns added through the attribute API */
+    ASSERT_EQ(leptris_element_set_attribute(c, "xmlns:l", "urn:l"),
+              LEPTRIS_OK);
+    /* undeclaration: xmlns='' empties the default ns */
+    ASSERT_EQ(leptris_element_set_attribute(c, "xmlns", ""),
+              LEPTRIS_OK);
+
+    size_t need_rows = 0, need_blob = 0;
+    leptris_element_namespace_declarations_snapshot(
+        root, NULL, 0, &need_rows, NULL, 0, &need_blob);
+    ASSERT_EQ(need_rows, 2u);
+    std::vector<leptris_ns_decl_row> rows(need_rows);
+    std::vector<char> blob(need_blob);
+    ASSERT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, rows.data(), need_rows, NULL, blob.data(),
+                  need_blob, NULL),
+              0u);
+    EXPECT_EQ(rows[0].depth, 1u);
+    EXPECT_EQ(std::string(blob.data() + rows[0].prefix_off), "l");
+    EXPECT_EQ(std::string(blob.data() + rows[0].href_off), "urn:l");
+    EXPECT_EQ(rows[1].depth, 1u);
+    EXPECT_EQ(rows[1].prefix_off, 0xFFFFFFFFu);
+    EXPECT_EQ(rows[1].href_len, 0u);  /* undeclared */
+    leptris_document_free(doc);
+}
+
+TEST(DomNsSnapshot, RetryAndNullContracts) {
+    const char xml[] = "<r xmlns:p='urn:p'><c xmlns:q='urn:q'/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+
+    size_t need_rows = 0, need_blob = 0;
+    leptris_element_namespace_declarations_snapshot(
+        root, NULL, 0, &need_rows, NULL, 0, &need_blob);
+    ASSERT_EQ(need_rows, 2u);
+
+    std::vector<leptris_ns_decl_row> rows(need_rows);
+    /* blob too small -> SIZE_MAX, buffers untouched */
+    std::vector<char> tiny(4);
+    EXPECT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, rows.data(), need_rows, NULL, tiny.data(), 4,
+                  NULL),
+              (size_t)-1);
+
+    /* rows too small -> SIZE_MAX */
+    std::vector<char> blob(need_blob);
+    std::vector<leptris_ns_decl_row> one_row(1);
+    EXPECT_EQ(leptris_element_namespace_declarations_snapshot(
+                  root, one_row.data(), 1, NULL, blob.data(),
+                  need_blob, NULL),
+              (size_t)-1);
+
+    /* NULL element: 0 rows required, success at capacity 0 */
+    EXPECT_EQ(leptris_element_namespace_declarations_snapshot(
+                  NULL, NULL, 0, &need_rows, NULL, 0, &need_blob),
+              0u);
+    EXPECT_EQ(need_rows, 0u);
+
+    leptris_document_free(doc);
+}
+
+TEST(DomNsSnapshot, NoDeclarationsNeedZeroRows) {
+    const char xml[] = "<r><c/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    size_t need_rows = 1, need_blob = 1;
+    EXPECT_EQ(leptris_element_namespace_declarations_snapshot(
+                  leptris_document_root(doc), NULL, 0, &need_rows,
+                  NULL, 0, &need_blob),
+              0u);
+    EXPECT_EQ(need_rows, 0u);
+    EXPECT_EQ(need_blob, 0u);
+    leptris_document_free(doc);
+}
