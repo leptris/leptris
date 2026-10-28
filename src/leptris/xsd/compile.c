@@ -292,6 +292,9 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                 cm->process_skip =
                     (pc && (strcmp(pc, "skip") == 0 ||
                             strcmp(pc, "lax") == 0)) ? 1 : 0;
+                cm->pc_level =
+                    (pc && strcmp(pc, "skip") == 0) ? 2
+                    : (pc && strcmp(pc, "lax") == 0) ? 1 : 0;
             }
         } else {
             continue; /* annotation & friends */
@@ -2569,6 +2572,7 @@ static XsdCm* xsd_cm_copy_list(const XsdCm* head) {
         d->any_ns = xsd_strdup(src->any_ns);
         d->any_unit_tns = xsd_strdup(src->any_unit_tns);
         d->process_skip = src->process_skip;
+        d->pc_level = src->pc_level;
         d->min = src->min;
         d->max = src->max;
         d->first_child = xsd_cm_copy_list(src->first_child);
@@ -2662,6 +2666,8 @@ static XsdCm* xsd_capture_any(LeptrisElement any_child) {
         (pc && (strcmp(pc, "skip") == 0 || strcmp(pc, "lax") == 0))
             ? 1
             : 0;
+    w->pc_level = (pc && strcmp(pc, "skip") == 0) ? 2
+                  : (pc && strcmp(pc, "lax") == 0) ? 1 : 0;
     w->min = 0;
     w->max = -1;
     return w;
