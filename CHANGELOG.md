@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.390] - 2026-10-29
+
+### Fixed
+
+- compare node->type against its own enum constant (xpath)
+
+
+
 ## [1.9.389] - 2026-10-29
 
 ### Fixed
