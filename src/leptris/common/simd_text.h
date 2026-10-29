@@ -66,6 +66,17 @@ void leptris_copy_count3(char* dst, const char* src, size_t len,
                         char c0, char c1, char c2,
                         size_t* n0, size_t* n1, size_t* n2);
 
+/* One-pass text-run scan (#1842): find the first `term` byte in
+ * [s, s+len) and report whether f1/f2 occur strictly before it.
+ * Returns the term offset, or -1 when absent (flags then cover the
+ * whole span). saw_f1/saw_f2 are always written (0 or 1). Replaces
+ * the direct parser's 48-byte inline loop plus up to three per-run
+ * memchr calls with a single memory pass. term/f1/f2 must be
+ * distinct. */
+ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
+                                char f1, char f2,
+                                int* saw_f1, int* saw_f2);
+
 /* ---- Structural span scan (TODO 193 Phase 1: parser v3) ----
  *
  * Records every byte of the XML structural set in [buf, buf+len)
@@ -121,6 +132,12 @@ void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
                               size_t* ca, size_t* cb, size_t* cc);
 size_t leptris_text_scan_events_neon(const char* buf, size_t len,
                                      LeptrisScanEvent* events, size_t max);
+ptrdiff_t leptris_text_scan_run_avx2(const char* s, size_t len, char term,
+                                     char f1, char f2,
+                                     int* saw_f1, int* saw_f2);
+ptrdiff_t leptris_text_scan_run_neon(const char* s, size_t len, char term,
+                                     char f1, char f2,
+                                     int* saw_f1, int* saw_f2);
 
 /* Append events for every structural byte to out (capacity max).
  * Returns the number of events written; returns max unchanged as

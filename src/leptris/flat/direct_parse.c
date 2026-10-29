@@ -1726,44 +1726,31 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 if (q >= p.end) break;
                 if (*q == '<') { p.pos = q; continue; }
             }
-            /* Text content — FUSED scan (TODO 184): one inline loop
-             * finds '<' AND counts '\n' (issue #223 line tracking),
-             * replacing the memchr + dp_advance_line re-walk (two
-             * passes; memchr pays ~10ns setup on short text — the
-             * same finding as the attr-value scan). First 48 bytes
-             * inline, SIMD fallback for longer spans. */
+            /* Text content — one-pass scan (#1842): leptris_text_
+             * scan_run finds '<' AND flags '&'/'\r' in a single SIMD
+             * pass, replacing the 48-byte inline loop plus up to
+             * three per-run memchr calls (the three setup costs
+             * dominated on text-heavy shapes: ~90ns of scan per
+             * ~55-byte run). Identical semantics: flags cover
+             * [text_start, lt) only. */
             char* text_start = p.pos;
             uint32_t text_off =
                 p.line_offsets_ok
                     ? (uint32_t)(text_start - p.buf) + 1u : 0u;
             char* lt = NULL;
-            /* #1285 slice 4: '&' tracking fused into the scan (one
-             * predicted compare per byte) — the flush below needs
-             * it and a separate memchr per run cost ~7% parse on
-             * entity-free docs. The memchr fallback covers the
-             * >48-byte tail region only. */
             int has_amp = 0;
-            /* §2.11 (#326): literal-CR tracking rides the same fused
-             * loop — CR-bearing runs take the pool-copy collapse,
-             * CR-free runs (the norm) keep the zero-copy carve. */
+            /* §2.11 (#326): literal-CR tracking rides the same pass —
+             * CR-bearing runs take the pool-copy collapse, CR-free
+             * runs (the norm) keep the zero-copy carve. */
             int has_cr = 0;
             {
-                const char* q = p.pos;
-                const char* probe_end = p.probe_slack
-                    ? q + 48
-                    : ((p.end - q > 48) ? q + 48 : p.end);
-                while (q < probe_end) {
-                    char ch = *q;
-                    if (ch == '<') { lt = (char*)q; break; }
-                    has_amp |= (ch == '&');
-                    has_cr |= (ch == '\r');
-                    q++;
-                }
-                if (q >= p.end) goto text_done;
-                lt = (char*)memchr(q, '<', p.end - q);
-                if (!lt) lt = p.end;
-                has_amp |= memchr(q, '&', (size_t)((char*)lt - q)) != NULL;
-                has_cr |= memchr(q, '\r', (size_t)((char*)lt - q)) != NULL;
+                int saw_amp = 0, saw_cr = 0;
+                ptrdiff_t t_off = leptris_text_scan_run(
+                    p.pos, (size_t)(p.end - p.pos), '<', '&', '\r',
+                    &saw_amp, &saw_cr);
+                lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
+                has_amp |= saw_amp;
+                has_cr |= saw_cr;
             }
             /* leptris#1748: a '<' that opens no markup construct
              * ('!', '?', '/', name-start) is unescaped text. Strict
@@ -1783,14 +1770,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                     LEPTRIS_DIAG_UNESCAPED_LT, NULL,
                     "Unescaped < not allowed in a text node");
                 const char* nq = lt + 1;
-                const char* nlt =
-                    memchr(nq, '<', (size_t)(p.end - nq));
-                const char* span_end = nlt ? nlt : p.end;
-                has_amp |= memchr(nq, '&',
-                                  (size_t)(span_end - nq)) != NULL;
-                has_cr |= memchr(nq, '\r',
-                                 (size_t)(span_end - nq)) != NULL;
-                lt = (char*)nlt;
+                int saw_amp2 = 0, saw_cr2 = 0;
+                ptrdiff_t n_off = leptris_text_scan_run(
+                    nq, (size_t)(p.end - nq), '<', '&', '\r',
+                    &saw_amp2, &saw_cr2);
+                has_amp |= saw_amp2;
+                has_cr |= saw_cr2;
+                lt = (n_off >= 0) ? (char*)(nq + n_off) : NULL;
             }
         text_done:
             p.pos = lt ? lt : p.end;

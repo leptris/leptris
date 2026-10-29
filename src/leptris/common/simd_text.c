@@ -63,6 +63,29 @@ static void (*g_count3_high_fn)(const char*, size_t, char, char, char,
                                 int*) = NULL;
 static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
                           size_t*, size_t*, size_t*) = NULL;
+static ptrdiff_t (*g_scan_run_fn)(const char*, size_t, char, char, char,
+                                  int*, int*) = NULL;
+
+/* #1842: one pass, three byte classes — the direct parser's text path
+ * (find '<', flag '&'/CR) drops its 48-byte inline loop and up to
+ * three per-run memchr calls for this. */
+static ptrdiff_t scan_run_scalar(const char* s, size_t len, char term,
+                                 char f1, char f2,
+                                 int* saw_f1, int* saw_f2) {
+    int a = 0, b = 0;
+    const char* p = s;
+    const char* end = s + len;
+    while (p < end) {
+        char ch = *p;
+        if (ch == term) break;
+        a |= (ch == f1);
+        b |= (ch == f2);
+        p++;
+    }
+    *saw_f1 = a;
+    *saw_f2 = b;
+    return (p < end) ? (ptrdiff_t)(p - s) : -1;
+}
 
 static size_t count_scalar(const char* s, size_t len, char c) {
     size_t n = 0;
@@ -108,6 +131,7 @@ static void dispatch_init(void) {
         g_find3_fn = leptris_text_find3_avx2;
         g_count_fn = leptris_text_count_char_avx2;
         g_count3_high_fn = count3_high_scalar;
+        g_scan_run_fn = leptris_text_scan_run_avx2;
         return;
     }
 #endif
@@ -119,6 +143,7 @@ static void dispatch_init(void) {
         g_count3_fn = leptris_text_count3_neon;
         g_count3_high_fn = leptris_text_count3_high_neon;
         g_copy3_fn = leptris_copy_count3_neon;
+        g_scan_run_fn = leptris_text_scan_run_neon;
         return;
     }
 #endif
@@ -127,6 +152,7 @@ static void dispatch_init(void) {
     g_find3_fn = find3_scalar;
     g_count_fn = count_scalar;
     g_count3_high_fn = count3_high_scalar;
+    g_scan_run_fn = scan_run_scalar;
 }
 
 /* Scalar kernel: one byte loop counts all three chars and detects
@@ -211,6 +237,13 @@ void leptris_copy_count3(char* dst, const char* src, size_t len,
     /* Fallback = exactly the pre-fusion behavior: memcpy + count. */
     memcpy(dst, src, len);
     leptris_text_count3(src, len, c0, c1, c2, n0, n1, n2);
+}
+
+ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
+                                char f1, char f2,
+                                int* saw_f1, int* saw_f2) {
+    if (!g_scan_run_fn) dispatch_init();
+    return g_scan_run_fn(s, len, term, f1, f2, saw_f1, saw_f2);
 }
 
 /* ---- Structural span scan (TODO 193 Phase 1) ---- */

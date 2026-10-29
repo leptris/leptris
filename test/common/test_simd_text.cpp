@@ -139,4 +139,141 @@ TEST(SimdText, Find3TerminatorAtVeryEnd) {
     EXPECT_EQ(leptris_text_find3(u.data(), u.size(), '-', '-', '>'), -1);
 }
 
+/* ---- leptris_text_scan_run (#1842): one-pass text-run scan ----
+ *
+ * Parser contract: find the first `term` byte and report whether f1/f2
+ * occur strictly BEFORE it. Replaces the 48-byte inline loop plus up to
+ * three per-run memchr calls in the direct parser's text path. */
+
+TEST(SimdText, ScanRunFindsTermEveryPosition) {
+    std::string base = "abcdefghijklmnopqrstuvwxyz";
+    for (size_t len = 1; len <= 80; len++) {
+        std::string s;
+        for (size_t i = 0; i < len; i++) s += base[i % base.size()];
+        for (size_t pos = 0; pos < len; pos++) {
+            std::string t = s;
+            t[pos] = '<';
+            int saw_amp = -1, saw_cr = -1;
+            ptrdiff_t off = leptris_text_scan_run(
+                t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+            EXPECT_EQ(off, (ptrdiff_t)pos)
+                << "len=" << len << " pos=" << pos;
+            EXPECT_EQ(saw_amp, 0) << "len=" << len << " pos=" << pos;
+            EXPECT_EQ(saw_cr, 0) << "len=" << len << " pos=" << pos;
+        }
+    }
+}
+
+TEST(SimdText, ScanRunFlagsCountPrefixOnly) {
+    /* '&'/CR before the term set the flags; the same bytes after it
+     * must NOT (the parser's entity/CR handling only covers the run
+     * it carves). */
+    {
+        std::string t = "ab&cd<ef&gh";
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        EXPECT_EQ(off, 5);
+        EXPECT_EQ(saw_amp, 1);
+        EXPECT_EQ(saw_cr, 0);
+    }
+    {
+        std::string t = "ab<cd&";  /* flag byte after the term is skipped */
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        EXPECT_EQ(off, 2);
+        EXPECT_EQ(saw_amp, 0);
+        EXPECT_EQ(saw_cr, 0);
+    }
+    {
+        std::string t = "a\r\rb<c\r";
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        EXPECT_EQ(off, 4);
+        EXPECT_EQ(saw_amp, 0);
+        EXPECT_EQ(saw_cr, 1);
+    }
+    {
+        std::string t = "&x\ry<z";
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        EXPECT_EQ(off, 4);
+        EXPECT_EQ(saw_amp, 1);
+        EXPECT_EQ(saw_cr, 1);
+    }
+}
+
+TEST(SimdText, ScanRunNoTermFlagsWholeSpan) {
+    std::string base = "The quick brown fox jumps over the lazy dog ";
+    for (size_t len = 0; len <= 200; len++) {
+        std::string s;
+        for (size_t i = 0; i < len; i++) s += base[i % base.size()];
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            s.data(), s.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        EXPECT_EQ(off, -1) << "len=" << len;
+        EXPECT_EQ(saw_amp, 0) << "len=" << len;
+        EXPECT_EQ(saw_cr, 0) << "len=" << len;
+    }
+    /* Flags fire across chunk boundaries when the term is absent. */
+    std::string t(15, 'x');
+    t += '&';
+    t.append(20, 'x');
+    t += '\r';
+    t.append(40, 'x');
+    int saw_amp = -1, saw_cr = -1;
+    EXPECT_EQ(leptris_text_scan_run(t.data(), t.size(), '<', '&', '\r',
+                                    &saw_amp, &saw_cr),
+              -1);
+    EXPECT_EQ(saw_amp, 1);
+    EXPECT_EQ(saw_cr, 1);
+}
+
+TEST(SimdText, ScanRunTermAtVeryEnd) {
+    std::string t(40, 'y');
+    t += '<';
+    int saw_amp = -1, saw_cr = -1;
+    EXPECT_EQ(leptris_text_scan_run(t.data(), t.size(), '<', '&', '\r',
+                                    &saw_amp, &saw_cr),
+              40);
+    EXPECT_EQ(saw_amp, 0);
+    EXPECT_EQ(saw_cr, 0);
+}
+
+TEST(SimdText, ScanRunEmptySpan) {
+    int saw_amp = -1, saw_cr = -1;
+    EXPECT_EQ(leptris_text_scan_run("", 0, '<', '&', '\r', &saw_amp,
+                                    &saw_cr),
+              -1);
+    EXPECT_EQ(saw_amp, 0);
+    EXPECT_EQ(saw_cr, 0);
+}
+
+TEST(SimdText, ScanRunLongBodyEveryPosition) {
+    /* Vector-loop coverage: term at every offset of a 300-byte body,
+     * with flag bytes seeded before and after each position. */
+    std::string body(300, 'x');
+    for (size_t pos = 0; pos < body.size(); pos++) {
+        std::string t = body;
+        if (pos > 0) t[pos / 2] = '&';
+        if (pos > 2) t[pos / 3] = '\r';
+        t[pos] = '<';
+        /* Expected flags derive from the final seeded string. */
+        int e_amp = 0, e_cr = 0;
+        for (size_t i = 0; i < pos; i++) {
+            e_amp |= (t[i] == '&');
+            e_cr |= (t[i] == '\r');
+        }
+        int saw_amp = -1, saw_cr = -1;
+        ptrdiff_t off = leptris_text_scan_run(
+            t.data(), t.size(), '<', '&', '\r', &saw_amp, &saw_cr);
+        ASSERT_EQ(off, (ptrdiff_t)pos) << "pos=" << pos;
+        EXPECT_EQ(saw_amp, e_amp) << "pos=" << pos;
+        EXPECT_EQ(saw_cr, e_cr) << "pos=" << pos;
+    }
+}
+
 }  // namespace
