@@ -4,7 +4,23 @@
 
 ### Fixed
 
-- size-cap the content-model automaton (#1894) (xsd)
+- **XSD: size-cap the content-model automaton (leptris#1897,
+  leptris#1894).** A counted particle multiplies the expanded NFA
+  (finite `maxOccurs` copies the subtree per copy), so nested large
+  bounds grew the automaton exponentially and a huge finite bound
+  walked the copy loop until the process died — jetsam/OOM with no
+  diagnostic, which read as a flaky harness in the W3C XML Schema
+  Test Suite batch runner. Two layers: an analytic, saturating
+  product bound computed BEFORE the build rejects pathological
+  models in microseconds (the 2000x2000 repro measured 10.0s ->
+  0ms), and a 1e6 state/transition expansion cap as the backstop
+  for shapes the walk cannot see (cyclic groups). Over-cap models
+  fail LOUDLY: a `content-model` structured row on instance
+  validation and a `-1` (not evaluable) from the public
+  `leptris_xsd_content_valid` with the message on
+  `leptris_xsd_error`. The issue's own repro (seq maxOccurs=100 x
+  element unbounded) lowers to a ~200-state loop model and pins
+  green.
 
 
 
