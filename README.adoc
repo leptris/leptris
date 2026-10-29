@@ -1135,6 +1135,53 @@ No runtime dependencies when built without utf8proc/iconv.
 |libFuzzer for 5 minutes; report any crashes.
 |===
 
+== Releasing and the runtime packages
+
+The engine releases via the automated workflow
+(`gh workflow run release.yml -f next_version=patch` — the workflow
+bumps the version, opens the release PR, and tags + publishes the
+GitHub Release when it merges). Never tag or release by hand.
+
+**Every engine release ships ALL runtime packages the same day** —
+an engine release is not done until each binding that rides it is
+published and verified on its registry:
+
+[cols="1,2,3",options="header"]
+|===
+|Runtime |Registry |Ride
+
+|Ruby
+|rubygems (`leptris`, `{engine-semver}.{binding-patch}`)
+|bump `Rakefile` `LIBLEPTRIS_VERSION` + `lib/leptris/version.rb` in
+link:https://github.com/leptris/leptris-ruby[leptris-ruby]; merging
+the bump PR is the release decision (auto-publish).
+
+|Python
+|PyPI (`leptris`)
+|bump `libleptris-version.txt` + `pyproject.toml` +
+`leptris/__init__.py` in
+link:https://github.com/leptris/leptris-py[leptris-py]; merging the
+bump PR publishes via trusted publishing.
+
+|Rust
+|crates.io (`leptris`)
+|conventional commits on
+link:https://github.com/leptris/leptris-rs[leptris-rs] main; the
+release-plz PR carries the version bump, and merging IT publishes
+(crates.io trusted publishing).
+
+|TypeScript / WASM
+|npm (`leptris`)
+|bump the engine pin + `package.json` version in
+link:https://github.com/leptris/leptris-ts[leptris-ts]; the
+tag-gated `v<pkg-version>` push publishes via npm trusted
+publishing.
+|===
+
+Verify each publication on the registry itself (`gem list -r`,
+`pip index versions`, the crates.io/npm APIs) — a merged PR with a
+stuck workflow is NOT a release.
+
 == Project layout
 
 [source,text]
