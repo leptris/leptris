@@ -4,7 +4,12 @@
 
 ### Fixed
 
-- compare node->type against its own enum constant (xpath)
+- **XPath: compare `node->type` against its own enum constant
+  (leptris#1902).** The parent-axis attribute check (#1866,
+  `./@id/..`) used `LEPTRIS_NODE_ATTRIBUTE` — a constant of the
+  *other* internal enum — against `node->type`: same value, wrong
+  type. Found by the leptris-ts CI zero-warning gate (emcc
+  `-Wenum-compare`, wasm32 portability class).
 
 
 
