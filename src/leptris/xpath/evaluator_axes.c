@@ -760,7 +760,7 @@ XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisNode* node,
      * element). The element-typed dispatch below would read the
      * parent field in element form off the attribute struct and
      * return empty (leptris#1866, the standoc svg-uniqueids face). */
-    if (axis_id == XPATH_AXIS_PARENT && node && node->type == LEPTRIS_NODE_ATTRIBUTE) {
+    if (axis_id == XPATH_AXIS_PARENT && node && node->type == LEPTRIS_NODE_TYPE_ATTRIBUTE) {
         LeptrisElement owner = ((LeptrisAttributeNode*)node)->owner;
         XPathNodeSet* result = xpath_nodeset_new();
         if (!result) return result;
