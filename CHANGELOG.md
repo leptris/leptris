@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.389] - 2026-10-29
+
+### Fixed
+
+- size-cap the content-model automaton (#1894) (xsd)
+
+
+
 ## [1.9.388] - 2026-10-29
 
 ### Fixed
