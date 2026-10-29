@@ -4,11 +4,27 @@
 
 ### Fixed
 
-- split the arena retain pool by size class — mid traffic no longer evicts large spans (memory)
+- **Arena retain pool split by size class (leptris#1893, leptris#1846).**
+  Mid-sized spans (256 KB - 2 MB) could evict all four large-span retain
+  slots, so mixed-traffic workloads lost their warm large spans and
+  re-faulted them every parse. The retain pool is now two tiers (mid /
+  large at the 2 MB boundary) under the same shared ceiling, and a
+  pointer-identity test pins same-size reuse across mixed traffic.
 
 ### Performance
 
-- one-pass text-run scan replaces 48-byte loop + 3 memchrs (parse)
+- **One-pass text-run scan (leptris#1895, leptris#1842).** The direct
+  parser's text path found `<` with a byte-at-a-time inline loop over
+  the first 48 bytes, then paid up to three libc memchr calls per run
+  (`<`, `&`, CR) — about 90ns of scan per ~55-byte run, capping
+  text-heavy documents near 800 MB/s while pugixml ran one vectorized
+  pass (profile: 72% of parse samples in the inline loop, 9% in the
+  three memchr sites). The new `leptris_text_scan_run` kernel (scalar +
+  NEON + AVX2, dispatched like the other simd_text primitives) finds
+  the first `<` and flags `&`/CR over the prefix in a single memory
+  pass; the recover-mode unescaped-`<` re-scan uses the same kernel.
+  Text shapes: 764-804 → 1370-1448 MB/s; gap vs pugixml 2.9x → 1.70x
+  (1.30x at 5 MB). Attr shapes unchanged.
 
 
 
