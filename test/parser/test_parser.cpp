@@ -974,3 +974,35 @@ TEST(ParseErrorPosition, GenericFailuresStayGeneric) {
     ASSERT_NE(err, nullptr);
     EXPECT_NE(std::strstr(err, "malformed input"), nullptr) << err;
 }
+
+/* leptris#1901: linux-only round-trip attribute loss — sz/szCs w:val
+ * runs vanish between parse and serialize on x86_64-linux (uniword
+ * matrix: darwin green, linux red, same seed + gem versions). Pin the
+ * OOXML shape so the ubuntu lane arbitrates the platform split. */
+TEST(RoundTrip, OoxmlRunPropertiesKeepValAttributes) {
+    const char xml[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+        "<w:document xmlns:w=\"http://schemas.openxmlformats.org/"
+        "wordprocessingml/2006/main\"><w:body><w:p><w:pPr><w:rPr>"
+        "<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/></w:rPr></w:pPr>"
+        "<w:r><w:rPr><w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>"
+        "</w:rPr><w:t xml:space=\"preserve\">hi there</w:t></w:r>"
+        "</w:p></w:body></w:document>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(doc, nullptr);
+    char* out = leptris_document_serialize(doc, NULL);
+    ASSERT_NE(out, nullptr);
+    /* all four w:val attributes survive the round trip */
+    int val_count = 0;
+    for (const char* p = out; (p = std::strstr(p, "w:val=\"24\"")) != NULL;
+         p++)
+        val_count++;
+    EXPECT_EQ(val_count, 4) << out;
+    EXPECT_NE(std::strstr(out, "<w:sz w:val=\"24\"/>"), nullptr);
+    EXPECT_NE(std::strstr(out, "<w:szCs w:val=\"24\"/>"), nullptr);
+    leptris_free_string(out);
+    leptris_document_free(doc);
+}
