@@ -3651,8 +3651,17 @@ LEPTRIS_API int leptris_xsd_content_valid(
     XsdCm* model = ct->first_child;
     if (!model) return child_count == 0;
 
-    return xsd_content_valid(s, model, s->target_ns, child_names,
-                             child_ns, child_count);
+    int ok = xsd_content_valid(s, model, s->target_ns, child_names,
+                               child_ns, child_count);
+    /* #1894: -2 = the model crosses the automaton size cap — surface
+     * the loud structured row and keep the public contract's -1 for
+     * "not evaluable". */
+    if (ok == -2) {
+        xsd_set_error(s, "content model exceeds the automaton size "
+                         "cap (pathological occurrence product)");
+        return -1;
+    }
+    return ok;
 }
 
 LEPTRIS_API size_t leptris_xsd_declaration_count(LeptrisXsdSchema schema) {
