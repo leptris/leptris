@@ -169,3 +169,19 @@ calculates the next version, and updates three files:
 - `CHANGELOG.md` (version header)
 
 The bump-version.sh script handles all three in one shot.
+
+### Runtime coverage law: publish ALL runtimes every release
+
+An engine release is NOT done when the GitHub Release publishes — it is
+done when every runtime package riding it is published and VERIFIED on
+its registry, same day: **ruby** (rubygems, leptris-ruby: bump Rakefile
+`LIBLEPTRIS_VERSION` + `lib/leptris/version.rb`; merge = publish), **py**
+(PyPI, leptris-py: bump `libleptris-version.txt` + `pyproject.toml` +
+`leptris/__init__.py`; merge = publish), **rs** (crates.io, leptris-rs:
+conventional commits -> merge release-plz's release PR = publish), **ts**
+(npm package `leptris`, leptris-ts: bump pin + `package.json`; the
+`v<pkg>` tag push publishes). Verify on the registry itself — a merged
+PR with a stuck workflow is not a release (2026-10-29: ruby sat two
+engine releases behind with the pin already advanced; py seven behind;
+rs's release workflow had never succeeded — missing `id-token: write`;
+ts 0.1.24 never tagged).
