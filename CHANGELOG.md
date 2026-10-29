@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.388] - 2026-10-29
+
+### Fixed
+
+- split the arena retain pool by size class — mid traffic no longer evicts large spans (memory)
+
+### Performance
+
+- one-pass text-run scan replaces 48-byte loop + 3 memchrs (parse)
+
+
+
 ## [1.9.387] - 2026-10-28
 
 ### Added
