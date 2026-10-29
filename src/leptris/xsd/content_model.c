@@ -29,12 +29,34 @@ typedef struct {
     int start, accept;
     struct leptris_xsd_schema* s; /* group-ref resolution */
     int depth;                    /* cyclic-group guard */
+    int overflow; /* #1894: crossed XSD_CM_NFA_MAX — abort the build */
 } CmNfa;
 
-static int nfa_state(CmNfa* n) { return n->state_count++; }
+/* leptris#1894: a counted particle multiplies the expanded NFA (finite
+ * maxOccurs copies the subtree per copy), so nested large bounds grow
+ * the automaton exponentially and a huge finite bound walks the copy
+ * loop until the process dies (jetsam/OOM, no diagnostic). Crossing
+ * this bound aborts the build; xsd_content_valid reports -2 and the
+ * callers surface a loud structured row. Generous: legitimate suite
+ * content models stay orders of magnitude below it. */
+#define XSD_CM_NFA_MAX 1000000
+
+static int nfa_state(CmNfa* n) {
+    if (n->overflow) return 0;
+    if (n->state_count >= XSD_CM_NFA_MAX) {
+        n->overflow = 1;
+        return 0;
+    }
+    return n->state_count++;
+}
 
 static void nfa_trans(CmNfa* n, int from, int symbol, XsdCm* particle,
                       int to) {
+    if (n->overflow) return;
+    if (n->count >= XSD_CM_NFA_MAX) {
+        n->overflow = 1;
+        return;
+    }
     if (n->count == n->cap) {
         size_t cap = n->cap ? n->cap * 2 : 16;
         CmTrans* grown = (CmTrans*)realloc(n->trans, cap * sizeof(*grown));
@@ -125,7 +147,9 @@ static void cm_build(CmNfa* n, XsdCm* node, int from, int to) {
 /* occurrence bounds: min copies, then (max-min) optionals, or an
  * epsilon self-loop region for unbounded. */
 static void cm_build_occurrence(CmNfa* n, XsdCm* node, int from, int to) {
+    if (n->overflow) return;
     for (int i = 0; i < node->min; i++) {
+        if (n->overflow) return;
         int mid = nfa_state(n);
         cm_build(n, node, from, mid);
         from = mid;
@@ -138,12 +162,69 @@ static void cm_build_occurrence(CmNfa* n, XsdCm* node, int from, int to) {
         return;
     }
     for (int i = node->min; i < node->max; i++) {
+        if (n->overflow) return;
         nfa_trans(n, from, -1, NULL, to);
         int mid = nfa_state(n);
         cm_build(n, node, from, mid);
         from = mid;
     }
     nfa_trans(n, from, -1, NULL, to);
+}
+
+/* ---- #1894 analytic product bound (pre-build rejection) ----------- */
+
+/* Saturating upper bound on the states+transitions one subtree
+ * expands, honoring the same occurrence lowering cm_build_occurrence
+ * performs: finite max copies the subtree max times; unbounded lowers
+ * to ONE loop region (min + 1 copies). Groups follow like cm_build
+ * (depth-capped; unresolved/cyclic refs count as 1 — the expansion
+ * cap remains the backstop for anything the walk cannot see). Returns
+ * nonzero when the bound crosses XSD_CM_NFA_MAX. */
+static int cm_bound_over(struct leptris_xsd_schema* s,
+                         const XsdCm* node, size_t* bound, int depth) {
+    if (!node || depth > 64) return 0;
+    size_t sub;
+    switch (node->kind) {
+        case XSD_CM_ELEMENT:
+        case XSD_CM_ANY:
+            sub = 1;
+            break;
+        case XSD_CM_GROUP_REF: {
+            XsdGroupDef* g = s ? xsd_find_group(s, node->name) : NULL;
+            if (!g || !g->model ||
+                cm_bound_over(s, g->model, &sub, depth + 1))
+                sub = 1;
+            break;
+        }
+        case XSD_CM_SEQ:
+        case XSD_CM_ALL:
+        case XSD_CM_CHOICE: {
+            sub = 0;
+            for (const XsdCm* c = node->first_child; c; c = c->next) {
+                size_t cb = 0;
+                if (cm_bound_over(s, c, &cb, depth + 1)) return 1;
+                if (sub > XSD_CM_NFA_MAX) return 1;
+                sub += cb;
+            }
+            break;
+        }
+        default:
+            sub = 1;
+            break;
+    }
+    /* occurrence multiplier: copies of the subtree */
+    size_t copies;
+    if (node->max < 0)
+        copies = (size_t)(node->min > 0 ? node->min : 0) + 1;
+    else
+        copies = (size_t)(node->max > 0 ? node->max : 0);
+    if (copies == 0) {
+        *bound = 0;
+        return 0;
+    }
+    if (sub != 0 && copies > XSD_CM_NFA_MAX / sub) return 1;
+    *bound = sub * copies + 1;
+    return *bound > XSD_CM_NFA_MAX;
 }
 
 /* ---- namespace filter (xs:any/@namespace) ------------------------ */
@@ -297,7 +378,19 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
     n.s = s;
     n.start = nfa_state(&n);
     n.accept = nfa_state(&n);
+    /* #1894: bound the expansion analytically BEFORE building — a
+     * pathological occurrence product (nested finite maxOccurs)
+     * rejects in microseconds instead of growing the automaton until
+     * the process dies. */
+    {
+        size_t bound = 0;
+        if (cm_bound_over(s, model, &bound, 0)) return -2;
+    }
     cm_build_occurrence(&n, model, n.start, n.accept);
+    if (n.overflow) {
+        free(n.trans);
+        return -2;
+    }
 
     StateSet live;
     memset(&live, 0, sizeof(live));

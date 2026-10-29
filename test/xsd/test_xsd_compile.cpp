@@ -3624,3 +3624,59 @@ TEST(XsdValidate, QNameNotationIgnoreLengthFacets) {
     EXPECT_EQ(validate_doc(ul, "<test a='x y'/>"), 1);
     EXPECT_EQ(validate_doc(ul, "<test a='x'/>"), 0);
 }
+
+/* leptris#1894: pathological occurrence products. A counted particle
+ * multiplies the expanded NFA (finite maxOccurs copies the subtree per
+ * copy), so nested large bounds grow the automaton exponentially and a
+ * huge finite bound walks the copy loop until the process dies. The
+ * compile-time size guard fails LOUDLY — a structured report row and a
+ * -1 (not evaluable) from the public face — instead of consuming the
+ * machine. */
+TEST(XsdContent, PathologicalProductFailsLoudlyNotOom) {
+    std::string xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\"><xs:complexType><xs:sequence"
+        " minOccurs=\"0\" maxOccurs=\"2000\"><xs:element name=\"e\""
+        " minOccurs=\"0\" maxOccurs=\"2000\"/></xs:sequence>"
+        "</xs:complexType></xs:element></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(xsd.data(), xsd.size(), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* 2000 x 2000 = 4e6 expanded copies — over the cap. Zero children
+     * keep the simulation cheap; the BUILD is what the guard bounds. */
+    EXPECT_EQ(leptris_xsd_content_valid(s, "r", NULL, NULL, 0), -1);
+    /* the loud message rides the schema error face (validator rows
+     * carry it on the instance-validation path instead) */
+    const char* err = leptris_xsd_error(s);
+    ASSERT_NE(err, nullptr);
+    EXPECT_NE(std::string(err).find("size cap"), std::string::npos)
+        << "error: " << err;
+    leptris_xsd_free(s);
+}
+
+TEST(XsdContent, Issue1894ReproStaysUnderCapAndCorrect) {
+    /* The issue's exact shape — seq maxOccurs=100 x element
+     * unbounded — lowers to a loop region (not copies) and must stay
+     * far under the cap with normal answers. */
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\"><xs:complexType><xs:sequence"
+        " maxOccurs=\"100\"><xs:element name=\"e\""
+        " maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType>"
+        "</xs:element></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* e[] = {"e"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "r", e, NULL, 1), 1);
+    /* minOccurs defaults to 1 on the inner element: empty violates */
+    EXPECT_EQ(leptris_xsd_content_valid(s, "r", NULL, NULL, 0), 0);
+    const char* x[] = {"x"};
+    EXPECT_EQ(leptris_xsd_content_valid(s, "r", x, NULL, 1), 0);
+    EXPECT_EQ(leptris_xsd_error_count(s), 0u);
+    leptris_xsd_free(s);
+}

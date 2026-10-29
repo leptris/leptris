@@ -391,6 +391,19 @@ static void validate_children(struct xsd_validator* v,
      * min == 0. names/uris stay NULL (never dereferenced at n==0). */
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
                                n);
+    if (ok == -2) {
+        /* #1894: pathological occurrence product — the automaton
+         * exceeds the compile-time size cap. Loud, not a hang. */
+        const char* l2 = NULL;
+        leptris_element_expanded_name(elem, &l2, NULL, NULL);
+        verrf_atk(v, elem, "content-model", l2 ? l2 : "", "element",
+                  l2 ? l2 : "",
+                  "content model exceeds the automaton size cap "
+                  "(pathological occurrence product)");
+        free(names);
+        free(uris);
+        return;
+    }
     if (ok) {
         free(names);
         free(uris);
