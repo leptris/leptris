@@ -103,3 +103,53 @@ size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
 }
 
 #endif /* LEPTRIS_ARCH_X86 && __AVX2__ */
+
+/* #1842: one-pass text-run scan — AVX2 mirror of the NEON kernel:
+ * full 32-byte chunks OR-accumulate the f1/f2 movemasks; the term
+ * mask hits and the first lane is ctz-resolved with a scalar prefix
+ * fold. */
+ptrdiff_t leptris_text_scan_run_avx2(const char* s, size_t len, char term,
+                                     char f1, char f2,
+                                     int* saw_f1, int* saw_f2) {
+    const char* p = s;
+    const char* end = s + len;
+    const __m256i kt = _mm256_set1_epi8(term);
+    const __m256i k1 = _mm256_set1_epi8(f1);
+    const __m256i k2 = _mm256_set1_epi8(f2);
+    uint32_t acc1 = 0, acc2 = 0;
+
+    while (end - p >= 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)p);
+        uint32_t mt =
+            (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, kt));
+        if (mt) {
+            unsigned idx = (unsigned)LEPTRIS_CTZ(mt);
+            int a = (acc1 != 0);
+            int b = (acc2 != 0);
+            for (unsigned j = 0; j < idx; j++) {
+                a |= (p[j] == f1);
+                b |= (p[j] == f2);
+            }
+            *saw_f1 = a;
+            *saw_f2 = b;
+            return (ptrdiff_t)(p + idx - s);
+        }
+        acc1 |= (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, k1));
+        acc2 |= (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, k2));
+        p += 32;
+    }
+    {
+        int a = (acc1 != 0);
+        int b = (acc2 != 0);
+        while (p < end) {
+            char ch = *p;
+            if (ch == term) break;
+            a |= (ch == f1);
+            b |= (ch == f2);
+            p++;
+        }
+        *saw_f1 = a;
+        *saw_f2 = b;
+        return (p < end) ? (ptrdiff_t)(p - s) : -1;
+    }
+}

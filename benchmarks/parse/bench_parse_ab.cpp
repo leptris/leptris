@@ -42,9 +42,13 @@ static int file_mode(const char* path) {
         return 1;
     }
     fclose(f);
+    /* LEPTRIS_BENCH_ITERS: profiling escape hatch (sample(1) needs a
+     * long-running process, not a 10ms one). */
+    const char* iters_env = getenv("LEPTRIS_BENCH_ITERS");
+    int iters = iters_env ? atoi(iters_env) : 5;
     double best = 1e18;
     double sum = 0;
-    for (int r = 0; r < 5; r++) {
+    for (int r = 0; r < iters; r++) {
         double a = now_us();
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_string(doc, (size_t)sz, &st);
@@ -59,7 +63,7 @@ static int file_mode(const char* path) {
      * lives exactly there. */
     printf("FILE %s %ld %.1f MB/s mean %.1f MB/s\n", path, sz,
            sz / 1048576.0 / (best / 1e6),
-           sz / 1048576.0 / ((sum / 5.0) / 1e6));
+           sz / 1048576.0 / ((sum / (double)iters) / 1e6));
     free(doc);
     return 0;
 }

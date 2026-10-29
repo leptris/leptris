@@ -328,3 +328,55 @@ size_t leptris_text_scan_events_neon(const char* buf, size_t len,
     }
     return n;
 }
+
+/* #1842: one-pass text-run scan — first `term` byte plus f1/f2
+ * seen-flags over the prefix. Full chunks OR-accumulate the f1/f2
+ * compare masks; a term hit resolves its lane scalar (once per run,
+ * at most 15 bytes of prefix re-check) and returns without folding
+ * the post-hit lanes. */
+ptrdiff_t leptris_text_scan_run_neon(const char* s, size_t len, char term,
+                                     char f1, char f2,
+                                     int* saw_f1, int* saw_f2) {
+    const char* p = s;
+    const char* end = s + len;
+    const uint8x16_t kt = vdupq_n_u8((uint8_t)term);
+    const uint8x16_t k1 = vdupq_n_u8((uint8_t)f1);
+    const uint8x16_t k2 = vdupq_n_u8((uint8_t)f2);
+    uint8x16_t acc1 = vdupq_n_u8(0);
+    uint8x16_t acc2 = vdupq_n_u8(0);
+
+    while (end - p >= 16) {
+        uint8x16_t v = vld1q_u8((const uint8_t*)p);
+        uint8x16_t eqt = vceqq_u8(v, kt);
+        if (vmaxvq_u8(eqt) != 0) {
+            int i = 0;
+            while (p[i] != term) i++;
+            int a = vmaxvq_u8(acc1) != 0;
+            int b = vmaxvq_u8(acc2) != 0;
+            for (int j = 0; j < i; j++) {
+                a |= (p[j] == f1);
+                b |= (p[j] == f2);
+            }
+            *saw_f1 = a;
+            *saw_f2 = b;
+            return (ptrdiff_t)(p + i - s);
+        }
+        acc1 = vorrq_u8(acc1, vceqq_u8(v, k1));
+        acc2 = vorrq_u8(acc2, vceqq_u8(v, k2));
+        p += 16;
+    }
+    {
+        int a = vmaxvq_u8(acc1) != 0;
+        int b = vmaxvq_u8(acc2) != 0;
+        while (p < end) {
+            char ch = *p;
+            if (ch == term) break;
+            a |= (ch == f1);
+            b |= (ch == f2);
+            p++;
+        }
+        *saw_f1 = a;
+        *saw_f2 = b;
+        return (p < end) ? (ptrdiff_t)(p - s) : -1;
+    }
+}
