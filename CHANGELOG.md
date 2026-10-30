@@ -4,7 +4,18 @@
 
 ### Added
 
-- capability descriptor face — one call answering what the engine serves (leptris#1905) (api)
+- **Capability descriptor face (leptris#1905, PR #1908).**
+  `leptris_capabilities()` returns a versioned bitset of every face
+  this installed engine serves — the engine-side half of the
+  moxml#504 capability report. Bindings OR it with their own wrapper
+  knowledge instead of maintaining scattered version-gate
+  constants; build-conditional faces (DUCET collation, utf8proc,
+  iconv, AVX2) follow the same `LEPTRIS_HAS_*` macros that gate the
+  sources, so the descriptor cannot drift from the binary it ships
+  in. Contract: bits append, never reorder; the descriptor version
+  gates shape changes. The spec anchors every unconditional bit to
+  its real face symbol — a bit without a linked face fails the
+  build, not the assertion.
 
 
 
