@@ -51,7 +51,11 @@ struct leptris_xsd_schema {
     char* target_ns;
     int version_11;    /* xs:schema @version = "1.1" */
     char* base_dir;    /* schemaLocation resolution (file compile) */
-    int include_depth; /* include/import recursion guard */
+    int include_depth;
+    /* xs:override body capture replaces same-named components: the
+     * attributeGroup pre-pass must re-register defs the base
+     * already captured (leptris#1913). */
+    int capture_force; /* include/import recursion guard */
     /* leptris#1644: already-captured schema units (canonical
      * location per entry) — the include/import DAG is dense and
      * cyclic; without this set every DAG path re-parses and
@@ -679,7 +683,7 @@ static int xsd_is_declaration(const char* local, const char* uri) {
         "element",    "attribute",    "simpleType", "complexType",
         "group",      "attributeGroup", "notation", "include",
         "defaultOpenContent",
-        "import",     "redefine",     NULL
+        "import",     "redefine",     "override", NULL
     };
     for (int i = 0; names[i]; i++)
         if (strcmp(local, names[i]) == 0) return 1;
@@ -1810,7 +1814,8 @@ static void xsd_collect_decls_doc(LeptrisElement root, const char* eff_tns,
         if (!l || !u || strcmp(u, XSD_NS) != 0)
             continue;
         int is_inc = (strcmp(l, "include") == 0 ||
-                      strcmp(l, "redefine") == 0);
+                      strcmp(l, "redefine") == 0 ||
+                      strcmp(l, "override") == 0);
         int is_imp = (strcmp(l, "import") == 0);
         if (!is_inc && !is_imp) continue;
         const char* loc = leptris_element_attribute(c, "schemaLocation");
@@ -1853,6 +1858,13 @@ static void xsd_collect_decls_doc(LeptrisElement root, const char* eff_tns,
             xsd_collect_decls_doc(subroot, eff, sub_base, decls, n, max,
                                   claimed, nclaimed, cmax, depth + 1);
         }
+        /* leptris#1913: an xs:override body's declarations belong
+         * to the symbol space too — walk the override element as a
+         * pseudo-root (it has no include/import children of its
+         * own). */
+        if (strcmp(l, "override") == 0)
+            xsd_collect_decls_doc(c, eff_tns, base_dir, decls, n, max,
+                                  claimed, nclaimed, cmax, depth + 1);
         leptris_document_free(sub);
     }
 }
@@ -2263,7 +2275,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
 
         if (strcmp(local, "include") == 0 ||
             strcmp(local, "import") == 0 ||
-            strcmp(local, "redefine") == 0) {
+            strcmp(local, "redefine") == 0 ||
+            strcmp(local, "override") == 0) {
             const char* loc = leptris_element_attribute(
                 (LeptrisElement)n, "schemaLocation");
             if (loc && s->base_dir && s->include_depth < 16) {
@@ -2329,6 +2342,20 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             s->include_depth--;
                             if (sub_ns) free(sub_ns);
                             s->target_ns = saved_ns;
+                        }
+                        /* leptris#1913 (XSD 1.1 §I.4): the override
+                         * element's OWN declaration children
+                         * replace same-named components of the base
+                         * just captured — capture them AFTER the
+                         * base so the lookup ladder (head-first)
+                         * sees the replacements. */
+                        if (subroot && same_ns &&
+                            strcmp(local, "override") == 0) {
+                            s->include_depth++;
+                            s->capture_force = 1;
+                            xsd_capture_root(s, (LeptrisElement)n);
+                            s->capture_force = 0;
+                            s->include_depth--;
                         }
                         leptris_document_free(sub);
                     }
@@ -2464,7 +2491,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 XsdAttrGroupDef* seen = s->attr_groups;
                 for (; seen; seen = seen->next)
                     if (strcmp(seen->name, nm) == 0) break;
-                if (!seen) xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
+                if (!seen || s->capture_force)
+                    xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
             }
         } else if (strcmp(local, "group") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm =
