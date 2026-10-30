@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.394] - 2026-10-30
+
+### Fixed
+
+- xs:override loads its base and replaces the overridden components (leptris#1913) (xsd)
+
+
+
 ## [1.9.393] - 2026-10-30
 
 ### Added
