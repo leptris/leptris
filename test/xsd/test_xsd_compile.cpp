@@ -3949,3 +3949,57 @@ TEST(Xsd11Gate, AssertIsEvaluated) {
         << "violating assert must produce a finding";
     leptris_xsd_free(s);
 }
+
+/* leptris#1913: xs:override (XSD 1.1 Structures §I.4) — the base
+ * document's declarations load (xs:override is an include-family
+ * chase), then the override body's same-named declarations REPLACE
+ * them. Previously override was absent from the chase condition:
+ * the base never loaded and the body's nested declarations were
+ * never captured — an empty symbol space (decls=0). */
+TEST(Xsd11Gate, OverrideLoadsBaseAndReplacesComponents) {
+    const char* base =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:b\" xmlns=\"urn:b\""
+        " elementFormDefault=\"qualified\">"
+        "<xs:element name=\"doc\" type=\"Doc\"/>"
+        "<xs:complexType name=\"Doc\">"
+        "<xs:sequence><xs:element name=\"a\" type=\"xs:string\"/>"
+        "</xs:sequence></xs:complexType></xs:schema>";
+    const char* ovr =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:b\" xmlns=\"urn:b\""
+        " elementFormDefault=\"qualified\" vc:minVersion=\"1.1\""
+        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        "<xs:override schemaLocation=\"ovr1913_base.xsd\">"
+        "<xs:complexType name=\"Doc\">"
+        "<xs:sequence><xs:element name=\"b\" type=\"xs:integer\"/>"
+        "</xs:sequence></xs:complexType>"
+        "</xs:override></xs:schema>";
+    const char* dir = std::getenv("TMPDIR");
+    std::string tmp = dir ? dir : "/tmp";
+    std::string base_path = tmp + "/ovr1913_base.xsd";
+    std::string ovr_path = tmp + "/ovr1913_ovr.xsd";
+    {
+        std::ofstream f(base_path);
+        f << base;
+    }
+    {
+        std::ofstream f(ovr_path);
+        f << ovr;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(ovr_path.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_GT(leptris_xsd_declaration_count(s), 0u)
+        << "override must not produce an empty symbol space";
+    EXPECT_EQ(validate_compiled(s, "<doc xmlns=\"urn:b\"><b>1</b></doc>"),
+              1)
+        << "the overridden Doc admits <b>: " << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<doc xmlns=\"urn:b\"><a>x</a></doc>"),
+              0)
+        << "the overridden Doc no longer admits <a>";
+    std::remove(base_path.c_str());
+    std::remove(ovr_path.c_str());
+    leptris_xsd_free(s);
+}
