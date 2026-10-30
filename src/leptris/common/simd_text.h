@@ -57,6 +57,19 @@ void leptris_text_count3_high(const char* s, size_t len,
                               size_t* n0, size_t* n1, size_t* n2,
                               int* saw_high);
 
+/* Returns 1 when [s, s+len) is valid UTF-8, 0 otherwise. SIMD
+ * boundary-vector validation (the Lemire/Steagall construction) with
+ * the scalar DFA as the fallback; identical verdicts on every input
+ * (pinned by the encoding suite's adversarial matrix + a randomized
+ * cross-check). #1842 A5: the parser's UTF-8 gate ran a per-byte DFA
+ * over the whole document — the hottest line on UTF-8-dense
+ * fixtures (line-level profile, 2026-10-30). */
+int leptris_utf8_valid(const char* s, size_t len);
+
+/* The scalar DFA fallback (and the SIMD verdicts' oracle) — also
+ * the shared tail anchor for the ISA cores. */
+int leptris_utf8_valid_scalar(const char* s, size_t len);
+
 /* Copy [src, src+len) to dst while counting c0/c1/c2 occurrences —
  * one fused memory pass (falls back to memcpy + count3 where no
  * SIMD path is compiled). The parser's owns-copy path gets its

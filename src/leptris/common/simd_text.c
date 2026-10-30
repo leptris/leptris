@@ -49,6 +49,54 @@ static ptrdiff_t find3_scalar(const char* s, size_t len,
     return -1;
 }
 
+/* Scalar UTF-8 DFA — the always-available fallback (and the oracle
+ * the SIMD cores are pinned against). Moved from the parser's
+ * dp_utf8_valid (#1842 A5). */
+int leptris_utf8_valid_scalar(const char* s_, size_t len) {
+    const unsigned char* p = (const unsigned char*)s_;
+    size_t i = 0;
+    /* ASCII fast path: 8 bytes per iteration. The DFA below runs
+     * only when a high byte is present; ordinary documents pay one
+     * memory-bandwidth pass. */
+    while (i + 8 <= len) {
+        uint64_t w;
+        memcpy(&w, p + i, 8);
+        if (w & UINT64_C(0x8080808080808080)) break;
+        i += 8;
+    }
+    while (i < len && p[i] < 0x80) i++;
+    while (i < len) {
+        unsigned c = p[i];
+        if (c < 0x80) {
+            i++;
+            continue;
+        }
+        size_t n;
+        unsigned lo = 0x80;
+        unsigned hi = 0xBF;
+        if (c >= 0xC2 && c <= 0xDF) {
+            n = 1;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            n = 2;
+            if (c == 0xE0) lo = 0xA0;
+            else if (c == 0xED) hi = 0x9F;
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            n = 3;
+            if (c == 0xF0) lo = 0x90;
+            else if (c == 0xF4) hi = 0x8F;
+        } else {
+            return 0;
+        }
+        if (len - i <= n) return 0;
+        if (p[i + 1] < lo || p[i + 1] > hi) return 0;
+        for (size_t k = 2; k <= n; k++) {
+            if (p[i + k] < 0x80 || p[i + k] > 0xBF) return 0;
+        }
+        i += n + 1;
+    }
+    return 1;
+}
+
 /* ---- Dispatch ---------------------------------------------------------- */
 
 /* Resolved pointer — initialized on first use (thread-safe enough:
@@ -63,6 +111,7 @@ static void (*g_count3_high_fn)(const char*, size_t, char, char, char,
                                 int*) = NULL;
 static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
                           size_t*, size_t*, size_t*) = NULL;
+static int (*g_utf8_fn)(const char*, size_t) = NULL;
 static ptrdiff_t (*g_scan_run_fn)(const char*, size_t, char, char, char,
                                   int*, int*) = NULL;
 
@@ -105,6 +154,9 @@ static size_t count_scalar(const char* s, size_t len, char c) {
  * dispatch_init()" pattern raced when two threads hit the same
  * entry point on first call. */
 static void dispatch_init(void);
+int leptris_utf8_valid_scalar(const char* s, size_t len);
+int leptris_utf8_valid_avx2(const char* s, size_t len);
+int leptris_utf8_valid_neon(const char* s, size_t len);
 static void count3_high_scalar(const char* s, size_t len,
                                char c0, char c1, char c2,
                                size_t* n0, size_t* n1, size_t* n2,
@@ -132,6 +184,7 @@ static void dispatch_init(void) {
         g_count_fn = leptris_text_count_char_avx2;
         g_count3_high_fn = count3_high_scalar;
         g_scan_run_fn = leptris_text_scan_run_avx2;
+        g_utf8_fn = leptris_utf8_valid_avx2;
         return;
     }
 #endif
@@ -144,6 +197,7 @@ static void dispatch_init(void) {
         g_count3_high_fn = leptris_text_count3_high_neon;
         g_copy3_fn = leptris_copy_count3_neon;
         g_scan_run_fn = leptris_text_scan_run_neon;
+        g_utf8_fn = leptris_utf8_valid_neon;
         return;
     }
 #endif
@@ -153,6 +207,7 @@ static void dispatch_init(void) {
     g_count_fn = count_scalar;
     g_count3_high_fn = count3_high_scalar;
     g_scan_run_fn = scan_run_scalar;
+    g_utf8_fn = leptris_utf8_valid_scalar;
 }
 
 /* Scalar kernel: one byte loop counts all three chars and detects
@@ -237,6 +292,12 @@ void leptris_copy_count3(char* dst, const char* src, size_t len,
     /* Fallback = exactly the pre-fusion behavior: memcpy + count. */
     memcpy(dst, src, len);
     leptris_text_count3(src, len, c0, c1, c2, n0, n1, n2);
+}
+
+int leptris_utf8_valid(const char* s, size_t len) {
+    if (!g_utf8_fn) dispatch_init();
+    if (!g_utf8_fn) g_utf8_fn = leptris_utf8_valid_scalar;
+    return g_utf8_fn(s, len);
 }
 
 ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
