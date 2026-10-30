@@ -2314,6 +2314,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             if (*p.pos != '?') {
                 if (dp_nul(&p, p.pos)) goto fail;
                 p.pos++;
+                /* consuming the separator may exhaust the buffer
+                 * ("     <?xm" — the fuzzer shape): p.pos one past
+                 * p.end made p.end - p.pos underflow to SIZE_MAX and
+                 * the data memchr below walked off the allocation
+                 * (nightly-fuzz crash-aac3c9bb, no-LTO build) */
+                if (p.pos >= p.end) goto fail;
                 data_start = p.pos;
             }
             /* memchr for '?' — fast-skip PI data bodies. */
