@@ -100,6 +100,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root);
 static char* xsd_read_file(const char* path, size_t* out_len);
 static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src);
+static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s);
 static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
                                  const char* name, char* any_attr_ns,
@@ -2021,6 +2022,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
 
     xsd_capture_root(s, root);
     xsd_resolve_extension_bases(s);
+    xsd_resolve_pending_attr_refs(s);
 
     leptris_document_free(doc);
     return s;
@@ -3109,6 +3111,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
         d->type = xsd_strdup(src->type);
         d->fixed = xsd_strdup(src->fixed);
         d->required = src->required;
+        d->pending_ref = src->pending_ref;
         if (tail)
             tail->next = d;
         else
@@ -3116,6 +3119,51 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
         tail = d;
     }
     return head;
+}
+
+/* leptris-ruby#569: re-resolve the rows the #1880 attributeGroup
+ * pre-pass captured before the import chase had registered the
+ * referenced unit's top-level attributes. Idempotent; pending rows
+ * that never resolve keep declaring their name (untyped) — the
+ * compile-time ref check already rejects true danglers loudly. */
+#define XSD_PENDING_REF 1
+#define XSD_PENDING_USE 2
+static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
+    if (!s) return;
+    int progressed = 1;
+    while (progressed) {
+        progressed = 0;
+        for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next)
+            for (XsdAttrDecl* a = g->attrs; a; a = a->next) {
+                if (!(a->pending_ref & XSD_PENDING_REF) || !a->name)
+                    continue;
+                const XsdAttrDecl* src = xsd_find_top_attr(s, a->name);
+                if (!src) continue;
+                free(a->type);
+                free(a->fixed);
+                a->type = xsd_strdup(src->type);
+                a->fixed = xsd_strdup(src->fixed);
+                if (!(a->pending_ref & XSD_PENDING_USE))
+                    a->required = src->required;
+                a->pending_ref &= ~XSD_PENDING_REF;
+                progressed = 1;
+            }
+        for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
+            for (XsdAttrDecl* a = t->attrs; a; a = a->next) {
+                if (!(a->pending_ref & XSD_PENDING_REF) || !a->name)
+                    continue;
+                const XsdAttrDecl* src = xsd_find_top_attr(s, a->name);
+                if (!src) continue;
+                free(a->type);
+                free(a->fixed);
+                a->type = xsd_strdup(src->type);
+                a->fixed = xsd_strdup(src->fixed);
+                if (!(a->pending_ref & XSD_PENDING_USE))
+                    a->required = src->required;
+                a->pending_ref &= ~XSD_PENDING_REF;
+                progressed = 1;
+            }
+    }
 }
 
 /* Capture the attribute rows of a complexType or attributeGroup:
@@ -3185,16 +3233,31 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                     leptris_element_attribute(ae, "ref"));
                 const XsdAttrDecl* src =
                     ref ? xsd_find_top_attr(s, ref) : NULL;
-                if (!src) {
+                if (!src && !ref) {
                     free(d);
                     continue;
                 }
-                d->name = xsd_strdup(src->name);
-                d->type = xsd_strdup(src->type);
-                d->fixed = xsd_strdup(src->fixed);
-                d->required = use
-                                  ? (strcmp(use, "required") == 0)
-                                  : src->required;
+                if (!src) {
+                    /* leptris-ruby#569: the #1880 pre-pass captures
+                     * attributeGroup defs BEFORE the import chase
+                     * registers the referenced unit's globals — an
+                     * unresolved ref used to be silently DROPPED
+                     * here, hole-punching the type's rows (a:blip
+                     * @r:embed "not declared (strict)") or leaving
+                     * the type attribute-less so the strict walk
+                     * never ran. Keep the row pending; the
+                     * post-capture fixup resolves it. */
+                    d->name = xsd_strdup(xsd_local_name(ref));
+                    d->pending_ref = use ? 3 : 1;
+                    d->required = (use && strcmp(use, "required") == 0);
+                } else {
+                    d->name = xsd_strdup(src->name);
+                    d->type = xsd_strdup(src->type);
+                    d->fixed = xsd_strdup(src->fixed);
+                    d->required = use
+                                      ? (strcmp(use, "required") == 0)
+                                      : src->required;
+                }
             }
             if (tail)
                 tail->next = d;
@@ -3802,5 +3865,6 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_set(
         s->base_dir = saved;
     }
     xsd_resolve_extension_bases(s);
+    xsd_resolve_pending_attr_refs(s);
     return s;
 }
