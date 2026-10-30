@@ -380,3 +380,109 @@ ptrdiff_t leptris_text_scan_run_neon(const char* s, size_t len, char term,
         return (p < end) ? (ptrdiff_t)(p - s) : -1;
     }
 }
+
+/* ---- UTF-8 validation (leptris#1842 A5) -------------------------------
+ * Same derivation as the SSE core in simd_text_avx2.c; NEON bytes are
+ * unsigned, so ranges are direct vcge/vcle pairs. */
+int leptris_utf8_valid_neon(const char* src, size_t len) {
+    const unsigned char* p = (const unsigned char*)src;
+    if (len < 16) return leptris_utf8_valid_scalar(src, len);
+
+    const uint8x16_t zero = vdupq_n_u8(0);
+    const uint8x16_t ff = vdupq_n_u8(0xFF);
+    const uint8x16_t b80 = vdupq_n_u8(0x80);
+    const uint8x16_t bBF = vdupq_n_u8(0xBF);
+    uint8x16_t prev = zero;
+
+#define IN_RANGE(v, lo, hi)                                             \
+    vandq_u8(vcgeq_u8((v), vdupq_n_u8(lo)), vcleq_u8((v), vdupq_n_u8(hi)))
+    size_t i = 0;
+    while (i + 16 <= len) {
+        uint8x16_t cur = vld1q_u8(p + i);
+        /* lane j = byte(j-1): vext(prev, cur, k) keeps the last k
+         * lanes of prev at the head -> k = 15/14/13. */
+        uint8x16_t b1 = vextq_u8(prev, cur, 15);
+        uint8x16_t b2 = vextq_u8(prev, cur, 14);
+        uint8x16_t b3 = vextq_u8(prev, cur, 13);
+
+        uint8x16_t st2c = IN_RANGE(cur, 0xC2, 0xDF);
+        uint8x16_t st3c = IN_RANGE(cur, 0xE0, 0xEF);
+        uint8x16_t st4c = IN_RANGE(cur, 0xF0, 0xF4);
+        uint8x16_t is_ascii = vcltq_u8(cur, b80);
+        uint8x16_t legal_start = vorrq_u8(st2c, vorrq_u8(st3c, st4c));
+
+        uint8x16_t st2b1 = IN_RANGE(b1, 0xC2, 0xDF);
+        uint8x16_t st3b1 = IN_RANGE(b1, 0xE0, 0xEF);
+        uint8x16_t st4b1 = IN_RANGE(b1, 0xF0, 0xF4);
+        uint8x16_t st3b2 = IN_RANGE(b2, 0xE0, 0xEF);
+        uint8x16_t st4b2 = IN_RANGE(b2, 0xF0, 0xF4);
+        uint8x16_t st4b3 = IN_RANGE(b3, 0xF0, 0xF4);
+
+        uint8x16_t must_cont =
+            vorrq_u8(vorrq_u8(st2b1, vorrq_u8(st3b1, st4b1)),
+                     vorrq_u8(vorrq_u8(st3b2, st4b2), st4b3));
+
+        const uint8x16_t bA0 = vdupq_n_u8(0xA0);
+        const uint8x16_t b90 = vdupq_n_u8(0x90);
+        const uint8x16_t b9F = vdupq_n_u8(0x9F);
+        const uint8x16_t b8F = vdupq_n_u8(0x8F);
+        uint8x16_t e0 = vceqq_u8(b1, vdupq_n_u8(0xE0));
+        uint8x16_t ed = vceqq_u8(b1, vdupq_n_u8(0xED));
+        uint8x16_t f0 = vceqq_u8(b1, vdupq_n_u8(0xF0));
+        uint8x16_t f4 = vceqq_u8(b1, vdupq_n_u8(0xF4));
+        uint8x16_t lo = vbslq_u8(e0, bA0, b80);
+        lo = vbslq_u8(f0, b90, lo);
+        uint8x16_t hi = vbslq_u8(ed, b9F, bBF);
+        hi = vbslq_u8(f4, b8F, hi);
+
+        uint8x16_t cont_ok = vandq_u8(vcgeq_u8(cur, lo), vcleq_u8(cur, hi));
+
+        uint8x16_t block_error = vorrq_u8(
+            vandq_u8(must_cont, veorq_u8(cont_ok, ff)),
+            vandq_u8(veorq_u8(must_cont, ff),
+                     vandq_u8(veorq_u8(is_ascii, ff),
+                              veorq_u8(legal_start, ff))));
+        /* any lane set? */
+        /* any lane set? */
+        if (vmaxvq_u8(block_error) != 0) return 0;
+        prev = cur;
+        i += 16;
+    }
+    if (i >= len) {
+        /* The input ENDS at the block edge: the last sequence must
+         * be complete (the scalar DFA's "len - i <= n" rule). Walk
+         * back over at most 3 continuations; s2 lands ON the last
+         * continuation (or the final non-continuation byte). */
+        size_t s2 = i;
+        size_t conts = 0;
+        while (s2 > 0 && (p[s2 - 1] & 0xC0) == 0x80 && conts < 3) {
+            s2--;
+            conts++;
+        }
+        if (conts > 0) {
+            if (s2 == 0) return 0; /* continuations, no opener anywhere */
+            unsigned op = p[s2 - 1]; /* the opener BEFORE the run */
+            unsigned owed = (op >= 0xF0) ? 3
+                          : (op >= 0xE0) ? 2
+                          : (op >= 0xC2) ? 1
+                                         : 0;
+            if (owed > conts) return 0;
+            return 1;
+        }
+        /* the last byte is not a continuation: it must be ASCII */
+        unsigned op = p[i - 1];
+        unsigned owed = (op >= 0xF0) ? 3
+                      : (op >= 0xE0) ? 2
+                      : (op >= 0xC2) ? 1
+                                     : 0;
+        return owed == 0 ? 1 : 0;
+    }
+    /* Tail: scalar DFA anchored at a character boundary (at most 3
+     * bytes back from the SIMD end; a sequence is at most 4) — the
+     * anchored run also covers a sequence spanning the block edge. */
+    size_t start = i;
+    while (start > 0 && (p[start] & 0xC0) == 0x80 && i - start < 3)
+        start--;
+    return leptris_utf8_valid_scalar((const char*)(p + start), len - start);
+}
+#undef IN_RANGE
