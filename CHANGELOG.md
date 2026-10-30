@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.393] - 2026-10-30
+
+### Added
+
+- capability bit for entity-reference nodes (leptris#1904) (api)
+
+### Fixed
+
+- gate XSD 1.1 on vc:minVersion; value comparisons accept name-test operands (xsd,xpath)
+
+
+
 ## [1.9.392] - 2026-10-30
 
 ### Added
