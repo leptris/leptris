@@ -1960,8 +1960,24 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     s->target_ns = xsd_strdup(
         leptris_element_attribute(root, "targetNamespace"));
     {
+        /* XSD 1.1 §4.3 schema versioning: the W3C suite and the
+         * binding ecosystem mark 1.1 with vc:minVersion (the
+         * versioning namespace); the plain version attribute is
+         * the other legal spelling. vc:maxVersion below 1.1 pins
+         * a 1.0 processor target regardless. leptris#1910/#1911:
+         * reading only @version silently compiled asserts and
+         * alternatives away for every vc-marked schema. */
         const char* ver = leptris_element_attribute(root, "version");
-        s->version_11 = (ver && strcmp(ver, "1.1") == 0);
+        const char* vmin = leptris_element_attribute_ns(
+            root, "http://www.w3.org/2001/XMLSchema-versioning",
+            "minVersion");
+        const char* vmax = leptris_element_attribute_ns(
+            root, "http://www.w3.org/2001/XMLSchema-versioning",
+            "maxVersion");
+        int is11 = (ver && strcmp(ver, "1.1") == 0) ||
+                   (vmin && strcmp(vmin, "1.1") == 0);
+        if (vmax && strcmp(vmax, "1.0") == 0) is11 = 0;
+        s->version_11 = is11;
     }
 
     const char* local = NULL;
