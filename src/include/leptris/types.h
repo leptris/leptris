@@ -483,7 +483,11 @@ enum {
     LEPTRIS_CAP_COLLATION_DUCET = 1ULL << 20,
     LEPTRIS_CAP_UNICODE_UTF8PROC = 1ULL << 21,
     LEPTRIS_CAP_ENCODING_ICONV = 1ULL << 22,
-    LEPTRIS_CAP_SIMD_AVX2 = 1ULL << 23
+    LEPTRIS_CAP_SIMD_AVX2 = 1ULL << 23,
+    /* LEPTRIS_PARSE_KEEP_ENTITY_REFS yields entity references as
+     * first-class ENTITY_REF nodes (segments split around the five
+     * built-ins and custom named references; leptris#1904). */
+    LEPTRIS_CAP_ENTITY_REF_NODES = 1ULL << 24
 };
 
 /* Descriptor shape version: 1. Bump when the STRUCT changes or a

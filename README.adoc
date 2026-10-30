@@ -761,6 +761,14 @@ if (c.descriptor_version >= 1 && (c.caps & LEPTRIS_CAP_XSD)) {
 }
 ----
 
+Entity references: parsing with `LEPTRIS_PARSE_KEEP_ENTITY_REFS`
+yields `LEPTRIS_NODE_TYPE_ENTITY_REF` nodes instead of pre-expanded
+text — segments split around the five built-ins and custom named
+references (numeric character references stay text, per XML 1.0
+§4.1). String-value, serialization, and XPath all see the expanded
+value. Probe `LEPTRIS_CAP_ENTITY_REF_NODES` before relying on the
+mode.
+
 The bits: `LEPTRIS_CAP_PARSE`, `LEPTRIS_CAP_DOM`, `LEPTRIS_CAP_XPATH`,
 `LEPTRIS_CAP_XQUERY`, `LEPTRIS_CAP_DTD`, `LEPTRIS_CAP_SAX`,
 `LEPTRIS_CAP_HTML`, `LEPTRIS_CAP_XINCLUDE`, `LEPTRIS_CAP_DIFF`,
@@ -770,7 +778,8 @@ The bits: `LEPTRIS_CAP_PARSE`, `LEPTRIS_CAP_DOM`, `LEPTRIS_CAP_XPATH`,
 `LEPTRIS_CAP_CHILDREN_BATCH`, `LEPTRIS_CAP_NAME_COMPARE`,
 `LEPTRIS_CAP_VERSION`, and the build-conditional
 `LEPTRIS_CAP_COLLATION_DUCET`, `LEPTRIS_CAP_UNICODE_UTF8PROC`,
-`LEPTRIS_CAP_ENCODING_ICONV`, `LEPTRIS_CAP_SIMD_AVX2`.
+`LEPTRIS_CAP_ENCODING_ICONV`, `LEPTRIS_CAP_SIMD_AVX2`,
+`LEPTRIS_CAP_ENTITY_REF_NODES`.
 
 [#FFI]
 == FFI design
