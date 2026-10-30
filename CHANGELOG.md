@@ -4,11 +4,37 @@
 
 ### Added
 
-- capability bit for entity-reference nodes (leptris#1904) (api)
+- **Capability bit for entity-reference nodes (leptris#1904, PR #1915).**
+  `LEPTRIS_PARSE_KEEP_ENTITY_REFS` already parses references as
+  first-class `LEPTRIS_NODE_TYPE_ENTITY_REF` nodes — text segments
+  split around the five built-ins and custom named references
+  (numeric character references stay text, XML 1.0 §4.1) — but
+  nothing advertised it. `LEPTRIS_CAP_ENTITY_REF_NODES` lets a
+  binding probe once and parse with the flag instead of re-scanning
+  expanded text; a spec pins the DOM shape and the
+  string-value / serialization / XPath agreement.
 
 ### Fixed
 
-- gate XSD 1.1 on vc:minVersion; value comparisons accept name-test operands (xsd,xpath)
+- **XSD 1.1 was inert for every `vc:minVersion`-marked schema
+  (leptris#1910, leptris#1911, PR #1914).** The version detector
+  read only the root's plain `version` attribute; the W3C suite and
+  the binding ecosystem mark 1.1 with `vc:minVersion` in the
+  versioning namespace. With the capture gates off,
+  `xs:alternative` and `xs:assert` compiled to nothing —
+  conditional type assignment applied the declared base type's
+  model in both directions (false rejects and false accepts), and
+  asserts never attached to their types. The detector now honors
+  `version`, `vc:minVersion`, and a `vc:maxVersion="1.0"` pin, and
+  `xs:openContent` interleave/suffix semantics engage with it
+  (leptris#1912's repro validates clean).
+- **Value-comparison keywords accept name-test operands
+  (`w le h`).** The XPath `eq/ne/lt/le/gt/ge` operators only read
+  as operators when the right operand opened with a scalar, paren,
+  variable, or function call — an `xs:assert test="w le h"` failed
+  to compile. Adjacent name tokens are never a valid path
+  continuation, so a bare name-test follower is unambiguously an
+  operand; every path start is now admitted.
 
 
 
