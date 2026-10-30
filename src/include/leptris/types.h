@@ -448,6 +448,54 @@ typedef struct leptris_xpath_compiled* LeptrisXPathCompiled;
 typedef struct leptris_xslt* LeptrisXslt;
 
 /* ============================================================================
+ * Capability Descriptor (leptris#1905)
+ * ============================================================================ */
+
+/* What this INSTALLED engine serves — one call, one versioned
+ * bitset. Contract: new capabilities APPEND bits; a bit is never
+ * removed, repurposed, or reordered — that is a descriptor-version
+ * bump. Build-conditional faces (utf8proc/iconv/DUCET/AVX2) answer
+ * honestly for the exact library a consumer linked. Bindings OR
+ * this with their own wrapper knowledge; consumers stop maintaining
+ * scattered version-gate constants. */
+enum {
+    LEPTRIS_CAP_PARSE = 1ULL << 0,
+    LEPTRIS_CAP_DOM = 1ULL << 1,
+    LEPTRIS_CAP_XPATH = 1ULL << 2,
+    LEPTRIS_CAP_XQUERY = 1ULL << 3,
+    LEPTRIS_CAP_DTD = 1ULL << 4,
+    LEPTRIS_CAP_SAX = 1ULL << 5,
+    LEPTRIS_CAP_HTML = 1ULL << 6,
+    LEPTRIS_CAP_XINCLUDE = 1ULL << 7,
+    LEPTRIS_CAP_DIFF = 1ULL << 8,
+    LEPTRIS_CAP_DIGEST = 1ULL << 9,
+    LEPTRIS_CAP_XSD = 1ULL << 10,
+    LEPTRIS_CAP_XSD_SET = 1ULL << 11,
+    LEPTRIS_CAP_RELAXNG = 1ULL << 12,
+    LEPTRIS_CAP_SCHEMATRON = 1ULL << 13,
+    LEPTRIS_CAP_XSLT = 1ULL << 14,
+    LEPTRIS_CAP_DESCRIPTOR = 1ULL << 15,
+    LEPTRIS_CAP_NS_SNAPSHOT_BULK = 1ULL << 16,
+    LEPTRIS_CAP_CHILDREN_BATCH = 1ULL << 17,
+    LEPTRIS_CAP_NAME_COMPARE = 1ULL << 18,
+    LEPTRIS_CAP_VERSION = 1ULL << 19,
+    /* build-conditional */
+    LEPTRIS_CAP_COLLATION_DUCET = 1ULL << 20,
+    LEPTRIS_CAP_UNICODE_UTF8PROC = 1ULL << 21,
+    LEPTRIS_CAP_ENCODING_ICONV = 1ULL << 22,
+    LEPTRIS_CAP_SIMD_AVX2 = 1ULL << 23
+};
+
+/* Descriptor shape version: 1. Bump when the STRUCT changes or a
+ * bit is retired (never expected — bits append). */
+#define LEPTRIS_CAPS_DESCRIPTOR_VERSION 1u
+
+typedef struct leptris_capabilities {
+    unsigned long long caps;
+    unsigned descriptor_version;
+} LeptrisCapabilities;
+
+/* ============================================================================
  * Memory Allocation Function Types
  * ============================================================================ */
 
