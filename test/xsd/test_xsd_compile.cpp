@@ -3887,3 +3887,65 @@ TEST(XsdCrossNs, RealWmlChainCompilesDeclarations) {
         << " err=" << (err ? err : "(clean)");
     leptris_xsd_free(s);
 }
+
+/* leptris#1911: vc:minVersion="1.1" marks the schema as XSD 1.1
+ * (the W3C suite and moxml both use the versioning namespace; the
+ * plain version attribute is the other legal spelling). The
+ * alternative's test selects the type — validation must run the
+ * SELECTED type's content model, in both directions. */
+TEST(Xsd11Gate, CtaSelectsAlternativeType) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " vc:minVersion=\"1.1\""
+        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        "<xs:element name=\"shape\" type=\"Shape\">"
+        "<xs:alternative test=\"@kind='circle'\" type=\"Circle\"/>"
+        "</xs:element>"
+        "<xs:complexType name=\"Shape\" abstract=\"true\">"
+        "<xs:attribute name=\"kind\" type=\"xs:string\"/>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"Circle\">"
+        "<xs:complexContent><xs:extension base=\"Shape\">"
+        "<xs:sequence><xs:element name=\"r\" type=\"xs:integer\"/>"
+        "</xs:sequence></xs:extension></xs:complexContent>"
+        "</xs:complexType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_STREQ(leptris_xsd_version(s), "1.1")
+        << "vc:minVersion must gate the 1.1 feature set";
+    EXPECT_EQ(validate_compiled(s,
+                "<shape kind=\"circle\"><r>4</r></shape>"),
+              1)
+        << "the selected Circle type admits <r>: "
+        << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<shape kind=\"circle\"/>"), 0)
+        << "the selected Circle type REQUIRES <r>";
+    leptris_xsd_free(s);
+}
+
+/* leptris#1910: an xs:assert in a vc:minVersion="1.1" schema must
+ * be evaluated — a violating instance produces an assertion row. */
+TEST(Xsd11Gate, AssertIsEvaluated) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " vc:minVersion=\"1.1\""
+        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        "<xs:element name=\"size\">"
+        "<xs:complexType><xs:sequence>"
+        "<xs:element name=\"w\" type=\"xs:integer\"/>"
+        "<xs:element name=\"h\" type=\"xs:integer\"/>"
+        "</xs:sequence><xs:assert test=\"w le h\"/></xs:complexType>"
+        "</xs:element></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<size><w>3</w><h>5</h></size>"), 1)
+        << "satisfying assert must stay valid: "
+        << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, "<size><w>9</w><h>5</h></size>"), 0)
+        << "violating assert must produce a finding";
+    leptris_xsd_free(s);
+}

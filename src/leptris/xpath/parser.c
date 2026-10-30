@@ -643,44 +643,26 @@ static XPathASTNode* parse_string_concat_expr(XPathParser* parser) {
 }
 
 /* True when the token AFTER a bare value-comparison keyword may
- * START an operand. The base list covers scalars/parens; an NCName
- * qualifies ONLY when it opens a function call — a bare NCName
- * follower stays a path step (XPath 1.0 name-test precedence). */
+ * START an operand. Scalars, parens, variables, and (leptris#1910)
+ * every path start: a bare NCName/QName is an element name test in
+ * operand position, and adjacent name tokens are never a valid
+ * path continuation, so the keyword reading is unambiguous
+ * (`w le h` in xs:assert/xs:alternative tests). */
 static int kw_operand_boundary(XPathParser* parser, XPathToken* nx) {
+    (void)parser;
     if (!nx) return 1;
     switch (nx->type) {
         case TOK_EOF: case TOK_RPAREN: case TOK_COMMA:
         case TOK_RBRACE: case TOK_LBRACE: case TOK_NUMBER:
         case TOK_STRING: case TOK_DOLLAR: case TOK_LPAREN:
         case TOK_MINUS: case TOK_PLUS:
+        case TOK_SLASH: case TOK_DOUBLE_SLASH: case TOK_AT:
+        case TOK_DOT: case TOK_DOUBLE_DOT: case TOK_STAR:
             return 1;
         case TOK_QNAME:
-            /* prefixed call: QName '(' — a lone QName stays a path
-             * step (name-test precedence, like NCName). */
-        case TOK_NCNAME: {
-            /* unprefixed call: name '(' ... prefixed call:
-             * name ':' name '(' (the QT3 corpus writes fn:year-...). */
-            XPathToken* nnx =
-                parser->token_pos + 2 < parser->token_count
-                    ? &parser->tokens[parser->token_pos + 2]
-                    : NULL;
-            if (nnx && nnx->type == TOK_LPAREN) return 1;
-            XPathToken* t3 =
-                parser->token_pos + 3 < parser->token_count
-                    ? &parser->tokens[parser->token_pos + 3]
-                    : NULL;
-            XPathToken* t4 =
-                parser->token_pos + 4 < parser->token_count
-                    ? &parser->tokens[parser->token_pos + 4]
-                    : NULL;
-            XPathToken* t5 =
-                parser->token_pos + 5 < parser->token_count
-                    ? &parser->tokens[parser->token_pos + 5]
-                    : NULL;
-            return nnx && nnx->type == TOK_COLON && t3 &&
-                   t3->type == TOK_NCNAME && t4 &&
-                   t4->type == TOK_LPAREN && t5;
-        }
+        case TOK_NCNAME:
+            /* name test, function call, or prefixed call */
+            return 1;
         default:
             return 0;
     }
