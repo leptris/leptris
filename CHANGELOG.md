@@ -4,7 +4,23 @@
 
 ### Fixed
 
-- resolve attributeGroup ref rows the pre-pass captured before its imports (xsd)
+- **XSD: resolve attributeGroup ref rows the pre-pass captured
+  before its imports (leptris-ruby#569, PR #1906).** The #1880
+  attributeGroup pre-pass captures each unit's group defs *before*
+  that unit's imports are chased, so an `<xs:attribute ref="r:embed"/>`
+  row whose declaration lives in a later-imported unit found no
+  global attribute and was silently dropped. Types were left
+  hole-punched (whole-instance validation then rejected `a:blip
+  @r:embed` with "not declared (strict)" on the OOXML `wml.xsd`
+  chain — clean on 1.9.368.1, regressed by the 386-390 wave) or
+  attribute-less, which skipped the strict attribute walk entirely
+  and false-validated foreign attributes. Unresolved ref rows are
+  now kept pending — with the ref's own `use=` override recorded —
+  and re-resolved against the merged top-level attribute table once
+  the whole capture has run; row copies carry the flag so referencing
+  types heal too. Witness: the real uniword `wml.xsd` (1826
+  declarations) compiles clean and a docx-style document with
+  `a:blip r:embed` validates 1.
 
 
 
