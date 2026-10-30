@@ -72,6 +72,36 @@ LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch) 
     if (patch) *patch = LEPTRIS_VERSION_PATCH;
 }
 
+/* leptris#1905: the capability descriptor. Unconditional faces are
+ * always compiled into this library; the build-conditional bits
+ * follow the same macros the build system defines for the sources
+ * — the descriptor cannot drift from the binary it ships in. */
+LEPTRIS_API LeptrisCapabilities leptris_capabilities(void) {
+    LeptrisCapabilities c;
+    c.caps = LEPTRIS_CAP_PARSE | LEPTRIS_CAP_DOM | LEPTRIS_CAP_XPATH |
+             LEPTRIS_CAP_XQUERY | LEPTRIS_CAP_DTD | LEPTRIS_CAP_SAX |
+             LEPTRIS_CAP_HTML | LEPTRIS_CAP_XINCLUDE | LEPTRIS_CAP_DIFF |
+             LEPTRIS_CAP_DIGEST | LEPTRIS_CAP_XSD | LEPTRIS_CAP_XSD_SET |
+             LEPTRIS_CAP_RELAXNG | LEPTRIS_CAP_SCHEMATRON |
+             LEPTRIS_CAP_XSLT | LEPTRIS_CAP_DESCRIPTOR |
+             LEPTRIS_CAP_NS_SNAPSHOT_BULK | LEPTRIS_CAP_CHILDREN_BATCH |
+             LEPTRIS_CAP_NAME_COMPARE | LEPTRIS_CAP_VERSION;
+#if defined(LEPTRIS_HAS_DUCET)
+    c.caps |= LEPTRIS_CAP_COLLATION_DUCET;
+#endif
+#if defined(LEPTRIS_HAS_UTF8PROC)
+    c.caps |= LEPTRIS_CAP_UNICODE_UTF8PROC;
+#endif
+#if defined(LEPTRIS_HAS_ICONV)
+    c.caps |= LEPTRIS_CAP_ENCODING_ICONV;
+#endif
+#if defined(LEPTRIS_HAS_AVX2_BUILD)
+    c.caps |= LEPTRIS_CAP_SIMD_AVX2;
+#endif
+    c.descriptor_version = LEPTRIS_CAPS_DESCRIPTOR_VERSION;
+    return c;
+}
+
 LEPTRIS_API void leptris_thread_cleanup(void) {
     leptris_xpath_drain_thread_caches();
     leptris_root_doc_drain_thread_caches();

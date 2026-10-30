@@ -4230,6 +4230,12 @@ LEPTRIS_API const char* leptris_version(void);
  */
 LEPTRIS_API void leptris_version_components(int* major, int* minor, int* patch);
 
+/* leptris#1905: the capability descriptor — what this installed
+ * engine serves, as a versioned bitset (LEPTRIS_CAP_*). Query once
+ * at attach; new capabilities append bits (the descriptor version
+ * gates shape changes). Thread-safe: pure, allocation-free. */
+LEPTRIS_API LeptrisCapabilities leptris_capabilities(void);
+
 /**
  * Release this thread's libleptris caches
  *

@@ -744,6 +744,34 @@ To pin enum values (bindings hard-code these):
 ctest --test-dir build -R HeaderHygiene
 ----
 
+=== Capability descriptor (one call: what does this engine serve?)
+
+Bindings and embedders stop maintaining scattered version-gate
+constants: one call returns a versioned bitset of every face this
+installed engine serves. Build-conditional faces (Unicode
+normalization, iconv, DUCET collation, AVX2) answer honestly for the
+exact library you linked. New capabilities APPEND bits — the
+descriptor version gates shape changes.
+
+[source,c]
+----
+LeptrisCapabilities c = leptris_capabilities();
+if (c.descriptor_version >= 1 && (c.caps & LEPTRIS_CAP_XSD)) {
+    /* xsd compile/validate faces are present */
+}
+----
+
+The bits: `LEPTRIS_CAP_PARSE`, `LEPTRIS_CAP_DOM`, `LEPTRIS_CAP_XPATH`,
+`LEPTRIS_CAP_XQUERY`, `LEPTRIS_CAP_DTD`, `LEPTRIS_CAP_SAX`,
+`LEPTRIS_CAP_HTML`, `LEPTRIS_CAP_XINCLUDE`, `LEPTRIS_CAP_DIFF`,
+`LEPTRIS_CAP_DIGEST`, `LEPTRIS_CAP_XSD`, `LEPTRIS_CAP_XSD_SET`,
+`LEPTRIS_CAP_RELAXNG`, `LEPTRIS_CAP_SCHEMATRON`, `LEPTRIS_CAP_XSLT`,
+`LEPTRIS_CAP_DESCRIPTOR`, `LEPTRIS_CAP_NS_SNAPSHOT_BULK`,
+`LEPTRIS_CAP_CHILDREN_BATCH`, `LEPTRIS_CAP_NAME_COMPARE`,
+`LEPTRIS_CAP_VERSION`, and the build-conditional
+`LEPTRIS_CAP_COLLATION_DUCET`, `LEPTRIS_CAP_UNICODE_UTF8PROC`,
+`LEPTRIS_CAP_ENCODING_ICONV`, `LEPTRIS_CAP_SIMD_AVX2`.
+
 [#FFI]
 == FFI design
 
