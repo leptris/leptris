@@ -4003,3 +4003,57 @@ TEST(Xsd11Gate, OverrideLoadsBaseAndReplacesComponents) {
     std::remove(ovr_path.c_str());
     leptris_xsd_free(s);
 }
+
+/* leptris#1920: a strict wildcard's declaration lookup must see the
+ * merged set — the imported document's globals. Both vehicles (the
+ * set compile and the single-document import chase) validate the
+ * matched element; pinned so the document-local regression cannot
+ * return silently. */
+TEST(XsdCrossNs, StrictWildcardSeesImportedDeclarations) {
+    const char* head =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://foobar\" xmlns=\"http://foobar\">"
+        "<xs:import namespace=\"http://foo\""
+        " schemaLocation=\"w1920_decl.xsd\"/>"
+        "<xs:element name=\"foo\"><xs:complexType><xs:sequence>"
+        "<xs:any namespace=\"##any\" processContents=\"strict\"/>"
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>";
+    const char* decl =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://foo\" xmlns=\"http://foo\">"
+        "<xs:element name=\"bar\" type=\"xs:string\"/></xs:schema>";
+    const char* dir = std::getenv("TMPDIR");
+    std::string base = dir ? dir : "/tmp";
+    std::string head_path = base + "/w1920_head.xsd";
+    std::string decl_path = base + "/w1920_decl.xsd";
+    {
+        std::ofstream f(head_path);
+        f << head;
+    }
+    {
+        std::ofstream f(decl_path);
+        f << decl;
+    }
+    const char* paths[2] = {head_path.c_str(), decl_path.c_str()};
+    const char* xml =
+        "<foo xmlns=\"http://foobar\" xmlns:b=\"http://foo\">"
+        "<b:bar>hi</b:bar></foo>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_set(paths, 2, &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, xml), 1)
+        << "set compile: strict wildcard admits the imported bar: "
+        << leptris_xsd_error(s);
+    leptris_xsd_free(s);
+
+    s = leptris_xsd_compile_file(head_path.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s, xml), 1)
+        << "single-doc chase: strict wildcard admits the imported bar: "
+        << leptris_xsd_error(s);
+    leptris_xsd_free(s);
+    std::remove(head_path.c_str());
+    std::remove(decl_path.c_str());
+}
