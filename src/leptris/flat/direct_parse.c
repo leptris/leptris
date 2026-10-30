@@ -1441,14 +1441,22 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * bookkeeping on any path. The count pass runs plain over the
      * caller's buffer; the copy then reads it warm from L1. */
     char* pristine;
-    int const_input = (owns_buffer == 2);   /* needs a pristine carve */
+    /* A3 (#1842 audit): only the CONST entry drops its pristine
+     * carve — xml_buffer aliases the scratch (NUL-only mutations,
+     * no reader needs byte identity). The IN-PLACE entry
+     * (owns_buffer == 0) must keep pointing xml_buffer at the
+     * CALLER's buffer: leptris_parse heap-copies its input, sets
+     * xml_buffer to that copy with needs_free=1, and doc_free
+     * releases exactly that pointer — aliasing the scratch here
+     * made doc_free release an arena interior. */
+    int const_input = (owns_buffer == 2);
     /* Counts arrive precomputed by the entry (the count3_high fused
      * pre-scan doubles as the UTF-8 fast gate there — #1842). */
     size_t lt_count = lt_count_in, dq_count = dq_count_in,
            sq_count = sq_count_in;
     pristine = buf;   /* owns_buffer == 0: caller's buffer — never
-                       * written, never freed. const_input overwrites
-                       * this below with the arena-carved copy. */
+                       * written, never freed. The const entry
+                       * overwrites this with the scratch below. */
     size_t quote_count = dq_count + sq_count;
     size_t est_elems = lt_count + 8;
 #define DP_ELEM_CHUNK 8u
@@ -1491,13 +1499,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * 100k-element document). */
     size_t pos_bytes = (est_elems + 8) * sizeof(struct leptris_elem_pos_entry);
     size_t scratch_bytes = (len + 1 + 64 + 15u) & ~(size_t)15u;
-    size_t pristine_bytes =
-        const_input ? ((len + 1 + 15u) & ~(size_t)15u) : 0u;
     /* Round 10: the owning pool struct carves the arena head. */
     size_t pool_bytes =
         (sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u;
     size_t arena_size = elem_bytes + elem_pad + attr_bytes + text_room
-        + slack + scratch_bytes + pristine_bytes + pos_bytes + pool_bytes;
+        + slack + scratch_bytes + pos_bytes + pool_bytes;
     LeptrisArena* arena = leptris_arena_create(arena_size);
     if (!arena) return NULL;   /* nothing owned yet */
     LeptrisMemoryPool* pool = leptris_pool_create_arena_backed(arena, 1);
@@ -1522,15 +1528,15 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     memcpy(scratch, buf, len);
     scratch[len] = '\0';
     memset(scratch + len + 1, 0, 64);
-    if (const_input) {
-        pristine = (char*)leptris_pool_alloc(pool, len + 1);
-        if (!pristine) {
-            leptris_pool_destroy(pool);
-            return NULL;
-        }
-        memcpy(pristine, buf, len);
-        pristine[len] = '\0';
-    }
+    /* A3 (#1842 audit): the pristine copy is GONE. Every scratch
+     * mutation is a NUL write at a recorded delimiter (dp_nul
+     * sites, the DTD subset/colon terminators, the sentinel, the
+     * replay materialization) — never a '\n' — and xml_buffer has
+     * no public accessor; its only reader (source-position
+     * diagnostics) is NUL-insensitive by construction. The copy
+     * cost len bytes of arena + a full memcpy per document for no
+     * reader that needed byte identity. */
+    if (const_input) pristine = scratch;
     buf = scratch;
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
