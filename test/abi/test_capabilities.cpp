@@ -36,6 +36,7 @@ void* const kNsSnapshot = (void*)&leptris_element_namespace_declarations_snapsho
 void* const kChildrenBatch = (void*)&leptris_element_children_batch;
 void* const kNameCompare = (void*)&leptris_node_name_compare;
 void* const kVersion = (void*)&leptris_version;
+void* const kEntityRefs = (void*)&leptris_entity_ref_node_name;
 }  // namespace caps_anchors
 
 TEST(LeptrisCapabilities, DescriptorVersionIsCurrent) {
@@ -65,6 +66,7 @@ TEST(LeptrisCapabilities, UnconditionalFacesAreSet) {
     EXPECT_NE(c.caps & LEPTRIS_CAP_CHILDREN_BATCH, 0ULL);
     EXPECT_NE(c.caps & LEPTRIS_CAP_NAME_COMPARE, 0ULL);
     EXPECT_NE(c.caps & LEPTRIS_CAP_VERSION, 0ULL);
+    EXPECT_NE(c.caps & LEPTRIS_CAP_ENTITY_REF_NODES, 0ULL);
 }
 
 TEST(LeptrisCapabilities, BuildConditionalBitsMatchTheBuild) {
@@ -103,7 +105,7 @@ TEST(LeptrisCapabilities, NoUnknownBits) {
         LEPTRIS_CAP_CHILDREN_BATCH | LEPTRIS_CAP_NAME_COMPARE |
         LEPTRIS_CAP_VERSION | LEPTRIS_CAP_COLLATION_DUCET |
         LEPTRIS_CAP_UNICODE_UTF8PROC | LEPTRIS_CAP_ENCODING_ICONV |
-        LEPTRIS_CAP_SIMD_AVX2;
+        LEPTRIS_CAP_SIMD_AVX2 | LEPTRIS_CAP_ENTITY_REF_NODES;
     EXPECT_EQ(c.caps & ~kKnown, 0ULL)
         << "an unknown bit is set — the descriptor grew without "
            "bumping LEPTRIS_CAPS_DESCRIPTOR_VERSION";
