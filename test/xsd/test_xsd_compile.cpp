@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <fstream>
 #include <cstring>
 #include <string>
 #include <algorithm>
@@ -3678,5 +3679,211 @@ TEST(XsdContent, Issue1894ReproStaysUnderCapAndCorrect) {
     const char* x[] = {"x"};
     EXPECT_EQ(leptris_xsd_content_valid(s, "r", x, NULL, 1), 0);
     EXPECT_EQ(leptris_xsd_error_count(s), 0u);
+    leptris_xsd_free(s);
+}
+
+
+/* leptris-ruby#569 family: cross-namespace references into an
+ * IMPORTED unit. The importing schema must declare xmlns="urn:a"
+ * as the DEFAULT namespace — unprefixed ref QNames resolve to
+ * no-namespace otherwise (spec behavior, the #1901 repro lesson). */
+TEST(XsdCrossNs, AttributeRefIntoImportedUnitResolves) {
+    const char* rel =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:r\" elementFormDefault=\"qualified\">"
+        "<xs:simpleType name=\"ST_RelId\">"
+        "<xs:restriction base=\"xs:string\"/></xs:simpleType>"
+        "<xs:attribute name=\"embed\" type=\"ST_RelId\"/>"
+        "</xs:schema>";
+    const char* main =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:r=\"urn:r\" xmlns=\"urn:a\" targetNamespace=\"urn:a\""
+        " elementFormDefault=\"qualified\">"
+        "<xs:import namespace=\"urn:r\" schemaLocation=\"blip_repro_rel.xsd\"/>"
+        "<xs:attributeGroup name=\"AG_Blob\">"
+        "<xs:attribute ref=\"r:embed\" use=\"optional\"/>"
+        "</xs:attributeGroup>"
+        "<xs:complexType name=\"CT_Blip\">"
+        "<xs:sequence><xs:element name=\"e\" type=\"xs:string\""
+        " minOccurs=\"0\"/></xs:sequence>"
+        "<xs:attributeGroup ref=\"AG_Blob\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
+        "</xs:schema>";
+
+    const char* dir = std::getenv("TMPDIR");
+    std::string base = dir ? dir : "/tmp";
+    std::string rel_path = base + "/blip_repro_rel.xsd";
+    std::string main_path = base + "/blip_repro_main.xsd";
+    {
+        std::ofstream f(rel_path);
+        f << rel;
+    }
+    {
+        std::ofstream f(main_path);
+        f << main;
+    }
+    const char* paths[2] = {rel_path.c_str(), main_path.c_str()};
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_set(paths, 2, &st);
+    if (st != LEPTRIS_OK || s == (LeptrisXsdSchema)0) {
+        const char* err = s ? leptris_xsd_error(s) : "(no handle)";
+        GTEST_FAIL() << "compile_set failed st=" << (int)st
+                     << " err=" << (err ? err : "(null)");
+    }
+
+    EXPECT_EQ(validate_compiled(s,
+                "<a:blip xmlns:a=\"urn:a\" xmlns:r=\"urn:r\""
+                " r:embed=\"rId2\"><e>x</e></a:blip>"),
+              1)
+        << "cross-unit attribute ref must resolve: "
+        << leptris_xsd_error(s);
+    std::remove(rel_path.c_str());
+    std::remove(main_path.c_str());
+    leptris_xsd_free(s);
+}
+
+/* Same shape through the single-document import chase. */
+TEST(XsdCrossNs, SingleDocImportChaseResolves) {
+    const char* rel =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:r\" elementFormDefault=\"qualified\">"
+        "<xs:simpleType name=\"ST_RelId\">"
+        "<xs:restriction base=\"xs:string\"/></xs:simpleType>"
+        "<xs:attribute name=\"embed\" type=\"ST_RelId\"/>"
+        "</xs:schema>";
+    const char* main =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:r=\"urn:r\" xmlns=\"urn:a\" targetNamespace=\"urn:a\""
+        " elementFormDefault=\"qualified\">"
+        "<xs:import namespace=\"urn:r\""
+        " schemaLocation=\"blip_repro_rel.xsd\"/>"
+        "<xs:attributeGroup name=\"AG_Blob\">"
+        "<xs:attribute ref=\"r:embed\" use=\"optional\"/>"
+        "</xs:attributeGroup>"
+        "<xs:complexType name=\"CT_Blip\">"
+        "<xs:sequence><xs:element name=\"e\" type=\"xs:string\""
+        " minOccurs=\"0\"/></xs:sequence>"
+        "<xs:attributeGroup ref=\"AG_Blob\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
+        "</xs:schema>";
+
+    const char* dir = std::getenv("TMPDIR");
+    std::string base = dir ? dir : "/tmp";
+    std::string rel_path = base + "/blip_repro_rel.xsd";
+    std::string main_path = base + "/blip_repro_main.xsd";
+    {
+        std::ofstream f(rel_path);
+        f << rel;
+    }
+    {
+        std::ofstream f(main_path);
+        f << main;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file(main_path.c_str(), &st);
+    if (st != LEPTRIS_OK || s == (LeptrisXsdSchema)0) {
+        const char* err = s ? leptris_xsd_error(s) : "(no handle)";
+        GTEST_FAIL() << "single-doc compile failed st=" << (int)st
+                     << " err=" << (err ? err : "(null)");
+    }
+
+    EXPECT_EQ(validate_compiled(s,
+                "<a:blip xmlns:a=\"urn:a\" xmlns:r=\"urn:r\""
+                " r:embed=\"rId2\"><e>x</e></a:blip>"),
+              1)
+        << "import-chase attribute ref must resolve: "
+        << leptris_xsd_error(s);
+    std::remove(rel_path.c_str());
+    std::remove(main_path.c_str());
+    leptris_xsd_free(s);
+}
+
+/* The #569 regression itself: the #1880 attributeGroup pre-pass
+ * captured AG_Blob and resolved its <xs:attribute ref="r:embed"/>
+ * row BEFORE the import chase registered the referenced unit's
+ * r:embed — the row used to be silently dropped, so whole-instance
+ * validation then rejected every a:blip @r:embed ("not declared
+ * (strict)") on the real DrawingML chain. The row must survive as
+ * pending and resolve once the full capture has run. */
+TEST(XsdCrossNs, AttrGroupRefRowResolvedAfterImportChase) {
+    const char* rel =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"urn:r\" elementFormDefault=\"qualified\">"
+        "<xs:attribute name=\"embed\" type=\"xs:string\"/>"
+        "</xs:schema>";
+    const char* main =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:r=\"urn:r\" xmlns=\"urn:a\" targetNamespace=\"urn:a\""
+        " elementFormDefault=\"qualified\">"
+        "<xs:import namespace=\"urn:r\" schemaLocation=\"ag569_rel.xsd\"/>"
+        "<xs:attributeGroup name=\"AG_Blob\">"
+        "<xs:attribute ref=\"r:embed\"/>"
+        "</xs:attributeGroup>"
+        "<xs:complexType name=\"CT_Blip\">"
+        "<xs:sequence><xs:element name=\"e\" type=\"xs:string\""
+        " minOccurs=\"0\"/></xs:sequence>"
+        "<xs:attributeGroup ref=\"AG_Blob\"/>"
+        "</xs:complexType>"
+        "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
+        "</xs:schema>";
+
+    const char* dir = std::getenv("TMPDIR");
+    std::string base = dir ? dir : "/tmp";
+    std::string rel_path = base + "/ag569_rel.xsd";
+    std::string main_path = base + "/ag569_main.xsd";
+    {
+        std::ofstream f(rel_path);
+        f << rel;
+    }
+    {
+        std::ofstream f(main_path);
+        f << main;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file(main_path.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* err = leptris_xsd_error(s);
+    ASSERT_EQ(st, LEPTRIS_OK)
+        << "compile failed: " << (err ? err : "(null)");
+
+    EXPECT_EQ(validate_compiled(s,
+                "<a:blip xmlns:a=\"urn:a\" xmlns:r=\"urn:r\""
+                " r:embed=\"rId2\"><e>x</e></a:blip>"),
+              1)
+        << "pre-pass ref row must resolve after the import chase: "
+        << leptris_xsd_error(s);
+    std::remove(rel_path.c_str());
+    std::remove(main_path.c_str());
+    leptris_xsd_free(s);
+}
+
+/* leptris-ruby#569: compiling the REAL wml.xsd (ISO transitional,
+ * 790 element decls, import chain to the drawing units) must yield
+ * a cleanly compiled schema — a missing import file poisons the
+ * graph (the '{mce}Ignorable' class), and the merged capture must
+ * carry every unit. The schema set is bundled at $BLIP_CHAIN_DIR
+ * in dev; CI skips when the fixture is absent so the suite stays
+ * hermetic. */
+TEST(XsdCrossNs, RealWmlChainCompilesDeclarations) {
+    const char* dir = std::getenv("BLIP_CHAIN_DIR");
+    if (!dir || *dir == '\0') {
+        GTEST_SKIP() << "BLIP_CHAIN_DIR not set";
+    }
+    std::string wml = std::string(dir) + "/wml.xsd";
+    std::ifstream f(wml);
+    ASSERT_TRUE(f.good()) << wml;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(wml.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char* err = leptris_xsd_error(s);
+    EXPECT_EQ(st, LEPTRIS_OK)
+        << "compile status " << (int)st
+        << " decls=" << leptris_xsd_declaration_count(s)
+        << " err=" << (err ? err : "(clean)");
     leptris_xsd_free(s);
 }

@@ -197,6 +197,15 @@ typedef struct xsd_attr_decl {
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
     char* fixed; /* #FIXED value: present values must string-equal it */
     int required;
+    /* leptris-ruby#569: the row came from <xs:attribute ref=.../>
+     * whose global declaration was not yet captured (the #1880
+     * attributeGroup pre-pass runs before the import chase). The
+     * row is kept — never silently dropped — and xsd_compile_impl
+     * re-resolves it once the full merged capture has run
+     * (xsd_resolve_pending_attr_refs). bit 0 = ref unresolved,
+     * bit 1 = the ref carried its own use= (it overrides the
+     * declaration's). */
+    int pending_ref;
     struct xsd_attr_decl* next;
 } XsdAttrDecl;
 
