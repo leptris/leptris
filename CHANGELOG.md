@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.391] - 2026-10-30
+
+### Fixed
+
+- resolve attributeGroup ref rows the pre-pass captured before its imports (xsd)
+
+
+
 ## [1.9.390] - 2026-10-29
 
 ### Fixed
