@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.392] - 2026-10-30
+
+### Added
+
+- capability descriptor face — one call answering what the engine serves (leptris#1905) (api)
+
+
+
 ## [1.9.391] - 2026-10-30
 
 ### Fixed
