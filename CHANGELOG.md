@@ -4,7 +4,19 @@
 
 ### Fixed
 
-- xs:override loads its base and replaces the overridden components (leptris#1913) (xsd)
+- **xs:override loads its base and replaces the overridden components
+  (leptris#1913, PR #1917).** `override` was absent from the
+  declaration gate and the include-family chase, so the base document
+  never loaded and the override body's nested declarations were never
+  captured — the compiled schema had an empty symbol space (decls=0,
+  every instance element "not declared"). Override now chases its
+  schemaLocation like include (same targetNamespace), then captures
+  its own declaration children as a pseudo-root AFTER the base so the
+  head-first lookup ladder sees the replacements; the attributeGroup
+  pre-pass honors a capture-force flag in that body, and the ref-check
+  declaration collector walks the override body too. Witness: base
+  `Doc` replaced by the override's `Doc` — `<doc><b>1</b></doc>`
+  validates, `<doc><a>x</a></doc>` is rejected.
 
 
 
