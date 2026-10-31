@@ -8,6 +8,8 @@
 
 #include "leptris.h"
 
+#include "../../src/leptris/common/simd_text.h"
+
 #include <cstring>
 #include <vector>
 
@@ -366,4 +368,117 @@ TEST(EncodingLatin1, WithEncodingConvertsToUtf8) {
     EXPECT_EQ((unsigned char)text[3], 0xC3);
     EXPECT_EQ((unsigned char)text[4], 0xA9);
     leptris_document_free(doc);
+}
+
+// leptris-py CI regression (2026-10-31): the binding's flow is
+// fast-path parse (raw UTF-16 into the UTF-8 parser) then retry via
+// the encoding-detecting entry. On x86 CI the retry of a BOM-only
+// document whose text contains a multi-byte character failed with
+// "malformed input". Mirror the flow stage by stage so the failing
+// stage is visible on every architecture.
+TEST(EncodingUtf16Le, PyBindingFlowBomWithMultibyteText) {
+    // "<?xml version='1.0'?><r><a>café</a></r>" as UTF-16LE + BOM —
+    // the exact bytes the py fixture produces.
+    static const unsigned char kDoc[] = {
+        0xFF, 0xFE,
+        '<', 0x00, '?', 0x00, 'x', 0x00, 'm', 0x00, 'l', 0x00,
+        ' ', 0x00, 'v', 0x00, 'e', 0x00, 'r', 0x00, 's', 0x00,
+        'i', 0x00, 'o', 0x00, 'n', 0x00, '=', 0x00, '\'', 0x00,
+        '1', 0x00, '.', 0x00, '0', 0x00, '\'', 0x00, '?', 0x00,
+        '>', 0x00,
+        '<', 0x00, 'r', 0x00, '>', 0x00,
+        '<', 0x00, 'a', 0x00, '>', 0x00,
+        'c', 0x00, 'a', 0x00, 'f', 0x00, 0xE9, 0x00,
+        '<', 0x00, '/', 0x00, 'a', 0x00, '>', 0x00,
+        '<', 0x00, '/', 0x00, 'r', 0x00, '>', 0x00,
+    };
+    const size_t n = sizeof kDoc;
+    ASSERT_EQ(n, 80u);
+
+    // Stage 1 — the UTF-8 entry over raw UTF-16 (py fast path): the
+    // lenient contract is parse-or-fail, never a crash. The inplace
+    // entry owns the buffer it is given (NUL-masking is part of the
+    // inplace contract), so the scratch copy absorbs the mutation —
+    // the pristine kDoc stays for the retry.
+    std::vector<unsigned char> buf(kDoc, kDoc + n);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument fast = leptris_parse_string_inplace(
+        reinterpret_cast<char*>(buf.data()), n, &st);
+    if (fast) leptris_document_free(fast);
+    ASSERT_EQ(buf.size(), n) << "inplace parse must not resize";
+
+    // Stage 2 — the encoding-detecting retry on the pristine bytes:
+    // BOM-only, multi-byte payload; must convert and parse.
+    LeptrisDocument doc = leptris_parse_string_with_encoding(
+        reinterpret_cast<const char*>(kDoc), n, &st);
+    ASSERT_NE(doc, nullptr) << "status: " << leptris_status_string(st);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "r");
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    const char* text = leptris_element_text(a);
+    ASSERT_STREQ(text, "caf\xC3\xA9");
+
+    leptris_document_free(doc);
+}
+
+// x86-only multibyte-parse bisection (follows the PyBindingFlow spec):
+// the Utf8Simd matrix is green on every lane while multibyte PARSES
+// fail on all four x86 lanes. Stage the flow so the failing surface
+// names itself: validator verdict, per-sequence-length parses, the
+// converted-buffer shape, and the interleaved vs default lane.
+TEST(EncodingUtf8Strict, X86MultibyteBisection) {
+    const char two[] = "<r>caf\xC3\xA9</r>";
+    const char three[] = "<r>\xE4\xB8\xAD</r>";
+    const char four[] = "<r>\xF0\x9F\x98\x80</r>";
+    const char mix[] = "<r>caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80</r>";
+    EXPECT_EQ(leptris_utf8_valid(two, strlen(two)), 1) << "validator: 2-byte doc";
+    EXPECT_EQ(leptris_utf8_valid(three, strlen(three)), 1) << "validator: 3-byte doc";
+    EXPECT_EQ(leptris_utf8_valid(four, strlen(four)), 1) << "validator: 4-byte doc";
+    /* Localize the offending lane: every prefix of the mixed doc is
+     * either valid or ends mid-sequence (which the scalar oracle
+     * rejects too) — print the verdict map so the first SIMD/scalar
+     * divergence names its byte offset. */
+    {
+        std::string map;
+        for (size_t k = 0; k <= strlen(mix); k++) {
+            int sc = leptris_utf8_valid_scalar(mix, k);
+            int si = leptris_utf8_valid(mix, k);
+            if (sc != si || k == strlen(mix))
+                map += " [" + std::to_string(k) + "]:" + std::to_string(sc)
+                     + "/" + std::to_string(si);
+        }
+        EXPECT_EQ(leptris_utf8_valid(mix, strlen(mix)), 1)
+            << "validator: mixed doc; divergences scalar/simd" << map;
+    }
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d2 = leptris_parse_string(two, strlen(two), &st);
+    EXPECT_NE(d2, nullptr) << "parse 2-byte: " << leptris_status_string(st);
+    if (d2) leptris_document_free(d2);
+    LeptrisDocument d3 = leptris_parse_string(three, strlen(three), &st);
+    EXPECT_NE(d3, nullptr) << "parse 3-byte: " << leptris_status_string(st);
+    if (d3) leptris_document_free(d3);
+    LeptrisDocument d4 = leptris_parse_string(four, strlen(four), &st);
+    EXPECT_NE(d4, nullptr) << "parse 4-byte: " << leptris_status_string(st);
+    if (d4) leptris_document_free(d4);
+
+    /* The converted-buffer shape from the py flow (40 bytes). */
+    const char conv[] = "<?xml version='1.0'?><r><a>caf\xC3\xA9</a></r>";
+    EXPECT_EQ(leptris_utf8_valid(conv, strlen(conv)), 1) << "validator: converted buffer";
+    LeptrisDocument dc = leptris_parse_string(conv, strlen(conv), &st);
+    EXPECT_NE(dc, nullptr) << "parse converted: " << leptris_status_string(st);
+    if (dc) leptris_document_free(dc);
+
+    /* The default (non-interleaved) lane via RECOVER. */
+    LeptrisParseOptions opts;
+    memset(&opts, 0, sizeof opts);
+    opts.flags = LEPTRIS_PARSE_RECOVER;
+    opts.strict_mode = -1;
+    LeptrisDocument dr = leptris_parse_string_ex(mix, strlen(mix),
+        &opts, &st);
+    EXPECT_NE(dr, nullptr) << "parse mixed (default lane): " << leptris_status_string(st);
+    if (dr) leptris_document_free(dr);
 }

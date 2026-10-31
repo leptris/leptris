@@ -3631,7 +3631,10 @@ struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!dp_declares_non_utf8(buf, len) && saw_high &&
         !dp_utf8_valid(buf, len))
         return NULL;
-    buf[len] = '\0';  /* Ensure NUL termination */
+    /* No sentinel write past len: the caller owns exactly `len`
+     * writable bytes (the header contract promises NULL terminators
+     * INSIDE the buffer; an exactly-sized caller trips ASAN, and
+     * bindings hand read-only views). The scanner takes `len`. */
     return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0,
                                  lt_count, dq_count, sq_count);
 }

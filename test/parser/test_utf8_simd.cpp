@@ -96,6 +96,21 @@ TEST(Utf8Simd, RandomizedCrossCheck) {
             else c = (char)(0x80 + (r % 0x80));
             buf.push_back(c);
         }
+        /* The plain corpus rarely produces the boundary shapes that
+         * broke the cores (x86-TSAN 2026-10-31): a start byte in the
+         * final block lane with a non-continuation after it, and
+         * sequences straddling 16/32-byte edges. Append an ASCII
+         * tail after a valid-or-not multibyte run so every trial
+         * also probes the tail-anchor at a shifted offset. */
+        if (trial % 3 == 0) {
+            static const char* mids[] = {
+                "\xC3\xA9", "\xE4\xB8\xAD", "\xF0\x9F\x98\x80",
+                "\xC3", "\xE0\xA0", "\xF0\x90\x80", "\xED\xA0\x80",
+                "\xF4\x8F\xBF\xBF", "\xC2\xBF", "\xEF\xBF\xBD"
+            };
+            buf += mids[trial % 10];
+            buf += "zz";
+        }
         int scalar = leptris_utf8_valid_scalar(buf.data(), buf.size());
         int simd = leptris_utf8_valid(buf.data(), buf.size());
         EXPECT_EQ(simd, scalar)

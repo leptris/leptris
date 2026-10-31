@@ -75,6 +75,14 @@ ptrdiff_t leptris_text_find3_avx2(const char* s, size_t len,
     return -1;
 }
 
+/* MSVC has no __builtin_popcount; __popcnt32 maps to the POPCNT
+ * instruction the /arch:AVX2 target guarantees. */
+#if defined(_MSC_VER)
+#  define LEPTRIS_POPCOUNT32(x) __popcnt(x)
+#else
+#  define LEPTRIS_POPCOUNT32(x) __builtin_popcount(x)
+#endif
+
 /* Byte-population count: cmpeq → movemask → popcount per 32-byte
  * chunk, 16-byte SSE step, scalar tail. Never reads past s+len. */
 size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
@@ -86,13 +94,13 @@ size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
     while (end - p >= 32) {
         __m256i v = _mm256_loadu_si256((const __m256i*)p);
         __m256i eq = _mm256_cmpeq_epi8(v, needle);
-        n += (size_t)__builtin_popcount((unsigned)_mm256_movemask_epi8(eq));
+        n += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(eq));
         p += 32;
     }
     if (end - p >= 16) {
         __m128i v = _mm_loadu_si128((const __m128i*)p);
         __m128i eq = _mm_cmpeq_epi8(v, _mm256_castsi256_si128(needle));
-        n += (size_t)__builtin_popcount((unsigned)_mm_movemask_epi8(eq));
+        n += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm_movemask_epi8(eq));
         p += 16;
     }
     while (p < end) {
@@ -186,15 +194,20 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
         __m128i b2 = _mm_alignr_epi8(cur, prev, 14);
         __m128i b3 = _mm_alignr_epi8(cur, prev, 13);
 
-        /* start classes (unsigned ranges via saturating compare) */
+        /* start classes — the saturating idiom's operand order is the
+         * whole game: subs(v, lo)==0 tests v<=lo (saturate on
+         * underflow AND equality), so the LOWER bound must be
+         * subs(lo, v)==0 (0 iff lo<=v). subs(v, hi)==0 ⇔ v<=hi is
+         * already the right direction for the upper bound. */
 #define IN_RANGE(v, lo, hi)                                            \
-        (_mm_cmpeq_epi8(_mm_subs_epu8((v), _mm_set1_epi8(lo)), zero) & \
-         _mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(hi), (v)), zero))
+        (_mm_and_si128(                                                \
+            _mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(lo), (v)), zero), \
+            _mm_cmpeq_epi8(_mm_subs_epu8((v), _mm_set1_epi8(hi)), zero)))
         __m128i st2c = IN_RANGE(cur, (char)0xC2, (char)0xDF);
         __m128i st3c = IN_RANGE(cur, (char)0xE0, (char)0xEF);
         __m128i st4c = IN_RANGE(cur, (char)0xF0, (char)0xF4);
         __m128i is_ascii =
-            _mm_cmplt_epi8(cur, zero); /* unsigned < 0x80 <=> signed < 0 */
+            _mm_cmpeq_epi8(_mm_and_si128(cur, b80), zero);
         __m128i legal_start = _mm_or_si128(
             st2c, _mm_or_si128(st3c, st4c));
 
@@ -224,9 +237,12 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
         __m128i hi = _mm_blendv_epi8(bBF, b9F, ed);
         hi = _mm_blendv_epi8(hi, b8F, f4);
 
-        /* cont-in-range */
-        __m128i cge = _mm_subs_epu8(cur, lo); /* max(0, cur-lo) */
-        __m128i cle = _mm_subs_epu8(hi, cur); /* max(0, hi-cur) */
+        /* cont-in-range — NEON's vcge/vcle pair translated to the
+         * saturating-subtraction idiom: subs(lo, cur) saturates to 0
+         * iff lo <= cur, subs(cur, hi) iff cur <= hi (the operand
+         * order is the whole game: subs(cur, lo) tests cur <= lo). */
+        __m128i cge = _mm_subs_epu8(lo, cur);
+        __m128i cle = _mm_subs_epu8(cur, hi);
         __m128i cont_ok = _mm_and_si128(
             _mm_cmpeq_epi8(cge, zero), _mm_cmpeq_epi8(cle, zero));
 
@@ -278,9 +294,16 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
     }
     /* Tail: scalar DFA anchored at a character boundary (at most 3
      * bytes back from the SIMD end; a sequence is at most 4) — the
-     * anchored run also covers a sequence spanning the block edge. */
+     * anchored run also covers a sequence spanning the block edge.
+     * One more step back when the byte before the anchor is a start
+     * byte: an opener in the final block lane reaches into the tail
+     * (400k-case randomized cross-check vs the scalar oracle). */
     size_t start = i;
     while (start > 0 && (p[start] & 0xC0) == 0x80 && i - start < 3)
         start--;
+    if (i - start < 3 && start > 0) {
+        unsigned char b = p[start - 1];
+        if (b >= 0xC2 && b <= 0xF4) start--;
+    }
     return leptris_utf8_valid_scalar((const char*)(p + start), len - start);
 }
