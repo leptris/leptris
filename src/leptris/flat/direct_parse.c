@@ -3537,48 +3537,15 @@ static int dp_declares_non_utf8(const char* s, size_t len) {
 }
 
 static int dp_utf8_valid(const char* s, size_t len) {
-    const unsigned char* p = (const unsigned char*)s;
-    size_t i = 0;
-    /* ASCII fast path: 8 bytes per iteration. The DFA below runs
-     * only when a high byte is present; ordinary documents pay one
-     * memory-bandwidth pass. */
-    while (i + 8 <= len) {
-        uint64_t w;
-        memcpy(&w, p + i, 8);
-        if (w & UINT64_C(0x8080808080808080)) break;
-        i += 8;
-    }
-    while (i < len && p[i] < 0x80) i++;
-    while (i < len) {
-        unsigned c = p[i];
-        if (c < 0x80) {
-            i++;
-            continue;
-        }
-        size_t n;
-        unsigned lo = 0x80;
-        unsigned hi = 0xBF;
-        if (c >= 0xC2 && c <= 0xDF) {
-            n = 1;
-        } else if (c >= 0xE0 && c <= 0xEF) {
-            n = 2;
-            if (c == 0xE0) lo = 0xA0;
-            else if (c == 0xED) hi = 0x9F;
-        } else if (c >= 0xF0 && c <= 0xF4) {
-            n = 3;
-            if (c == 0xF0) lo = 0x90;
-            else if (c == 0xF4) hi = 0x8F;
-        } else {
-            return 0;
-        }
-        if (len - i <= n) return 0;
-        if (p[i + 1] < lo || p[i + 1] > hi) return 0;
-        for (size_t k = 2; k <= n; k++) {
-            if (p[i + k] < 0x80 || p[i + k] > 0xBF) return 0;
-        }
-        i += n + 1;
-    }
-    return 1;
+    /* #1842 A5: the per-byte DFA moved to the SIMD layer —
+     * leptris_utf8_valid dispatches to boundary-vector cores (AVX2/
+     * NEON) with the DFA as the fallback+oracle. Pure accept/reject
+     * on the caller's bytes: no buffer-identity interaction (the A3
+     * revert settled that question for xml_buffer; this face only
+     * READS). */
+    (void)s;
+    (void)len;
+    return leptris_utf8_valid(s, len);
 }
 
 static int dp_input_encoding_ok(const char* s, size_t len) {
