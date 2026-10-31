@@ -4,7 +4,15 @@
 
 ### Fixed
 
-- capture redefine bodies — redefine+extension keeps the extension model (leptris#1926) (xsd)
+- **`xs:redefine` bodies were dropped (leptris#1926).** A
+  `redefine`d complexType whose body declared new particles (or
+  attributes) lost them: the extension derived from the base type
+  captured its model against the BASE body, and the redefinition was
+  never folded in. Bodies are now captured after the base resolves —
+  the same mechanism `xs:override` already uses (PR #1913) — so the
+  ladder resolves head-first through the redefinition and the
+  extension folds against the redefined content. `xs:group`/attr
+  refs inside redefine bodies are collected like override bodies.
 
 
 
