@@ -3842,7 +3842,7 @@ TEST(XsdCrossNs, SingleDocImportChaseResolves) {
         " xmlns:r=\"urn:r\" xmlns=\"urn:a\" targetNamespace=\"urn:a\""
         " elementFormDefault=\"qualified\">"
         "<xs:import namespace=\"urn:r\""
-        " schemaLocation=\"blip_repro_rel.xsd\"/>"
+        " schemaLocation=\"blip_chase_rel.xsd\"/>"
         "<xs:attributeGroup name=\"AG_Blob\">"
         "<xs:attribute ref=\"r:embed\" use=\"optional\"/>"
         "</xs:attributeGroup>"
@@ -3858,8 +3858,8 @@ TEST(XsdCrossNs, SingleDocImportChaseResolves) {
     if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
     if (!dir) dir = std::getenv("TMP");
     std::string base = dir ? dir : ".";
-    std::string rel_path = base + "/blip_repro_rel.xsd";
-    std::string main_path = base + "/blip_repro_main.xsd";
+    std::string rel_path = base + "/blip_chase_rel.xsd";
+    std::string main_path = base + "/blip_chase_main.xsd";
     {
         std::ofstream f(rel_path);
         f << rel;
