@@ -1114,17 +1114,17 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
             if (q >= p->end) return -1; /* unterminated */
             val_end = (char*)memchr(q, quote, p->end - q);
             if (!val_end) return -1;
-            if (q < val_end) {
-                if (!has_amp &&
-                    leptris_text_contains(q, (size_t)(val_end - q), '&'))
-                    has_amp = 1;
-                if (!has_ws) {
-                    for (const char* w = q; w < val_end; w++) {
-                        if (*w == '\t' || *w == '\n' || *w == '\r') {
-                            has_ws = 1;
-                            break;
-                        }
-                    }
+            if (q < val_end && (!has_amp || !has_ws)) {
+                /* One fused pass for '&' and literal \t/\n/\r: the old
+                 * shape paid a SIMD-contains CALL plus a second byte
+                 * loop per attribute — 3 scans of every value on the
+                 * #1842 profile (50-byte values just miss the 48-byte
+                 * inline probe, so this tail ran for all of them). */
+                for (const char* w = q; w < val_end; w++) {
+                    unsigned char c = (unsigned char)*w;
+                    has_amp |= (c == '&');
+                    has_ws |= (c == '\t' || c == '\n' || c == '\r');
+                    if (has_amp && has_ws) break;
                 }
             }
         }
