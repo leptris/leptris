@@ -45,7 +45,11 @@ TEST(Utf8Simd, SequenceMatrixAcrossBlockEdges) {
         // stray continuation
         {{"\x80"}, 0}, {{"a\x80" "b"}, 0}, {{"\xBF"}, 0},
     };
-    for (const auto& [s, expect] : cases) {
+    for (std::vector<std::pair<std::string, int> >::const_iterator
+             it = cases.begin();
+         it != cases.end(); ++it) {
+        const std::string& s = it->first;
+        const int expect = it->second;
         for (int pad = 0; pad < 20; pad++) {
             std::string buf((size_t)pad, 'a');
             buf += s;
