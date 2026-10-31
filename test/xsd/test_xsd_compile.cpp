@@ -3657,6 +3657,33 @@ TEST(XsdContent, PathologicalProductFailsLoudlyNotOom) {
     leptris_xsd_free(s);
 }
 
+/* lutaml/moxml#514: the cap is a resource guard, not a validity
+ * verdict. A content model whose NFA crosses the cap is engine-INERT
+ * at INSTANCE validation — no structured row flips a suite-valid
+ * document to invalid (the compile-time loud face above is the one
+ * place the guard reports). */
+TEST(XsdContent, Issue514CapIsInertAtInstanceValidation) {
+    std::string xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"r\"><xs:complexType><xs:sequence"
+        " minOccurs=\"0\" maxOccurs=\"2000\"><xs:element name=\"e\""
+        " minOccurs=\"0\" maxOccurs=\"2000\"/></xs:sequence>"
+        "</xs:complexType></xs:element></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile(xsd.data(), xsd.size(), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    LeptrisDocument d = leptris_parse_string("<r><e/><e/></r>", 15, &st);
+    ASSERT_NE(d, nullptr);
+    /* The instance is suite-valid and stays valid: the capped model
+     * is skipped, not failed. */
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    EXPECT_EQ(leptris_xsd_error_count(s), 0u);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdContent, Issue1894ReproStaysUnderCapAndCorrect) {
     /* The issue's exact shape — seq maxOccurs=100 x element
      * unbounded — lowers to a loop region (not copies) and must stay
