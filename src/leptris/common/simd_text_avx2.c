@@ -194,7 +194,7 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
         __m128i st3c = IN_RANGE(cur, (char)0xE0, (char)0xEF);
         __m128i st4c = IN_RANGE(cur, (char)0xF0, (char)0xF4);
         __m128i is_ascii =
-            _mm_cmplt_epi8(cur, zero); /* unsigned < 0x80 <=> signed < 0 */
+            _mm_cmpeq_epi8(_mm_and_si128(cur, b80), zero);
         __m128i legal_start = _mm_or_si128(
             st2c, _mm_or_si128(st3c, st4c));
 
