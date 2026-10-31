@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.399] - 2026-10-31
+
+### Fixed
+
+- the legacy-Nd digit pin applies on every build — outside the utf8proc guard (xsd)
+- pin the Unicode-3.1 legacy-Nd digits into the pattern \\d class (leptris#1936) (xsd)
+
+
+
 ## [1.9.398] - 2026-10-31
 
 ### Fixed
