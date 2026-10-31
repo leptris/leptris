@@ -8,6 +8,8 @@
 
 #include "leptris.h"
 
+#include "../../src/leptris/common/simd_text.h"
+
 #include <cstring>
 #include <vector>
 
@@ -419,4 +421,48 @@ TEST(EncodingUtf16Le, PyBindingFlowBomWithMultibyteText) {
     ASSERT_STREQ(text, "caf\xC3\xA9");
 
     leptris_document_free(doc);
+}
+
+// x86-only multibyte-parse bisection (follows the PyBindingFlow spec):
+// the Utf8Simd matrix is green on every lane while multibyte PARSES
+// fail on all four x86 lanes. Stage the flow so the failing surface
+// names itself: validator verdict, per-sequence-length parses, the
+// converted-buffer shape, and the interleaved vs default lane.
+TEST(EncodingUtf8Strict, X86MultibyteBisection) {
+    const char two[] = "<r>caf\xC3\xA9</r>";
+    const char three[] = "<r>\xE4\xB8\xAD</r>";
+    const char four[] = "<r>\xF0\x9F\x98\x80</r>";
+    const char mix[] = "<r>caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80</r>";
+    EXPECT_EQ(leptris_utf8_valid(two, strlen(two)), 1) << "validator: 2-byte doc";
+    EXPECT_EQ(leptris_utf8_valid(three, strlen(three)), 1) << "validator: 3-byte doc";
+    EXPECT_EQ(leptris_utf8_valid(four, strlen(four)), 1) << "validator: 4-byte doc";
+    EXPECT_EQ(leptris_utf8_valid(mix, strlen(mix)), 1) << "validator: mixed doc";
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d2 = leptris_parse_string(two, strlen(two), &st);
+    EXPECT_NE(d2, nullptr) << "parse 2-byte: " << leptris_status_string(st);
+    if (d2) leptris_document_free(d2);
+    LeptrisDocument d3 = leptris_parse_string(three, strlen(three), &st);
+    EXPECT_NE(d3, nullptr) << "parse 3-byte: " << leptris_status_string(st);
+    if (d3) leptris_document_free(d3);
+    LeptrisDocument d4 = leptris_parse_string(four, strlen(four), &st);
+    EXPECT_NE(d4, nullptr) << "parse 4-byte: " << leptris_status_string(st);
+    if (d4) leptris_document_free(d4);
+
+    /* The converted-buffer shape from the py flow (40 bytes). */
+    const char conv[] = "<?xml version='1.0'?><r><a>caf\xC3\xA9</a></r>";
+    EXPECT_EQ(leptris_utf8_valid(conv, strlen(conv)), 1) << "validator: converted buffer";
+    LeptrisDocument dc = leptris_parse_string(conv, strlen(conv), &st);
+    EXPECT_NE(dc, nullptr) << "parse converted: " << leptris_status_string(st);
+    if (dc) leptris_document_free(dc);
+
+    /* The default (non-interleaved) lane via RECOVER. */
+    LeptrisParseOptions opts;
+    memset(&opts, 0, sizeof opts);
+    opts.flags = LEPTRIS_PARSE_RECOVER;
+    opts.strict_mode = -1;
+    LeptrisDocument dr = leptris_parse_string_ex(mix, strlen(mix),
+        &opts, &st);
+    EXPECT_NE(dr, nullptr) << "parse mixed (default lane): " << leptris_status_string(st);
+    if (dr) leptris_document_free(dr);
 }
