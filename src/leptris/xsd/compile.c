@@ -1860,11 +1860,11 @@ static void xsd_collect_decls_doc(LeptrisElement root, const char* eff_tns,
             xsd_collect_decls_doc(subroot, eff, sub_base, decls, n, max,
                                   claimed, nclaimed, cmax, depth + 1);
         }
-        /* leptris#1913: an xs:override body's declarations belong
-         * to the symbol space too — walk the override element as a
-         * pseudo-root (it has no include/import children of its
-         * own). */
-        if (strcmp(l, "override") == 0)
+        /* leptris#1913/#1926: override and redefine bodies'
+         * declarations belong to the symbol space too — walk the
+         * derivation element as a pseudo-root (it has no
+         * include/import children of its own). */
+        if (strcmp(l, "override") == 0 || strcmp(l, "redefine") == 0)
             xsd_collect_decls_doc(c, eff_tns, base_dir, decls, n, max,
                                   claimed, nclaimed, cmax, depth + 1);
         leptris_document_free(sub);
@@ -2345,14 +2345,20 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             if (sub_ns) free(sub_ns);
                             s->target_ns = saved_ns;
                         }
-                        /* leptris#1913 (XSD 1.1 §I.4): the override
-                         * element's OWN declaration children
-                         * replace same-named components of the base
-                         * just captured — capture them AFTER the
-                         * base so the lookup ladder (head-first)
-                         * sees the replacements. */
+                        /* leptris#1913 (XSD 1.1 §I.4) + #1926 (XSD
+                         * 1.0 §4.2.2): the override/redefine
+                         * element's OWN declaration children replace
+                         * same-named components of the base just
+                         * captured — capture them AFTER the base so
+                         * the lookup ladder (head-first) sees the
+                         * replacements. A redefine body that EXTENDS
+                         * the redefined name folds its extension
+                         * against the base at this moment (base
+                         * captured, ladder sees the new head), which
+                         * is exactly the redefine hook. */
                         if (subroot && same_ns &&
-                            strcmp(local, "override") == 0) {
+                            (strcmp(local, "override") == 0 ||
+                             strcmp(local, "redefine") == 0)) {
                             s->include_depth++;
                             s->capture_force = 1;
                             xsd_capture_root(s, (LeptrisElement)n);

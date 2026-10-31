@@ -4115,3 +4115,57 @@ TEST(XsdCrossNs, ChameleonRestrictionAdmitsBaseChainAttributes) {
     std::remove(ch_path.c_str());
     leptris_xsd_free(s);
 }
+
+/* leptris#1926 (W3C msData idF030): an xs:redefine that EXTENDS the
+ * redefined type keeps the extension in the compiled model — the
+ * body's own definitions replace the base's name bindings (capture
+ * after the base; the ladder sees the new head), and the body's
+ * extension folds against the base at capture time. Pinned with the
+ * fixture's shape: tabletype(r?) extended by (c); the instance
+ * carries r+c per t. */
+TEST(XsdCrossNs, RedefineExtensionKeepsTheExtensionModel) {
+    const char* base =
+        "<?xml version=\"1.0\"?>\n"
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:complexType name=\"tabletype\"><xsd:sequence>"
+        "<xsd:element name=\"r\" type=\"xsd:string\" minOccurs=\"0\"/>"
+        "</xsd:sequence></xsd:complexType></xsd:schema>";
+    const char* redef =
+        "<?xml version=\"1.0\"?>\n"
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:redefine schemaLocation=\"f030_base.xsd\">"
+        "<xsd:complexType name=\"tabletype\"><xsd:complexContent>"
+        "<xsd:extension base=\"tabletype\"><xsd:sequence>"
+        "<xsd:element name=\"c\" type=\"xsd:string\"/>"
+        "</xsd:sequence></xsd:extension></xsd:complexContent>"
+        "</xsd:complexType></xsd:redefine>"
+        "<xsd:element name=\"root\"><xsd:complexType><xsd:sequence>"
+        "<xsd:element name=\"t\" type=\"tabletype\""
+        " maxOccurs=\"unbounded\"/>"
+        "</xsd:sequence></xsd:complexType></xsd:element>"
+        "</xsd:schema>";
+    const char* dir = std::getenv("TMPDIR");
+    std::string base_p = std::string(dir ? dir : "/tmp") + "/f030_base.xsd";
+    std::string redef_p = std::string(dir ? dir : "/tmp") + "/f030_red.xsd";
+    {
+        std::ofstream f(base_p);
+        f << base;
+    }
+    {
+        std::ofstream f(redef_p);
+        f << redef;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(redef_p.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s,
+                "<root><t><r>1</r><c>1</c></t>"
+                "<t><r>2</r><c>2</c></t></root>"),
+              1)
+        << "the redefined+extended model admits r and c: "
+        << leptris_xsd_error(s);
+    std::remove(base_p.c_str());
+    std::remove(redef_p.c_str());
+    leptris_xsd_free(s);
+}
