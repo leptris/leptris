@@ -635,7 +635,8 @@ static int any_attr_matches(const char* grammar, const char* uri,
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
-                                const XsdTypeAttrs* ta) {
+                                const XsdTypeAttrs* ta,
+                                const XsdCm* chain_ct) {
     /* ta == NULL (no captured rows — attribute-less complexTypes)
      * skips the walk entirely; simple/builtin element validation
      * passes k_no_attrs to run the strict walk with zero declared
@@ -688,6 +689,37 @@ static void validate_attributes(struct xsd_validator* v,
             if (strcmp(a->name, local) == 0 ||
                 strcmp(a->name, qn) == 0)
                 declared = 1;
+        /* leptris#1923 (oracle parity with libxml2): the restriction
+         * chain's declared attributes stay visible for strict
+         * admission — a RESTRICTION that narrows the base's rows
+         * still admits what the base declared (ctE019). */
+        if (!declared && chain_ct) {
+            const XsdCm* anc = chain_ct;
+            for (int hops = 0; anc && anc->res_base && hops < 8;
+                 hops++) {
+                const XsdTypeAttrs* base_rows = xsd_find_type_attrs_ns(
+                    s, anc->res_base,
+                    anc->res_base_ns ? anc->res_base_ns
+                                     : xsd_target_ns(s));
+                if (!base_rows)
+                    base_rows = xsd_find_type_attrs(s, anc->res_base);
+                for (XsdAttrDecl* a = base_rows ? base_rows->attrs
+                                                : NULL;
+                     a && !declared; a = a->next)
+                    if (strcmp(a->name, local) == 0 ||
+                        strcmp(a->name, qn) == 0)
+                        declared = 1;
+                if (declared) break;
+                const XsdCm* base_ct = anc->res_base
+                    ? xsd_find_complex_ns(s, anc->res_base,
+                          anc->res_base_ns ? anc->res_base_ns
+                                           : xsd_target_ns(s))
+                    : NULL;
+                if (!base_ct)
+                    base_ct = xsd_find_complex(s, anc->res_base);
+                anc = base_ct;
+            }
+        }
         if (declared) continue;
         /* namespace of the attribute: engine-side attributes
          * carry their uri through the expanded form */
@@ -824,7 +856,7 @@ static void validate_local_uri(struct xsd_validator* v,
         const XsdTypeAttrs* rows =
             xsd_find_type_attrs_ns(s, type, euri);
         if (!rows) rows = xsd_find_type_attrs(s, type);
-        validate_attributes(v, s, elem, rows);
+        validate_attributes(v, s, elem, rows, ct);
         validate_children(v, s, elem, ct);
         /* XSD 1.1: the type's xs:assert list — context is the
          * element; evaluation errors are failures */
@@ -866,7 +898,7 @@ static void validate_local_uri(struct xsd_validator* v,
     if (strncmp(type, "xs:", 3) == 0 ||
         xsd_find_simple_pub(s, type)) {
         static const XsdTypeAttrs k_no_attrs;
-        validate_attributes(v, s, elem, &k_no_attrs);
+        validate_attributes(v, s, elem, &k_no_attrs, NULL);
         const char* text = leptris_element_text(elem);
         if (text && *text)
             text_valid(v, s, type, text, euri, "element", local,
@@ -886,7 +918,7 @@ static void validate_local_uri(struct xsd_validator* v,
                 (int)sizeof(builtin) &&
             xsd_builtin_known(builtin)) {
             static const XsdTypeAttrs k_no_attrs;
-            validate_attributes(v, s, elem, &k_no_attrs);
+            validate_attributes(v, s, elem, &k_no_attrs, NULL);
             const char* text = leptris_element_text(elem);
             if (text && *text)
                 text_valid(v, s, builtin, text, euri, "element",
