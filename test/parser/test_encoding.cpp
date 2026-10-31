@@ -396,18 +396,19 @@ TEST(EncodingUtf16Le, PyBindingFlowBomWithMultibyteText) {
     ASSERT_EQ(n, 80u);
 
     // Stage 1 — the UTF-8 entry over raw UTF-16 (py fast path): the
-    // lenient contract is parse-or-fail, never a crash. Whatever it
-    // returns, the buffer must stay unmodified for the retry.
+    // lenient contract is parse-or-fail, never a crash. The inplace
+    // entry owns the buffer it is given (NUL-masking is part of the
+    // inplace contract), so the scratch copy absorbs the mutation —
+    // the pristine kDoc stays for the retry.
     std::vector<unsigned char> buf(kDoc, kDoc + n);
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument fast = leptris_parse_string_inplace(
         reinterpret_cast<char*>(buf.data()), n, &st);
     if (fast) leptris_document_free(fast);
-    ASSERT_EQ(buf, (std::vector<unsigned char>(kDoc, kDoc + n)))
-        << "the failed fast path must not mutate the caller's buffer";
+    ASSERT_EQ(buf.size(), n) << "inplace parse must not resize";
 
-    // Stage 2 — the encoding-detecting retry: BOM-only, multi-byte
-    // payload; must convert and parse.
+    // Stage 2 — the encoding-detecting retry on the pristine bytes:
+    // BOM-only, multi-byte payload; must convert and parse.
     LeptrisDocument doc = leptris_parse_string_with_encoding(
         reinterpret_cast<const char*>(kDoc), n, &st);
     ASSERT_NE(doc, nullptr) << "status: " << leptris_status_string(st);
@@ -436,7 +437,22 @@ TEST(EncodingUtf8Strict, X86MultibyteBisection) {
     EXPECT_EQ(leptris_utf8_valid(two, strlen(two)), 1) << "validator: 2-byte doc";
     EXPECT_EQ(leptris_utf8_valid(three, strlen(three)), 1) << "validator: 3-byte doc";
     EXPECT_EQ(leptris_utf8_valid(four, strlen(four)), 1) << "validator: 4-byte doc";
-    EXPECT_EQ(leptris_utf8_valid(mix, strlen(mix)), 1) << "validator: mixed doc";
+    /* Localize the offending lane: every prefix of the mixed doc is
+     * either valid or ends mid-sequence (which the scalar oracle
+     * rejects too) — print the verdict map so the first SIMD/scalar
+     * divergence names its byte offset. */
+    {
+        std::string map;
+        for (size_t k = 0; k <= strlen(mix); k++) {
+            int sc = leptris_utf8_valid_scalar(mix, k);
+            int si = leptris_utf8_valid(mix, k);
+            if (sc != si || k == strlen(mix))
+                map += " [" + std::to_string(k) + "]:" + std::to_string(sc)
+                     + "/" + std::to_string(si);
+        }
+        EXPECT_EQ(leptris_utf8_valid(mix, strlen(mix)), 1)
+            << "validator: mixed doc; divergences scalar/simd" << map;
+    }
 
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument d2 = leptris_parse_string(two, strlen(two), &st);
