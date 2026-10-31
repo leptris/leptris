@@ -4,8 +4,17 @@
 
 ### Fixed
 
-- the legacy-Nd digit pin applies on every build — outside the utf8proc guard (xsd)
-- pin the Unicode-3.1 legacy-Nd digits into the pattern \\d class (leptris#1936) (xsd)
+- **`\\d` matches the Unicode-3.1 legacy digits (leptris#1936,
+  PR #1940).** XSD 1.0 Part 2 cites Unicode 3.1, where
+  U+1369–U+1371 (Ethiopic digits one-nine) were Nd — Unicode 4.0.1
+  demoted them to No, so the utf8proc-backed Nd mask missed them
+  and the suite's reS38 (`\\d` vs `&#x1371;`) / reT51 (`\\D`) rows
+  failed. The legacy-Nd set now joins the class as a pure-codepoint
+  range, outside the utf8proc guard so every build (windows
+  included) answers it; `\\D` inherits the exclusion through the
+  complement's negation. RED-first spec
+  (`XsdDatatypes.DigitClassPinsLegacyNd`), and the shared-fixture
+  collision behind an arm-lane flake got unique names.
 
 
 
