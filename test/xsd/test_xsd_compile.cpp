@@ -4057,3 +4057,61 @@ TEST(XsdCrossNs, StrictWildcardSeesImportedDeclarations) {
     std::remove(head_path.c_str());
     std::remove(decl_path.c_str());
 }
+
+/* leptris#1923 (W3C msData ctE019, oracle: libxml2 validates): a
+ * chameleon-included document's global attributes — referenced by
+ * the derived type's restriction — must be admitted at validation.
+ * fooType restricts mytype1 keeping attrTest1; the instance carries
+ * attrTest2 as well, and libxml2 admits it (the restriction chain's
+ * declarations remain visible for strict admission). */
+TEST(XsdCrossNs, ChameleonRestrictionAdmitsBaseChainAttributes) {
+    const char* head =
+        "<?xml version=\"1.0\"?>\n"
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"a\" xmlns=\"a\">"
+        "<xsd:include schemaLocation=\"cte019_b.xsd\"/>"
+        "<xsd:element name=\"doc\" type=\"fooType\"/>"
+        "</xsd:schema>";
+    const char* chameleon =
+        "<?xml version=\"1.0\"?>\n"
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:simpleType name=\"myType\">"
+        "<xsd:restriction base=\"xsd:string\"/></xsd:simpleType>"
+        "<xsd:complexType name=\"mytype1\"><xsd:simpleContent>"
+        "<xsd:extension base=\"myType\">"
+        "<xsd:attribute ref=\"attrTest1\"/>"
+        "<xsd:attribute ref=\"attrTest2\"/>"
+        "</xsd:extension></xsd:simpleContent></xsd:complexType>"
+        "<xsd:complexType name=\"fooType\"><xsd:simpleContent>"
+        "<xsd:restriction base=\"mytype1\">"
+        "<xsd:attribute ref=\"attrTest1\"/>"
+        "</xsd:restriction></xsd:simpleContent></xsd:complexType>"
+        "<xsd:attribute name=\"attrTest1\" type=\"xsd:int\"/>"
+        "<xsd:attribute name=\"attrTest2\" type=\"xsd:ID\"/>"
+        "</xsd:schema>";
+    const char* dir = std::getenv("TMPDIR");
+    std::string base = dir ? dir : "/tmp";
+    std::string head_path = base + "/cte019_a.xsd";
+    std::string ch_path = base + "/cte019_b.xsd";
+    {
+        std::ofstream f(head_path);
+        f << head;
+    }
+    {
+        std::ofstream f(ch_path);
+        f << chameleon;
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(head_path.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    EXPECT_EQ(validate_compiled(s,
+                "<a:doc xmlns:a=\"a\" a:attrTest1=\"1\""
+                " a:attrTest2=\"b\" />"),
+              1)
+        << "the restriction chain's attribute must be admitted: "
+        << leptris_xsd_error(s);
+    std::remove(head_path.c_str());
+    std::remove(ch_path.c_str());
+    leptris_xsd_free(s);
+}

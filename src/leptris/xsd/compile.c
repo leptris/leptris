@@ -183,7 +183,9 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->name);
         free(cm->type);
         free(cm->ns);
-        free(cm->ext_base);
+        free(cm->res_base);
+    free(cm->res_base_ns);
+    free(cm->ext_base);
         free(cm->ext_base_ns);
         free(cm->any_ns);
         free(cm->not_qname);
@@ -2946,9 +2948,21 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             attrs = own_attrs;
                     }
                 } else {
-                    /* restriction: the derived model REPLACES */
+                    /* restriction: the derived model REPLACES.
+                     * leptris#1923: the base still rides the type —
+                     * libxml2 admits the restriction chain's declared
+                     * attributes at validation, so record the base
+                     * (local + resolved ns) for the strict-attribute
+                     * admission walk. */
                     root->first_child = xsd_cm_parse(s, dq, NULL);
                     attrs = xsd_capture_attr_rows(s, dq, 0);
+                    if (base && strncmp(base, "xs:", 3) != 0) {
+                        free(root->res_base);
+                        root->res_base = xsd_strdup(base);
+                        free(root->res_base_ns);
+                        root->res_base_ns =
+                            buri[0] ? xsd_strdup(buri) : NULL;
+                    }
                 }
                 /* XSD 1.1: asserts nested under the derivation */
                 if (s->version_11)
@@ -3014,6 +3028,16 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             root->text_type = xsd_strdup(synth);
                         } else {
                             root->text_type = xsd_strdup(base);
+                        }
+                        /* leptris#1923: a simpleContent restriction
+                         * rides its base for strict-attribute
+                         * admission (libxml2 admits the chain's
+                         * declared attributes — ctE019). */
+                        if (strcmp(dl, "restriction") == 0) {
+                            free(root->res_base);
+                            root->res_base = xsd_strdup(base);
+                            free(root->res_base_ns);
+                            root->res_base_ns = NULL;
                         }
                     }
                 }

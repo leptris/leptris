@@ -120,6 +120,14 @@ typedef struct xsd_cm {
     char* ext_base; /* extension whose base was not yet captured at
                      * capture time (forward ref) — folded by the
                      * post-capture resolver (leptris-ruby#440 A) */
+    char* res_base; /* restriction whose base was not yet captured at
+                     * capture time — the post-capture resolver only
+                     * folds EXTENSION models; the restriction's model
+                     * replaces the base's, so this rides along solely
+                     * for strict-attribute ADMISSION (leptris#1923:
+                     * libxml2 admits the restriction chain's declared
+                     * attributes) */
+    char* res_base_ns;
     char* ext_base_ns; /* #1881: the base QName's RESOLVED namespace
                         * (prefix resolved against the extension
                         * element's in-scope declarations) — a set
