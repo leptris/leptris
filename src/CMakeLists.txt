@@ -300,16 +300,23 @@ target_compile_definitions(leptris_objects PUBLIC _POSIX_C_SOURCE=200809L)
 # them all into the same library, dispatch at runtime via cpu.c. The
 # scalar TU (simd_text.c) is always built; these add accelerated paths.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|AMD64|i[3-6]86)")
-    check_c_compiler_flag("-mavx2" LEPTRIS_HAVE_AVX2_FLAG)
+    # MSVC has no -mavx2; /arch:AVX2 enables the whole AVX set for the
+    # TU (the windows lane shipped scalar-only and the capability bit
+    # disagreed with test_capabilities — 2026-10-31).
+    if(MSVC)
+        set(LEPTRIS_AVX2_FLAG "/arch:AVX2")
+    else()
+        set(LEPTRIS_AVX2_FLAG "-mavx2")
+    endif()
+    check_c_compiler_flag("${LEPTRIS_AVX2_FLAG}" LEPTRIS_HAVE_AVX2_FLAG)
     if(LEPTRIS_HAVE_AVX2_FLAG)
         target_sources(leptris_objects PRIVATE leptris/common/simd_text_avx2.c)
         set_source_files_properties(leptris/common/simd_text_avx2.c
-            PROPERTIES COMPILE_FLAGS "-mavx2")
+            PROPERTIES COMPILE_FLAGS "${LEPTRIS_AVX2_FLAG}")
         # Consumers (simd_text.c dispatch) reference the AVX2 symbol only
-        # when this define is present — MSVC rejects -mavx2 (uses /arch:),
-        # so the TU is skipped there and the dispatch falls back to scalar.
+        # when this define is present.
         target_compile_definitions(leptris_objects PRIVATE LEPTRIS_HAS_AVX2_BUILD=1)
-        message(STATUS "AOT SIMD: AVX2 text scan ENABLED")
+        message(STATUS "AOT SIMD: AVX2 text scan ENABLED (${LEPTRIS_AVX2_FLAG})")
     else()
         message(STATUS "AOT SIMD: AVX2 unavailable (flag rejected)")
     endif()
