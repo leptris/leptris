@@ -367,3 +367,56 @@ TEST(EncodingLatin1, WithEncodingConvertsToUtf8) {
     EXPECT_EQ((unsigned char)text[4], 0xA9);
     leptris_document_free(doc);
 }
+
+// leptris-py CI regression (2026-10-31): the binding's flow is
+// fast-path parse (raw UTF-16 into the UTF-8 parser) then retry via
+// the encoding-detecting entry. On x86 CI the retry of a BOM-only
+// document whose text contains a multi-byte character failed with
+// "malformed input". Mirror the flow stage by stage so the failing
+// stage is visible on every architecture.
+TEST(EncodingUtf16Le, PyBindingFlowBomWithMultibyteText) {
+    // "<?xml version='1.0'?><r><a>café</a></r>" as UTF-16LE + BOM —
+    // the exact bytes the py fixture produces.
+    static const unsigned char kDoc[] = {
+        0xFF, 0xFE,
+        '<', 0x00, '?', 0x00, 'x', 0x00, 'm', 0x00, 'l', 0x00,
+        ' ', 0x00, 'v', 0x00, 'e', 0x00, 'r', 0x00, 's', 0x00,
+        'i', 0x00, 'o', 0x00, 'n', 0x00, '=', 0x00, '\'', 0x00,
+        '1', 0x00, '.', 0x00, '0', 0x00, '\'', 0x00, '?', 0x00,
+        '>', 0x00,
+        '<', 0x00, 'r', 0x00, '>', 0x00,
+        '<', 0x00, 'a', 0x00, '>', 0x00,
+        'c', 0x00, 'a', 0x00, 'f', 0x00, 0xE9, 0x00,
+        '<', 0x00, '/', 0x00, 'a', 0x00, '>', 0x00,
+        '<', 0x00, '/', 0x00, 'r', 0x00, '>', 0x00,
+    };
+    const size_t n = sizeof kDoc;
+    ASSERT_EQ(n, 80u);
+
+    // Stage 1 — the UTF-8 entry over raw UTF-16 (py fast path): the
+    // lenient contract is parse-or-fail, never a crash. Whatever it
+    // returns, the buffer must stay unmodified for the retry.
+    std::vector<unsigned char> buf(kDoc, kDoc + n);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument fast = leptris_parse_string_inplace(
+        reinterpret_cast<char*>(buf.data()), n, &st);
+    if (fast) leptris_document_free(fast);
+    ASSERT_EQ(buf, (std::vector<unsigned char>(kDoc, kDoc + n)))
+        << "the failed fast path must not mutate the caller's buffer";
+
+    // Stage 2 — the encoding-detecting retry: BOM-only, multi-byte
+    // payload; must convert and parse.
+    LeptrisDocument doc = leptris_parse_string_with_encoding(
+        reinterpret_cast<const char*>(kDoc), n, &st);
+    ASSERT_NE(doc, nullptr) << "status: " << leptris_status_string(st);
+
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    EXPECT_STREQ(leptris_element_name(root), "r");
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    const char* text = leptris_element_text(a);
+    ASSERT_STREQ(text, "caf\xC3\xA9");
+
+    leptris_document_free(doc);
+}
