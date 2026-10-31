@@ -75,6 +75,14 @@ ptrdiff_t leptris_text_find3_avx2(const char* s, size_t len,
     return -1;
 }
 
+/* MSVC has no __builtin_popcount; __popcnt32 maps to the POPCNT
+ * instruction the /arch:AVX2 target guarantees. */
+#if defined(_MSC_VER)
+#  define LEPTRIS_POPCOUNT32(x) __popcnt(x)
+#else
+#  define LEPTRIS_POPCOUNT32(x) __builtin_popcount(x)
+#endif
+
 /* Byte-population count: cmpeq → movemask → popcount per 32-byte
  * chunk, 16-byte SSE step, scalar tail. Never reads past s+len. */
 size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
@@ -86,13 +94,13 @@ size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
     while (end - p >= 32) {
         __m256i v = _mm256_loadu_si256((const __m256i*)p);
         __m256i eq = _mm256_cmpeq_epi8(v, needle);
-        n += (size_t)__builtin_popcount((unsigned)_mm256_movemask_epi8(eq));
+        n += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(eq));
         p += 32;
     }
     if (end - p >= 16) {
         __m128i v = _mm_loadu_si128((const __m128i*)p);
         __m128i eq = _mm_cmpeq_epi8(v, _mm256_castsi256_si128(needle));
-        n += (size_t)__builtin_popcount((unsigned)_mm_movemask_epi8(eq));
+        n += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm_movemask_epi8(eq));
         p += 16;
     }
     while (p < end) {
