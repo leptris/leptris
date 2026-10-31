@@ -4,6 +4,26 @@
 
 ### Fixed
 
+- **The AVX2 UTF-8 validator rejected valid multi-byte input
+  (leptris#1842 A5 follow-up).** Three defects shipped with the
+  1.9.395 SIMD gate, all invisible on arm64: the ascii lane's
+  polarity was inverted (`cmplt(cur, zero)` is the NOT-ascii half,
+  so every ASCII byte tripped the error term), both
+  continuation-range bounds compared in the wrong direction
+  (`cont_ok` was unsatisfiable — NEON's direct `vcge/vcle` pair
+  became a swapped saturating-subtraction idiom), and the tail
+  anchor walked back only over continuation runs, letting an
+  opener in the final block lane escape validation (both cores).
+  The leptris-py UTF-16 BOM lane caught it (`malformed input` on
+  `café`); x86 CI failed 25+ tests. Now verified by a 400k-case
+  lane-math simulation against the scalar oracle plus boundary
+  shapes seeded into the randomized cross-check.
+
+- **`leptris_parse_string_inplace` no longer writes past the
+  buffer.** The NUL sentinel at `buf[len]` exceeded the documented
+  contract (terminators INSIDE the buffer); an exactly-sized
+  caller tripped ASAN. The scanner takes `len` and never read it.
+
 - **`xs:redefine` bodies were dropped (leptris#1926).** A
   `redefine`d complexType whose body declared new particles (or
   attributes) lost them: the extension derived from the base type
