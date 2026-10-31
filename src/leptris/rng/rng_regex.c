@@ -111,6 +111,15 @@ static void cls_add_builtin(RreNode* n, char c) {
              * (moxml#464, the reZ/reC \d rows) */
             n->cat_set = 1;
             n->cat_mask |= 1u << UTF8PROC_CATEGORY_ND;
+            /* XSD 1.0 cites Unicode 3.1, where U+1369-1371
+             * (Ethiopic digits one-nine) were Nd — Unicode 4.0.1
+             * demoted them to No, so modern tables miss them
+             * (#1936 reS38/reT51). Pin the legacy-Nd set. */
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x1369;
+                n->uni_hi[n->uni_n] = 0x1371;
+                n->uni_n++;
+            }
 #endif
             break;
         case 'w':

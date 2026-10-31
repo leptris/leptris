@@ -390,6 +390,32 @@ TEST(XsdDatatypes, LengthFacetCountsOctetsForHexBinary) {
 // byte world and character-class SUBTRACTION — the OPC
 // ST_ContentType shape. A pattern that fails to parse rejects
 // everything, so media types failed wholesale.
+// leptris#1936 (reS38/reT51): XSD 1.0 cites Unicode 3.1, where
+// U+1369-1371 (Ethiopic digits one-nine) were Nd — \\d matches
+// &#x1371; and \\D rejects it even though the host tables (4.0.1+)
+// carry them as No.
+TEST(XsdDatatypes, DigitClassPinsLegacyNd) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"Digs\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"\\d\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"NonDigs\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"\\D\"/></xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "Digs", "\xE1\x8D\xB1"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "Digs", "\xE1\x8D\xA9"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "Digs", "5"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "Digs", "x"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigs", "\xE1\x8D\xB1"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigs", "5"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigs", "x"), 1);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdDatatypes, PatternPropertyClassesAndSubtraction) {
     // The OPC ST_ContentType shape, minus the quoted-string member
     // (same property-class + subtraction machinery): type/subtype
