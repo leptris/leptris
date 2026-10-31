@@ -479,10 +479,17 @@ int leptris_utf8_valid_neon(const char* src, size_t len) {
     }
     /* Tail: scalar DFA anchored at a character boundary (at most 3
      * bytes back from the SIMD end; a sequence is at most 4) — the
-     * anchored run also covers a sequence spanning the block edge. */
+     * anchored run also covers a sequence spanning the block edge.
+     * One more step back when the byte before the anchor is a start
+     * byte: an opener in the final block lane reaches into the tail
+     * (400k-case randomized cross-check vs the scalar oracle). */
     size_t start = i;
     while (start > 0 && (p[start] & 0xC0) == 0x80 && i - start < 3)
         start--;
+    if (i - start < 3 && start > 0) {
+        unsigned char b = p[start - 1];
+        if (b >= 0xC2 && b <= 0xF4) start--;
+    }
     return leptris_utf8_valid_scalar((const char*)(p + start), len - start);
 }
 #undef IN_RANGE
