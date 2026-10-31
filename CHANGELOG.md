@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.396] - 2026-10-31
+
+### Fixed
+
+- capture redefine bodies — redefine+extension keeps the extension model (leptris#1926) (xsd)
+
+
+
 ## [1.9.395] - 2026-10-31
 
 ### Added
