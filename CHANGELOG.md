@@ -4,7 +4,16 @@
 
 ### Performance
 
-- fuse the attribute-value amp/whitespace tail into one pass (parse)
+- **Attribute-value tail fused into one pass (leptris#1842, PR
+  #1934).** With the UTF-8 gate on the SIMD validator, the line
+  profile moved to `dp_parse_attrs`: values of ~50 bytes just miss
+  the 48-byte inline probe, so every attribute paid the quote
+  memchr AND a SIMD-contains CALL for `&` AND a second full byte
+  loop for literal whitespace — three scans of every value. One
+  fused early-exit loop computes both flags: **parse +28%** on the
+  2.2MB dense-UTF-8 fixture (4.11 -> 3.20 ms, 536 -> 686 MB/s with
+  frame pointers). Flag semantics unchanged; amp/whitespace hits
+  from the inline probe still short-circuit the tail.
 
 
 
