@@ -4,15 +4,31 @@
 
 ### Added
 
-- boundary-vector UTF-8 validation (leptris#1842 A5) (simd)
+- **Boundary-vector UTF-8 validation (leptris#1842 A5, PRs #1922/#1924).**
+  `leptris_utf8_valid` — AVX2/NEON cores over the existing dispatch
+  layer, the scalar DFA as the fallback and oracle — pinned by an
+  adversarial matrix plus a 4000-case randomized cross-check. The
+  parser's UTF-8 gate now routes through it: **parse of UTF-8-dense
+  documents is +32%** (3.70ms -> 2.81ms on a 2.2MB catalog; the
+  validator alone ~3.7 GB/s on NEON). Unblocked line-level profiling
+  first: the no-LTO `-g` build resolves file:line through
+  dsymutil/atos (ThinLTO bitcode was the blocker).
 
 ### Fixed
 
-- bound the PI data scan when the separator exhausts the buffer (parse)
-
-### Performance
-
-- route the UTF-8 gate through the SIMD validator (leptris#1842 A5) (parse)
+- **PI data-scan bounds (fuzzer class).** Consuming the PI target's
+  separator could leave `p.pos` one past `p.end`; `p.end - p.pos`
+  underflowed to SIZE_MAX and the data `memchr` walked off the
+  allocation (the nightly-fuzz witness segfaulted under the no-LTO
+  build — allocator luck hid it on LTO).
+- **ctE019 regression (leptris#1923, PR #1927).** A chameleon-included
+  attribute referenced through a restriction base was false-rejected
+  as "not declared (strict)" — the 1.9.391 pending-ref fix made the
+  forward-referenced rows visible, surfacing that only the derived
+  type's rows were consulted. The oracle (xmllint) validates ctE019:
+  both derivation spellings now record the restriction base and the
+  strict-attribute admission walks the chain (admission only;
+  required/fixed/type checks stay derived-only).
 - drop the const-path pristine carve (leptris#1842 A3) (parse)
 
 
