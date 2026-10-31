@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.397] - 2026-10-31
+
+### Performance
+
+- fuse the attribute-value amp/whitespace tail into one pass (parse)
+
+
+
 ## [1.9.396] - 2026-10-31
 
 ### Fixed
