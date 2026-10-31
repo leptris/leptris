@@ -460,6 +460,35 @@ TEST(XsdDatatypes, BuiltinsLexicalMatrix) {
     }
 }
 
+/* leptris#1936: gMonth accepts BOTH XSD 1.0 spellings — the
+ * errata's --MM and the first edition's --MM-- — each with the
+ * optional timezone; and the g-regional/date family rejects
+ * trailing garbage after an absent timezone. */
+TEST(XsdDatatypes, GMonthSpellingsAndStrictTail) {
+    const BuiltinCase rows[] = {
+        {"xs:gMonth", "--03", 1},
+        {"xs:gMonth", "--03--", 1},
+        {"xs:gMonth", "--03Z", 1},
+        {"xs:gMonth", "--03--Z", 1},
+        {"xs:gMonth", "--03--+05:00", 1},
+        {"xs:gMonth", "--03-05:00", 1},
+        {"xs:gMonth", "--12", 1},
+        {"xs:gMonth", "--13", 0},
+        {"xs:gMonth", "--00", 0},
+        {"xs:gMonth", "--03garbage", 0},
+        {"xs:gMonth", "--03-x", 0},
+        {"xs:gMonth", "--03--05:00", 0},
+        {"xs:date", "2026-10-08garbage", 0},
+        {"xs:gDay", "---05garbage", 0},
+        {"xs:gYear", "2026x", 0},
+    };
+    for (const BuiltinCase& c : rows) {
+        SCOPED_TRACE(std::string(c.type) + " : " + c.value);
+        EXPECT_EQ(leptris_xsd_builtin_valid(c.type, c.value), c.expect)
+            << c.type << " : " + std::string(c.value);
+    }
+}
+
 /* leptris#1883: the builtin lexical table converges on Datatypes
  * Part 2 — collapse semantics, unbounded integers, +INF spelling,
  * 64-bit bounds, calendar/duration/binary grammars, xmlns prefix. */

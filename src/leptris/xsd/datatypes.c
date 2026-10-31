@@ -146,7 +146,9 @@ static int two_digits(const char** p) {
     return 1;
 }
 static int tz_optional(const char** p) {
-    if (**p != 'Z' && **p != '+' && **p != '-') return 1; /* absent */
+    /* #1936: the absent timezone is only absent at END of string —
+     * "2000-01-01garbage" used to pass the g-regional family. */
+    if (**p != 'Z' && **p != '+' && **p != '-') return **p == 0;
     if (**p == 'Z') { (*p)++; return **p == 0; }
     (*p)++;
     return two_digits(p) && *(*p) == ':' && (*p)++ && two_digits(p) &&
@@ -393,7 +395,15 @@ int xsd_builtin_valid(const char* type, const char* v) {
         const char* p = v;
         if (*p++ != '-') return 0;
         if (*p++ != '-') return 0;
-        return two_digits_bounded(&p, 1, 12) && tz_optional(&p);
+        if (!two_digits_bounded(&p, 1, 12)) return 0;
+        /* #1936: XSD 1.0 first edition spelled the lexical --MM--
+         * (the errata added --MM) — both are valid 1.0 forms, each
+         * carrying the optional timezone. */
+        if (p[0] == '-' && p[1] == '-') {
+            const char* q = p + 2;
+            return tz_optional(&q);
+        }
+        return tz_optional(&p);
     }
     if (strcmp(type, "xs:dateTime") == 0) {
         const char* p = v;
