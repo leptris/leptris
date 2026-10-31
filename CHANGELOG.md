@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+## [1.9.395] - 2026-10-31
+
+### Added
+
+- boundary-vector UTF-8 validation (leptris#1842 A5) (simd)
+
+### Fixed
+
+- bound the PI data scan when the separator exhausts the buffer (parse)
+
+### Performance
+
+- route the UTF-8 gate through the SIMD validator (leptris#1842 A5) (parse)
+- drop the const-path pristine carve (leptris#1842 A3) (parse)
+
+
+
 ## [1.9.394] - 2026-10-30
 
 ### Fixed
