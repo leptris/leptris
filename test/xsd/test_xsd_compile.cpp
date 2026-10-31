@@ -3712,7 +3712,9 @@ TEST(XsdCrossNs, AttributeRefIntoImportedUnitResolves) {
         "</xs:schema>";
 
     const char* dir = std::getenv("TMPDIR");
-    std::string base = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
     std::string rel_path = base + "/blip_repro_rel.xsd";
     std::string main_path = base + "/blip_repro_main.xsd";
     {
@@ -3771,7 +3773,9 @@ TEST(XsdCrossNs, SingleDocImportChaseResolves) {
         "</xs:schema>";
 
     const char* dir = std::getenv("TMPDIR");
-    std::string base = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
     std::string rel_path = base + "/blip_repro_rel.xsd";
     std::string main_path = base + "/blip_repro_main.xsd";
     {
@@ -3832,7 +3836,9 @@ TEST(XsdCrossNs, AttrGroupRefRowResolvedAfterImportChase) {
         "</xs:schema>";
 
     const char* dir = std::getenv("TMPDIR");
-    std::string base = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
     std::string rel_path = base + "/ag569_rel.xsd";
     std::string main_path = base + "/ag569_main.xsd";
     {
@@ -3976,7 +3982,9 @@ TEST(Xsd11Gate, OverrideLoadsBaseAndReplacesComponents) {
         "</xs:sequence></xs:complexType>"
         "</xs:override></xs:schema>";
     const char* dir = std::getenv("TMPDIR");
-    std::string tmp = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string tmp = dir ? dir : ".";
     std::string base_path = tmp + "/ovr1913_base.xsd";
     std::string ovr_path = tmp + "/ovr1913_ovr.xsd";
     {
@@ -4023,7 +4031,9 @@ TEST(XsdCrossNs, StrictWildcardSeesImportedDeclarations) {
         " targetNamespace=\"http://foo\" xmlns=\"http://foo\">"
         "<xs:element name=\"bar\" type=\"xs:string\"/></xs:schema>";
     const char* dir = std::getenv("TMPDIR");
-    std::string base = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
     std::string head_path = base + "/w1920_head.xsd";
     std::string decl_path = base + "/w1920_decl.xsd";
     {
@@ -4090,7 +4100,9 @@ TEST(XsdCrossNs, ChameleonRestrictionAdmitsBaseChainAttributes) {
         "<xsd:attribute name=\"attrTest2\" type=\"xsd:ID\"/>"
         "</xsd:schema>";
     const char* dir = std::getenv("TMPDIR");
-    std::string base = dir ? dir : "/tmp";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base = dir ? dir : ".";
     std::string head_path = base + "/cte019_a.xsd";
     std::string ch_path = base + "/cte019_b.xsd";
     {
@@ -4145,8 +4157,10 @@ TEST(XsdCrossNs, RedefineExtensionKeepsTheExtensionModel) {
         "</xsd:sequence></xsd:complexType></xsd:element>"
         "</xsd:schema>";
     const char* dir = std::getenv("TMPDIR");
-    std::string base_p = std::string(dir ? dir : "/tmp") + "/f030_base.xsd";
-    std::string redef_p = std::string(dir ? dir : "/tmp") + "/f030_red.xsd";
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    std::string base_p = std::string(dir ? dir : ".") + "/f030_base.xsd";
+    std::string redef_p = std::string(dir ? dir : ".") + "/f030_red.xsd";
     {
         std::ofstream f(base_p);
         f << base;
