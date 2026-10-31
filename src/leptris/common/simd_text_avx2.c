@@ -192,8 +192,9 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
          * subs(lo, v)==0 (0 iff lo<=v). subs(v, hi)==0 ⇔ v<=hi is
          * already the right direction for the upper bound. */
 #define IN_RANGE(v, lo, hi)                                            \
-        (_mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(lo), (v)), zero) & \
-         _mm_cmpeq_epi8(_mm_subs_epu8((v), _mm_set1_epi8(hi)), zero))
+        (_mm_and_si128(                                                \
+            _mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(lo), (v)), zero), \
+            _mm_cmpeq_epi8(_mm_subs_epu8((v), _mm_set1_epi8(hi)), zero)))
         __m128i st2c = IN_RANGE(cur, (char)0xC2, (char)0xDF);
         __m128i st3c = IN_RANGE(cur, (char)0xE0, (char)0xEF);
         __m128i st4c = IN_RANGE(cur, (char)0xF0, (char)0xF4);
