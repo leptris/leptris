@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.398] - 2026-10-31
+
+### Fixed
+
+- gMonth accepts both 1.0 spellings; absent timezone must end the lexical (leptris#1936) (xsd)
+- the automaton size cap is inert at instance validation (moxml#514) (xsd)
+
+
+
 ## [1.9.397] - 2026-10-31
 
 ### Performance
