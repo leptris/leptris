@@ -4,8 +4,19 @@
 
 ### Fixed
 
-- gMonth accepts both 1.0 spellings; absent timezone must end the lexical (leptris#1936) (xsd)
-- the automaton size cap is inert at instance validation (moxml#514) (xsd)
+- **gMonth accepts both XSD 1.0 spellings (leptris#1936, PR
+  #1937).** The first edition defined the lexical as `--MM--` (the
+  W3C suite's gMonth002/004 carry `--03--`); the errata added
+  `--MM`. Both validate now, each with its optional timezone.
+- **Absent timezone must end the lexical.** `tz_optional`'s absent
+  path returned success without reaching end of string, so the
+  g-regional/date family accepted trailing garbage (`--03garbage`,
+  `2026-10-08x`). Pinned by a 15-row red-first spec; the XSD
+  compile suite stays 138/138.
+- **The automaton size cap is inert at instance validation
+  (moxml#514, PR #1938).** The #1894 cap is a resource guard, not a
+  validity signal: a document whose content model hits the cap
+  validates on its merits instead of failing.
 
 
 
