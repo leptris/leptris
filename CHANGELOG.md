@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.401] - 2026-11-01
+
+### Fixed
+
+- list value spaces collapse whitespace before the facets (leptris#1936 stG010/stH005) (xsd)
+
+
+
 ## [1.9.400] - 2026-11-01
 
 ### Fixed
