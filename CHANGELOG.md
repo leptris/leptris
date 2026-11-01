@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.400] - 2026-11-01
+
+### Fixed
+
+- a restriction's inline anonymous base drives validation (leptris#1936 stG/stH) (xsd)
+
+
+
 ## [1.9.399] - 2026-10-31
 
 ### Fixed
