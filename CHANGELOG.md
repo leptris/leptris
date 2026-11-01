@@ -4,7 +4,18 @@
 
 ### Fixed
 
-- a restriction's inline anonymous base drives validation (leptris#1936 stG/stH) (xsd)
+- **A restriction's inline anonymous base drives validation
+  (leptris#1936 stG/stH, PR #1943).** An `xs:restriction` whose
+  base is an inline anonymous `<xs:simpleType>` — the W3C suite's
+  stG/stH style — never captured that base: values were
+  facet-checked with nothing underneath, so `length` counted
+  characters of the whole lexical instead of list items. The base
+  now rides the capture (`base_def`, mirroring `item_def`/
+  `member_defs`), the value passes through the base's own
+  derivation before the restriction's facets, and the list-chain
+  detector descends the anonymous path. RED-first spec; the
+  xmllint-arbiter harness agrees on all 8 collected
+  schema/instance pairs. (xsd)
 
 
 
