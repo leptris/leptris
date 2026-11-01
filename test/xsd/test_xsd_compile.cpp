@@ -394,6 +394,29 @@ TEST(XsdDatatypes, LengthFacetCountsOctetsForHexBinary) {
 // an ANONYMOUS inline simpleType must validate the value against
 // that base before its own facets — length on a list-with-length-2
 // counts items, not characters of the whole lexical.
+// leptris#1936 (stG010/stH005, the REAL suite documents): a list
+// value space is whitespace=collapse — element content "\n\tCA\n  "
+// normalizes to "CA" before the enumeration/pattern facets run.
+TEST(XsdDatatypes, ListValueSpaceCollapsesBeforeFacets) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"myToken\"><xs:list itemType=\"xs:NMTOKEN\"/>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"fooType\"><xs:restriction base=\"myToken\">"
+        "<xs:enumeration value=\"CA\"/><xs:enumeration value=\"OR\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:element name=\"r\" type=\"fooType\"/></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "fooType", "\n\tCA\n  "), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "fooType", "CA"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "fooType", "  OR  "), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "fooType", "CA OR"), 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdDatatypes, RestrictionInlineBaseDrivesFacets) {
     const char xsd[] =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
