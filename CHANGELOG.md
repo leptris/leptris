@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- list value spaces collapse whitespace before the facets (leptris#1936 stG010/stH005) (xsd)
+- **List value spaces collapse whitespace before the facets
+  (leptris#1936 stG010/stH005, PR #1945).** Caught by running the
+  REAL W3C suite documents (vendored in lutaml-xsd) through the
+  xmllint-arbiter harness: a list-derived restriction's
+  enumeration facet compared the RAW element content — stG010's
+  value arrives as newline-tab-CA-newline-spaces and never matched
+  enum "CA" — and a whole-list pattern had the same hole (stH005).
+  List value spaces are whitespace=collapse (Part 2): the value is
+  normalized before the pattern/enumeration/length family runs.
+  Suite 142/142; both documents validate. (xsd)
 
 
 
