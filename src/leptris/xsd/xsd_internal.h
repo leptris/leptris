@@ -40,6 +40,7 @@ typedef struct xsd_simple {
     char* name;
     char* ns;    /* leptris-ruby#440: declaring schema's targetNamespace */
     char* base;
+    struct xsd_simple* base_def; /* RESTRICTION: inline anonymous base */
     XsdSimpleDeriv deriv;
     char* item_type;         /* LIST: builtin or local type name */
     struct xsd_simple* item_def; /* LIST: inline anonymous item type */

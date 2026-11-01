@@ -390,6 +390,30 @@ TEST(XsdDatatypes, LengthFacetCountsOctetsForHexBinary) {
 // byte world and character-class SUBTRACTION — the OPC
 // ST_ContentType shape. A pattern that fails to parse rejects
 // everything, so media types failed wholesale.
+// leptris#1936 (stG/stH oracle pair): a restriction whose base is
+// an ANONYMOUS inline simpleType must validate the value against
+// that base before its own facets — length on a list-with-length-2
+// counts items, not characters of the whole lexical.
+TEST(XsdDatatypes, RestrictionInlineBaseDrivesFacets) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"twoInts\"><xs:restriction>"
+        "<xs:simpleType><xs:list itemType=\"xs:int\"/></xs:simpleType>"
+        "<xs:length value=\"2\"/></xs:restriction></xs:simpleType>"
+        "<xs:element name=\"r\" type=\"twoInts\"/></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    // 2 items: valid per xmllint (the engine used to count chars)
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "twoInts", "1 2"), 1);
+    // 3 items: over the length facet
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "twoInts", "1 2 3"), 0);
+    // a member fails the item type
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "twoInts", "1 x"), 0);
+    leptris_xsd_free(s);
+}
+
 // leptris#1936 (reS38/reT51): XSD 1.0 cites Unicode 3.1, where
 // U+1369-1371 (Ethiopic digits one-nine) were Nd — \\d matches
 // &#x1371; and \\D rejects it even though the host tables (4.0.1+)

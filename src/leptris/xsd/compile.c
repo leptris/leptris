@@ -428,6 +428,22 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
         } else if (strcmp(local, "restriction") == 0) {
             simple->base = xsd_strdup(xsd_local_name(
                 leptris_element_attribute(e, "base")));
+            /* #1936 (stG/stH): an inline anonymous BASE rides this
+             * capture — without it the restriction's facets apply
+             * with no base (length counted characters, list
+             * semantics vanished). Mirrors the union member_defs. */
+            for (LeptrisNodeRef b = leptris_node_first_child(
+                     leptris_element_as_node(e));
+                 b && !simple->base_def;
+                 b = leptris_node_next_sibling(b)) {
+                if (leptris_node_get_type(b) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement be = (LeptrisElement)b;
+                const char* bl = NULL;
+                leptris_element_expanded_name(be, &bl, NULL, NULL);
+                if (bl && strcmp(bl, "simpleType") == 0)
+                    simple->base_def = xsd_capture_simple(be);
+            }
             for (LeptrisNodeRef f = leptris_node_first_child(
                      leptris_element_as_node(e));
                  f; f = leptris_node_next_sibling(f)) {
@@ -584,7 +600,13 @@ static int xsd_chain_is_list(struct leptris_xsd_schema* s,
     int depth = 0;
     while (t && depth < 32) {
         if (t->deriv == XSD_SIMPLE_LIST) return 1;
-        if (!t->base) return 0;
+        if (!t->base) {
+            /* #1936: an anonymous inline base continues the chain —
+             * a restriction of an inline list keeps list semantics
+             * (the length family counts items). */
+            if (t->base_def) { t = t->base_def; depth++; continue; }
+            return 0;
+        }
         if (strncmp(t->base, "xs:", 3) == 0)
             return strcmp(t->base, "xs:IDREFS") == 0 ||
                    strcmp(t->base, "xs:NMTOKENS") == 0 ||
@@ -651,6 +673,11 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
                 return 1;
         return 0;
     }
+    /* #1936: the value satisfies the inline base (its own
+     * derivation — list item walks, union members — first), then
+     * this level's facets. */
+    if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
+        return 0;
     return xsd_simple_valid(t, v, xsd_chain_terminal(s, t), 0);
 }
 
@@ -663,6 +690,11 @@ static int xsd_valid_chain(struct leptris_xsd_schema* s,
     }
     if (t->deriv != XSD_SIMPLE_RESTRICT)
         return xsd_deriv_valid(s, t, v, depth);
+    /* #1936: the inline anonymous base drives the value first
+     * (its own derivation — list item walks, union members),
+     * then this restriction's facets. */
+    if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
+        return 0;
     return xsd_simple_valid(t, v, xsd_chain_terminal(s, t),
                             xsd_chain_is_list(s, t));
 }
@@ -2551,6 +2583,7 @@ static void xsd_free_simple_one(XsdSimple* t) {
     free(t->assertion);
     free(t->item_type);
     xsd_free_simple_one(t->item_def);
+    xsd_free_simple_one(t->base_def);
     for (size_t i = 0; i < t->member_count; i++) free(t->members[i]);
     free(t->members);
     for (size_t i = 0; i < t->member_def_count; i++)
