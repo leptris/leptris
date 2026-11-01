@@ -510,7 +510,41 @@ static int facet_check_body(const XsdSimple* s, const char* v,
                             const char* terminal_base, int chain_is_list);
 static int facet_check(const XsdSimple* s, const char* v,
                        const char* terminal_base, int chain_is_list) {
-    int rc = facet_check_body(s, v, terminal_base, chain_is_list);
+    /* #1936 (stG010): a LIST value space is whitespace=collapse —
+     * element content arrives as "\n\tCA\n  " and the enumeration
+     * /pattern facets must see the collapsed form ("CA"), not the
+     * raw text. */
+    int list_valued = chain_is_list || s->deriv == XSD_SIMPLE_LIST ||
+        (terminal_base &&
+         (strcmp(terminal_base, "xs:IDREFS") == 0 ||
+          strcmp(terminal_base, "xs:NMTOKENS") == 0 ||
+          strcmp(terminal_base, "xs:ENTITIES") == 0));
+    if (!list_valued)
+        return facet_check_body(s, v, terminal_base, chain_is_list);
+    while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r') v++;
+    size_t n = strlen(v);
+    while (n > 0 && (v[n-1] == ' ' || v[n-1] == '\t' ||
+                     v[n-1] == '\n' || v[n-1] == '\r'))
+        n--;
+    char* collapsed = (char*)malloc(n + 1);
+    if (!collapsed)
+        return facet_check_body(s, v, terminal_base, chain_is_list);
+    size_t o = 0;
+    int in_ws = 0;
+    for (size_t i = 0; i < n; i++) {
+        char ch = v[i];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+            if (!in_ws && o) collapsed[o++] = ' ';
+            in_ws = 1;
+        } else {
+            collapsed[o++] = ch;
+            in_ws = 0;
+        }
+    }
+    if (o && collapsed[o-1] == ' ') o--;
+    collapsed[o] = 0;
+    int rc = facet_check_body(s, collapsed, terminal_base, chain_is_list);
+    free(collapsed);
     return rc;
 }
 static int facet_check_body(const XsdSimple* s, const char* v,
