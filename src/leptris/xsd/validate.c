@@ -797,13 +797,17 @@ static void validate_element(struct xsd_validator* v,
             break;
         }
     }
-    if (!eff_type) return; /* anyType */
+    /* #1936 (stE): the element's fixed VALUE constraint applies
+     * regardless of the type resolution — inline anonymous types
+     * leave eff_type NULL and used to skip the check entirely. An
+     * empty content also violates a non-empty fixed value. */
     if (d->fixed) {
         const char* text = leptris_element_text(elem);
-        if (text && *text && strcmp(text, d->fixed) != 0)
+        if (text && strcmp(text, d->fixed) != 0)
             verrfk(v, "content-model", "element", local,
                "content does not match the fixed value");
     }
+    if (!eff_type) return; /* anyType */
     /* XSD 1.0 §2.6.2/§3.3.4 (moxml#433): xsi:type on the instance
      * names the type definition this element is assessed against —
      * it replaces the declared type and wins over XSD 1.1
