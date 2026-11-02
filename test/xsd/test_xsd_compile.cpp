@@ -411,11 +411,16 @@ TEST(XsdDatatypes, WComplementCoversUnicodeWordChars) {
     LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
     ASSERT_EQ(st, LEPTRIS_OK);
     ASSERT_NE(s, (LeptrisXsdSchema)0);
+#ifdef LEPTRIS_HAS_UTF8PROC
+    /* The complement runs over the utf8proc categories; builds
+     * without the tables keep the ASCII word set (documented
+     * degradation), so these rows are capability-pinned. */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xF0\x9D\x9F\x89"), 0); // U+1D7C9 Lo
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x83\x9D"), 0);     // U+20DD Me
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xC2\xB2"), 0);          // U+00B2 No
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x81\x84"), 0);     // U+2044 Sm
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x82\xA0"), 0);     // U+20A0 Sc
+#endif
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "#"), 1);                   // real punct
     EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", " "), 1);                   // separator
     leptris_xsd_free(s);
