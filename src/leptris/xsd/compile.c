@@ -2462,6 +2462,12 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                     if (has_inline)
                         d->type = xsd_strdup(synth);
+                    /* #1936 (stE): the fixed VALUE constraint rides
+                     * the decl whatever the type shape — inline
+                     * anonymous types used to lose it entirely. */
+                    d->fixed = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "fixed"));
                     const char* sg = leptris_element_attribute(
                         (LeptrisElement)n, "substitutionGroup");
                     if (sg) {
