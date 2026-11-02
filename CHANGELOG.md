@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.402] - 2026-11-02
+
+### Fixed
+
+- global elements with inline anonymous types get their declaration (leptris#1936 stE, 15 rows) (xsd)
+- the element fixed VALUE constraint fires regardless of type resolution (xsd)
+- \\w is the complement of punctuation/separators/controls (leptris#1936 reV family, 39 rows) (xsd)
+
+
+
 ## [1.9.401] - 2026-11-01
 
 ### Fixed
