@@ -4,9 +4,27 @@
 
 ### Fixed
 
-- global elements with inline anonymous types get their declaration (leptris#1936 stE, 15 rows) (xsd)
-- the element fixed VALUE constraint fires regardless of type resolution (xsd)
-- \\w is the complement of punctuation/separators/controls (leptris#1936 reV family, 39 rows) (xsd)
+- **`\\w` is the complement of punctuation/separators/controls
+  (leptris#1936 reV family, 39 rows, PR #1948).** XSD Part 2
+  App. F defines wordChar as NOT in `\\p{P}\\p{Z}\\p{C}` —
+  Sm/Sc/No/Mn/Me are all word chars. The engine's `\\w` was
+  ASCII-only, so `\\W` accepted every non-ASCII letter, mark,
+  superscript, fraction slash and currency sign (reV6-43). A
+  `cat_neg` flag on the regex class node expresses the category
+  complement; `\\W` inherits through its negation. reV 42/42
+  oracle agreement against the real suite documents.
+- **Global elements with inline anonymous types get their
+  declaration (leptris#1936 stE, 15 rows, PR #1948).** The
+  global-element capture required both `name` and `type`
+  attributes — a global element whose type is an inline
+  `<xs:simpleType>` child never produced a declaration, so the
+  element's `fixed` value constraint and the type both vanished
+  and every instance validated. The `nm`-only branch now records
+  `fixed` alongside the #1592 synthesized-slot type.
+- **The element `fixed` VALUE constraint fires regardless of type
+  resolution (PR #1948).** The check sat after the type
+  resolution's anyType early-return and its `*text` guard let
+  empty content pass a non-empty fixed value.
 
 
 
