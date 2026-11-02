@@ -55,6 +55,11 @@ typedef struct RreNode {
      * LEPTRIS_HAS_UTF8PROC (without it the escapes fail loudly). */
     unsigned cat_set;
     unsigned cat_mask;
+    /* cat_neg (#1936 reV33-43): the class matches when the codepoint
+     * is NOT in the masked categories — XSD \w is defined as the
+     * complement of punctuation/separators/controls, not the union
+     * of letters (Sm/Sc/Sk are word chars per the suite). */
+    unsigned cat_neg;
     /* cat_strict (moxml#464): a class-internal COMPLEMENT builtin
      * ([\I], [\D]) needs bitmap AND cats to agree — the normal
      * union can't express "not in the set" once the bitmap holds
@@ -125,10 +130,36 @@ static void cls_add_builtin(RreNode* n, char c) {
             }
             break;
         case 'w':
-            for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
+            /* XSD 1.0 Part 2 App. F: wordChar is the COMPLEMENT of
+             * punctuation, separators and controls — Sm/Sc/No/Mn/
+             * Me are all word chars (the suite's reV rows: U+2044,
+             * U+20A0, U+00B2, U+20DD never match \W). The ASCII-only
+             * form made \W accept every non-ASCII non-punct char
+             * (#1936 reV family). */
             for (int i = 'a'; i <= 'z'; i++) cls_add(n, (unsigned char)i);
             for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
+            for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
             cls_add(n, '_');
+#if defined(LEPTRIS_HAS_UTF8PROC)
+            n->cat_set = 1;
+            n->cat_neg = 1;
+            n->cat_mask =
+                (1u << UTF8PROC_CATEGORY_PC) |
+                (1u << UTF8PROC_CATEGORY_PD) |
+                (1u << UTF8PROC_CATEGORY_PS) |
+                (1u << UTF8PROC_CATEGORY_PE) |
+                (1u << UTF8PROC_CATEGORY_PI) |
+                (1u << UTF8PROC_CATEGORY_PF) |
+                (1u << UTF8PROC_CATEGORY_PO) |
+                (1u << UTF8PROC_CATEGORY_ZL) |
+                (1u << UTF8PROC_CATEGORY_ZP) |
+                (1u << UTF8PROC_CATEGORY_ZS) |
+                (1u << UTF8PROC_CATEGORY_CC) |
+                (1u << UTF8PROC_CATEGORY_CF) |
+                (1u << UTF8PROC_CATEGORY_CN) |
+                (1u << UTF8PROC_CATEGORY_CO) |
+                (1u << UTF8PROC_CATEGORY_CS);
+#endif
             break;
         case 's':
             cls_add(n, ' ');
@@ -175,7 +206,9 @@ static void cls_add_builtin(RreNode* n, char c) {
                           (1u << UTF8PROC_CATEGORY_NL) |
                           (1u << UTF8PROC_CATEGORY_ND) |
                           (1u << UTF8PROC_CATEGORY_MN) |
-                          (1u << UTF8PROC_CATEGORY_MC);
+                          (1u << UTF8PROC_CATEGORY_MC) |
+                          (1u << UTF8PROC_CATEGORY_ME) |
+                          (1u << UTF8PROC_CATEGORY_NO);
 #else
             for (int i = 0x80; i < 0x100; i++) cls_add(n, (unsigned char)i);
 #endif
@@ -256,6 +289,7 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
         int c = (n->cat_mask &
                  (1u << utf8proc_get_property((utf8proc_int32_t)cp)
                       ->category)) != 0;
+        if (n->cat_neg) c = !c;
         hit = n->cat_strict ? (hit && c) : (hit || c);
     }
 #else

@@ -397,6 +397,30 @@ TEST(XsdDatatypes, LengthFacetCountsOctetsForHexBinary) {
 // leptris#1936 (stG010/stH005, the REAL suite documents): a list
 // value space is whitespace=collapse — element content "\n\tCA\n  "
 // normalizes to "CA" before the enumeration/pattern facets run.
+// leptris#1936 (the reV family, 39 rows): XSD \w is the COMPLEMENT
+// of punctuation/separators/controls — letters (U+1D7C9 Lo), marks
+// (U+20DD Me), No (U+00B2), Sm (U+2044), Sc (U+20A0) are all word
+// chars, so \W must reject them; \W matches real punctuation.
+TEST(XsdDatatypes, WComplementCoversUnicodeWordChars) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"nonWord\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"\\W\"/></xs:restriction></xs:simpleType>"
+        "<xs:element name=\"r\" type=\"nonWord\"/></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xF0\x9D\x9F\x89"), 0); // U+1D7C9 Lo
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x83\x9D"), 0);     // U+20DD Me
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xC2\xB2"), 0);          // U+00B2 No
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x81\x84"), 0);     // U+2044 Sm
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "\xE2\x82\xA0"), 0);     // U+20A0 Sc
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", "#"), 1);                   // real punct
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "nonWord", " "), 1);                   // separator
+    leptris_xsd_free(s);
+}
+
 TEST(XsdDatatypes, ListValueSpaceCollapsesBeforeFacets) {
     const char xsd[] =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
