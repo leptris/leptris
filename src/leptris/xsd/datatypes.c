@@ -550,7 +550,16 @@ static int facet_check(const XsdSimple* s, const char* v,
 static int facet_check_body(const XsdSimple* s, const char* v,
                             const char* terminal_base,
                             int chain_is_list) {
-    if (s->pattern && !rng_regex_matches(s->pattern, v)) return 0;
+    /* several patterns are a disjunction (p16: same as [abc]+|[123]+) */
+    if (s->patterns) {
+        int matched = 0;
+        for (XsdFacetValue* p = s->patterns; p; p = p->next)
+            if (rng_regex_matches(p->text, v)) {
+                matched = 1;
+                break;
+            }
+        if (!matched) return 0;
+    }
     if (s->enum_values) {
         int found = 0;
         for (XsdFacetValue* e = s->enum_values; e; e = e->next)
