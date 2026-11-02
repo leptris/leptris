@@ -60,12 +60,6 @@ typedef struct RreNode {
      * complement of punctuation/separators/controls, not the union
      * of letters (Sm/Sc/Sk are word chars per the suite). */
     unsigned cat_neg;
-    /* cat_strict (moxml#464): a class-internal COMPLEMENT builtin
-     * ([\I], [\D]) needs bitmap AND cats to agree — the normal
-     * union can't express "not in the set" once the bitmap holds
-     * the complement's high bytes (U+00AA is in ~ASCII-bits but
-     * excluded by the category). */
-    unsigned cat_strict;
     /* XSD charClassSub: the bracketed subtrahend (moxml#464). The
      * node is consulted at match time so its ranges, blocks and
      * categories all subtract — the old byte-bitmap merge ignored
@@ -290,7 +284,7 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
                  (1u << utf8proc_get_property((utf8proc_int32_t)cp)
                       ->category)) != 0;
         if (n->cat_neg) c = !c;
-        hit = n->cat_strict ? (hit && c) : (hit || c);
+        hit = hit || c;
     }
 #else
     (void)0;
@@ -585,8 +579,11 @@ static RreNode* parse_class(RreParser* ps) {
         ps->p++;
     }
     int first = 1;
+    int member_ord = 0;
     while (*ps->p && (*ps->p != ']' || first)) {
         first = 0;
+        int is_first_member = (member_ord == 0);
+        member_ord++;
         if (*ps->p == '\\' && (ps->p[1] == 'p' || ps->p[1] == 'P') &&
             ps->p[2] == '{') {
             /* XSD property classes for the Latin-1 byte world —
@@ -680,42 +677,88 @@ static RreNode* parse_class(RreParser* ps) {
                     node_free(n);
                     return NULL;
                 }
-                cls_add_builtin(tmp, e);
+                /* cls_add_builtin implements the LOWERCASE spellings;
+                 * the uppercase forms negate via negm (reG21/reG23:
+                 * [\D]+ must reject '1' — the old path passed 'D'
+                 * raw, built an empty member set, and the complement
+                 * memset accepted every byte). */
+                char pos = (char)((e >= 'A' && e <= 'Z')
+                                      ? e - 'A' + 'a' : e);
+                cls_add_builtin(tmp, pos);
                 int neg_b = e == 'D' || e == 'W' || e == 'S' ||
                             e == 'I' || e == 'C';
+                if (neg_b) {
+                    /* Negated built-in: the class gains the
+                     * COMPLEMENT of the member — the negm slot
+                     * (hit || !cls_has_cp(negm)) unions a flipped
+                     * sub-class, codepoint-exact across bytes, uni
+                     * ranges (the \d legacy-Nd pin stays excluded
+                     * from \D) and categories (\W flips the \w
+                     * complement form back to P|Z|C). A second
+                     * negated member degrades to the positive
+                     * spelling (single negm slot, as with \P). */
+                    if (!n->negm) {
+                        n->negm = tmp;
+                        continue;
+                    }
 #if defined(LEPTRIS_HAS_UTF8PROC)
-                if (!neg_b && tmp->cat_set) {
+                    if (tmp->cat_set) {
+                        n->cat_set = 1;
+                        n->cat_mask |= tmp->cat_mask;
+                    }
+#endif
+                    for (int i = 0; i < 256; i++)
+                        if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
+                            cls_add(n, (unsigned char)i);
+                    node_free(tmp);
+                    continue;
+                }
+#if defined(LEPTRIS_HAS_UTF8PROC)
+                if (tmp->cat_set) {
                     n->cat_set = 1;
                     n->cat_mask |= tmp->cat_mask;
-                } else if (neg_b && tmp->cat_set && !n->cat_set) {
-                    n->cat_set = 1;
-                    n->cat_strict = 1;
-                    n->cat_mask = (~tmp->cat_mask) & 0x7FFFFFFFu;
                 }
 #endif
                 for (int i = 0; i < 256; i++)
-                    if (((tmp->cls[i >> 3] >> (i & 7)) & 1) ==
-                        (neg_b ? 0 : 1))
+                    if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
                         cls_add(n, (unsigned char)i);
-                if (neg_b) {
-                    /* Negated built-in: everything except the set. */
-                    memset(n->cls, 0xff, sizeof(n->cls));
-                    for (int i = 0; i < 256; i++)
-                        if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
-                            n->cls[i >> 3] &=
-                                (unsigned char)~(1u << (i & 7));
-                }
                 node_free(tmp);
                 continue;
             }
             /* XSD singleCharEsc covers the control escapes too
              * (the OPC ST_ContentType pattern uses \t) —
-             * leptris-ruby#434. */
-            if (e == 't') { cls_add(n, '\t'); continue; }
-            if (e == 'n') { cls_add(n, '\n'); continue; }
-            if (e == 'r') { cls_add(n, '\r'); continue; }
-            cls_add(n, (unsigned char)e);
-            continue;
+             * leptris-ruby#434. Greedy seRange [18]: a singleCharEsc
+             * may open a range ([\\-\\{^], reG17: range \..{ union
+             * ^) — the end must be a charOrEsc and NOT `\\`/`[` per
+             * the seRange bullets. */
+            {
+                unsigned scp = (e == 't') ? (unsigned)'\t'
+                             : (e == 'n') ? (unsigned)'\n'
+                             : (e == 'r') ? (unsigned)'\r'
+                             : (unsigned char)e;
+                if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
+                    ps->p++;
+                    int hi_esc = (*ps->p == '\\');
+                    unsigned hi = 0;
+                    if (!cls_read_cp(ps, &hi) || hi < scp ||
+                        hi == 0x5B || (hi_esc && hi == 0x5C)) {
+                        node_free(n);
+                        ps->bad = 1;
+                        return NULL;
+                    }
+                    if (scp < 0x100 && hi < 0x100) {
+                        for (unsigned int i = scp; i <= hi; i++)
+                            cls_add(n, (unsigned char)i);
+                    } else if (n->uni_n < 4) {
+                        n->uni_lo[n->uni_n] = scp;
+                        n->uni_hi[n->uni_n] = hi;
+                        n->uni_n++;
+                    }
+                    continue;
+                }
+                cls_add_cp(n, scp);
+                continue;
+            }
         }
         /* XSD charClassSub: `[ A - [ B ] ]` — the '-' followed by
          * '[' subtracts the bracketed class (leptris-ruby#434, the
@@ -746,8 +789,10 @@ static RreNode* parse_class(RreParser* ps) {
         }
         if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
             ps->p++;
+            int hi_esc = (*ps->p == '\\');
             unsigned hi = 0;
-            if (!cls_read_cp(ps, &hi) || hi < lo) {
+            if (!cls_read_cp(ps, &hi) || hi < lo ||
+                hi == 0x5B || (hi_esc && hi == 0x5C)) {
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
@@ -761,6 +806,15 @@ static RreNode* parse_class(RreParser* ps) {
                 n->uni_n++;
             }
         } else {
+            /* F.1 [17]/[22]: a standalone '-' is a member only at
+             * the BEGINNING or END of the group — after a completed
+             * member with a following non-']' char it is a grammar
+             * error (reG26-33/reH19: [a-c-1-4x-z-7-9], [a-a-x-x]) */
+            if (lo == '-' && !is_first_member && *ps->p != ']') {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
             cls_add_cp(n, lo);
         }
     }
@@ -1082,7 +1136,11 @@ static const char* rre_match(RreNode* n, const char* s,
 }
 
 int rng_regex_supported(const char* pat) {
-    if (!pat || !*pat) return 0;
+    if (!pat) return 0;
+    /* an EMPTY branch is a valid regExp (F.1 [1]: branch*) — it
+     * matches only the empty string (reA1/reA7: pattern='' with
+     * value='' [valid]; matches() implements the semantics) */
+    if (!*pat) return 1;
     RreParser ps;
     ps.p = pat;
     ps.depth = 0;

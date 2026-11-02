@@ -492,6 +492,101 @@ TEST(XsdDatatypes, DigitClassPinsLegacyNd) {
     leptris_xsd_free(s);
 }
 
+// W3C XSD suite msData/regex reG21/reG23 (+ reG-class): an
+// IN-CLASS negated builtin (\D, \C, \W, \S) is the complement of
+// the builtin unioned with the class's other members. The old
+// in-class path uppercased the escape into cls_add_builtin (only
+// the lowercase cases exist), built an EMPTY member set, and the
+// "complement" memset accepted every byte: [\D]+ matched '1'.
+TEST(XsdDatatypes, ClassNegatedBuiltinsComplement) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"NonDigClass\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[\\D]+\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"reG23\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[\\D\\?a-c\\?]+\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"reG21\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[\\C\\?a-c\\?]+\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"SpaceClass\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[\\S]+\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"NonWordClass\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[\\W]+\"/></xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* [\D]+ : digits reject, everything else (incl. astral-adjacent
+     * unicode) accepts */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigClass", "1"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigClass", "9"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigClass", "x"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigClass", "?"), 1);
+    /* the legacy-Nd pin: U+1369 is a DIGIT, \D must reject */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonDigClass",
+                                       "\xE1\x8D\xA9"), 0);
+    /* reG23 [\\D\\?a-c\\?]+ : suite value '?1?' [invalid] */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "reG23", "?1?"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "reG23", "?d?"), 1);
+    /* reG21 [\\C\\?a-c\\?]+ : suite value '?d?' [invalid] — 'd'
+     * is a NameChar, \\C excludes it; '?a?' accepts (a in a-c) */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "reG21", "?d?"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "reG21", "?a?"), 1);
+    /* [\\S]+ : whitespace rejects */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "SpaceClass", " "), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "SpaceClass", "a"), 1);
+    /* [\\W]+ : punctuation accepts, word chars reject */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonWordClass", "!"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "NonWordClass", "a"), 0);
+    leptris_xsd_free(s);
+}
+
+// W3C XSD suite msData/regex reG26-33/reH19 (F.1 productions
+// [14]/[17]-[22]): an unescaped '-' is a character range member
+// only at the BEGINNING or END of a positive character group. A
+// '-' after a completed member with a following non-']' char is a
+// grammar error — the SCHEMA must fail to compile (suite
+// schemaTest: invalid; xmllint is lenient here, the suite governs).
+TEST(XsdDatatypes, DashAfterRangeMemberIsGrammarError) {
+    auto compile_pattern = [](const char* pat) {
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+            "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+            "<xs:simpleType name=\"t\"><xs:restriction"
+            " base=\"xs:string\">"
+            "<xs:pattern value=\"%s\"/></xs:restriction>"
+            "</xs:simpleType></xs:schema>", pat);
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXsdSchema s = leptris_xsd_compile(
+            buf, strlen(buf), &st);
+        int err = st != LEPTRIS_OK ||
+                  leptris_xsd_error(s) != NULL;
+        leptris_xsd_free(s);
+        return !err;
+    };
+    // reG26-33: dash after a completed range, mid-group
+    EXPECT_EQ(compile_pattern("[a-c-1-4x-z-7-9]*"), 0);
+    // reH19: [a-a-x-x]+ — dash after the a-a range
+    EXPECT_EQ(compile_pattern("[a-a-x-x]+"), 0);
+    // dash mid-group after a plain member
+    EXPECT_EQ(compile_pattern("[a-b-c]"), 0);
+    // the LEGAL shapes stay legal: dash first, dash last, escaped
+    EXPECT_EQ(compile_pattern("[-abc]"), 1);
+    EXPECT_EQ(compile_pattern("[abc-]"), 1);
+    EXPECT_EQ(compile_pattern("[a\\-b]"), 1);
+    EXPECT_EQ(compile_pattern("[0-9-]"), 1);
+    EXPECT_EQ(compile_pattern("[^abc]"), 1);
+    // reG17: [\\-\\{^] — the escaped-brace range end compiles
+    EXPECT_EQ(compile_pattern("[\\\\-\\{^]"), 1);
+}
+
 TEST(XsdDatatypes, PatternPropertyClassesAndSubtraction) {
     // The OPC ST_ContentType shape, minus the quoted-string member
     // (same property-class + subtraction machinery): type/subtype
@@ -673,6 +768,28 @@ TEST(XsdDatatypes, RestrictionFacetsApply) {
     EXPECT_EQ(leptris_xsd_simple_valid(s, "label", "abcde"), 0);
 
     EXPECT_EQ(leptris_xsd_simple_valid(s, "missing", "x"), -1);
+    leptris_xsd_free(s);
+}
+
+// W3C XSD suite msData/regex/p16: two patterns in one restriction
+// are a DISJUNCTION — the lexical matches if ANY pattern matches
+// ("should be same as [abc]+|[123]+", value "112233123" [valid]).
+// Last-pattern-wins under-accepts every earlier pattern.
+TEST(XsdDatatypes, MultiplePatternsAreDisjunction) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"p16\">"
+        "<xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[123]+\"/>"
+        "<xs:pattern value=\"[abc]+\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "p16", "112233123"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "p16", "abc"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "p16", "x9"), 0);
     leptris_xsd_free(s);
 }
 
@@ -932,6 +1049,32 @@ TEST(XsdValidate, AllMinOccursZeroAbsentWithRequiredParticles) {
                        "</root>"), 1);
     EXPECT_EQ(validate_doc(
                   sch, "<root><elt1><elt2/></elt1></root>"), 0);
+}
+
+// W3C XSD suite msData/regex/reG17: a simple-typed element's EMPTY
+// content is still a lexical value — "" must face the pattern facet
+// and the builtin path alike (xmllint: '' fails [a-z]+ and
+// xs:integer; whitespace-only and self-closing shapes too). The
+// `text && *text` guard silently accepted every empty simple-typed
+// element.
+TEST(XsdValidate, EmptyContentFacesSimpleTypeFacets) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"doc\"><xsd:complexType>"
+        "<xsd:choice maxOccurs=\"unbounded\">"
+        "<xsd:element name=\"e\" type=\"xsd:integer\"/>"
+        "<xsd:element name=\"p\" type=\"pat\"/>"
+        "</xsd:choice></xsd:complexType></xsd:element>"
+        "<xsd:simpleType name=\"pat\"><xsd:restriction"
+        " base=\"xsd:string\">"
+        "<xsd:pattern value=\"[a-z]+\"/></xsd:restriction>"
+        "</xsd:simpleType></xsd:schema>";
+    EXPECT_EQ(validate_doc(sch, "<doc><e></e></doc>"), 0);
+    EXPECT_EQ(validate_doc(sch, "<doc><e/></doc>"), 0);
+    EXPECT_EQ(validate_doc(sch, "<doc><p></p></doc>"), 0);
+    EXPECT_EQ(validate_doc(sch, "<doc><e>  </e></doc>"), 0);
+    EXPECT_EQ(validate_doc(sch, "<doc><e>5</e></doc>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<doc><p>abc</p></doc>"), 1);
 }
 
 TEST(XsdValidate, ContentModelViolationReports) {

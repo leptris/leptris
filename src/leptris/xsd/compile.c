@@ -455,9 +455,15 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                 if (!fl || (fu && strcmp(fu, XSD_NS) != 0)) continue;
                 const char* val =
                     leptris_element_attribute(fe, "value");
-                if (strcmp(fl, "pattern") == 0)
-                    simple->pattern = xsd_strdup(val);
-                else if (strcmp(fl, "enumeration") == 0) {
+                if (strcmp(fl, "pattern") == 0) {
+                    XsdFacetValue* fv =
+                        (XsdFacetValue*)calloc(1, sizeof(*fv));
+                    if (fv) {
+                        fv->text = xsd_strdup(val);
+                        fv->next = simple->patterns;
+                        simple->patterns = fv;
+                    }
+                } else if (strcmp(fl, "enumeration") == 0) {
                     XsdFacetValue* fv =
                         (XsdFacetValue*)calloc(1, sizeof(*fv));
                     if (fv) {
@@ -659,9 +665,17 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
         if (ok && t->length >= 0 && (long)n != t->length) ok = 0;
         if (ok && t->min_length >= 0 && (long)n < t->min_length) ok = 0;
         if (ok && t->max_length >= 0 && (long)n > t->max_length) ok = 0;
-        /* pattern applies to the whole lexical */
-        if (ok && t->pattern && !rng_regex_matches(t->pattern, v))
-            ok = 0;
+        /* pattern applies to the whole lexical; several patterns are
+         * a disjunction (p16: same as [abc]+|[123]+) */
+        if (ok && t->patterns) {
+            int matched = 0;
+            for (XsdFacetValue* p = t->patterns; p; p = p->next)
+                if (rng_regex_matches(p->text, v)) {
+                    matched = 1;
+                    break;
+                }
+            if (!matched) ok = 0;
+        }
         return ok;
     }
     if (t->deriv == XSD_SIMPLE_UNION) {
@@ -707,6 +721,24 @@ static void xsd_set_error(struct leptris_xsd_schema* s, const char* msg) {
         s->error = (char*)malloc(n);
         if (s->error) memcpy(s->error, msg, n);
     }
+}
+
+/* XSD Part 2 §4.3.4: every pattern facet value is a regular
+ * expression — an unsupported one is a schema error AT COMPILE
+ * time (reG26-33/reH19: the suite's schemaTest=invalid rows, e.g.
+ * the mid-dash [a-c-1-4x-z-7-9]). Walks the def chains so inline
+ * anonymous members are covered too. */
+extern int rng_regex_supported(const char* pat);
+static int xsd_patterns_supported(const XsdSimple* t, int depth) {
+    if (!t || depth > 32) return 1;
+    for (const XsdFacetValue* p = t->patterns; p; p = p->next)
+        if (!rng_regex_supported(p->text)) return 0;
+    if (!xsd_patterns_supported(t->base_def, depth + 1)) return 0;
+    if (!xsd_patterns_supported(t->item_def, depth + 1)) return 0;
+    for (size_t i = 0; i < t->member_def_count; i++)
+        if (!xsd_patterns_supported(t->member_defs[i], depth + 1))
+            return 0;
+    return 1;
 }
 
 /* A top-level schema-language declaration component. */
@@ -2086,6 +2118,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     xsd_resolve_extension_bases(s);
     xsd_resolve_pending_attr_refs(s);
 
+    for (const XsdSimple* t = s->simple_types; t; t = t->next)
+        if (!xsd_patterns_supported(t, 0)) {
+            xsd_set_error(s, "pattern facet is not a supported "
+                             "regular expression");
+            if (status) *status = LEPTRIS_ERROR_PARSE;
+            leptris_document_free(doc);
+            return (LeptrisXsdSchema)s;
+        }
+
     leptris_document_free(doc);
     return s;
 
@@ -2572,7 +2613,13 @@ static void xsd_free_simple_one(XsdSimple* t) {
     free(t->name);
     free(t->ns);
     free(t->base);
-    free(t->pattern);
+    XsdFacetValue* pv = t->patterns;
+    while (pv) {
+        XsdFacetValue* pn = pv->next;
+        free(pv->text);
+        free(pv);
+        pv = pn;
+    }
     XsdFacetValue* fv = t->enum_values;
     while (fv) {
         XsdFacetValue* fn = fv->next;

@@ -803,7 +803,8 @@ static void validate_element(struct xsd_validator* v,
      * empty content also violates a non-empty fixed value. */
     if (d->fixed) {
         const char* text = leptris_element_text(elem);
-        if (text && strcmp(text, d->fixed) != 0)
+        if (!text) text = "";
+        if (strcmp(text, d->fixed) != 0)
             verrfk(v, "content-model", "element", local,
                "content does not match the fixed value");
     }
@@ -879,10 +880,12 @@ static void validate_local_uri(struct xsd_validator* v,
                                                      : "(invalid)");
         }
         if (ct->text_type) {
+            /* empty content is still a lexical value — it faces the
+             * facets (reG17: '' must fail the pattern) */
             const char* text = leptris_element_text(elem);
-            if (text && *text)
-                text_valid(v, s, ct->text_type, text, ct->ns,
-                           "element", local, elem);
+            if (!text) text = "";
+            text_valid(v, s, ct->text_type, text, ct->ns,
+                       "element", local, elem);
         }
         return;
     }
@@ -903,9 +906,9 @@ static void validate_local_uri(struct xsd_validator* v,
         static const XsdTypeAttrs k_no_attrs;
         validate_attributes(v, s, elem, &k_no_attrs, NULL);
         const char* text = leptris_element_text(elem);
-        if (text && *text)
-            text_valid(v, s, type, text, euri, "element", local,
-                       elem);
+        if (!text) text = "";
+        text_valid(v, s, type, text, euri, "element", local,
+                   elem);
         return;
     }
     /* libxml2-compat (#1691 ns1_0/seq-dubl-elem1): an UNPREFIXED
@@ -923,9 +926,9 @@ static void validate_local_uri(struct xsd_validator* v,
             static const XsdTypeAttrs k_no_attrs;
             validate_attributes(v, s, elem, &k_no_attrs, NULL);
             const char* text = leptris_element_text(elem);
-            if (text && *text)
-                text_valid(v, s, builtin, text, euri, "element",
-                           local, elem);
+            if (!text) text = "";
+            text_valid(v, s, builtin, text, euri, "element",
+                       local, elem);
             return;
         }
     }

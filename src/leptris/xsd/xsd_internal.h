@@ -48,7 +48,7 @@ typedef struct xsd_simple {
     size_t member_count;
     struct xsd_simple** member_defs; /* UNION: inline members */
     size_t member_def_count;
-    char* pattern;
+    XsdFacetValue* patterns; /* DISJUNCTION: any pattern may match */
     XsdFacetValue* enum_values;
     size_t enum_count;
     char* min_inclusive;
