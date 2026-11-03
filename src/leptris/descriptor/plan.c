@@ -2160,6 +2160,27 @@ static struct leptris_plan_result* plan_result_build_windowed(
             if (!gn[el->attr_count] || !gv[el->attr_count])
                 goto oom;
             el->attr_count++;
+        } else if (op->kind == LEPTRIS_PLAN_OP_RAW) {
+            /* leptris#1941: the host-serialized fragment rides the
+             * result verbatim (VALUE_RAW; the serializer emits it
+             * without escaping). Ignored by hydration. */
+            struct leptris_plan_result* v =
+                dp_value_new(LEPTRIS_PLAN_VALUE_RAW);
+            if (!v) goto oom;
+            if (!dp_value_set_str(v, op->value ? op->value : "",
+                                  op->value ? op->value_len : 0))
+                dp_value_set_str(v, "", 0);
+            if (sp == 0) {
+                dp_result_free_rec(v);
+                free(stack);
+                if (status) *status = LEPTRIS_ERROR_INVALID_ARG;
+                return NULL;
+            }
+            v->order_index = (uint32_t)stack[sp - 1]->kid_count;
+            if (!dp_value_push(stack[sp - 1], v)) {
+                dp_result_free_rec(v);
+                goto oom;
+            }
         } else if (op->kind == LEPTRIS_PLAN_OP_END) {
             if (sp == 0) {
                 /* Mid-build failure: the arena holds every minted

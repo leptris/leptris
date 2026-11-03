@@ -2577,6 +2577,45 @@ TEST(Plan1941, ResultBuildInheritsPlanAndChildPlanBindings) {
  * the #1115 multi-ns case carry no row binding and take the
  * child plan's w14/w15 namespaces, while a row WITH a binding
  * keeps it verbatim. */
+/* leptris#1941: the RAW op splices a host-serialized fragment into
+ * the result verbatim — the ops lane's escape hatch for subtrees
+ * the plan cannot address (valued child_deferred rows: the child
+ * model serializes through its own best lane and rides as text). */
+TEST(Plan1941, ResultBuildRawOpSplicesVerbatim) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].child_plan_index = -1;
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "doc";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    const char* frag = "<w:r xmlns:w=\"urn:w\"><w:t>hi</w:t></w:r>";
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_RAW, 0, UINT32_MAX, NULL, frag,
+         (uint32_t)strlen(frag)},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 3, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<doc><w:r xmlns:w=\"urn:w\"><w:t>hi</w:t></w:r></doc>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
 TEST(Plan1941, ResultBuildExplicitRowBindingBeatsInheritance) {
     LeptrisStatus st = LEPTRIS_OK;
     leptris_child_plan root_kids[2] = {};
