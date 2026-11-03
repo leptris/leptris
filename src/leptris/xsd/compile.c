@@ -62,6 +62,12 @@ struct leptris_xsd_schema {
      * re-captures the whole subtree (multi-GB / minutes). */
     char** visited;
     size_t visited_len, visited_cap;
+    /* leptris#1957: captured sub-documents stay ALIVE until schema
+     * teardown — attributeGroup defs hold LeptrisElement pointers
+     * into their own unit for the lazy ref expansion, and freeing
+     * the sub-document at chase time left those dangling (ASAN
+     * heap-use-after-free in the corpus sweep). */
+    struct xsd_sub_doc* sub_docs;
     void* validator; /* slice-4 parked error list */
     char* error;
     /* #1841: materialized structured report — rebuilt per
@@ -2317,6 +2323,23 @@ static int xsd_visited_has(struct leptris_xsd_schema* s,
     return 0;
 }
 
+struct xsd_sub_doc {
+    LeptrisDocument doc;
+    struct xsd_sub_doc* next;
+};
+
+static void xsd_sub_doc_retain(struct leptris_xsd_schema* s,
+                               LeptrisDocument doc) {
+    struct xsd_sub_doc* node =
+        (struct xsd_sub_doc*)calloc(1, sizeof(*node));
+    if (!node) return; /* retention is best-effort; the freed-elem
+                          lazy path is never taken for eagerly
+                          captured defs */
+    node->doc = doc;
+    node->next = (struct xsd_sub_doc*)s->sub_docs;
+    s->sub_docs = node;
+}
+
 static void xsd_visited_add(struct leptris_xsd_schema* s,
                             const char* path) {
     if (s->visited_len == s->visited_cap) {
@@ -2531,7 +2554,10 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                 t->base = xsd_strdup(alias);
                             }
                         }
-                        leptris_document_free(sub);
+                        /* leptris#1957: retained — attributeGroup
+                         * defs hold elements from this unit for the
+                         * lazy ref expansion; freed at teardown. */
+                        xsd_sub_doc_retain(s, sub);
                     }
                     free(text);
                 }
@@ -2755,6 +2781,15 @@ static void xsd_free_simple_one(XsdSimple* t) {
 LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     struct leptris_xsd_schema* s = (struct leptris_xsd_schema*)schema;
     if (!s) return;
+    /* leptris#1957: retained sub-documents last — attributeGroup
+     * defs' LeptrisElement pointers live inside them. */
+    struct xsd_sub_doc* sd = (struct xsd_sub_doc*)s->sub_docs;
+    while (sd) {
+        struct xsd_sub_doc* sn = sd->next;
+        leptris_document_free(sd->doc);
+        free(sd);
+        sd = sn;
+    }
     free(s->report);
     xsd_cm_free(s->complex_types);
     XsdElementIcs* slot = s->element_ics;
