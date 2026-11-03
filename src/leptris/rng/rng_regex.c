@@ -131,11 +131,15 @@ static void cls_add_builtin(RreNode* n, char c) {
              * Me are all word chars (the suite's reV rows: U+2044,
              * U+20A0, U+00B2, U+20DD never match \W). The ASCII-only
              * form made \W accept every non-ASCII non-punct char
-             * (#1936 reV family). */
+             * (#1936 reV family). '_' (Pc) is PUNCTUATION per the
+             * table's \p{P} exclusion — NOT a word char (reZ002:
+             * first_last fails [\w\-\.]+@.*; Perl's \w includes it,
+             * XSD's does not). */
             for (int i = 'a'; i <= 'z'; i++) cls_add(n, (unsigned char)i);
             for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
             for (int i = '0'; i <= '9'; i++) cls_add(n, (unsigned char)i);
-            cls_add(n, '_');
+            /* Pc rides the cat_mask below (the byte bitmap cannot
+             * express "excluded" once the complement negates) */
 #if defined(LEPTRIS_HAS_UTF8PROC)
             n->cat_set = 1;
             n->cat_neg = 1;
@@ -330,9 +334,15 @@ static int cls_has_cp(const RreNode* n, unsigned cp) {
 #endif
     if (n->negm)
         hit = hit || !cls_has_cp(n->negm, cp);
+    /* charClassSub [16] applies to the GROUP's set: the neg flip
+     * (negCharGroup) composes BEFORE the subtraction — for
+     * [^cde-[ag]] the complement is the minuend, so 'a'/'g' are
+     * excluded even though they sit outside the raw bitmap
+     * (RegexTest_430). */
+    if (n->neg) hit = !hit;
     if (hit && n->subtract)
         hit = !cls_has_cp(n->subtract, cp);
-    return n->neg ? !hit : hit;
+    return hit;
 }
 
 /* Strict UTF-8 decode at s (text is well-formed UTF-8; malformed
@@ -786,7 +796,10 @@ static RreNode* parse_class(RreParser* ps) {
                              : (e == 'n') ? (unsigned)'\n'
                              : (e == 'r') ? (unsigned)'\r'
                              : (unsigned char)e;
-                if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
+                /* `-[` is charClassSub, not a range toward '[' (the
+                 * subtraction branch fires at the member loop) */
+                if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']' &&
+                    ps->p[1] != '[') {
                     ps->p++;
                     int hi_esc = (*ps->p == '\\');
                     unsigned hi = 0;
@@ -815,7 +828,12 @@ static RreNode* parse_class(RreParser* ps) {
          * OPC ST_ContentType shape). The subtraction is the last
          * member of the class. */
         if (*ps->p == '-' && ps->p[1] == '[') {
-            ps->p++;
+            /* skip BOTH '-' and '[': parse_class expects to be
+             * entered past the opening bracket (the atom path does
+             * the same) — skipping only '-' parsed the subtrahend's
+             * '[' as a literal member and dropped a leading '^'
+             * (reF39: [a-z-[^a]] must be {a}) */
+            ps->p += 2;
             RreNode* sub = parse_class(ps);
             if (!sub) {
                 node_free(n);
@@ -837,7 +855,10 @@ static RreNode* parse_class(RreParser* ps) {
             ps->bad = 1;
             return NULL;
         }
-        if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']') {
+        /* the same `-[` precedence: a single-char member followed
+         * by subtraction is charClassSub, not a range toward '[' */
+        if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']' &&
+            ps->p[1] != '[') {
             ps->p++;
             int hi_esc = (*ps->p == '\\');
             unsigned hi = 0;

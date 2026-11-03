@@ -685,15 +685,17 @@ TEST(XsdDatatypes, InClassWordComplementCarriesNeg) {
     /* word chars: letters, digits, and the P/Z/C-excluded symbols */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "a"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "5"), 1);
-    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "_"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
                                        "\xC3\xA9"), 1); /* U+00E9 Ll */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
                                        "\xE1\x8D\xA9"), 1); /* U+1369 */
-    /* punctuation is NOT a word char */
+    /* punctuation is NOT a word char — and per the F.1 table \w
+     * excludes ALL of P (Pc too): '_' is NOT a word char (reZ002:
+     * the first_last email must fail [\w\-\.]+@.*) */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "["), 0);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", ","), 0);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", " "), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "_"), 0);
     /* [\w\d]: the digit member unions into the complement form */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wcd", "a5"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wcd", ","), 0);
@@ -750,6 +752,55 @@ TEST(XsdDatatypes, InClassBuiltinsCarryUniRangesAndXmlPins) {
     /* [\c] alone matches exactly one char */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "c", "a"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "c", "a5"), 0);
+    leptris_xsd_free(s);
+}
+
+// reF39: `[a-z-[^a]]` = {a} (a-z minus complement-of-a) — 'a'
+// accepts, 'b' rejects. The subtraction branch must win over the
+// range read: a single-char member followed by `-[` is
+// charClassSub, not a range toward '[' (F.1 [16]).
+TEST(XsdDatatypes, SubtractionOfNegatedClass) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"f39\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[a-z-[^a]]\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"sub1\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[a-[b]]\"/></xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* reF39: suite value 'b' [invalid], 'a' valid */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "f39", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "f39", "b"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "f39", "z"), 0);
+    /* single-char member followed by subtraction */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "sub1", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "sub1", "b"), 0);
+    leptris_xsd_free(s);
+}
+
+// RegexTest_430: [^cde-[ag]] = complement({c,d,e}) minus {a,g} —
+// the subtraction applies to the NEGATED GROUP's set, so 'a'/'g'
+// are excluded even though they are outside the raw {c,d,e}
+// bitmap (value 'agbfxyzga' [invalid]: 'a' is not matchable).
+TEST(XsdDatatypes, SubtractionAppliesToNegatedGroup) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"t430\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[^cde-[ag]]+\"/></xs:restriction>"
+        "</xs:simpleType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "t430", "bfxyz"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "t430", "agbfxyzga"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "t430", "a"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "t430", "g"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "t430", "c"), 0);
     leptris_xsd_free(s);
 }
 
@@ -1241,6 +1292,27 @@ TEST(XsdValidate, EmptyContentFacesSimpleTypeFacets) {
     EXPECT_EQ(validate_doc(sch, "<doc><e>  </e></doc>"), 0);
     EXPECT_EQ(validate_doc(sch, "<doc><e>5</e></doc>"), 1);
     EXPECT_EQ(validate_doc(sch, "<doc><p>abc</p></doc>"), 1);
+}
+
+// W3C XSD suite msData/regex/p2: a complexType with attributes
+// only has EMPTY content — character data violates it (XSD 1.0
+// §3.3.4: whitespace-only text stays legal). The suite instance
+// <elem>abc</elem> [invalid].
+TEST(XsdValidate, EmptyContentModelRejectsText) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"doc\"><xsd:complexType>"
+        "<xsd:sequence><xsd:element name=\"e\" type=\"att-only\"/>"
+        "</xsd:sequence></xsd:complexType></xsd:element>"
+        "<xsd:complexType name=\"att-only\">"
+        "<xsd:attribute name=\"a\" type=\"xsd:integer\"/>"
+        "</xsd:complexType></xsd:schema>";
+    EXPECT_EQ(validate_doc(sch, "<doc><e a=\"9\"/></doc>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<doc><e/></doc>"), 1);
+    /* the oracle rejects even whitespace-only character content
+     * for an empty content type (libxml2-compat, #1691 law) */
+    EXPECT_EQ(validate_doc(sch, "<doc><e>  </e></doc>"), 0);
+    EXPECT_EQ(validate_doc(sch, "<doc><e>abc</e></doc>"), 0);
 }
 
 TEST(XsdValidate, ContentModelViolationReports) {
