@@ -4,9 +4,37 @@
 
 ### Fixed
 
-- the attribute leg of fixed + whitespace-variant values (leptris-rs#36) (xsd)
-- retain captured sub-documents until schema teardown (ASAN) (xsd)
-- nested attributeGroup refs + multi-document component resolution (leptris#1957, leptris#1958) (xsd)
+- **XSD: the leptris-rs#36 attribute leg** — an attribute with
+  `fixed` whose instance lexical differs only in whitespace was
+  rejected by the raw strcmp. The fixed constraint holds on the
+  TYPE's value (§3.2.3/§4.3.1.2): when the raw comparison fails,
+  both sides normalize per the type's whiteSpace and compare again
+  (addB104, attO006 — xsd:integer whitespace variants).
+
+- **XSD: nested attributeGroup refs (leptris#1957)** — an inner
+  `attributeGroup ref` naming a group declared LATER expanded empty,
+  rejecting level-2 members under strict admission (attgD005..034,
+  attJ018). The pre-pass registers every def first and captures rows
+  in a second sweep; the ref expansion re-captures lazily through
+  the def's own element. A complexType whose content model is only
+  an attributeGroup ref + `mixed="true"` no longer reports "the
+  content model is empty".
+
+- **XSD: multi-document component resolution (leptris#1958)** — an
+  import of a no-targetNamespace document kept the importer's tns
+  during capture (chameleon semantics are include-only, §4.2.3), so
+  its same-named complexType shadowed the importing namespace's own
+  declaration and swapped particle types (schF1). The content-model
+  child loop binds a no-namespace child to its own no-tns
+  declaration first; `xs:redefine` of a simpleType aliases the
+  original so the facet chain resolves to the redefinition (schP2's
+  minLength enforced).
+
+- **Descriptor: retained captured sub-documents until schema
+  teardown** — the #1957 lazy attributeGroup expansion holds element
+  pointers into their own unit; freeing sub-documents at chase time
+  left them dangling (heap-use-after-free under ASAN in the corpus
+  sweep).
 
 
 
