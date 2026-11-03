@@ -1153,11 +1153,11 @@ static const char* rre_match(RreNode* n, const char* s,
         case RRE_EMPTY:
             return rre_run(k, s);
         case RRE_MINPOS: {
-            /* the stored floor is the iteration's start: an empty
-             * match is rejected so the caller's ALT falls through
-             * to alternatives that progress (reD3-6) */
-            const char* floor = (const char*)n->l;
-            if (s != floor) return rre_run(k, s);
+            /* the stored start of the iteration: an empty match is
+             * rejected so the caller's ALT falls through to
+             * alternatives that progress (reD3-6) */
+            const char* iter_start = (const char*)n->l;
+            if (s != iter_start) return rre_run(k, s);
             return NULL;
         }
         case RRE_END:

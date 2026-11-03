@@ -83,7 +83,11 @@ static int unbounded_sign_ok(const char* name, const char* s) {
     for (; *d; d++)
         if (*d != '0') { zero_only = 0; break; }
     if (strcmp(name, "xs:integer") == 0) return 1;
-    if (strcmp(name, "xs:nonNegativeInteger") == 0) return !neg;
+    /* XSD §3.3.20 (leptris-rs#28, errE002): a negative sign is
+     * legal where the value is ZERO — "-0" is a valid
+     * nonNegativeInteger lexical */
+    if (strcmp(name, "xs:nonNegativeInteger") == 0)
+        return !neg || zero_only;
     if (strcmp(name, "xs:positiveInteger") == 0)
         return !neg && !zero_only;
     if (strcmp(name, "xs:nonPositiveInteger") == 0)

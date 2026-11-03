@@ -815,12 +815,22 @@ static void validate_element(struct xsd_validator* v,
     }
     /* #1936 (stE): the element's fixed VALUE constraint applies
      * regardless of the type resolution — inline anonymous types
-     * leave eff_type NULL and used to skip the check entirely. An
-     * empty content also violates a non-empty fixed value. */
+     * leave eff_type NULL and used to skip the check entirely.
+     * XSD 1.0 §3.12.2/§4.3.1.2 (leptris-rs#25, isDefault001): an
+     * element with EMPTY content is satisfied BY the fixed value —
+     * only non-empty content that differs violates (nine suite
+     * rows flipped on the 1.9.402 ride; whitespace-only counts as
+     * empty per the §3.3.4 initial reading). */
     if (d->fixed) {
         const char* text = leptris_element_text(elem);
-        if (!text) text = "";
-        if (strcmp(text, d->fixed) != 0)
+        int has_content = 0;
+        if (text)
+            for (const char* q = text; *q; q++)
+                if (!isspace((unsigned char)*q)) {
+                    has_content = 1;
+                    break;
+                }
+        if (has_content && strcmp(text, d->fixed) != 0)
             verrfk(v, "content-model", "element", local,
                "content does not match the fixed value");
     }
