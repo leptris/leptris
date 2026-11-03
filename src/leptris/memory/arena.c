@@ -40,7 +40,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#if defined(__linux__) || defined(LEPTRIS_HAS_DIRECT_SPANS)
+#if defined(__linux__) || \
+    (defined(LEPTRIS_HAS_DIRECT_SPANS) && !defined(_WIN32))
 #include <sys/mman.h>   /* madvise(MADV_HUGEPAGE), mmap/munmap */
 #endif
 
