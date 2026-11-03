@@ -1,0 +1,4 @@
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:complexType name="fooType" mixed="true"/>
+  <xsd:element name="root" type="fooType"/>
+</xsd:schema>

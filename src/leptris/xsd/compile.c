@@ -279,6 +279,13 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                     if (xsd_capture_inline(s, e, synth))
                         cm->type = xsd_strdup(synth);
                 }
+                /* leptris-rs#35 (isDefault005): particle value
+                 * constraints — an empty child is satisfied BY its
+                 * fixed/default value (§3.12.2). */
+                cm->fixed_value = xsd_strdup(
+                    leptris_element_attribute(e, "fixed"));
+                cm->default_value = xsd_strdup(
+                    leptris_element_attribute(e, "default"));
             }
         } else if (strcmp(local, "group") == 0) {
             /* <xs:group ref="g"/> — expanded at NFA build so
@@ -2471,6 +2478,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
+                    d->default_value = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "default"));
                     const char* sg = leptris_element_attribute(
                         (LeptrisElement)n, "substitutionGroup");
                     if (sg) {
@@ -2509,6 +2519,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
+                    d->default_value = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "default"));
                     const char* sg = leptris_element_attribute(
                         (LeptrisElement)n, "substitutionGroup");
                     if (sg) {
@@ -2922,6 +2935,10 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                         const char* name) {
     XsdCm* root = xsd_cm_new(XSD_CM_SEQ); /* wrapper keeps the name */
     if (!root) return NULL;
+    /* leptris-rs#35 (ctA033, idF025's inline c): mixed="true" admits
+     * character data even with no particle model — the flag must
+     * survive capture or the validator treats the type as empty. */
+    root->mixed = xsd_mixed_flag(ct);
     XsdAttrDecl* attrs = NULL;
     char* any_attr_ns = NULL;
     char* any_attr_not_qname = NULL;

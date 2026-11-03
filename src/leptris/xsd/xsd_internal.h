@@ -156,6 +156,14 @@ typedef struct xsd_cm {
     struct xsd_cm* open_any; /* XSD 1.1: xs:openContent wildcard */
     int oc_mode;        /* 0 none/unset, 1 suffix, 2 interleave */
     int oc_owned;       /* the wildcard node is this model's own */
+    /* leptris-rs#35: particle value constraints + the type's mixed
+     * flag. An empty element is satisfied BY its fixed/default value
+     * (XSD 1.0 §3.12.2/§4.3.1.2 — isDefault005); mixed="true"
+     * admits character data on a particle-less type (ctA033 and
+     * idF025's inline mixed c). */
+    char* fixed_value;
+    char* default_value;
+    int mixed;
 } XsdCm;
 
 
@@ -192,6 +200,8 @@ typedef struct xsd_element_decl {
     char* type;     /* "xs:string"-style builtin or a local type name */
     XsdAlternative* alternatives; /* XSD 1.1 conditional types */
     char* fixed;    /* fixed element content: text must string-equal it */
+    char* default_value; /* leptris-rs#35: supplies content when the
+                              element is empty (stZ072) */
     char* sub_head; /* substitutionGroup head (local name after ':') */
     struct xsd_element_decl* next;
 } XsdElementDecl;
