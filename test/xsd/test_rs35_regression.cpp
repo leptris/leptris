@@ -93,6 +93,15 @@ int validate_pair(const Rs35Case& c) {
 }
 } // namespace
 
+TEST(Rs35Regression, TheAttributeLegCasesValidate) {
+    /* leptris-rs#36: fixed + whitespace-variant lexicals — the
+     * fixed constraint holds on the TYPE value (§4.3.1.2), so
+     * integer attributes whose lexical differs only in
+     * whitespace validate. */
+    EXPECT_EQ(validate_pair({"attO006.xsd", "attO006.xml"}), 1);
+    EXPECT_EQ(validate_pair({"addB104.xsd", "addB104.xml"}), 1);
+}
+
 TEST(Rs35Regression, AllFifteenW3cCasesValidate) {
     static const Rs35Case cases[] = {
         {"isdefault002.xsd", "isdefault005.xml"},
@@ -110,6 +119,8 @@ TEST(Rs35Regression, AllFifteenW3cCasesValidate) {
         {"idG027.xsd", "idG027.xml"},
         {"idG028.xsd", "idG028.xml"},
         {"stZ072.xsd", "stZ072.xml"},
+        {"attO006.xsd", "attO006.xml"},
+        {"addB104.xsd", "addB104.xml"},
     };
     for (const auto& c : cases)
         EXPECT_EQ(validate_pair(c), 1) << c.schema << " / " << c.instance;
