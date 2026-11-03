@@ -1,0 +1,12 @@
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:simpleType name="mylist">
+    <xsd:restriction>
+      <xsd:simpleType>
+        <xsd:list itemType="xsd:integer"/>
+      </xsd:simpleType>
+      <xsd:enumeration value="1"/>
+      <xsd:enumeration value="2"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+  <xsd:element name="root" type="mylist" default="1"/>
+</xsd:schema>

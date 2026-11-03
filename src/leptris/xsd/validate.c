@@ -300,12 +300,12 @@ static void validate_element(struct xsd_validator* v,
 static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
-                           const char* type);
+                           const char* type, const char* fill);
 static void validate_local_uri(struct xsd_validator* v,
                                struct leptris_xsd_schema* s,
                                LeptrisElement elem, const char* local,
                                const char* type, const char* euri,
-                               const char* xsi_q);
+                               const char* xsi_q, const char* fill);
 
 /* #1879: the strongest processContents among the model's wildcards
  * whose namespace grammar admits (uri) — 2 skip, 1 lax, 0 strict,
@@ -351,8 +351,10 @@ static void validate_children(struct xsd_validator* v,
      * oracle rejects whitespace-only content too, #1691 law) */
     if (!model) {
         /* simpleContent types ride text_type with no particle —
-         * their text is validated at the call site */
-        if (!ct->text_type) {
+         * their text is validated at the call site. leptris-rs#35
+         * (ctA033, idF025's inline c): mixed="true" admits character
+         * content even with no particle model. */
+        if (!ct->text_type && !ct->mixed) {
             const char* et = leptris_element_text(elem);
             if (et && *et) {
                 const char* pn = NULL;
@@ -504,6 +506,7 @@ static void validate_children(struct xsd_validator* v,
         int wpc = model_wildcard_pc(model, cu, xsd_target_ns(s));
         if (wpc == 2) continue;
         const char* ptype = NULL;
+        const char* pfill = NULL;
         if (model) {
             XsdCm* stack[64];
             int sp = 0;
@@ -514,6 +517,11 @@ static void validate_children(struct xsd_validator* v,
                     if (p->kind == XSD_CM_ELEMENT && p->name &&
                         strcmp(p->name, cl) == 0 && p->type) {
                         ptype = p->type;
+                        /* leptris-rs#35 (isDefault005): the
+                         * particle's fixed/default value satisfies
+                         * EMPTY content (§3.12.2). */
+                        pfill = p->fixed_value ? p->fixed_value
+                                               : p->default_value;
                         break;
                     }
                     if (p->kind == XSD_CM_GROUP_REF) {
@@ -540,10 +548,11 @@ static void validate_children(struct xsd_validator* v,
                     verrf_atk(v, ce, "type-resolution", cl, "element", cl,
                               "xsi:type prefix is not bound in the instance");
                 } else {
-                    validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi);
+                    validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi,
+                                       pfill);
                 }
             } else {
-                validate_local(v, s, ce, cl, ptype);
+                validate_local(v, s, ce, cl, ptype, pfill);
             }
         } else if (xsd_find_element_ns(s, cl, cu)) {
             validate_element(v, s, ce, 0);
@@ -830,7 +839,8 @@ static void validate_element(struct xsd_validator* v,
      * only non-empty content that differs violates (nine suite
      * rows flipped on the 1.9.402 ride; whitespace-only counts as
      * empty per the §3.3.4 initial reading). */
-    if (d->fixed) {
+    const char* fill = NULL;
+    {
         const char* text = leptris_element_text(elem);
         int has_content = 0;
         if (text)
@@ -839,9 +849,17 @@ static void validate_element(struct xsd_validator* v,
                     has_content = 1;
                     break;
                 }
-        if (has_content && strcmp(text, d->fixed) != 0)
-            verrfk(v, "content-model", "element", local,
-               "content does not match the fixed value");
+        if (d->fixed) {
+            if (has_content && strcmp(text, d->fixed) != 0)
+                verrfk(v, "content-model", "element", local,
+                   "content does not match the fixed value");
+            if (!has_content)
+                fill = d->fixed;
+        } else if (!has_content && d->default_value) {
+            /* leptris-rs#35 (stZ072): the default value supplies the
+             * content of an empty element (§3.12.2). */
+            fill = d->default_value;
+        }
     }
     if (!eff_type) return; /* anyType */
     /* XSD 1.0 §2.6.2/§3.3.4 (moxml#433): xsi:type on the instance
@@ -863,10 +881,11 @@ static void validate_element(struct xsd_validator* v,
                       "xsi:type prefix is not bound in the instance");
             return;
         }
-        validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q);
+        validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q,
+                           fill);
         return;
     }
-    validate_local(v, s, elem, local, eff_type);
+    validate_local(v, s, elem, local, eff_type, fill);
 }
 
 /* Validate one element against a type name that comes from a
@@ -875,17 +894,17 @@ static void validate_element(struct xsd_validator* v,
 static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
-                           const char* type) {
+                           const char* type, const char* fill) {
     const char* euri = NULL;
     leptris_element_expanded_name(elem, NULL, NULL, &euri);
-    validate_local_uri(v, s, elem, local, type, euri, NULL);
+    validate_local_uri(v, s, elem, local, type, euri, NULL, fill);
 }
 
 static void validate_local_uri(struct xsd_validator* v,
                                struct leptris_xsd_schema* s,
                                LeptrisElement elem, const char* local,
                                const char* type, const char* euri,
-                               const char* xsi_q) {
+                               const char* xsi_q, const char* fill) {
     if (!type) return;
     /* the type ref may name a FOREIGN namespace's type (OOXML:
      * wp:extent -> a:CT_PositiveSize2D) — resolve through the
@@ -950,9 +969,12 @@ static void validate_local_uri(struct xsd_validator* v,
         }
         if (ct->text_type) {
             /* empty content is still a lexical value — it faces the
-             * facets (reG17: '' must fail the pattern) */
+             * facets (reG17: '' must fail the pattern). leptris-rs#35:
+             * an EMPTY element is satisfied BY its fixed/default
+             * value (§3.12.2) — the fill substitutes for the read. */
             const char* text = leptris_element_text(elem);
             if (!text) text = "";
+            if (fill && !*text) text = fill;
             text_valid(v, s, ct->text_type, text, ct->ns,
                        "element", local, elem);
         }
@@ -976,6 +998,7 @@ static void validate_local_uri(struct xsd_validator* v,
         validate_attributes(v, s, elem, &k_no_attrs, NULL);
         const char* text = leptris_element_text(elem);
         if (!text) text = "";
+        if (fill && !*text) text = fill;
         text_valid(v, s, type, text, euri, "element", local,
                    elem);
         return;
@@ -996,6 +1019,7 @@ static void validate_local_uri(struct xsd_validator* v,
             validate_attributes(v, s, elem, &k_no_attrs, NULL);
             const char* text = leptris_element_text(elem);
             if (!text) text = "";
+            if (fill && !*text) text = fill;
             text_valid(v, s, builtin, text, euri, "element",
                        local, elem);
             return;
