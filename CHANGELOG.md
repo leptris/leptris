@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.405] - 2026-11-03
+
+### Fixed
+
+- the attribute leg of fixed + whitespace-variant values (leptris-rs#36) (xsd)
+- retain captured sub-documents until schema teardown (ASAN) (xsd)
+- nested attributeGroup refs + multi-document component resolution (leptris#1957, leptris#1958) (xsd)
+
+
+
 ## [1.9.404] - 2026-11-03
 
 ### Fixed
