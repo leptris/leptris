@@ -2044,6 +2044,11 @@ static struct leptris_plan_result* plan_result_build_windowed(
                 dp_value_new(LEPTRIS_PLAN_VALUE_SCALAR);
             if (!v) goto oom;
             const dp_plan* cp = &pool->plans[op->plan_index];
+            /* The row identity drives the serializer's CONTENT check
+             * (bare text vs the wrapper element) and host row
+             * attribution — stamp it from the op. */
+            v->row_index = op->row_index;
+            v->container_plan = op->plan_index;
             if (op->row_index < cp->child_count)
                 v->name = dp_strdup(
                     cp->child_plans[op->row_index].wire_name);
