@@ -4,13 +4,14 @@
 
 ### Added
 
-- LEPTRIS_PLAN_OP_RAW — splice a host fragment verbatim (leptris#1941) (descriptor)
+- descriptor: `LEPTRIS_PLAN_OP_RAW` (op kind 4) — the serializer's escape hatch. Host-side code serializes a fragment (typically a lutaml-model child_deferred subtree) and the plan emits it verbatim as a `VALUE_RAW` row, so ordered/deferred/mixed layouts no longer fall back to per-node `create_element` minting. Closes the engine half of the #1941 wrapper-free serialize face.
+- descriptor: emission rows are stamped with their plan row identity (`row_index` + `container_plan`), which the serializer's CONTENT check requires to address the correct `child_plans` slot.
 
 ### Fixed
 
-- scalar ops stamp the row identity (descriptor)
+- descriptor: scalar ops previously left `child_plans[0]` in place for every row, wrapping scalar text in spurious `<>Hi </>` element shells during native emission.
 
-
+Uniword model_serialize: 0.878s vs 2.52s baseline (~3x CPU), allocations 1.22M vs 3.07M (~2.5x). Engine suite 2222/2222.
 
 ## [1.9.405] - 2026-11-03
 
