@@ -336,8 +336,24 @@ static void validate_children(struct xsd_validator* v,
                               LeptrisElement elem, XsdCm* ct) {
     XsdCm* model = ct->first_child;
     /* empty content model: no element children are allowed (the
-     * anyAttr-derive2 family accepted whole foreign subtrees here) */
+     * anyAttr-derive2 family accepted whole foreign subtrees here)
+     * and NO character content either — an attributes-only
+     * complexType is empty (p2: <elem>abc</elem> [invalid]; the
+     * oracle rejects whitespace-only content too, #1691 law) */
     if (!model) {
+        /* simpleContent types ride text_type with no particle —
+         * their text is validated at the call site */
+        if (!ct->text_type) {
+            const char* et = leptris_element_text(elem);
+            if (et && *et) {
+                const char* pn = NULL;
+                leptris_element_expanded_name(elem, &pn, NULL, NULL);
+                verrf_atk(v, elem, "content-model", pn ? pn : "",
+                          "element", "#text",
+                          "character content is not allowed: the "
+                          "content model is empty");
+            }
+        }
         for (LeptrisNodeRef c =
                  leptris_node_first_child(leptris_element_as_node(elem));
              c; c = leptris_node_next_sibling(c)) {
