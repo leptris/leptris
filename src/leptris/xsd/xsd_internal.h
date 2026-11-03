@@ -255,6 +255,11 @@ typedef struct xsd_element_ics {
 typedef struct xsd_attrgroup_def {
     char* name;
     XsdAttrDecl* attrs;
+    /* leptris#1957: the definition's own element — the ref
+     * expansion RE-CAPTURES it lazily so an inner attributeGroup ref
+     * naming a LATER-registered group resolves (document-order
+     * capture used to leave level-2 members unexpanded). */
+    LeptrisElement elem;
     struct xsd_attrgroup_def* next;
 } XsdAttrGroupDef;
 

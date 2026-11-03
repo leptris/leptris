@@ -36,10 +36,14 @@ extern const XsdElementDecl* xsd_find_element_ns(
     struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern const XsdElementDecl* xsd_find_element(
     struct leptris_xsd_schema* s, const char* name);
+extern const XsdElementDecl* xsd_find_element_child_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                               const char* type_name, const char* uri);
 extern XsdCm* xsd_find_complex_ref(struct leptris_xsd_schema* s,
                               const char* type_name, const char* uri);
+extern XsdCm* xsd_find_complex_ns_free_first(struct leptris_xsd_schema* s,
+                                             const char* type_name);
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,                               const char* type_name);
 extern const XsdSimple* xsd_find_simple_ns_pub(
     struct leptris_xsd_schema* s, const char* name, const char* uri);
@@ -297,15 +301,21 @@ static int text_valid(struct xsd_validator* v,
 static void validate_element(struct xsd_validator* v,
                              struct leptris_xsd_schema* s,
                              LeptrisElement elem, int depth);
+static void validate_element_decl(struct xsd_validator* v,
+                                  struct leptris_xsd_schema* s,
+                                  LeptrisElement elem, int depth,
+                                  const XsdElementDecl* decl_override);
 static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
-                           const char* type, const char* fill);
+                           const char* type, const char* fill,
+                           const char* tns_hint);
 static void validate_local_uri(struct xsd_validator* v,
                                struct leptris_xsd_schema* s,
                                LeptrisElement elem, const char* local,
                                const char* type, const char* euri,
-                               const char* xsi_q, const char* fill);
+                               const char* xsi_q, const char* fill,
+                               const char* tns_hint);
 
 /* #1879: the strongest processContents among the model's wildcards
  * whose namespace grammar admits (uri) — 2 skip, 1 lax, 0 strict,
@@ -549,13 +559,16 @@ static void validate_children(struct xsd_validator* v,
                               "xsi:type prefix is not bound in the instance");
                 } else {
                     validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi,
-                                       pfill);
+                                       pfill, NULL);
                 }
             } else {
-                validate_local(v, s, ce, cl, ptype, pfill);
+                validate_local(v, s, ce, cl, ptype, pfill,
+                               ct ? ct->ns : NULL);
             }
-        } else if (xsd_find_element_ns(s, cl, cu)) {
-            validate_element(v, s, ce, 0);
+        } else {
+            const XsdElementDecl* cd =
+                xsd_find_element_child_ns(s, cl, cu);
+            if (cd) validate_element_decl(v, s, ce, 0, cd);
         }
         /* wildcard-admitted children without a declaration pass:
          * strict and lax alike admit undeclared names (the pinned
@@ -798,13 +811,24 @@ static void validate_attributes(struct xsd_validator* v,
 static void validate_element(struct xsd_validator* v,
                              struct leptris_xsd_schema* s,
                              LeptrisElement elem, int depth) {
+    validate_element_decl(v, s, elem, depth, NULL);
+}
+
+/* decl_override: the CALLER's ns-free declaration find (the content
+ * model child loop's leptris#1958 semantics) — NULL = resolve here. */
+static void validate_element_decl(struct xsd_validator* v,
+                                  struct leptris_xsd_schema* s,
+                                  LeptrisElement elem, int depth,
+                                  const XsdElementDecl* decl_override) {
     if (depth > 64) return;
     const char* local = NULL, *prefix = NULL, *uri = NULL;
     leptris_element_expanded_name(elem, &local, &prefix, &uri);
     if (!local) return;
     const char* guri = NULL;
     leptris_element_expanded_name(elem, NULL, NULL, &guri);
-    const XsdElementDecl* d = xsd_find_element_ns(s, local, guri);
+    const XsdElementDecl* d =
+        decl_override ? decl_override
+                      : xsd_find_element_ns(s, local, guri);
     if (!d) {
         /* strict: the instance uses an element the schema never
          * declared (a local particle would have typed it) */
@@ -882,10 +906,11 @@ static void validate_element(struct xsd_validator* v,
             return;
         }
         validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q,
-                           fill);
+                           fill, NULL);
         return;
     }
-    validate_local(v, s, elem, local, eff_type, fill);
+    validate_local(v, s, elem, local, eff_type, fill,
+                   d->ns);
 }
 
 /* Validate one element against a type name that comes from a
@@ -894,22 +919,43 @@ static void validate_element(struct xsd_validator* v,
 static void validate_local(struct xsd_validator* v,
                            struct leptris_xsd_schema* s,
                            LeptrisElement elem, const char* local,
-                           const char* type, const char* fill) {
+                           const char* type, const char* fill,
+                           const char* tns_hint);
+static void validate_local_uri(struct xsd_validator* v,
+                               struct leptris_xsd_schema* s,
+                               LeptrisElement elem, const char* local,
+                               const char* type, const char* euri,
+                               const char* xsi_q, const char* fill,
+                               const char* tns_hint);
+
+static void validate_local(struct xsd_validator* v,
+                           struct leptris_xsd_schema* s,
+                           LeptrisElement elem, const char* local,
+                           const char* type, const char* fill,
+                           const char* tns_hint) {
     const char* euri = NULL;
     leptris_element_expanded_name(elem, NULL, NULL, &euri);
-    validate_local_uri(v, s, elem, local, type, euri, NULL, fill);
+    validate_local_uri(v, s, elem, local, type, euri, NULL, fill,
+                       tns_hint);
 }
 
 static void validate_local_uri(struct xsd_validator* v,
                                struct leptris_xsd_schema* s,
                                LeptrisElement elem, const char* local,
                                const char* type, const char* euri,
-                               const char* xsi_q, const char* fill) {
+                               const char* xsi_q, const char* fill,
+                               const char* tns_hint) {
     if (!type) return;
-    /* the type ref may name a FOREIGN namespace's type (OOXML:
-     * wp:extent -> a:CT_PositiveSize2D) — resolve through the
-     * reference ladder, not the element-ns-strict lookup */
-    XsdCm* ct = xsd_find_complex_ref(s, type, euri);
+    /* leptris#1958: the DECLARING unit's targetNamespace binds the
+     * type reference first — a no-targetNamespace declaration's
+     * unprefixed type must resolve to ITS OWN unit's component, not
+     * the importing namespace's same-name type (schF1). The
+     * instance-ns reference ladder remains the fallback (OOXML:
+     * wp:extent -> a:CT_PositiveSize2D — #1687). */
+    XsdCm* ct = tns_hint ? xsd_find_complex_ns(s, type, tns_hint) : NULL;
+    if (!ct && (!euri || !euri[0]))
+        ct = xsd_find_complex_ns_free_first(s, type);
+    if (!ct) ct = xsd_find_complex_ref(s, type, euri);
     /* XSD 1.0 §2.7/§3.3.3 (leptris-rs#26, particlesIa002/
      * QFE1700g2): a NILLED element must have neither character nor
      * element content — the content model is not applied (the nil
