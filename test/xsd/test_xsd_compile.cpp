@@ -685,10 +685,14 @@ TEST(XsdDatatypes, InClassWordComplementCarriesNeg) {
     /* word chars: letters, digits, and the P/Z/C-excluded symbols */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "a"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "5"), 1);
+#ifdef LEPTRIS_HAS_UTF8PROC
+    /* non-ASCII word chars need the category table; the no-utf8proc
+     * build degrades \w to the ASCII byte set */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
                                        "\xC3\xA9"), 1); /* U+00E9 Ll */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
                                        "\xE1\x8D\xA9"), 1); /* U+1369 */
+#endif
     /* punctuation is NOT a word char — and per the F.1 table \w
      * excludes ALL of P (Pc too): '_' is NOT a word char (reZ002:
      * the first_last email must fail [\w\-\.]+@.*) */
@@ -926,7 +930,13 @@ TEST(XsdDatatypes, BuiltinTableConvergesOnPart2) {
         {"xs:duration", "P200.5Y", 0},
         {"xs:base64Binary", "abcde", 0},
         {"xs:QName", "xmlns:xsi", 0},
+        /* leptris-rs#28 (errE002): nonNegativeInteger allows an
+         * OPTIONAL sign where zero may carry '-' (XSD §3.3.20) */
+        {"xs:nonNegativeInteger", "-1", 0},
         /* the valid twins stay valid */
+        {"xs:nonNegativeInteger", "+0", 1},
+        {"xs:nonNegativeInteger", "-0", 1},
+        {"xs:nonNegativeInteger", "00", 1},
         {"xs:long", "9223372036854775807", 1},
         {"xs:date", "2000-02-29", 1},
         {"xs:time", "23:59:60", 1},  /* leap second */
@@ -1919,6 +1929,27 @@ TEST(XsdValidate, FixedAttributeValueEnforced) {
 }
 
 TEST(XsdValidate, FixedElementTextEnforced) {
+    EXPECT_EQ(validate_doc(k_fd_schema, "<ship>air</ship>"), 1);
+    EXPECT_EQ(validate_doc(k_fd_schema, "<ship>sea</ship>"), 0);
+}
+
+// leptris-rs#25 (v1.9.402 regression; XSD 1.0 §3.12.2/§4.3.1.2):
+// an element with a fixed value and EMPTY instance content is
+// VALID — the fixed value supplies the content. Only non-empty
+// content that differs violates (msData/additional/isDefault001:
+// <root/> with fixed="abc" [valid]; nine suite rows flipped on
+// the 1.9.402 ride).
+TEST(XsdValidate, FixedElementEmptyContentSatisfiedByFixed) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"root\" type=\"xsd:string\" fixed=\"abc\"/>"
+        "</xsd:schema>";
+    EXPECT_EQ(validate_doc(sch, "<root/>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root></root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root>abc</root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root>  </root>"), 1);
+    EXPECT_EQ(validate_doc(sch, "<root>xyz</root>"), 0);
+    /* the FIXED-attribute facet keeps its strict reading */
     EXPECT_EQ(validate_doc(k_fd_schema, "<ship>air</ship>"), 1);
     EXPECT_EQ(validate_doc(k_fd_schema, "<ship>sea</ship>"), 0);
 }
