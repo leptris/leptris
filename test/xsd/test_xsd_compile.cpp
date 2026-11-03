@@ -1396,6 +1396,45 @@ TEST(XsdValidate, BuiltinCollapseCoversNonStringBuiltins) {
         " xsi:type=\"xsd:boolean\"> true </root>"), 1);
 }
 
+// leptris-rs#27 (XSD §4.3.5 + App. E): enumeration membership over
+// the temporal value spaces compares VALUES, not lexicals —
+// "2002-01-01T12:01:01+00:00" equals "2002-01-01T12:01:01Z"
+// (dateTime_enumeration005a/b); time/date normalize the zero
+// timezone spelling the same way.
+TEST(XsdDatatypes, TemporalEnumerationComparesByValue) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"dt\"><xs:restriction base=\"xs:dateTime\">"
+        "<xs:enumeration value=\"2002-01-01T12:01:01Z\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"tm\"><xs:restriction base=\"xs:time\">"
+        "<xs:enumeration value=\"12:01:01Z\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* the exact 005a/005b shape: Z in the facet, +00:00 in the doc */
+    EXPECT_EQ(leptris_xsd_simple_valid(
+                  s, "dt", "2002-01-01T12:01:01+00:00"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "dt", "2002-01-01T12:01:01Z"),
+              1);
+    /* a shifted-but-equal instant is the same VALUE (App. E):
+     * 07:01:01-05:00 == 12:01:01Z */
+    EXPECT_EQ(leptris_xsd_simple_valid(
+                  s, "dt", "2002-01-01T07:01:01-05:00"), 1);
+    /* a different instant stays out */
+    EXPECT_EQ(leptris_xsd_simple_valid(
+                  s, "dt", "2002-01-01T12:01:02Z"), 0);
+    /* time: the zero-timezone spellings are the same value; a
+     * different tz is a different value (the tz is part of it) */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "12:01:01+00:00"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "13:01:01+01:00"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "12:01:02+00:00"), 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdValidate, ContentModelViolationReports) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"1\">"
