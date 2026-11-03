@@ -191,6 +191,8 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->not_qname);
         free(cm->any_unit_tns);
         free(cm->text_type);
+        free(cm->fixed_value);
+        free(cm->default_value);
         free(cm);
         cm = next;
     }
@@ -2719,6 +2721,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(d->name);
         free(d->type);
         free(d->fixed);
+        free(d->default_value);
         free(d->sub_head);
         free(d);
         d = dn;
