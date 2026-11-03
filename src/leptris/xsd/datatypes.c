@@ -551,6 +551,132 @@ static int facet_check(const XsdSimple* s, const char* v,
     free(collapsed);
     return rc;
 }
+
+/* ---- temporal enumeration equality (leptris-rs#27) ---------------
+ * Enumeration (§4.3.5) is an equality test over the VALUE space:
+ * dateTime compares by instant (App. E), and the time/date/gMonth
+ * family includes the timezone in the value so only the zero
+ * spellings (Z / +00:00 / -00:00) normalize to each other. */
+
+/* days from 1970-01-01 (Howard Hinnant's civil algorithm) */
+static double xsd_days_from_civil(long y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    long era = (y >= 0 ? y : y - 399) / 400;
+    unsigned yoe = (unsigned)(y - era * 400);
+    unsigned doy = (153u * (m + (m > 2 ? -3u : 9u)) + 2u) / 5u + d - 1u;
+    unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return (double)era * 146097.0 + (double)doe - 719468.0;
+}
+
+/* [-]yyyy-mm-ddThh:mm:ss(.f+)?(Z|(+|-)hh:mm)? -> seconds since the
+ * epoch; 0 unless fully parsed (only well-formed lexicals reach
+ * the comparison — anything else stays lexical-equal-only). */
+static int xsd_parse_datetime_instant(const char* v, double* out) {
+    const char* p = v;
+    int neg_year = 0;
+    if (*p == '-') {
+        neg_year = 1;
+        p++;
+    }
+    long y = 0;
+    int got = 0;
+    while (*p >= '0' && *p <= '9') {
+        y = y * 10 + (*p++ - '0');
+        got++;
+    }
+    if (got < 4) return 0;
+    if (*p++ != '-') return 0;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9') return 0;
+    int mo = (p[0] - '0') * 10 + (p[1] - '0');
+    p += 2;
+    if (mo < 1 || mo > 12) return 0;
+    if (*p++ != '-') return 0;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9') return 0;
+    int da = (p[0] - '0') * 10 + (p[1] - '0');
+    p += 2;
+    if (da < 1 || da > 31) return 0;
+    if (*p != 'T' && *p != ' ') return 0;
+    p++;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9') return 0;
+    int hh = (p[0] - '0') * 10 + (p[1] - '0');
+    p += 2;
+    if (hh > 24) return 0;
+    if (*p++ != ':') return 0;
+    if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9') return 0;
+    int mm = (p[0] - '0') * 10 + (p[1] - '0');
+    p += 2;
+    if (mm > 59) return 0;
+    if (*p++ != ':') return 0;
+    double ss = 0;
+    got = 0;
+    while (*p >= '0' && *p <= '9') {
+        ss = ss * 10 + (*p++ - '0');
+        got++;
+    }
+    if (!got) return 0;
+    if (*p == '.') {
+        p++;
+        double f = 0.1;
+        while (*p >= '0' && *p <= '9') {
+            ss += (*p++ - '0') * f;
+            f /= 10.0;
+        }
+    }
+    long tzo = 0;
+    if (*p == 'Z') {
+        p++;
+    } else if (*p == '+' || *p == '-') {
+        int sign = (*p == '+') ? 1 : -1;
+        p++;
+        if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+            return 0;
+        int zh = (p[0] - '0') * 10 + (p[1] - '0');
+        p += 2;
+        if (*p++ != ':') return 0;
+        if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+            return 0;
+        int zm = (p[0] - '0') * 10 + (p[1] - '0');
+        p += 2;
+        if (zh > 14 || zm > 59) return 0;
+        tzo = sign * (zh * 60 + zm);
+    }
+    if (*p) return 0;
+    if (neg_year) y = -y;
+    *out = xsd_days_from_civil(y, (unsigned)mo, (unsigned)da) *
+               86400.0 +
+           hh * 3600.0 + mm * 60.0 + ss - (double)tzo * 60.0;
+    return 1;
+}
+
+static int xsd_datetime_instant_equal(const char* a, const char* b) {
+    double ia = 0, ib = 0;
+    if (!xsd_parse_datetime_instant(a, &ia)) return 0;
+    if (!xsd_parse_datetime_instant(b, &ib)) return 0;
+    return ia == ib;
+}
+
+static void xsd_normalize_zero_tz(const char* s, char* out, size_t cap) {
+    size_t n = strlen(s);
+    const char* tail = (n >= 6) ? s + n - 6 : NULL;
+    if (tail && (strcmp(tail, "+00:00") == 0 ||
+                 strcmp(tail, "-00:00") == 0)) {
+        if (n - 6 + 1 < cap) {
+            memcpy(out, s, n - 6);
+            out[n - 6] = 'Z';
+            out[n - 5] = 0;
+            return;
+        }
+    }
+    snprintf(out, cap, "%s", s);
+}
+
+static int xsd_tznormalized_equal(const char* a, const char* b) {
+    char na[256], nb[256];
+    xsd_normalize_zero_tz(a, na, sizeof na);
+    xsd_normalize_zero_tz(b, nb, sizeof nb);
+    return strcmp(na, nb) == 0;
+}
+
 static int facet_check_body(const XsdSimple* s, const char* v,
                             const char* terminal_base,
                             int chain_is_list) {
@@ -566,8 +692,31 @@ static int facet_check_body(const XsdSimple* s, const char* v,
     }
     if (s->enum_values) {
         int found = 0;
-        for (XsdFacetValue* e = s->enum_values; e; e = e->next)
-            if (strcmp(e->text, v) == 0) { found = 1; break; }
+        int is_dt = terminal_base &&
+                    strcmp(terminal_base, "xs:dateTime") == 0;
+        int is_tzval = terminal_base &&
+                       (strcmp(terminal_base, "xs:time") == 0 ||
+                        strcmp(terminal_base, "xs:date") == 0 ||
+                        strcmp(terminal_base, "xs:gYearMonth") == 0 ||
+                        strcmp(terminal_base, "xs:gYear") == 0 ||
+                        strcmp(terminal_base, "xs:gMonthDay") == 0 ||
+                        strcmp(terminal_base, "xs:gDay") == 0 ||
+                        strcmp(terminal_base, "xs:gMonth") == 0);
+        for (XsdFacetValue* e = s->enum_values; e; e = e->next) {
+            if (strcmp(e->text, v) == 0) {
+                found = 1;
+                break;
+            }
+            if (!found && is_dt &&
+                xsd_datetime_instant_equal(e->text, v)) {
+                found = 1;
+                break;
+            }
+            if (!found && is_tzval && xsd_tznormalized_equal(e->text, v)) {
+                found = 1;
+                break;
+            }
+        }
         if (!found) return 0;
     }
     /* Length family: character count (string-family semantics) —
