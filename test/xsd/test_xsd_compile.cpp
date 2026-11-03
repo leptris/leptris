@@ -661,6 +661,98 @@ TEST(XsdDatatypes, RepOverNullableBodyBacktracksToConsumingAlt) {
     leptris_xsd_free(s);
 }
 
+// reZ003-006: an IN-CLASS positive [\w] carries the complement
+// form — \w is NOT(P|Z|C), so [\w] accepts Sm/Sc/No/letters
+// (U+2044, U+00B2, U+00E9, '<') and REJECTS punctuation
+// ('[', '<' is Sm -> accept; '[' is Ps -> reject). The positive
+// merge copied tmp's P|Z|C mask WITHOUT cat_neg, inverting the
+// class: [\w] accepted punctuation and rejected word symbols.
+TEST(XsdDatatypes, InClassWordComplementCarriesNeg) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"wc\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\w]\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"wcd\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\w\\d]+\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"mail\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\w\\-\\.]+@.*\"/></xs:restriction>"
+        "</xs:simpleType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* word chars: letters, digits, and the P/Z/C-excluded symbols */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "5"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "_"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
+                                       "\xC3\xA9"), 1); /* U+00E9 Ll */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc",
+                                       "\xE1\x8D\xA9"), 1); /* U+1369 */
+    /* punctuation is NOT a word char */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", "["), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", ","), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wc", " "), 0);
+    /* [\w\d]: the digit member unions into the complement form */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wcd", "a5"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "wcd", ","), 0);
+    /* reZ002's email shape: escaped dash/dot members still accept */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "mail", "a.b-c@d"), 1);
+    leptris_xsd_free(s);
+}
+
+// reZ004-006: the in-class builtin merge must carry tmp's UNI
+// ranges (the \d legacy-Nd pin U+1369) and the XML 1.0
+// explicit-list chars: U+212E (BaseChar in the XML Letter
+// production; So in modern tables) for \i/\c, and U+06DD
+// (CombiningChar: Mn in Unicode 3.1, demoted to Cf in 4.0.1 —
+// the same vintage demotion as the 1369-1371 digit pin) for \c.
+TEST(XsdDatatypes, InClassBuiltinsCarryUniRangesAndXmlPins) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"d\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\d]\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"i\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\i]\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"c\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\c]\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"cs\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"[\\c]+\"/></xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* reZ004v: [\d] accepts the legacy-Nd pin IN-CLASS */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d",
+                                       "\xE1\x8D\xA9"), 1); /* U+1369 */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d", "5"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d", "x"), 0);
+    /* reZ005v: [\i] accepts U+212E ESTIMATE SIGN */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "i",
+                                       "\xE2\x84\xAE"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "i", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "i", "5"), 0);
+    /* reZ006v: [\c] accepts U+212E, U+06DD, and the Extender
+     * production's explicit Po members U+00B7/U+0387 */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c",
+                                       "\xE2\x84\xAE"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c",
+                                       "\xDB\x9D"), 1); /* U+06DD */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c",
+                                       "\xC2\xB7"), 1); /* U+00B7 */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c",
+                                       "\xCE\x87"), 1); /* U+0387 */
+    /* [\c]+ runs the name-char set across a name */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "cs", "a5.:-_"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "cs", "!"), 0);
+    /* [\c] alone matches exactly one char */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "c", "a5"), 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdDatatypes, PatternPropertyClassesAndSubtraction) {
     // The OPC ST_ContentType shape, minus the quoted-string member
     // (same property-class + subtraction machinery): type/subtype
