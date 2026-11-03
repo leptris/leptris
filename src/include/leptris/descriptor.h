@@ -277,7 +277,15 @@ typedef enum {
     LEPTRIS_PLAN_OP_SCALAR = 0,
     LEPTRIS_PLAN_OP_ELEMENT = 1,
     LEPTRIS_PLAN_OP_ATTR = 2,
-    LEPTRIS_PLAN_OP_END = 3
+    LEPTRIS_PLAN_OP_END = 3,
+    /* leptris#1941: splice a host-serialized fragment verbatim —
+     * `value`/`value_len` carry the fragment; the result stores it as
+     * a VALUE_RAW and the serializer emits it without escaping. The
+     * ops lane's escape hatch for subtrees the plan cannot address
+     * (valued cycle-point rows: the child model serializes through
+     * its own lane and rides as text). plan_index/row_index are
+     * ignored. */
+    LEPTRIS_PLAN_OP_RAW = 4
 } LeptrisPlanRowOpKind;
 
 typedef struct {
