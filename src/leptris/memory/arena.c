@@ -1,6 +1,38 @@
 /* lib/src/memory/arena.c — Contiguous per-document arena (TODO 183)
  * Copyright (c) 2024, Ribose Inc.
  */
+/* glibc hides MAP_ANONYMOUS under -std=c99 (__STRICT_ANSI__); the
+ * feature-test macros must precede every include of this TU. The
+ * build adds _POSIX_C_SOURCE=200809L publicly, which puts Apple's
+ * headers in strict mode — _DARWIN_C_SOURCE restores the BSD names
+ * (MAP_ANON/MAP_ANONYMOUS) there. */
+#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
+#endif
+
+/* ---- #1947 lever 2: direct (anonymous-mmap) spans ---------------------
+ *
+ * A span above the retain budget can never be parked (retain_give
+ * frees it unconditionally), so acquiring it through malloc buys
+ * nothing and the freed pages linger in allocator magazines — the
+ * ~2 GB post-drop residency the XMI/CityGML pipeline reports. Oversized
+ * spans are taken mmap-direct and returned with munmap on destroy, so
+ * the drop face collapses RSS deterministically.
+ *
+ * Stands down under ASAN (the malloc path keeps use-after-free visible
+ * to the shadow) and under custom allocators (hooked accounting must
+ * see every byte the library takes). Within-budget spans keep the
+ * park-and-reuse lane — the repeated-parse fault fix depends on it. */
+#if defined(_WIN32)
+#define LEPTRIS_HAS_DIRECT_SPANS 1
+#elif !defined(__wasm__) && !defined(__EMSCRIPTEN__) && \
+    (defined(__unix__) || defined(__APPLE__) || defined(__MACH__))
+#define LEPTRIS_HAS_DIRECT_SPANS 1
+#endif
+
 #include "arena.h"
 
 #include "../common/port.h" /* LEPTRIS_THREAD_LOCAL */
@@ -8,8 +40,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#if defined(__linux__)
-#include <sys/mman.h>   /* madvise(MADV_HUGEPAGE) — Linux only */
+#if defined(__linux__) || defined(LEPTRIS_HAS_DIRECT_SPANS)
+#include <sys/mman.h>   /* madvise(MADV_HUGEPAGE), mmap/munmap */
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
+/* BSD headers name it MAP_ANON; the POSIX spelling may be absent. */
+#if defined(LEPTRIS_HAS_DIRECT_SPANS) && !defined(MAP_ANONYMOUS) && \
+    defined(MAP_ANON)
+#define MAP_ANONYMOUS MAP_ANON
 #endif
 
 /* Allocation hooks (core.c): honoring the public
@@ -296,6 +338,66 @@ char* leptris_arena_buffer_alloc(size_t size) {
     return base ? base : (char*)leptris_alloc_hook(size);
 }
 
+/* ---- Direct-span transport (#1947) ----------------------------------- */
+
+static size_t g_span_direct_taken;
+static size_t g_span_direct_released;
+
+int leptris_arena_has_direct_spans(void) {
+#if defined(LEPTRIS_HAS_DIRECT_SPANS)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+void leptris_arena_span_stats(size_t* direct_taken, size_t* direct_released) {
+    if (direct_taken) *direct_taken = g_span_direct_taken;
+    if (direct_released) *direct_released = g_span_direct_released;
+}
+
+#if defined(_WIN32)
+
+static int span_direct_acquire(char** out, size_t size) {
+    void* p = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT,
+                           PAGE_READWRITE);
+    if (!p) return 0;
+    *out = (char*)p;
+    return 1;
+}
+
+static void span_direct_release(char* base, size_t size) {
+    (void)size;
+    VirtualFree(base, 0, MEM_RELEASE);
+}
+
+#elif defined(LEPTRIS_HAS_DIRECT_SPANS)
+
+static int span_direct_acquire(char** out, size_t size) {
+    void* p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return 0;
+    *out = (char*)p;
+    return 1;
+}
+
+static void span_direct_release(char* base, size_t size) {
+    munmap(base, size);
+}
+
+#else
+
+static int span_direct_acquire(char** out, size_t size) {
+    (void)out; (void)size;
+    return 0;
+}
+
+static void span_direct_release(char* base, size_t size) {
+    (void)base; (void)size;
+}
+
+#endif
+
 void leptris_arena_buffer_release(void* p, size_t size) {
     if (!p) return;
     retain_give((char*)p, size);
@@ -335,12 +437,29 @@ LeptrisArena* leptris_arena_create(size_t size) {
         return NULL;
     size_t want = size + hdr;
     size_t capacity = want;
-    char* span = retain_take(want, &capacity);
-    if (!span) {
-        span = (char*)leptris_alloc_hook(want);
+    char* span = NULL;
+    int direct = 0;
+#ifndef ARENA_RETAIN_ASAN
+    /* #1947: above the retain budget the span can never be parked, so
+     * the libc lane only adds magazine residency. Take it direct. */
+    if (want > ARENA_RETAIN_MAX_BYTES && !leptris_custom_allocator_active() &&
+        span_direct_acquire(&span, want)) {
         capacity = want;
-        if (!span) return NULL;
+        direct = 1;
+        retain_lock();
+        g_span_direct_taken++;
+        retain_unlock();
         arena_advise_hugepages(span, capacity);
+    }
+#endif
+    if (!span) {
+        span = retain_take(want, &capacity);
+        if (!span) {
+            span = (char*)leptris_alloc_hook(want);
+            capacity = want;
+            if (!span) return NULL;
+            arena_advise_hugepages(span, capacity);
+        }
     }
     LeptrisArena* arena = (LeptrisArena*)span;
     arena->span = span;
@@ -351,6 +470,7 @@ LeptrisArena* leptris_arena_create(size_t size) {
     arena->size = capacity - hdr;
     arena->used = 0;
     arena->failed = 0;
+    arena->direct = direct;
     return arena;
 }
 
@@ -364,9 +484,16 @@ void leptris_arena_destroy(LeptrisArena* arena) {
     if (!arena) return;
     /* The header lives inside the span — releasing the block
      * releases everything. */
-    retain_give(arena->span, arena->size +
-                ((sizeof(LeptrisArena) + ARENA_ALIGNMENT - 1) &
-                 ~(ARENA_ALIGNMENT - 1)));
+    const size_t hdr = (sizeof(LeptrisArena) + ARENA_ALIGNMENT - 1) &
+                       ~(ARENA_ALIGNMENT - 1);
+    if (arena->direct) {
+        span_direct_release(arena->span, arena->size + hdr);
+        retain_lock();
+        g_span_direct_released++;
+        retain_unlock();
+        return;
+    }
+    retain_give(arena->span, arena->size + hdr);
 }
 
 void* leptris_arena_alloc(LeptrisArena* arena, size_t size) {
