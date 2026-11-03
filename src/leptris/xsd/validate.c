@@ -678,6 +678,43 @@ static int any_attr_matches(const char* grammar, const char* uri,
     return 0;
 }
 
+/* leptris-rs#36 (addB104, attO006): the fixed constraint holds on
+ * the TYPE's value, not the raw lexical (XSD 1.0 §3.2.3/§4.3.1.2) —
+ * a whitespace-variant lexical of a collapsing type (token family,
+ * numeric) is the same value. Normalize both per the type's
+ * whiteSpace and compare. */
+static int attr_fixed_matches(struct leptris_xsd_schema* s,
+                              const char* type, const char* ns,
+                              const char* val, const char* fixed) {
+    if (!type) return 0;
+    if (!type_collapses_ws(s, type, ns)) return 0;
+    char norm_v[512];
+    char norm_f[512];
+    size_t n = strlen(val);
+    if (n >= sizeof(norm_v)) return 0;
+    size_t m = strlen(fixed);
+    if (m >= sizeof(norm_f)) return 0;
+    for (int pass = 0; pass < 2; pass++) {
+        const char* src = pass ? fixed : val;
+        char* out = pass ? norm_f : norm_v;
+        char* o = out;
+        const char* p = src;
+        while (*p && isspace((unsigned char)*p)) p++;
+        int spaced = 0;
+        while (*p) {
+            if (isspace((unsigned char)*p)) {
+                spaced = 1;
+                p++;
+                continue;
+            }
+            if (spaced) { *o++ = ' '; spaced = 0; }
+            *o++ = *p++;
+        }
+        *o = 0;
+    }
+    return strcmp(norm_v, norm_f) == 0;
+}
+
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
@@ -716,7 +753,9 @@ static void validate_attributes(struct xsd_validator* v,
         }
         text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
                    a->name, elem);
-        if (a->fixed && strcmp(val, a->fixed) != 0)
+        if (a->fixed && strcmp(val, a->fixed) != 0 &&
+            !attr_fixed_matches(s, a->type, ta ? ta->ns : NULL, val,
+                                a->fixed))
             verrf_atk(v, elem, "attribute-use", a->name, "attribute",
                       a->name, "value does not match the fixed value");
     }
