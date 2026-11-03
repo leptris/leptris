@@ -2403,6 +2403,238 @@ TEST(Plan408, ResultBuildFeedsSerialize) {
     leptris_plan_free(plan);
 }
 
+// ---- leptris#1941: the ops builder carries emission bindings ----
+// The walk stamps (ns_prefix, ns_uri) onto values (#1551); the ops
+// builder skipped them — the root, scalar rows, and attribute rows
+// all spelled bare names with no xmlns declarations, so every
+// namespaced native-emission tree serialized unnamespaced.
+
+TEST(Plan1941, ResultBuildCarriesRootRowAndAttrBindings) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[0].ns_uri = "http://example.com/wml";
+    kids[0].ns_prefix = "w";
+
+    leptris_attr_plan attrs[1] = {};
+    attrs[0].wire_name = "name";
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    attrs[0].ns_uri = "http://example.com/wml";
+    attrs[0].ns_prefix = "w";
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "document";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "http://example.com/wml";
+    plans[0].ns_prefix = "w";
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = attrs;
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ATTR, 0, 0, "name", "d1", 2},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "alpha", 5},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 4, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<w:document xmlns:w=\"http://example.com/wml\" "
+                 "w:name=\"d1\"><w:p>alpha</w:p></w:document>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+/* A row spelling a prefix without its own ns_uri inherits the
+ * TARGET plan's URI (the walk's #1115 fallback): the compiler
+ * leaves inherited rows' ns unset and the prefix comes from the
+ * child plan's tree namespace. */
+TEST(Plan1941, ResultBuildInheritsTargetUriForPrefixOnlyRows) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan root_kids[1] = {};
+    root_kids[0].wire_name = "docId";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[0].child_plan_index = 1;
+    root_kids[0].ns_prefix = "w14";
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "settings";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "http://example.com/main";
+    plans[0].ns_prefix = "w";
+    plans[0].child_count = 1;
+    plans[0].child_plans = root_kids;
+    plans[1].element_name = "docId";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "http://example.com/w14";
+    plans[1].ns_prefix = "w14";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 4, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<w:settings xmlns:w=\"http://example.com/main\" "
+                 "xmlns:w14=\"http://example.com/w14\">"
+                 "<w14:docId/></w:settings>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+/* leptris#1941 emission inheritance, two rules (the DOM lane's
+ * Namespaces planner contract): (1) rows of a namespaced plan
+ * inherit that plan's binding — an explicit row binding wins;
+ * (2) a NESTED row inherits the CHILD plan's binding so the
+ * wrapper spells the child's namespace, not the parent's. */
+TEST(Plan1941, ResultBuildInheritsPlanAndChildPlanBindings) {
+    LeptrisStatus st = LEPTRIS_OK;
+    /* plan 0: settings (w) with a nested row "body" -> plan 1;
+     * plan 1: body (w) with a scalar row "t" (no row binding). */
+    leptris_child_plan root_kids[1] = {};
+    root_kids[0].wire_name = "body";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[0].child_plan_index = 1;
+
+    leptris_child_plan body_kids[1] = {};
+    body_kids[0].wire_name = "t";
+    body_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    body_kids[0].child_plan_index = -1;
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "settings";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "http://example.com/main";
+    plans[0].ns_prefix = "w";
+    plans[0].child_count = 1;
+    plans[0].child_plans = root_kids;
+    plans[1].element_name = "body";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "http://example.com/main";
+    plans[1].ns_prefix = "w";
+    plans[1].child_count = 1;
+    plans[1].child_plans = body_kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 1, 0, NULL, "hello", 5},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 5, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    /* The nested row spells the CHILD plan's prefix; the scalar
+     * row inherits its OWN plan's prefix; one declaration per
+     * distinct pair on the root. */
+    EXPECT_STREQ(out,
+                 "<w:settings xmlns:w=\"http://example.com/main\">"
+                 "<w:body><w:t>hello</w:t></w:body></w:settings>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+/* Explicit row bindings beat inherited ones: the docId rows of
+ * the #1115 multi-ns case carry no row binding and take the
+ * child plan's w14/w15 namespaces, while a row WITH a binding
+ * keeps it verbatim. */
+TEST(Plan1941, ResultBuildExplicitRowBindingBeatsInheritance) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan root_kids[2] = {};
+    root_kids[0].wire_name = "docId";
+    root_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[0].child_plan_index = 1;
+    root_kids[1].wire_name = "note";
+    root_kids[1].kind = LEPTRIS_PLAN_KIND_NESTED;
+    root_kids[1].child_plan_index = 2;
+    root_kids[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    root_kids[1].ns_uri = "http://example.com/other";
+    root_kids[1].ns_prefix = "o";
+
+    leptris_element_plan plans[3] = {};
+    plans[0].element_name = "settings";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "http://example.com/main";
+    plans[0].ns_prefix = "w";
+    plans[0].child_count = 2;
+    plans[0].child_plans = root_kids;
+    plans[1].element_name = "docId";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "http://example.com/w14";
+    plans[1].ns_prefix = "w14";
+    plans[2].element_name = "note";
+    plans[2].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[2].ns_uri = "http://example.com/other";
+    plans[2].ns_prefix = "o";
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 3;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 1, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 6, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out,
+                 "<w:settings xmlns:w=\"http://example.com/main\" "
+                 "xmlns:w14=\"http://example.com/w14\" "
+                 "xmlns:o=\"http://example.com/other\">"
+                 "<w14:docId/><o:note/></w:settings>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
 TEST(Plan408, ResultBuildRejectsBadPrograms) {
     LeptrisStatus st = LEPTRIS_OK;
     leptris_element_plan plans[1] = {};
