@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.406] - 2026-11-03
+
+### Added
+
+- LEPTRIS_PLAN_OP_RAW — splice a host fragment verbatim (leptris#1941) (descriptor)
+
+### Fixed
+
+- scalar ops stamp the row identity (descriptor)
+
+
+
 ## [1.9.405] - 2026-11-03
 
 ### Fixed
