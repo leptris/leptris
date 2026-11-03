@@ -63,3 +63,54 @@ TEST(Rs35Regression, RedefineExtensionKeepsParticles) {
 TEST(Rs35Regression, DefaultSuppliesListContent) {
     EXPECT_EQ(validate_case(cases_path("rs35_list_default/stZ072")), 1);
 }
+
+/* The FULL rs#35 wave: every W3C case named in the issue (expected
+ * VALID, all passing on 1.9.402.0). Real msData fixtures verbatim. */
+namespace {
+struct Rs35Case {
+    const char* schema;
+    const char* instance;
+};
+// The msMeta manifest's own schema assignment per instance (the
+// isDefault family shares schemas: 005/006 → isdefault002,
+// 025/026 → isdefault004, 060_1 → test95960_1).
+int validate_pair(const Rs35Case& c) {
+    LeptrisStatus st = LEPTRIS_OK;
+    std::string base = cases_path("rs35_w3c");
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file((base + "/" + c.schema).c_str(), &st);
+    if (!s) return -1;
+    LeptrisDocument d =
+        leptris_parse_file((base + "/" + c.instance).c_str(), &st);
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int ok = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return ok;
+}
+} // namespace
+
+TEST(Rs35Regression, AllFifteenW3cCasesValidate) {
+    static const Rs35Case cases[] = {
+        {"isdefault002.xsd", "isdefault005.xml"},
+        {"isdefault002.xsd", "isdefault006.xml"},
+        {"isdefault004.xsd", "isdefault025.xml"},
+        {"isdefault004.xsd", "isdefault026.xml"},
+        {"test95960_1.xsd", "test95960_1.xml"},
+        {"ctA033.xsd", "ctA033.xml"},
+        {"ctA035.xsd", "ctA035.xml"},
+        {"idF025.xsd", "idF025.xml"},
+        {"idF033.xsd", "idF033.xml"},
+        {"idF034.xsd", "idF034.xml"},
+        {"idG018.xsd", "idG018.xml"},
+        {"idG019.xsd", "idG019.xml"},
+        {"idG027.xsd", "idG027.xml"},
+        {"idG028.xsd", "idG028.xml"},
+        {"stZ072.xsd", "stZ072.xml"},
+    };
+    for (const auto& c : cases)
+        EXPECT_EQ(validate_pair(c), 1) << c.schema << " / " << c.instance;
+}
