@@ -1,0 +1,2 @@
+<doc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="schema.xsd" att1="x" foo="123">text</doc>

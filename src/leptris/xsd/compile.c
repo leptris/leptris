@@ -550,6 +550,11 @@ static ret_type fn_name(struct leptris_xsd_schema* s, const char* name,    \
                 return t;                                                  \
         return NULL;                                                       \
     }                                                                      \
+    /* NULL uri: the reference itself is namespace-free — unstamped    \
+     * declarations bind FIRST (leptris#1958: an imported               \
+     * no-targetNamespace type must win its own reference over the      \
+     * importing namespace's same-name type), then the policy allows    \
+     * the name-only sweep across the merged table. */                  \
     for (ret_type t = s->list_field; t; t = t->next)                       \
         if (strcmp(t->name_field, name) == 0)                              \
             return t;                                                      \
@@ -558,6 +563,25 @@ static ret_type fn_name(struct leptris_xsd_schema* s, const char* name,    \
 
 XSD_DEFINE_NS_LADDER(const XsdElementDecl*, xsd_ladder_element, elements,
                      name, ns)
+
+/* leptris#1958: a NULL-namespace INSTANCE element binds its own
+ * no-targetNamespace declaration FIRST — the importing namespace's
+ * same-name global (registered later, prepended earlier in the
+ * merged list) must not shadow it. Stamped references keep the
+ * macro's ladder. */
+const XsdElementDecl* xsd_ladder_element_ns_free_first(
+    struct leptris_xsd_schema* s, const char* name, const char* uri,
+    int allow_name_only) {
+    if (!s || !name) return NULL;
+    if (uri && uri[0])
+        return xsd_ladder_element(s, name, uri, allow_name_only);
+    for (XsdElementDecl* t = s->elements; t; t = t->next)
+        if (!t->ns && strcmp(t->name, name) == 0) return t;
+    if (!allow_name_only) return NULL;
+    for (XsdElementDecl* t = s->elements; t; t = t->next)
+        if (strcmp(t->name, name) == 0) return t;
+    return NULL;
+}
 XSD_DEFINE_NS_LADDER(XsdCm*, xsd_ladder_complex, complex_types, name, ns)
 XSD_DEFINE_NS_LADDER(const XsdSimple*, xsd_ladder_simple, simple_types,
                      name, ns)
@@ -2313,20 +2337,29 @@ static XsdAttrDecl* xsd_capture_attr_rows(
  * PRE-PASS — the symbol space is order-free, but the ref expansion
  * in xsd_capture_attr_rows looks up s->attr_groups at capture time,
  * so a group declared AFTER the referencing type used to vanish. */
-static void xsd_capture_attr_group_def(struct leptris_xsd_schema* s,
-                                       LeptrisElement n,
-                                       const char* nm) {
+/* Phase 1 registers the def (name + element) only; phase 2
+ * captures the rows once EVERY top-level group is registered —
+ * leptris#1957: an inner attributeGroup ref naming a group that
+ * appears LATER in the document used to expand empty. */
+static void xsd_register_attr_group_def(struct leptris_xsd_schema* s,
+                                        LeptrisElement n,
+                                        const char* nm) {
     XsdAttrGroupDef* g = (XsdAttrGroupDef*)calloc(1, sizeof(*g));
     if (!g) return;
     g->name = xsd_strdup(nm);
-    g->attrs = xsd_capture_attr_rows(s, n, 0);
+    g->elem = n;
     g->next = s->attr_groups;
     s->attr_groups = g;
 }
 
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
-    /* pre-pass: every top-level attributeGroup def, document order */
+    /* pre-pass phase 1: register every top-level attributeGroup def
+     * (name + element), document order — the symbol space is
+     * order-free. Phase 2 captures the rows once ALL defs are
+     * registered, so an inner attributeGroup ref naming a LATER
+     * group resolves (leptris#1957: level-2 members used to
+     * vanish). */
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -2342,8 +2375,11 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         const char* nm = leptris_element_attribute((LeptrisElement)n,
                                                    "name");
         if (!nm) continue;
-        xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
+        xsd_register_attr_group_def(s, (LeptrisElement)n, nm);
     }
+    for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next)
+        if (!g->attrs && g->elem)
+            g->attrs = xsd_capture_attr_rows(s, g->elem, 0);
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -2416,11 +2452,23 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             (strcmp(local, "import") == 0 || same_ns)) {
                             /* leptris-ruby#440/#439: each captured
                              * unit stamps ITS OWN targetNamespace on
-                             * its declarations — chameleon includes
-                             * (no tns) adopt the includer's. */
+                             * its declarations — chameleon INCLUDES
+                             * (no tns) adopt the includer's.
+                             * leptris#1958: an IMPORT of a
+                             * no-targetNamespace document keeps its
+                             * declarations namespace-FREE (XSD 1.0
+                             * §4.2.3 — chameleon semantics are
+                             * include-only); stamping the importer's
+                             * tns made its same-named components
+                             * shadow the importing namespace's own
+                             * (schF1: the imported ct-A won the
+                             * (ns-a, ct-A) exact ladder slot and
+                             * swapped a1/a2's types). */
                             char* saved_ns = s->target_ns;
                             char* sub_ns = tns ? xsd_strdup(tns) : NULL;
                             if (sub_ns) s->target_ns = sub_ns;
+                            else if (strcmp(local, "import") == 0)
+                                s->target_ns = NULL;
                             s->include_depth++;
                             xsd_capture_root(s, subroot);
                             s->include_depth--;
@@ -2446,6 +2494,42 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             xsd_capture_root(s, (LeptrisElement)n);
                             s->capture_force = 0;
                             s->include_depth--;
+                            /* leptris#1958 (schP2): a redefined
+                             * simpleType's restriction base names the
+                             * ORIGINAL definition — both share the
+                             * name, and the name-only chain lookup
+                             * (head-first = the replacement) would
+                             * self-loop. Rename the original to a
+                             * hidden alias and repoint the
+                             * replacement's base at it; every OTHER
+                             * reference keeps resolving to the
+                             * replacement (head-first). */
+                            for (XsdSimple* t = s->simple_types; t;
+                                 t = t->next) {
+                                if (!t->base || strcmp(t->base, t->name) != 0)
+                                    continue;
+                                XsdSimple* other = NULL;
+                                for (XsdSimple* o = s->simple_types; o;
+                                     o = o->next) {
+                                    if (o == t) continue;
+                                    if (o->name &&
+                                        strcmp(o->name, t->name) == 0) {
+                                        other = o;
+                                        break;
+                                    }
+                                }
+                                if (!other) continue;
+                                size_t alen = strlen(other->name) + 24;
+                                char* alias =
+                                    (char*)malloc(alen);
+                                if (!alias) continue;
+                                snprintf(alias, alen, "%s#rb%p",
+                                         other->name, (void*)other);
+                                free(other->name);
+                                other->name = alias;
+                                free(t->base);
+                                t->base = xsd_strdup(alias);
+                            }
                         }
                         leptris_document_free(sub);
                     }
@@ -2593,8 +2677,16 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 XsdAttrGroupDef* seen = s->attr_groups;
                 for (; seen; seen = seen->next)
                     if (strcmp(seen->name, nm) == 0) break;
-                if (!seen || s->capture_force)
-                    xsd_capture_attr_group_def(s, (LeptrisElement)n, nm);
+                if (!seen || s->capture_force) {
+                    /* Sub-document defs register + capture inline —
+                     * their own inner refs ride the same lazy
+                     * expansion (leptris#1957). */
+                    xsd_register_attr_group_def(s, (LeptrisElement)n, nm);
+                    XsdAttrGroupDef* rg = s->attr_groups;
+                    if (rg && !rg->attrs)
+                        rg->attrs =
+                            xsd_capture_attr_rows(s, rg->elem, 0);
+                }
             }
         } else if (strcmp(local, "group") == 0 && uri && !strcmp(uri, XSD_NS)) {
             const char* nm =
@@ -3451,8 +3543,15 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
             XsdAttrGroupDef* g = s->attr_groups;
             for (; g; g = g->next)
                 if (strcmp(g->name, ref) == 0) break;
-            if (!g || !g->attrs) continue;
-            XsdAttrDecl* copied = xsd_copy_attr_rows(g->attrs);
+            if (!g) continue;
+            /* leptris#1957: expand lazily through the def's own
+             * element when its rows are not captured yet (a group
+             * registered in phase 1 whose phase-2 capture has not
+             * run, or runs later in document order). depth+1 keeps
+             * the cycle guard. */
+            XsdAttrDecl* copied =
+                g->attrs ? xsd_copy_attr_rows(g->attrs)
+                         : xsd_capture_attr_rows(s, g->elem, depth + 1);
             if (!copied) continue;
             if (!head)
                 head = copied;
@@ -3703,6 +3802,23 @@ const XsdElementDecl* xsd_find_element_ns(
     return xsd_ladder_element(s, name, uri, 0);
 }
 
+/* leptris#1958: the CONTENT-MODEL child loop's lookup — a
+ * no-namespace instance child binds its own no-targetNamespace
+ * declaration FIRST (the importing namespace's same-name global
+ * sits ahead in the merged list and must not shadow it). Root and
+ * global lookups keep the stock ladder. */
+const XsdElementDecl* xsd_find_element_child_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri) {
+    if (!s || !name) return NULL;
+    if (uri && uri[0])
+        return xsd_ladder_element(s, name, uri, 0);
+    for (XsdElementDecl* t = s->elements; t; t = t->next)
+        if (!t->ns && strcmp(t->name, name) == 0) return t;
+    for (XsdElementDecl* t = s->elements; t; t = t->next)
+        if (strcmp(t->name, name) == 0) return t;
+    return NULL;
+}
+
 XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
                         const char* type_name) {
     if (!s || !type_name) return NULL;
@@ -3719,6 +3835,22 @@ XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                            const char* type_name, const char* uri) {
     /* STRICT: derivation is same-namespace by XSD rules. */
     return xsd_ladder_complex(s, type_name, uri, 0);
+}
+
+/* leptris#1958: the ns-FREE reference — a no-targetNamespace
+ * declaration's unprefixed type binds ITS OWN unit's (unstamped)
+ * component first; the importing namespace's same-name type (which
+ * sits ahead in the merged list) must not shadow it. Used only by
+ * the validator's decl-driven fallback (hint == NULL, instance
+ * namespace absent) — every other lookup keeps the stock ladder. */
+XsdCm* xsd_find_complex_ns_free_first(struct leptris_xsd_schema* s,
+                                      const char* type_name) {
+    if (!s || !type_name) return NULL;
+    for (XsdCm* t = s->complex_types; t; t = t->next)
+        if (!t->ns && strcmp(t->name, type_name) == 0) return t;
+    for (XsdCm* t = s->complex_types; t; t = t->next)
+        if (strcmp(t->name, type_name) == 0) return t;
+    return NULL;
 }
 
 /* leptris-ruby#440 (follow-up): a TYPE REFERENCE on an instance
