@@ -1521,11 +1521,23 @@ static int dp_emit_element_open(const struct leptris_plan_result* v,
         }
     }
     for (size_t a = 0; a < v->attr_count; a++) {
-        if (!dp_sb_putn(b, " ", 1) || !dp_sb_puts(b, v->attr_names[a]) ||
-            !dp_sb_puts(b, "=\"") ||
-            !dp_sb_escape(b, v->attr_values[a], 1) ||
-            !dp_sb_putn(b, "\"", 1))
-            return 0;
+        /* leptris#1941: a row with an emission binding spells
+         * "prefix:local" (dp_wrapper_name's element contract);
+         * the stored name stays the LOCAL name for host lookups. */
+        char* qn = NULL;
+        const char* nm = v->attr_names[a];
+        if (v->attr_ns_prefixes && v->attr_ns_prefixes[a] && nm) {
+            const char* colon = strchr(nm, ':');
+            qn = dp_join_colon(v->attr_ns_prefixes[a],
+                               colon ? colon + 1 : nm);
+            nm = qn;
+        }
+        int ok = nm && dp_sb_putn(b, " ", 1) && dp_sb_puts(b, nm) &&
+                 dp_sb_puts(b, "=\"") &&
+                 dp_sb_escape(b, v->attr_values[a], 1) &&
+                 dp_sb_putn(b, "\"", 1);
+        free(qn);
+        if (!ok) return 0;
     }
     return 1;
 }
@@ -1948,8 +1960,48 @@ static struct leptris_plan_result* plan_result_build_windowed(
             if (op->row_index != UINT32_MAX) {
                 const leptris_child_plan* cr =
                     &cp->child_plans[op->row_index];
-                v->ns_prefix = dp_strdup(cr->ns_prefix);
-                v->ns_uri = dp_strdup(cr->ns_uri);
+                /* leptris#1941 emission inheritance (the DOM
+                 * lane's Namespaces planner contract): a row
+                 * without its own binding inherits the CHILD
+                 * plan's binding (nested rows spell the child's
+                 * namespace), else the row's OWN plan's binding
+                 * (rows of a namespaced plan spell the plan's
+                 * namespace). Explicit row bindings win. The URI
+                 * follows the prefix's plan. */
+                const dp_plan* ns_src = NULL;
+                if (cr->ns_prefix) {
+                    v->ns_prefix = dp_strdup(cr->ns_prefix);
+                    const dp_plan* tp =
+                        (cr->child_plan_index >= 0 &&
+                         cr->child_plan_index < (int32_t)pool->plan_count)
+                            ? &pool->plans[cr->child_plan_index]
+                            : NULL;
+                    v->ns_uri = dp_strdup(cr->ns_uri ? cr->ns_uri
+                                                     : tp->ns_uri);
+                    if (!v->ns_prefix || !v->ns_uri) goto oom;
+                } else if (cr->child_plan_index >= 0 &&
+                           cr->child_plan_index <
+                               (int32_t)pool->plan_count &&
+                           pool->plans[cr->child_plan_index].ns_prefix &&
+                           pool->plans[cr->child_plan_index].ns_form ==
+                               LEPTRIS_PLAN_NS_EXACT) {
+                    ns_src = &pool->plans[cr->child_plan_index];
+                } else if (cp->ns_prefix &&
+                           cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
+                    ns_src = cp;
+                }
+                if (ns_src) {
+                    v->ns_prefix = dp_strdup(ns_src->ns_prefix);
+                    v->ns_uri = dp_strdup(ns_src->ns_uri);
+                    if (!v->ns_prefix || !v->ns_uri) goto oom;
+                }
+            } else if (cp->ns_prefix &&
+                       cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
+                /* leptris#1941: the root op binds the plan's own
+                 * emission prefix — the walk's stamp (#1551). */
+                v->ns_prefix = dp_strdup(cp->ns_prefix);
+                v->ns_uri = dp_strdup(cp->ns_uri);
+                if (!v->ns_prefix || !v->ns_uri) goto oom;
             }
             if (sp == 0) {
                 if (root) {
@@ -1995,6 +2047,28 @@ static struct leptris_plan_result* plan_result_build_windowed(
             if (op->row_index < cp->child_count)
                 v->name = dp_strdup(
                     cp->child_plans[op->row_index].wire_name);
+            /* leptris#1941: scalar rows are their own wrapper
+             * element — the row's emission binding rides the
+             * value, same as ELEMENT ops (#1551); rows without a
+             * binding inherit the plan's namespace. */
+            if (op->row_index < cp->child_count) {
+                const leptris_child_plan* cr =
+                    &cp->child_plans[op->row_index];
+                const dp_plan* ns_src = NULL;
+                if (cr->ns_prefix) {
+                    v->ns_prefix = dp_strdup(cr->ns_prefix);
+                    v->ns_uri = dp_strdup(cr->ns_uri);
+                    if (!v->ns_prefix || !v->ns_uri) goto oom;
+                } else if (cp->ns_prefix &&
+                           cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
+                    ns_src = cp;
+                }
+                if (ns_src) {
+                    v->ns_prefix = dp_strdup(ns_src->ns_prefix);
+                    v->ns_uri = dp_strdup(ns_src->ns_uri);
+                    if (!v->ns_prefix || !v->ns_uri) goto oom;
+                }
+            }
             if (!dp_value_set_str(v, op->value ? op->value : "",
                                   op->value ? op->value_len : 0))
                 dp_value_set_str(v, "", 0);
@@ -2066,6 +2140,23 @@ static struct leptris_plan_result* plan_result_build_windowed(
                             op->value ? op->value_len : 0);
             gp[el->attr_count] = NULL;
             gu[el->attr_count] = NULL;
+            /* leptris#1941: the attr row's emission binding —
+             * ns_form EXACT rows spell "prefix:local" (#1551).
+             * row_index out of range (host-synthesized attrs) has
+             * no plan row: the fields stay NULL. */
+            if (op->plan_index < pool->plan_count &&
+                op->row_index <
+                    pool->plans[op->plan_index].attribute_count) {
+                const leptris_attr_plan* ap =
+                    &pool->plans[op->plan_index]
+                         .attribute_plans[op->row_index];
+                if (ap->ns_prefix) {
+                    gp[el->attr_count] = dp_strdup(ap->ns_prefix);
+                    gu[el->attr_count] = dp_strdup(ap->ns_uri);
+                    if (!gp[el->attr_count] || !gu[el->attr_count])
+                        goto oom;
+                }
+            }
             if (!gn[el->attr_count] || !gv[el->attr_count])
                 goto oom;
             el->attr_count++;
