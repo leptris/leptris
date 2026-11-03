@@ -415,3 +415,112 @@ TEST(LeptrisArena, SameSizeReuseSurvivesMixedSizeTraffic) {
         leptris_arena_destroy(h);
     }
 }
+
+// ---- #1947 lever 2: oversized spans bypass the libc allocator ------
+// A span above the retain budget can never be parked (retain_give
+// frees it unconditionally), so acquiring it through malloc buys
+// nothing and the freed pages linger in allocator magazines — the
+// ~2 GB post-drop residency the CityGML pipeline reports. Spans over
+// ARENA_RETAIN_MAX_BYTES are taken mmap-direct and returned with
+// munmap on destroy, so the drop face collapses RSS deterministically.
+//
+// The stats hook counts direct spans; it is internal (arena.h) — the
+// public ABI surface is untouched.
+TEST(ArenaDirectSpans, OversizedCreateGoesDirectNotMalloc) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "direct spans disabled under ASAN (malloc path keeps UAF visible)";
+#endif
+    if (!leptris_arena_has_direct_spans())
+        GTEST_SKIP() << "platform has no anonymous-mmap span path";
+    leptris_arena_retain_drain();
+    size_t taken0 = 0, released0 = 0;
+    leptris_arena_span_stats(&taken0, &released0);
+
+    const size_t kBig = 128u * 1024u * 1024u; /* > ARENA_RETAIN_MAX_BYTES */
+    LeptrisArena* a = leptris_arena_create(kBig);
+    ASSERT_NE(a, nullptr);
+    /* The bump region must still offer the full budget — direct
+     * acquisition is a transport swap, not a capacity change. */
+    EXPECT_EQ(leptris_arena_remaining(a), kBig);
+
+    size_t taken1 = 0, released1 = 0;
+    leptris_arena_span_stats(&taken1, &released1);
+    EXPECT_EQ(taken1, taken0 + 1) << "oversized span was not taken direct";
+    EXPECT_EQ(released1, released0);
+    leptris_arena_destroy(a);
+}
+
+TEST(ArenaDirectSpans, OversizedDestroyMunmapsInsteadOfParking) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "direct spans disabled under ASAN (malloc path keeps UAF visible)";
+#endif
+    if (!leptris_arena_has_direct_spans())
+        GTEST_SKIP() << "platform has no anonymous-mmap span path";
+    leptris_arena_retain_drain();
+    size_t taken0 = 0, released0 = 0;
+    leptris_arena_span_stats(&taken0, &released0);
+
+    const size_t kBig = 128u * 1024u * 1024u;
+    LeptrisArena* a = leptris_arena_create(kBig);
+    ASSERT_NE(a, nullptr);
+    leptris_arena_destroy(a);
+
+    size_t taken1 = 0, released1 = 0;
+    leptris_arena_span_stats(&taken1, &released1);
+    EXPECT_EQ(taken1, taken0 + 1);
+    EXPECT_EQ(released1, released0 + 1)
+        << "oversized span was parked or freed via libc instead of munmap";
+}
+
+TEST(ArenaDirectSpans, StandDownUnderCustomAllocator) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "direct spans disabled under ASAN";
+#endif
+    if (!leptris_arena_has_direct_spans())
+        GTEST_SKIP() << "platform has no anonymous-mmap span path";
+    leptris_arena_retain_drain();
+    leptris_set_memory_management_functions(
+        recycle_counting_alloc, recycle_counting_free);
+    g_recycle_allocs = 0;
+    g_recycle_frees = 0;
+    size_t taken0 = 0, released0 = 0;
+    leptris_arena_span_stats(&taken0, &released0);
+
+    LeptrisArena* a = leptris_arena_create(128u * 1024u * 1024u);
+    ASSERT_NE(a, nullptr);
+    leptris_arena_destroy(a);
+
+    size_t taken1 = 0, released1 = 0;
+    leptris_arena_span_stats(&taken1, &released1);
+    /* Hooked accounting must see the whole cycle — no direct lane. */
+    EXPECT_EQ(taken1, taken0);
+    EXPECT_EQ(released1, released0);
+    EXPECT_EQ(g_recycle_allocs, 1);
+    EXPECT_EQ(g_recycle_frees, 1);
+
+    leptris_arena_retain_drain();
+    leptris_set_memory_management_functions(NULL, NULL);
+}
+
+TEST(ArenaDirectSpans, WithinBudgetSpanNeverGoesDirect) {
+#if defined(ARENA_TESTS_ASAN)
+    GTEST_SKIP() << "retain cache disabled under ASAN";
+#endif
+    if (!leptris_arena_has_direct_spans())
+        GTEST_SKIP() << "platform has no anonymous-mmap span path";
+    leptris_arena_retain_drain();
+    size_t taken0 = 0, released0 = 0;
+    leptris_arena_span_stats(&taken0, &released0);
+
+    LeptrisArena* a = leptris_arena_create(1u * 1024u * 1024u);
+    ASSERT_NE(a, nullptr);
+    leptris_arena_destroy(a);
+
+    size_t taken1 = 0, released1 = 0;
+    leptris_arena_span_stats(&taken1, &released1);
+    /* Retain-budget spans keep the park-and-reuse lane: the repeated
+     * parse fault fix depends on it. */
+    EXPECT_EQ(taken1, taken0);
+    EXPECT_EQ(released1, released0);
+    leptris_arena_retain_drain();
+}

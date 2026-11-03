@@ -39,6 +39,8 @@ typedef struct leptris_arena {
     size_t size;   /* Bump-region capacity (span capacity minus header) */
     size_t used;   /* Bump pointer — bytes handed out so far */
     size_t failed; /* 1 once any request has been refused (sticky) */
+    int direct;    /* 1 when the span is an anonymous mmap owned by the
+                    * arena — destroy must munmap, not park or free */
 } LeptrisArena;
 
 /* Create an arena of `size` bytes (one malloc). Returns NULL on
@@ -58,6 +60,14 @@ void leptris_arena_destroy(LeptrisArena* arena);
 
 /* Release retained arena blocks (leptris_thread_cleanup drain). */
 void leptris_arena_retain_drain(void);
+
+/* #1947 lever 2: spans above the retain budget never park, so they
+ * bypass the libc allocator — anonymous mmap on acquire, munmap on
+ * destroy — and a dropped document's pages return to the OS
+ * deterministically instead of lingering in allocator magazines.
+ * Internal observability for specs; not part of the public ABI. */
+int leptris_arena_has_direct_spans(void);
+void leptris_arena_span_stats(size_t* direct_taken, size_t* direct_released);
 
 /* Bump-allocate `size` bytes, 8-byte aligned. NOT zeroed.
  * Returns NULL when the request does not fit in remaining space —
