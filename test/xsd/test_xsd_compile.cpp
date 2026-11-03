@@ -1325,6 +1325,45 @@ TEST(XsdValidate, EmptyContentModelRejectsText) {
     EXPECT_EQ(validate_doc(sch, "<doc><e>abc</e></doc>"), 0);
 }
 
+// leptris-rs#26 (XSD 1.0 §3.3.3): xsi:nil="true" requires EMPTY
+// content — the content model is NOT applied to nilled elements
+// (particlesIa002: e1 nillable minOccurs=2 under an all(a,b)
+// model, both instances empty+nilled [valid]; QFE1700g2).
+TEST(XsdValidate, NilledElementSkipsContentModel) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:x=\"http://xsdtesting\""
+        " targetNamespace=\"http://xsdtesting\""
+        " elementFormDefault=\"qualified\">"
+        "<xsd:complexType name=\"t1\"><xsd:all>"
+        "<xsd:element name=\"a\"/><xsd:element name=\"b\"/>"
+        "</xsd:all></xsd:complexType>"
+        "<xsd:element name=\"doc\"><xsd:complexType>"
+        "<xsd:sequence>"
+        "<xsd:element name=\"e1\" minOccurs=\"2\" maxOccurs=\"2\""
+        " type=\"x:t1\" nillable=\"true\"/>"
+        "</xsd:sequence></xsd:complexType></xsd:element>"
+        "</xsd:schema>";
+    const char* inst =
+        "<?xml version=\"1.0\"?>\n"
+        "<x:doc xmlns:x=\"http://xsdtesting\""
+        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+        "<x:e1 xsi:nil=\"true\"/><x:e1 xsi:nil=\"true\"/>"
+        "</x:doc>";
+    EXPECT_EQ(validate_doc(sch, inst), 1);
+    /* nilled with content is a violation */
+    EXPECT_EQ(validate_doc(sch,
+        "<x:doc xmlns:x=\"http://xsdtesting\""
+        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+        "<x:e1 xsi:nil=\"true\">x</x:e1>"
+        "<x:e1 xsi:nil=\"true\"/></x:doc>"), 0);
+    /* non-nilled still faces the model */
+    EXPECT_EQ(validate_doc(sch,
+        "<x:doc xmlns:x=\"http://xsdtesting\""
+        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
+        "<x:e1/><x:e1/></x:doc>"), 0);
+}
+
 TEST(XsdValidate, ContentModelViolationReports) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"1\">"

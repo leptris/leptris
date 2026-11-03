@@ -882,6 +882,40 @@ static void validate_local_uri(struct xsd_validator* v,
      * wp:extent -> a:CT_PositiveSize2D) — resolve through the
      * reference ladder, not the element-ns-strict lookup */
     XsdCm* ct = xsd_find_complex_ref(s, type, euri);
+    /* XSD 1.0 §2.7/§3.3.3 (leptris-rs#26, particlesIa002/
+     * QFE1700g2): a NILLED element must have neither character nor
+     * element content — the content model is not applied (the nil
+     * value replaces it; the oracle rejects whitespace too).
+     * Attributes are unaffected by nil and still validate. */
+    const char* nilattr = leptris_element_attribute_ns(
+        elem, "http://www.w3.org/2001/XMLSchema-instance", "nil");
+    if (nilattr && strcmp(nilattr, "true") == 0) {
+        const char* ntext = leptris_element_text(elem);
+        if (ntext && *ntext)
+            verrfk(v, "content-model", "element", local,
+                   "character content is not allowed: the element "
+                   "is nilled");
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(elem));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            verrfk(v, "content-model", "element", local,
+                   "element content is not allowed: the element "
+                   "is nilled");
+            break;
+        }
+        if (ct) {
+            const XsdTypeAttrs* nrows =
+                xsd_find_type_attrs_ns(s, type, euri);
+            if (!nrows) nrows = xsd_find_type_attrs(s, type);
+            validate_attributes(v, s, elem, nrows, ct);
+        } else {
+            static const XsdTypeAttrs k_no_attrs;
+            validate_attributes(v, s, elem, &k_no_attrs, NULL);
+        }
+        return;
+    }
     if (ct) {
         const XsdTypeAttrs* rows =
             xsd_find_type_attrs_ns(s, type, euri);
