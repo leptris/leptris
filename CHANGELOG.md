@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.404] - 2026-11-03
+
+### Fixed
+
+- free the rs#35 capture fields (ASAN Linux lane) (xsd)
+- the leptris-rs#35 regression wave (15 W3C cases, four subclasses) (xsd)
+- ops builder carries emission ns bindings (leptris#1941) (descriptor)
+
+
+
 ## [1.9.403] - 2026-11-03
 
 ### Fixed
