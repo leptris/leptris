@@ -157,16 +157,25 @@ static int token_family_builtin(const char* t) {
            strcmp(t, "xs:NMTOKENS") == 0 ||
            strcmp(t, "xs:ENTITIES") == 0;
 }
+
+/* XSD §4.3.6: whiteSpace=collapse is FIXED on every builtin
+ * EXCEPT string (preserve) and normalizedString (replace) — the
+ * numerics, the temporal family, boolean, the binaries, QName all
+ * collapse (leptris-rs#29, elemZ002). */
+static int builtin_collapses(const char* t) {
+    return strcmp(t, "xs:string") != 0 &&
+           strcmp(t, "xs:normalizedString") != 0;
+}
 static int type_collapses_ws(struct leptris_xsd_schema* s,
                              const char* type, const char* ns) {
     if (!type) return 0;
-    if (strncmp(type, "xs:", 3) == 0) return token_family_builtin(type);
+    if (strncmp(type, "xs:", 3) == 0) return builtin_collapses(type);
     const XsdSimple* st = xsd_find_simple_ns_pub(s, type, ns);
     int depth = 0;
     while (st && depth++ < 32) {
         if (!st->base) return 0;
         if (strncmp(st->base, "xs:", 3) == 0)
-            return token_family_builtin(st->base);
+            return builtin_collapses(st->base);
         st = xsd_find_simple_pub(s, st->base);
     }
     return 0;

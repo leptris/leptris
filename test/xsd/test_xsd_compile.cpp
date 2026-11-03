@@ -1364,6 +1364,38 @@ TEST(XsdValidate, NilledElementSkipsContentModel) {
         "<x:e1/><x:e1/></x:doc>"), 0);
 }
 
+// leptris-rs#29 (elemZ002): XSD §4.3.6 fixes whiteSpace=collapse
+// on EVERY builtin except string (preserve) and normalizedString
+// (replace) — the xsi:type override path must collapse integer
+// content like the declared path (oracle validates the instance).
+TEST(XsdValidate, BuiltinCollapseCoversNonStringBuiltins) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xsd:element name=\"root\" type=\"xsd:decimal\"/>"
+        "</xsd:schema>";
+    /* the exact elemZ002 shape: override + whitespace-wrapped */
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+        " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " xsi:type=\"xsd:integer\">\n    123451234\n</root>"), 1);
+    /* the declared path too (no override) */
+    EXPECT_EQ(validate_doc(sch,
+        "<root xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        ">  12345  </root>"), 1);
+    /* collapse does not repair an internal double space into a
+     * valid integer */
+    EXPECT_EQ(validate_doc(sch,
+        "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+        " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " xsi:type=\"xsd:integer\">12  345</root>"), 0);
+    /* non-numeric builtins collapse the same way */
+    EXPECT_EQ(validate_doc(sch,
+        "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+        " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " xsi:type=\"xsd:boolean\"> true </root>"), 1);
+}
+
 TEST(XsdValidate, ContentModelViolationReports) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"1\">"
