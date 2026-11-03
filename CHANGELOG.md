@@ -4,14 +4,82 @@
 
 ### Fixed
 
-- temporal enumeration compares by value, not lexically (leptris-rs#27) (xsd)
-- whiteSpace=collapse covers every non-string builtin (leptris-rs#29, elemZ002) (xsd)
-- a nilled element must have empty content - the model is not applied (leptris-rs#26) (xsd)
-- empty content satisfies a fixed value; -0 lexes for nonNegativeInteger (leptris-rs#25/#28) (xsd)
-- subtraction root cause, XSD \w excludes '_', empty content model (leptris#1936 reF39/reZ002/p2) (rng,xsd)
-- in-class builtin merge carries uni ranges and XML pins (leptris#1936 reZ003-006) (rng)
-- {n,} unbounded, empty branches, and REP over nullable bodies (leptris#1936 reC57/reE10/reD3) (rng)
-- regex-tail conformance - pattern disjunction, class grammar, empty content (leptris#1936 p16/reG) (xsd)
+**XSD regex conformance: the #1936 family closes.** The
+msMeta-classified W3C XSD suite divergences go from 104
+engine-wrong rows to ZERO; the 22 remaining sweep divergences are
+documented suite-stale dispositions (reJ x15 modern-Unicode,
+reS/reT `queried` rows, Unicode-3.1 vintage, reDH7a whose suite
+metadata contradicts its own annotation and the oracle).
+
+- **Multiple `xs:pattern` facets are a disjunction** (p16: two
+  patterns accept a value matching ANY of them, "same as
+  `[abc]+|[123]+`") — the old last-pattern-wins capture
+  under-accepted every earlier pattern.
+- **Pattern facets are validated at schema compile** (F.1
+  productions [14]/[17]-[22]): a standalone `-` is a class member
+  only at group start or end — mid-dash patterns
+  (`[a-c-1-4x-z-7-9]`, `[a-a-x-x]`, reG26-33/reH19) are grammar
+  errors and reject the schema. Empty patterns stay legal (reA1).
+- **In-class negated builtins complement exactly** (reG21/23):
+  `[\D]+` matched `'1'` because the uppercase spellings built an
+  empty member set and the "complement" memset accepted every
+  byte. The positive class now rides the negm slot — exact across
+  bytes, uni ranges and categories.
+- **charClassSub skipped only the `-`** before handing the stream
+  to the class parser, which expects entry PAST the `[` — the
+  subtrahend's `[` parsed as a literal member and a leading `^`
+  was dropped, so `[a-z-[^a]]` matched a-z minus `{a}` instead of
+  `{a}` (reF39). The subtraction also composes AFTER the
+  negCharGroup flip (`[^cde-[ag]]`, RegexTest_430).
+- **`\w` excludes ALL of `\p{P}`** — Pc too: `'_'` is NOT a word
+  char (reZ002: `first_last` fails `[\w\-\.]+@.*`; Perl's `\w`
+  includes it, XSD's does not).
+- **`{n,}` stays unbounded** (the `{n}`-exact fix collapsed every
+  comma form to `{n,n}` — reC57); **an empty branch is legal**
+  and matches only the empty string (reE10); **a REP over a
+  nullable body** pins each counted iteration to consume
+  (reD3-6: `((boy|(girl))...?)|(man|woman)...` under `woman1y`).
+- **The in-class builtin merge carries uni ranges and the XML 1.0
+  explicit-list pins** (reZ003-006): U+1369-1371 (legacy Nd) in
+  `[\d]`, U+212E (BaseChar) in `\i`/`\c`, U+06DD/U+06DE
+  (Mn-in-3.1 demotions) and U+00B7/U+0387 (Extender's explicit Po
+  members) in `\c`.
+- **Empty content faces simple-type facets** (reG17: `''` fails
+  the pattern and is not a valid `xs:integer`); the fixed-value
+  check fires with no text node.
+- **An attributes-only complexType has EMPTY content** —
+  character content violates it (p2: `<elem>abc</elem>`
+  [invalid]; whitespace-only too, per the oracle).
+
+**leptris-rs#25-29 validation-semantics wave** (found by the
+binding audit):
+
+- **rs#25 (regression in 1.9.402)**: an element with a fixed
+  value and EMPTY instance content is VALID — the fixed value
+  supplies the content (XSD §3.12.2; nine W3C rows flipped on the
+  402 ride: isDefault001/002/076, ctZ013a, elemQ019, stE065/066/
+  096, particlesZ040). Only differing non-empty content violates;
+  whitespace-only counts as empty.
+- **rs#26**: a NILLED element has neither character nor element
+  content — the content model is not applied
+  (particlesIa002/QFE1700g2). Attributes are unaffected and still
+  validate.
+- **rs#27**: temporal enumeration compares by VALUE, not
+  lexically — dateTime by instant (App. E: `+00:00` equals `Z` of
+  the same instant), time/date/gMonth normalize only the
+  zero-timezone spellings (the timezone is part of the value).
+- **rs#28**: `-0` is a valid nonNegativeInteger lexical (§3.3.20:
+  zero may carry a negative sign); positiveInteger keeps
+  excluding it.
+- **rs#29**: whiteSpace=collapse is FIXED on every builtin except
+  string (preserve) and normalizedString (replace) — the xsi:type
+  override path now collapses integer content like the declared
+  path (elemZ002).
+
+All fixes are red-first in the test suite (158 XSD specs green in
+both the utf8proc and no-utf8proc configs) and verified against
+the vendored W3C corpus documents; rng/sch/dtd/xpath/libxslt
+suites unchanged (204 + 1 standing skip).
 
 
 
