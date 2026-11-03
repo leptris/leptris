@@ -170,6 +170,13 @@ static void cls_add_builtin(RreNode* n, char c) {
             for (int i = 'A'; i <= 'Z'; i++) cls_add(n, (unsigned char)i);
             cls_add(n, '_');
             cls_add(n, ':');
+            /* XML 1.0 lists U+212E ESTIMATE SIGN explicitly in the
+             * Letter production (So in modern tables) — reZ005v */
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x212E;
+                n->uni_hi[n->uni_n] = 0x212E;
+                n->uni_n++;
+            }
 #if defined(LEPTRIS_HAS_UTF8PROC)
             /* letters above the bitmap: the old 0x80-0xFF blanket
              * also accepted symbols like U+00D7 (moxml#464) */
@@ -192,6 +199,36 @@ static void cls_add_builtin(RreNode* n, char c) {
             cls_add(n, ':');
             cls_add(n, '.');
             cls_add(n, '-');
+            /* XML 1.0 vintage pins: U+212E (BaseChar, reZ005v),
+             * U+06DD (CombiningChar: Mn in Unicode 3.1, demoted to
+             * Cf in 4.0.1 — reZ006v), and U+00B7/U+0387 (the
+             * Extender production's explicit Po members — reZ006v),
+             * the same vintage-demotion family as the \d legacy-Nd
+             * pin */
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x212E;
+                n->uni_hi[n->uni_n] = 0x212E;
+                n->uni_n++;
+            }
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x06DD;
+                n->uni_hi[n->uni_n] = 0x06DD;
+                n->uni_n++;
+            }
+            /* U+06DE: Mn in Unicode 3.1 -> So in 4.0.1 (reZ006v) */
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x06DE;
+                n->uni_hi[n->uni_n] = 0x06DE;
+                n->uni_n++;
+            }
+            /* 0xB7 sits in the BYTE bitmap (uni ranges are only
+             * consulted above 0x100) */
+            cls_add(n, 0xB7);
+            if (n->uni_n < 4) {
+                n->uni_lo[n->uni_n] = 0x0387;
+                n->uni_hi[n->uni_n] = 0x0387;
+                n->uni_n++;
+            }
 #if defined(LEPTRIS_HAS_UTF8PROC)
             n->cat_set = 1;
             n->cat_mask = (1u << UTF8PROC_CATEGORY_LU) |
@@ -719,8 +756,19 @@ static RreNode* parse_class(RreParser* ps) {
                 if (tmp->cat_set) {
                     n->cat_set = 1;
                     n->cat_mask |= tmp->cat_mask;
+                    /* \w rides the COMPLEMENT form: the mask lists
+                     * P|Z|C and the verdict negates (reZ003-006:
+                     * [\w] accepts Sm/No/letters, rejects P/Z/C) */
+                    if (tmp->cat_neg) n->cat_neg = 1;
                 }
 #endif
+                /* the builtin's UNI ranges ride too — [\d] must keep
+                 * the legacy-Nd pin U+1369-1371 (reZ004v) */
+                for (int i = 0; i < tmp->uni_n && n->uni_n < 4; i++) {
+                    n->uni_lo[n->uni_n] = tmp->uni_lo[i];
+                    n->uni_hi[n->uni_n] = tmp->uni_hi[i];
+                    n->uni_n++;
+                }
                 for (int i = 0; i < 256; i++)
                     if ((tmp->cls[i >> 3] >> (i & 7)) & 1)
                         cls_add(n, (unsigned char)i);
