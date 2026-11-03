@@ -4,9 +4,32 @@
 
 ### Fixed
 
-- free the rs#35 capture fields (ASAN Linux lane) (xsd)
-- the leptris-rs#35 regression wave (15 W3C cases, four subclasses) (xsd)
-- ops builder carries emission ns bindings (leptris#1941) (descriptor)
+- **XSD validation: the leptris-rs#35 regression wave** — four
+  strictness defects introduced/exposed by the 1.9.403 fixes, all
+  expected-VALID W3C cases that passed on 1.9.402:
+  - fixed + empty CHILD elements: particles capture `fixed`/`default`
+    and an empty element is satisfied BY the value (XSD 1.0
+    §3.12.2/§4.3.1.2) — the fill substitutes for the empty lexical at
+    every simple-type check site (isDefault005/006/025/026/060_1);
+  - `mixed="true"` on a particle-less complexType admits character
+    content (ctA033/ctA035);
+  - redefine composition with inline mixed children (idF025/033/034,
+    idG018/019/027/028) — the same root cause: the mixed flag now
+    survives capture;
+  - default-supplied content on an empty list-typed element (stZ072).
+  All fifteen issue cases run verbatim from the msData fixtures; the
+  capture fields are ASAN-leak clean.
+
+- **Descriptor: the ops builder carries the emission namespace
+  bindings (leptris#1941)** — `leptris_plan_result_build` dropped the
+  `(ns_prefix, ns_uri)` bindings the walk stamps: root, scalar, and
+  attribute ops serialized bare names with no xmlns declarations.
+  Root ops bind the plan's prefix, scalar ops their row binding,
+  nested element ops inherit the CHILD plan's binding (explicit row
+  bindings win), and prefix-only rows fall back to the target plan's
+  URI. The serializer spells `prefix:local` for attributes from the
+  stored LOCAL name. Matching is untouched — the bindings are
+  emission-only.
 
 
 
