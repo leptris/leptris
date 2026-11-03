@@ -587,6 +587,80 @@ TEST(XsdDatatypes, DashAfterRangeMemberIsGrammarError) {
     EXPECT_EQ(compile_pattern("[\\\\-\\{^]"), 1);
 }
 
+// F.1 [7] quantMin "{n,}" is OPEN-ENDED (the {n}-exact fix clobbered
+// it: after the comma branch *q is at '}', so "{n,}" collapsed to
+// {n,n}) and [2] branch ::= piece* — an EMPTY branch is legal and
+// matches only "" (reE10: the pattern "|" is valid; reC57:
+// (ab){2,}).
+TEST(XsdDatatypes, OpenEndedRepeatAndEmptyBranch) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"rep\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"a{2,}\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"grp\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"(ab){2,}\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"alt\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"|\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"altL\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"a|\"/></xs:restriction></xs:simpleType>"
+        "<xs:simpleType name=\"altR\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"|b\"/></xs:restriction></xs:simpleType>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "rep", "aaa"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "rep", "aa"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "rep", "a"), 0);
+    /* reC57: (ab){2,} vs 'ababab' [valid] */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "grp", "ababab"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "grp", "abab"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "grp", "ab"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "grp", "aba"), 0);
+    /* reE10: "|" matches only the empty string */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "alt", ""), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "alt", "a"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altL", "a"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altL", ""), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altL", "b"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altR", "b"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altR", ""), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "altR", "a"), 0);
+    leptris_xsd_free(s);
+}
+
+// reD3-6: a REP over a nullable body — the count loop must not end
+// at the body's EMPTY first alternative while later alternatives
+// consume ((a?|b)+ 'b'; the full reD3 shape 'woman1y').
+TEST(XsdDatatypes, RepOverNullableBodyBacktracksToConsumingAlt) {
+    const char xsd[] =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"d3\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"(((((boy)|(girl))[0-1][x-z]{2})?)|"
+        "(man|woman)[0-1]?[y|n])*\"/></xs:restriction>"
+        "</xs:simpleType>"
+        "<xs:simpleType name=\"red\"><xs:restriction base=\"xs:string\">"
+        "<xs:pattern value=\"(a?|b)+\"/></xs:restriction>"
+        "</xs:simpleType></xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* reD3: suite value 'woman1y' [valid] */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d3", "woman1y"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d3", "boy0xy"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d3", "man1n"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "d3", "z"), 0);
+    /* reduction: each iteration must find the consuming alt */
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "red", "b"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "red", "bb"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "red", "ab"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "red", "c"), 0);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdDatatypes, PatternPropertyClassesAndSubtraction) {
     // The OPC ST_ContentType shape, minus the quoted-string member
     // (same property-class + subtraction machinery): type/subtype

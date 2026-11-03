@@ -36,6 +36,8 @@ enum {
     RRE_CAT,
     RRE_ALT,
     RRE_REP,
+    RRE_EMPTY, /* F.1 [2]: a branch of zero pieces matches only "" */
+    RRE_MINPOS, /* count-loop sentinel: iteration must consume */
 };
 
 typedef struct RreNode {
@@ -972,12 +974,14 @@ static RreNode* parse_piece(RreParser* ps) {
     } else if (*ps->p == '{') {
         const char* q = ps->p + 1;
         int l = -1, h = -1;
+        int saw_comma = 0;
         char* end = NULL;
         long v = strtol(q, &end, 10);
         if (end > q) {
             l = (int)v;
             q = end;
             if (*q == ',') {
+                saw_comma = 1;
                 q++;
                 if (*q == '}') {
                     h = -1;
@@ -991,8 +995,11 @@ static RreNode* parse_piece(RreParser* ps) {
             }
             /* {n} with no comma is EXACT — h must be l, not the
              * -1 "unbounded" sentinel. The old code left h = -1,
-             * so [A-Z]{3} matched ABCD (open-ended {3,}). */
-            if (*q != ',' && h == -1) h = l;
+             * so [A-Z]{3} matched ABCD (open-ended {3,}). {n,}
+             * (comma seen) stays unbounded — the old exact-fix
+             * checked *q != ',' AFTER the comma was consumed, so
+             * a{2,} collapsed to {2,2} and never matched 'aaa'. */
+            if (!saw_comma && h == -1) h = l;
             if (*q == '}' && l >= 0 && (h == -1 || h >= l)) {
                 lo = l;
                 hi = h;
@@ -1013,6 +1020,12 @@ static RreNode* parse_piece(RreParser* ps) {
 }
 
 static RreNode* parse_cat(RreParser* ps) {
+    /* F.1 [2]: branch ::= piece* — ZERO pieces is a legal empty
+     * branch matching only "" (reE10: the pattern "|" is valid). */
+    if (!*ps->p || *ps->p == '|' || *ps->p == ')') {
+        RreNode* e = node_new(RRE_EMPTY);
+        return e;
+    }
     RreNode* first = parse_piece(ps);
     if (!first) return NULL;
     if (!*ps->p || *ps->p == '|' || *ps->p == ')') return first;
@@ -1068,6 +1081,16 @@ static const char* rre_run(const RreCont* k, const char* s) {
 static const char* rre_match(RreNode* n, const char* s,
                              const RreCont* k) {
     switch (n->kind) {
+        case RRE_EMPTY:
+            return rre_run(k, s);
+        case RRE_MINPOS: {
+            /* the stored floor is the iteration's start: an empty
+             * match is rejected so the caller's ALT falls through
+             * to alternatives that progress (reD3-6) */
+            const char* floor = (const char*)n->l;
+            if (s != floor) return rre_run(k, s);
+            return NULL;
+        }
         case RRE_END:
             return *s == 0 ? rre_run(k, s) : NULL;
         case RRE_CHAR:
@@ -1101,15 +1124,25 @@ static const char* rre_match(RreNode* n, const char* s,
         }
         case RRE_REP: {
             /* Two passes: count the greedy maximum, then store the
-             * end position of every prefix count in a heap array. */
+             * end position of every prefix count in a heap array.
+             * Each counted iteration is pinned to CONSUME (the
+             * RRE_MINPOS continuation): a nullable body whose first
+             * alternative matches empty must not end the count
+             * while later alternatives progress (reD3-6:
+             * ((boy|(girl))...?)|(man|woman)... under 'woman1y'). */
             size_t cap = n->hi < 0 ? 64 : (size_t)n->hi + 1;
             const char** ends =
                 (const char**)malloc((cap + 1) * sizeof(*ends));
             if (!ends) return NULL;
+            RreNode minpos;
+            memset(&minpos, 0, sizeof(minpos));
+            minpos.kind = RRE_MINPOS;
+            RreCont mk = {&minpos, NULL};
             ends[0] = s;
             size_t cnt = 0;
             while (n->hi < 0 || (int)cnt < n->hi) {
-                const char* r = rre_match(n->l, ends[cnt], NULL);
+                minpos.l = (RreNode*)ends[cnt];
+                const char* r = rre_match(n->l, ends[cnt], &mk);
                 if (!r || r == ends[cnt]) break;
                 if (cnt == cap) {
                     cap *= 2;
