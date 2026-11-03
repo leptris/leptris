@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [1.9.403] - 2026-11-03
+
+### Fixed
+
+- temporal enumeration compares by value, not lexically (leptris-rs#27) (xsd)
+- whiteSpace=collapse covers every non-string builtin (leptris-rs#29, elemZ002) (xsd)
+- a nilled element must have empty content - the model is not applied (leptris-rs#26) (xsd)
+- empty content satisfies a fixed value; -0 lexes for nonNegativeInteger (leptris-rs#25/#28) (xsd)
+- subtraction root cause, XSD \w excludes '_', empty content model (leptris#1936 reF39/reZ002/p2) (rng,xsd)
+- in-class builtin merge carries uni ranges and XML pins (leptris#1936 reZ003-006) (rng)
+- {n,} unbounded, empty branches, and REP over nullable bodies (leptris#1936 reC57/reE10/reD3) (rng)
+- regex-tail conformance - pattern disjunction, class grammar, empty content (leptris#1936 p16/reG) (xsd)
+
+
+
 ## [1.9.402] - 2026-11-02
 
 ### Fixed
