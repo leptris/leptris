@@ -1230,6 +1230,32 @@ int validate_doc(const char* schema, const char* xml) {
     return r;
 }
 
+// leptris#1964: the anyAttribute grammar rides attributeGroup
+// REFS too — attgD019's ##any wildcard lives inside the referenced
+// group, not the referencing complexType's direct children, so the
+// type's grammar captured empty and strict admission rejected
+// attributes the wildcard admits. compile-set variant: the head
+// (no tns) + the foo-tns member; W3C attgD019 expects VALID.
+TEST(XsdCompile, StrictAnyAttrGrammarRidesAttributeGroupRefs) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* paths[] = {
+        LEPTRIS_XSD_CASES_DIR "/attgD019-set/attgD019.xsd",
+        LEPTRIS_XSD_CASES_DIR "/attgD019-set/attgD019a.xsd",
+    };
+    LeptrisXsdSchema s = leptris_xsd_compile_set(paths, 2, &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char inst[] =
+        "<doc xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+        " xmlns:x=\"foo\">"
+        "<elem att1=\"123\" x:foo=\"foo\"/></doc>";
+    LeptrisDocument d = leptris_parse_string(inst, strlen(inst), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << leptris_xsd_error_at(s, 0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"2\" status=\"ok\">"
