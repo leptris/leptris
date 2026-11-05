@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [1.9.408] - 2026-11-05
+
+### Fixed
+
+- emit default-xmlns declarations for prefix-less EXACT rows (#1969) (descriptor)
+- the union value-space fix + default-xmlns emission (leptris-rs#45, leptris#1969) (engine)
+- union-typed fixed constraints compare in the value space (leptris-rs#45) (xsd)
+
+
+
 ## [1.9.407] - 2026-11-05
 
 ### Fixed
