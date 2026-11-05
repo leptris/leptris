@@ -88,3 +88,38 @@ TEST(I1958, RedefinedSimpleTypeFacetEnforced) {
     leptris_document_free(d);
     leptris_xsd_free(s);
 }
+
+
+// ---- leptris-rs#45: union-typed fixed constraints compare in the
+// union's VALUE SPACE — the first member type validating the fixed
+// lexical must also validate the instance lexical (stE050: "1" and
+// "true" both xs:boolean; stE055: "1.0"/"1.000" both xs:float).
+// Raw strcmp wrongly rejected value-equal forms. Real W3C fixtures
+// (msData/simpleType, vendored under libxml2-cases/stE-union-fixed).
+TEST(XsdUnionFixed, StE050BooleanMemberAcceptsBoth) {
+    EXPECT_EQ(validate_case(cases_path("stE-union-fixed/stE050.xsd"),
+                            cases_path("stE-union-fixed/stE050.xml")),
+              1);
+}
+
+TEST(XsdUnionFixed, StE055FloatMemberAcceptsBothSpellings) {
+    EXPECT_EQ(validate_case(cases_path("stE-union-fixed/stE055.xsd"),
+                            cases_path("stE-union-fixed/stE055.xml")),
+              1);
+}
+
+TEST(XsdUnionFixed, NonMemberValueStillRejects) {
+    /* "2.0" validates through the union (float) but differs from the
+     * fixed 1.0 in the value space — the fixed constraint holds. */
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        cases_path("stE-union-fixed/stE055.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    const char other[] = "<root>2.000</root>";
+    LeptrisDocument d = leptris_parse_string(other, strlen(other), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0)
+        << "fixed 1.0 accepted the value 2.0";
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
