@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.409] - 2026-11-05
+
+### Fixed
+
+- particle typing is namespace-aware — substitution members ride their own ns (rs#46) (xsd)
+
+
+
 ## [1.9.408] - 2026-11-05
 
 ### Fixed
