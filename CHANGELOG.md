@@ -1,10 +1,8 @@
 ## [Unreleased]
 
-## [1.9.409] - 2026-11-05
-
 ### Fixed
 
-- particle typing is namespace-aware — substitution members ride their own ns (rs#46) (xsd)
+- **xsd**: particle typing is NAMESPACE-AWARE — content-model capture records particle namespaces (ref-form resolves the QName; name-form reads @form/elementFormDefault), substitution members ride their own namespace (not the head particle's), and the gates are asymmetric per the pinned corpus posture: qualified particles admit no-ns children leniently, unqualified particles are strict with a fallback when no global declaration could type the child (leptris-rs#46; W3C elemZ020 vendored). Rounds out the v1.9.408 XSD wave (rs#45, #1969, #1964).
 
 
 
