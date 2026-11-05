@@ -1461,6 +1461,53 @@ TEST(XsdDatatypes, TemporalEnumerationComparesByValue) {
     leptris_xsd_free(s);
 }
 
+// W3C XSD suite msData/element/elemZ020: particle typing is
+// NAMESPACE-aware. A form="unqualified" local particle types only
+// no-namespace children; a namespaced child of the same local name
+// types through its own (substitution-member) declaration. The
+// first-name-match DFS bound BOTH to whichever same-name particle
+// it saw first (elemZ020: 'true' failed xsd:int, '123' failed
+// xsd:boolean).
+TEST(XsdValidate, ParticleTypingIsNamespaceAware) {
+    const char* sch =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " elementFormDefault=\"qualified\" targetNamespace=\"foo\""
+        " xmlns=\"foo\">"
+        "<xsd:element name=\"e1\" type=\"xsd:boolean\"/>"
+        "<xsd:element name=\"foo\" substitutionGroup=\"e1\""
+        " type=\"xsd:boolean\"/>"
+        "<xsd:element name=\"root\" type=\"B\"/>"
+        "<xsd:complexType name=\"B\">"
+        "<xsd:choice maxOccurs=\"1000\">"
+        "<xsd:element ref=\"e1\"/>"
+        "<xsd:element name=\"foo\" type=\"xsd:int\""
+        " form=\"unqualified\"/>"
+        "</xsd:choice></xsd:complexType></xsd:schema>";
+    /* namespaced member: typed by its own boolean declaration */
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<foo:root xmlns:foo=\"foo\"><foo:foo>true</foo:foo>"
+        "</foo:root>"), 1);
+    /* no-namespace child: typed by the unqualified local particle */
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<foo:root xmlns:foo=\"foo\"><foo>123</foo></foo:root>"), 1);
+    /* the full suite doc: both shapes interleaved [valid] */
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<foo:root xmlns:foo=\"foo\"><foo:foo>true</foo:foo>"
+        "<foo>123</foo><foo:foo>true</foo:foo><foo>123</foo>"
+        "</foo:root>"), 1);
+    /* wrong content for each binding still rejects */
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<foo:root xmlns:foo=\"foo\"><foo:foo>123</foo:foo>"
+        "</foo:root>"), 0);
+    EXPECT_EQ(validate_doc(sch,
+        "<?xml version=\"1.0\"?>\n"
+        "<foo:root xmlns:foo=\"foo\"><foo>true</foo></foo:root>"), 0);
+}
+
 TEST(XsdValidate, ContentModelViolationReports) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"1\">"

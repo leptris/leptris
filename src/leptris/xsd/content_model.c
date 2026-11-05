@@ -15,6 +15,13 @@
 
 #include "xsd_internal.h"
 
+/* validate.c-facing global lookup (compile.c): an unqualified
+ * particle may leniently admit a namespaced child only when no
+ * global declaration in the child's namespace could type it
+ * (elemZ020 vs the OOXML-style wp.xsd corpus). */
+extern const struct xsd_element_decl* xsd_find_element_child_ns(
+    struct leptris_xsd_schema* s, const char* name, const char* uri);
+
 typedef struct {
     int from;
     int symbol;      /* -1 = epsilon; else a particle transition */
@@ -345,8 +352,11 @@ static int all_root_valid(XsdCm* all, const char* target_ns,
         size_t hits = 0;
         for (size_t i = 0; i < count; i++) {
             const char* uri = ns_uris ? ns_uris[i] : NULL;
-            if (p->name && strcmp(p->name, names[i]) == 0 &&
-                (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
+            int child_qualified = uri && uri[0];
+            int ns_ok = p->ns ? (!child_qualified ||
+                                 strcmp(uri, p->ns) == 0)
+                              : !child_qualified;
+            if (p->name && strcmp(p->name, names[i]) == 0 && ns_ok)
                 hits++;
         }
         if ((long)hits < p->min) return 0;
@@ -357,8 +367,11 @@ static int all_root_valid(XsdCm* all, const char* target_ns,
         int matched = 0;
         const char* uri = ns_uris ? ns_uris[i] : NULL;
         for (XsdCm* p = all->first_child; p && !matched; p = p->next) {
-            if (p->name && strcmp(p->name, names[i]) == 0 &&
-                (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
+            int child_qualified2 = uri && uri[0];
+            int ns_ok2 = p->ns ? (!child_qualified2 ||
+                                  strcmp(uri, p->ns) == 0)
+                               : !child_qualified2;
+            if (p->name && strcmp(p->name, names[i]) == 0 && ns_ok2)
                 matched = 1;
         }
         if (!matched) return 0;
@@ -408,12 +421,32 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                     continue;
                 XsdCm* p = tr->particle;
                 if (p->kind == XSD_CM_ELEMENT) {
-                    int named = (strcmp(p->name, names[c]) == 0) ||
-                                (n.s && xsd_is_substitute(
-                                            n.s, names[c], p->name));
-                    if (named &&
-                        (!p->ns || (uri && strcmp(uri, p->ns) == 0)))
-                        ss_add(&next, tr->to);
+                    /* elemZ020: the ns gate is asymmetric — a
+                     * qualified particle matches its own ns but
+                     * leniently admits a no-ns child (the pinned
+                     * #1871 corpus posture); an unqualified
+                     * particle (ns NULL) is strict: no-ns children
+                     * only. A substitute hit rides the MEMBER's
+                     * own ns (cross-ns groups, #1881 sets). */
+                    const char* pns = p->ns;
+                    int named = (strcmp(p->name, names[c]) == 0);
+                    if (!named && n.s) {
+                        const XsdElementDecl* m =
+                            xsd_substitute_member(n.s, names[c],
+                                                  p->name);
+                        if (m) {
+                            named = 1;
+                            if (m->ns) pns = m->ns;
+                        }
+                    }
+                    int child_ns = uri && uri[0];
+                    int pns_ok =
+                        pns ? (!child_ns ||
+                               (uri && strcmp(uri, pns) == 0))
+                            : (!child_ns ||
+                               (n.s && !xsd_find_element_child_ns(
+                                          n.s, names[c], uri)));
+                    if (named && pns_ok) ss_add(&next, tr->to);
                 } else if (p->kind == XSD_CM_ANY) {
                     /* #1735: ##targetNamespace/##other are relative
                      * to the DECLARING unit's tns */

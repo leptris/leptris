@@ -211,6 +211,14 @@ typedef struct xsd_element_decl {
 int xsd_is_substitute(struct leptris_xsd_schema* s,
                       const char* name, const char* head);
 
+/* elemZ020: the MEMBER declaration behind a substitute hit — the
+ * member carries its OWN namespace (a member in ns g rides a head
+ * particle written for ns f, XSD 1.1 cross-ns groups + schema-set
+ * compilation), so ns gates must compare against the member's ns,
+ * never the head particle's. */
+const XsdElementDecl* xsd_substitute_member(
+    struct leptris_xsd_schema* s, const char* name, const char* head);
+
 typedef struct xsd_attr_decl {
     char* name;  /* attribute local name */
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
