@@ -2786,6 +2786,105 @@ TEST(Plan1941, ResultBuildExplicitRowBindingBeatsInheritance) {
     leptris_plan_free(plan);
 }
 
+// ---- leptris#1969: prefix-less EXACT rows are the DEFAULT xmlns --
+// ns_form EXACT with ns_uri but NO ns_prefix binds the default
+// namespace: the element emits a bare local name and hoists
+// xmlns="uri". The declaration appears once on the output root;
+// same-uri descendants inherit it (no re-declare); a deeper
+// different default re-declares. Attribute rows never default-bind
+// (pinned by the Plan1486 cases — the attr row's ns_prefix gate).
+
+TEST(Plan1969, ResultBuildEmitsDefaultXmlnsOnRoot) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan kids[1] = {};
+    kids[0].wire_name = "p";
+    kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    kids[0].child_plan_index = -1;
+    kids[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    kids[0].ns_uri = "urn:w";
+
+    leptris_element_plan plans[1] = {};
+    plans[0].element_name = "document";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].child_count = 1;
+    plans[0].child_plans = kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 0, 0, NULL, "x", 1},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 3, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "<document xmlns=\"urn:w\"><p>x</p></document>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
+TEST(Plan1969, ResultBuildNestedDefaultRedeclaresDifferentUri) {
+    LeptrisStatus st = LEPTRIS_OK;
+    leptris_child_plan a_kids[1] = {};
+    a_kids[0].wire_name = "b";
+    a_kids[0].kind = LEPTRIS_PLAN_KIND_NESTED;
+    a_kids[0].child_plan_index = 1;
+
+    leptris_child_plan b_kids[1] = {};
+    b_kids[0].wire_name = "c";
+    b_kids[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    b_kids[0].child_plan_index = -1;
+
+    leptris_element_plan plans[2] = {};
+    plans[0].element_name = "a";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:1";
+    plans[0].child_count = 1;
+    plans[0].child_plans = a_kids;
+    plans[1].element_name = "b";
+    plans[1].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[1].ns_uri = "urn:2";
+    plans[1].child_count = 1;
+    plans[1].child_plans = b_kids;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 2;
+    spec.plans = plans;
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+
+    leptris_plan_row_op ops[] = {
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_ELEMENT, 0, 0, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_SCALAR, 1, 0, NULL, "x", 1},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+        {LEPTRIS_PLAN_OP_END, 0, UINT32_MAX, NULL, NULL, 0},
+    };
+    LeptrisPlanResult r = leptris_plan_result_build(plan, ops, 5, &st);
+    ASSERT_NE(r, nullptr);
+    char* out = leptris_plan_serialize(plan, r, &st);
+    ASSERT_NE(out, nullptr);
+    /* b's nested row inherits its child plan's DEFAULT binding —
+     * urn:2 differs from the in-scope urn:1, so b re-declares; c
+     * inherits urn:2 and spells bare. */
+    EXPECT_STREQ(out,
+                 "<a xmlns=\"urn:1\"><b xmlns=\"urn:2\">"
+                 "<c>x</c></b></a>");
+    leptris_free_string(out);
+    leptris_plan_result_free(r);
+    leptris_plan_free(plan);
+}
+
 TEST(Plan408, ResultBuildRejectsBadPrograms) {
     LeptrisStatus st = LEPTRIS_OK;
     leptris_element_plan plans[1] = {};
