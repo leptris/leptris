@@ -2036,18 +2036,23 @@ static struct leptris_plan_result* plan_result_build_windowed(
                 } else if (cr->child_plan_index >= 0 &&
                            cr->child_plan_index <
                                (int32_t)pool->plan_count &&
-                           pool->plans[cr->child_plan_index].ns_prefix &&
+                           pool->plans[cr->child_plan_index].ns_uri &&
                            pool->plans[cr->child_plan_index].ns_form ==
                                LEPTRIS_PLAN_NS_EXACT) {
                     ns_src = &pool->plans[cr->child_plan_index];
-                } else if (cp->ns_prefix &&
+                } else if (cp->ns_uri &&
                            cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
                     ns_src = cp;
                 }
                 if (ns_src) {
-                    v->ns_prefix = dp_strdup(ns_src->ns_prefix);
+                    /* leptris#1969: ns_prefix NULL + ns_uri set is
+                     * the DEFAULT-xmlns claim (bare local name,
+                     * xmlns="uri" hoisted on the emitting root). */
+                    v->ns_prefix = ns_src->ns_prefix
+                                       ? dp_strdup(ns_src->ns_prefix)
+                                       : NULL;
                     v->ns_uri = dp_strdup(ns_src->ns_uri);
-                    if (!v->ns_prefix || !v->ns_uri) goto oom;
+                    if (!v->ns_uri) goto oom;
                 }
             } else if (cp->ns_prefix &&
                        cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
@@ -2056,6 +2061,13 @@ static struct leptris_plan_result* plan_result_build_windowed(
                 v->ns_prefix = dp_strdup(cp->ns_prefix);
                 v->ns_uri = dp_strdup(cp->ns_uri);
                 if (!v->ns_prefix || !v->ns_uri) goto oom;
+            } else if (cp->ns_uri &&
+                       cp->ns_form == LEPTRIS_PLAN_NS_EXACT) {
+                /* leptris#1969: the root op binds the plan's own
+                 * DEFAULT namespace (prefix-less EXACT) —
+                 * xmlns="uri" hoists on the output root. */
+                v->ns_uri = dp_strdup(cp->ns_uri);
+                if (!v->ns_uri) goto oom;
             }
             if (sp == 0) {
                 if (root) {
