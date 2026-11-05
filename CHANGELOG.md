@@ -2,12 +2,9 @@
 
 ## [1.9.410] - 2026-11-05
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- **xsd**: a no-namespace element no longer resolves to a same-name **namespaced** global declaration. `xsd_find_element_child_ns`'s no-ns branch carried an ns-blind fallback that typed whole subtrees with a foreign namespace's type — the W3C schG2 shape (lutaml-xsd roundtrip compiles unit A alone; the instance's no-ns `<e1>` answered ns-a's `ct-A` and manufactured two false lexical rows). The fallback is removed; a no-ns element resolves only against true no-ns declarations (leptris#1976, PR #1977; full suite 2239/2239 with no corpus reliance on the fallback). Present since before 1.9.407 — it surfaced in the 1.9.409 wave only because the leptris lane replaced nokogiri as the active validator.
 
 
 ## [1.9.409] - 2026-11-05
