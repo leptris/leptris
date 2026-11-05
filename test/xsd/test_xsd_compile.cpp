@@ -1256,6 +1256,81 @@ TEST(XsdCompile, StrictAnyAttrGrammarRidesAttributeGroupRefs) {
     leptris_xsd_free(s);
 }
 
+// leptris#1976: the 1.9.409 ns-aware particle typing must not
+// disturb the A(ns)/B(no-ns) import composition — W3C schG2 (valid).
+// The no-ns global e1 types through B's ct-A (a1:boolean, a2:int);
+// the ns-a e1 types through A's ct-A (a1:int, a2:boolean).
+TEST(XsdValidate, SchG2ImportComposeStaysValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR
+        "/schG2-import-compose/schG2_a.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR
+        "/schG2-import-compose/schG2.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+        ADD_FAILURE() << leptris_xsd_error_at(s, i);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// #1976 variant: the same composition through leptris_xsd_compile_set
+// (the lutaml-xsd EngineContext path) — both unit orders must stay valid.
+TEST(XsdValidate, SchG2CompileSetBothOrdersValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* paths_ab[] = {
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_a.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_b.xsd",
+    };
+    const char* paths_ba[] = {
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_b.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_a.xsd",
+    };
+    const char* doc_paths[] = {
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2.xml",
+    };
+    for (int order = 0; order < 2; order++) {
+        LeptrisXsdSchema s = leptris_xsd_compile_set(
+            order == 0 ? paths_ab : paths_ba, 2, &st);
+        ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+        LeptrisDocument d = leptris_parse_file(doc_paths[0], &st);
+        ASSERT_NE(d, nullptr) << "status " << (int)st;
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << "order " << order;
+        for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+            ADD_FAILURE() << "order " << order << ": "
+                          << leptris_xsd_error_at(s, i);
+        leptris_document_free(d);
+        leptris_xsd_free(s);
+    }
+}
+
+// #1976 root cause face: the lutaml-xsd roundtrip drops the import,
+// so the engine compiles unit A ALONE (e1/ct-A/root, all ns-a; the
+// default xmlns="ns-a" preserved). The instance's no-ns <e1> then
+// meets ONLY ns-a declarations: the strict wildcard reports it
+// undeclared, and its children a1/a2 typed... by whom? This pins
+// whatever the engine does here so the fix has a regression gate.
+TEST(XsdValidate, SchG2RoundtripUnitAAlone) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR
+        "/schG2-import-compose/roundtrip_a.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR
+        "/schG2-import-compose/schG2.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << leptris_xsd_error_at(s, 0);
+    for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+        ADD_FAILURE() << leptris_xsd_error_at(s, i);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"2\" status=\"ok\">"

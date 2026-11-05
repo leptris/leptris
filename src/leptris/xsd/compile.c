@@ -3943,8 +3943,12 @@ const XsdElementDecl* xsd_find_element_child_ns(
         return xsd_ladder_element(s, name, uri, 0);
     for (XsdElementDecl* t = s->elements; t; t = t->next)
         if (!t->ns && strcmp(t->name, name) == 0) return t;
-    for (XsdElementDecl* t = s->elements; t; t = t->next)
-        if (strcmp(t->name, name) == 0) return t;
+    /* leptris#1976: NO ns-blind fallback for a no-ns child. A
+     * no-namespace element resolves only against true no-ns
+     * declarations — matching a NAMESPACED global of the same name
+     * typed whole subtrees with a foreign type and manufactured
+     * false lexical rows (the schG2 roundtrip shape: a lone ns-a
+     * unit answering the instance's no-ns <e1> with ns-a's ct-A). */
     return NULL;
 }
 
