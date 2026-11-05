@@ -301,6 +301,88 @@ static int text_valid(struct xsd_validator* v,
 static void validate_element(struct xsd_validator* v,
                              struct leptris_xsd_schema* s,
                              LeptrisElement elem, int depth);
+static void xsd_member_canon(const char* mname, char* out, size_t cap) {
+    const char* local = mname ? strchr(mname, ':') : NULL;
+    local = local ? local + 1 : mname;
+    snprintf(out, cap, "xs:%s", local ? local : "");
+}
+
+/* Value-space equality within one union member: numerics compare
+ * numerically ("1.0" == "1.000"), booleans identify across the
+ * {true,1}/{false,0} spellings, everything else is exact text. */
+static int xsd_value_equal(const char* canon_type, const char* a,
+                           const char* b) {
+    if (strcmp(a, b) == 0) return 1;
+    if (strcmp(canon_type, "xs:boolean") == 0) {
+        int av = strcmp(a, "true") == 0 || strcmp(a, "1") == 0;
+        int bv = strcmp(b, "true") == 0 || strcmp(b, "1") == 0;
+        return av == bv;
+    }
+    if (strcmp(canon_type, "xs:float") == 0 ||
+        strcmp(canon_type, "xs:double") == 0)
+        return strtod(a, NULL) == strtod(b, NULL);
+    if (strstr(canon_type, "int") || strstr(canon_type, "decimal") ||
+        strstr(canon_type, "long") || strstr(canon_type, "short") ||
+        strstr(canon_type, "byte") ||
+        strstr(canon_type, "Negative") || strstr(canon_type, "positive"))
+        return strtod(a, NULL) == strtod(b, NULL);
+    return 0;
+}
+
+/* leptris-rs#45 (stE050/stE055): union-typed fixed constraints
+ * compare in the VALUE SPACE of the first union member that
+ * validates each lexical form — fixed "1" and instance "true"
+ * both validate as xs:boolean (its lexical space accepts "1");
+ * "1.0" and "1.000" both as xs:float. Raw strcmp wrongly
+ * rejected value-equal forms. Returns 1 when a single member
+ * type validates both the fixed value and the instance text. */
+static int xsd_union_fixed_match(struct leptris_xsd_schema* s,
+                                 const XsdSimple* ut, const char* ns,
+                                 const char* fixed, const char* text) {
+    if (!ut || ut->deriv != XSD_SIMPLE_UNION) return 0;
+    size_t n = ut->member_count > ut->member_def_count
+                   ? ut->member_count
+                   : ut->member_def_count;
+    int fixed_member = -1;
+    for (size_t i = 0; i < n && fixed_member < 0; i++) {
+        const XsdSimple* def =
+            i < ut->member_def_count ? ut->member_defs[i] : NULL;
+        const char* mname = i < ut->member_count ? ut->members[i] : NULL;
+        int ok;
+        char canon[128];
+        if (mname) xsd_member_canon(mname, canon, sizeof(canon));
+        if (def) {
+            ok = xsd_simple_valid_chain(s, def, fixed);
+        } else if (mname && strncmp(canon, "xs:", 3) == 0) {
+            ok = xsd_builtin_valid(canon, fixed);
+        } else if (mname) {
+            const XsdSimple* m = xsd_find_simple_ns_pub(s, canon, ns);
+            ok = m && xsd_simple_valid_chain(s, m, fixed);
+        } else {
+            continue;
+        }
+        if (ok) fixed_member = (int)i;
+    }
+    if (fixed_member < 0) return 0;
+    const XsdSimple* def =
+        (size_t)fixed_member < ut->member_def_count
+            ? ut->member_defs[fixed_member]
+            : NULL;
+    if (def) return xsd_simple_valid_chain(s, def, text) &&
+                    xsd_value_equal("xs:string", fixed, text);
+    const char* mname = (size_t)fixed_member < ut->member_count
+                            ? ut->members[fixed_member]
+                            : NULL;
+    if (!mname) return 0;
+    char canon[128];
+    xsd_member_canon(mname, canon, sizeof(canon));
+    if (strncmp(canon, "xs:", 3) == 0)
+        return xsd_builtin_valid(canon, text) &&
+               xsd_value_equal(canon, fixed, text);
+    const XsdSimple* m = xsd_find_simple_ns_pub(s, canon, ns);
+    return m && xsd_simple_valid_chain(s, m, text);
+}
+
 static void validate_element_decl(struct xsd_validator* v,
                                   struct leptris_xsd_schema* s,
                                   LeptrisElement elem, int depth,
@@ -913,7 +995,16 @@ static void validate_element_decl(struct xsd_validator* v,
                     break;
                 }
         if (d->fixed) {
-            if (has_content && strcmp(text, d->fixed) != 0)
+            int match = !has_content || strcmp(text, d->fixed) == 0;
+            if (!match) {
+                const XsdSimple* ut =
+                    d->type ? xsd_find_simple_ns_pub(s, d->type, d->ns)
+                            : NULL;
+                if (ut)
+                    match = xsd_union_fixed_match(s, ut, d->ns, d->fixed,
+                                                  text);
+            }
+            if (!match)
                 verrfk(v, "content-model", "element", local,
                    "content does not match the fixed value");
             if (!has_content)

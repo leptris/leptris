@@ -1525,7 +1525,8 @@ static char* dp_wrapper_name(const struct leptris_plan_result* v) {
 
 static int dp_emit_element_open(const struct leptris_plan_result* v,
                                 const char* name, dp_sb* b,
-                                const dp_decls* decls, int is_root) {
+                                const dp_decls* decls, int is_root,
+                                const char* default_claim) {
     if (!dp_sb_putn(b, "<", 1) || !dp_sb_puts(b, name)) return 0;
     if (is_root && decls) {
         for (size_t i = 0; i < decls->n; i++) {
@@ -1534,6 +1535,17 @@ static int dp_emit_element_open(const struct leptris_plan_result* v,
                 !dp_sb_putn(b, "\"", 1))
                 return 0;
         }
+    }
+    /* leptris#1969: a prefix-less EXACT binding is the DEFAULT
+     * namespace — emit the bare local name and declare xmlns="uri"
+     * when the claim differs from the in-scope default (the root
+     * hoists it once; deeper same-uri nodes inherit). Attribute
+     * rows never take this form (W3C: attributes cannot
+     * default-bind). */
+    if (default_claim) {
+        if (!dp_sb_puts(b, " xmlns=\"") ||
+            !dp_sb_puts(b, default_claim) || !dp_sb_putn(b, "\"", 1))
+            return 0;
     }
     for (size_t a = 0; a < v->attr_count; a++) {
         /* leptris#1941: a row with an emission binding spells
@@ -1584,14 +1596,17 @@ static int dp_sb_indent_newline(dp_sb* b, const dp_fmt* fmt, int depth) {
 static int dp_emit_value(const struct leptris_plan_result* v,
                          const dp_plan* container, const LeptrisPlan pool,
                          dp_sb* b, const dp_decls* decls, int is_root,
-                         const dp_fmt* fmt, int depth);
+                         const dp_fmt* fmt, int depth,
+                         const char* cur_default);
 
 static int dp_emit_element(const struct leptris_plan_result* v,
                            const char* name, const LeptrisPlan pool,
                            const dp_plan* kids_container, dp_sb* b,
                            const dp_decls* decls, int is_root,
-                           const dp_fmt* fmt, int depth) {
-    if (!dp_emit_element_open(v, name, b, decls, is_root)) return 0;
+                           const dp_fmt* fmt, int depth,
+                           const char* cur_default) {
+    if (!dp_emit_element_open(v, name, b, decls, is_root, cur_default))
+        return 0;
     const struct leptris_plan_result** kids = NULL;
     size_t nk = 0, cap = 0;
     if (!dp_flatten_kids(v, &kids, &nk, &cap)) {
@@ -1616,6 +1631,10 @@ static int dp_emit_element(const struct leptris_plan_result* v,
      * parent), so a nested member resolved its kids' rows against
      * the parent's rows and a CONTENT row serialized as an
      * empty-named wrapper. */
+    /* leptris#1969: this element's own claim sets the kids'
+     * in-scope default (a default-xmlns re-declaration nests). */
+    const char* kid_default = cur_default;
+    if (v->ns_uri && !v->ns_prefix) kid_default = v->ns_uri;
     int ok = 1;
     for (size_t i = 0; i < nk && ok; i++) {
         if (indent_kids && !dp_sb_indent_newline(b, fmt, depth + 1)) {
@@ -1623,7 +1642,8 @@ static int dp_emit_element(const struct leptris_plan_result* v,
             break;
         }
         ok = dp_emit_value(kids[i], kids_container, pool, b, NULL, 0,
-                           fmt, indent_kids ? depth + 1 : depth);
+                           fmt, indent_kids ? depth + 1 : depth,
+                           kid_default);
     }
     free((void*)kids);
     if (!ok) return 0;
@@ -1638,7 +1658,8 @@ static int dp_emit_element(const struct leptris_plan_result* v,
 static int dp_emit_value(const struct leptris_plan_result* v,
                          const dp_plan* container, const LeptrisPlan pool,
                          dp_sb* b, const dp_decls* decls, int is_root,
-                         const dp_fmt* fmt, int depth) {
+                         const dp_fmt* fmt, int depth,
+                         const char* cur_default) {
     if (v->kind == LEPTRIS_PLAN_VALUE_RAW)
         return dp_sb_puts(b, v->str ? v->str : "");
     if (v->kind == LEPTRIS_PLAN_VALUE_ELEMENT) {
@@ -1688,8 +1709,17 @@ static int dp_emit_value(const struct leptris_plan_result* v,
                 kids_container =
                     &poolp->plans[cap->child_plan_index];
         }
+        /* leptris#1969: this node's default-xmlns claim (a ns_uri
+         * without a prefix). Emitted only when it differs from the
+         * in-scope default; the kids inherit the claim. */
+        const char* claim =
+            (v->ns_uri && !v->ns_prefix) ? v->ns_uri : NULL;
+        const char* open_claim =
+            (claim && (!cur_default || strcmp(claim, cur_default) != 0))
+                ? claim
+                : NULL;
         int ok = dp_emit_element(v, name, pool, kids_container, b,
-                                 decls, is_root, fmt, depth);
+                                 decls, is_root, fmt, depth, open_claim);
         free(name);
         return ok;
     }
@@ -1703,7 +1733,16 @@ static int dp_emit_value(const struct leptris_plan_result* v,
         /* The row is the wrapper element around this text. */
         char* name = dp_wrapper_name(v);
         if (!name) return 0;
+        /* leptris#1969: the wrapper's own default-xmlns claim. */
+        const char* wclaim =
+            (v->ns_uri && !v->ns_prefix &&
+             (!cur_default || strcmp(v->ns_uri, cur_default) != 0))
+                ? v->ns_uri
+                : NULL;
         int ok = dp_sb_putn(b, "<", 1) && dp_sb_puts(b, name) &&
+                 (wclaim ? dp_sb_puts(b, " xmlns=\"") &&
+                               dp_sb_puts(b, wclaim) && dp_sb_putn(b, "\"", 1)
+                         : 1) &&
                  dp_sb_putn(b, ">", 1) && dp_sb_escape(b, text, 0) &&
                  dp_sb_puts(b, "</") && dp_sb_puts(b, name) &&
                  dp_sb_putn(b, ">", 1);
@@ -1732,7 +1771,7 @@ static char* dp_serialize_impl(LeptrisPlan plan,
     }
     dp_sb b = {0};
     int ok = dp_emit_value(rv, NULL, (const LeptrisPlan)plan, &b,
-                           &decls, 1, fmt, 0);
+                           &decls, 1, fmt, 0, NULL);
     dp_decls_free(&decls);
     if (!ok) {
         free(b.s);
