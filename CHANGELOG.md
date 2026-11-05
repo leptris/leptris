@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.407] - 2026-11-05
+
+### Fixed
+
+- deep-copy attr and element ns_prefix past the spec buffers (descriptor)
+- keep sys/mman.h off the Windows include path (memory)
+
+### Performance
+
+- oversized arena spans return to the OS on drop (#1947) (memory)
+
+
+
 ## [1.9.406] - 2026-11-03
 
 ### Added
