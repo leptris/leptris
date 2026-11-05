@@ -123,3 +123,57 @@ TEST(XsdUnionFixed, NonMemberValueStillRejects) {
     leptris_document_free(d);
     leptris_xsd_free(s);
 }
+
+// ---- leptris-rs#46 (elemZ020): particle typing is ns-aware ------
+// Real W3C fixture msData/element/elemZ020: a form="unqualified"
+// local particle (xs:int) and a same-name substitution member
+// (xs:boolean) discriminate by namespace. The namespaced child
+// types through its member declaration; the no-ns child types
+// through the unqualified particle.
+
+TEST(XsdSubstNs, ElemZ020RealFixtureValidates) {
+    EXPECT_EQ(validate_case(cases_path("elemZ020-subst-ns/elemZ020.xsd"),
+                            cases_path("elemZ020-subst-ns/elemZ020.xml")),
+              1);
+}
+
+TEST(XsdSubstNs, NamespacedChildTypedByMemberNotUnqualifiedParticle) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        cases_path("elemZ020-subst-ns/elemZ020.xsd").c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    /* "true" is boolean (the member), not int (the unqualified
+     * particle) — the ns-strict member binding types it. */
+    const char q[] = "<?xml version=\"1.0\"?>\n"
+                     "<foo:root xmlns:foo=\"foo\">"
+                     "<foo:foo>true</foo:foo></foo:root>";
+    LeptrisDocument d = leptris_parse_string(q, strlen(q), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    /* int lexical in the member's slot still rejects */
+    const char bad[] = "<?xml version=\"1.0\"?>\n"
+                       "<foo:root xmlns:foo=\"foo\">"
+                       "<foo:foo>123</foo:foo></foo:root>";
+    d = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+    /* the no-ns child rides the form="unqualified" particle */
+    const char u[] = "<?xml version=\"1.0\"?>\n"
+                     "<foo:root xmlns:foo=\"foo\">"
+                     "<foo>123</foo></foo:root>";
+    d = leptris_parse_string(u, strlen(u), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    /* boolean lexical in the unqualified particle's slot rejects */
+    const char bad2[] = "<?xml version=\"1.0\"?>\n"
+                        "<foo:root xmlns:foo=\"foo\">"
+                        "<foo>true</foo></foo:root>";
+    d = leptris_parse_string(bad2, strlen(bad2), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}

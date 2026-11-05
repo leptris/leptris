@@ -125,6 +125,9 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
 static XsdCm* xsd_capture_any(LeptrisElement any_child);
 static char* xsd_capture_unit_tns(LeptrisElement e);
+static void xsd_resolve_qname(LeptrisElement e, const char* qname,
+                              char* uri, size_t urisz, char* local,
+                              size_t localsz);
 static char* xsd_capture_any_attr_ns(LeptrisElement container);
 static char* xsd_capture_any_attr_ns_deep(
     struct leptris_xsd_schema* s, LeptrisElement container, int depth);
@@ -272,11 +275,57 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
         } else if (strcmp(local, "element") == 0) {
             cm = xsd_cm_new(XSD_CM_ELEMENT);
             if (cm) {
-                const char* nm =
-                    leptris_element_attribute(e, "name");
-                if (!nm)
-                    nm = xsd_local_name(
-                        leptris_element_attribute(e, "ref"));
+                const char* ref_raw =
+                    leptris_element_attribute(e, "ref");
+                const char* nm = NULL;
+                if (ref_raw) {
+                    /* elemZ020: record the particle's namespace — a
+                     * ref binds in the REFERENCED DECLARATION's ns
+                     * (same-tns ref → tns, cross-ns → the foreign
+                     * ns). The old capture kept the local name only,
+                     * so the NFA and the typing DFS matched by name
+                     * alone. */
+                    nm = xsd_local_name(ref_raw);
+                    char ruri[512], rlocal[256];
+                    xsd_resolve_qname(e, ref_raw, ruri, sizeof(ruri),
+                                      rlocal, sizeof(rlocal));
+                    if (ruri[0])
+                        cm->ns = xsd_strdup(ruri);
+                    else
+                        cm->ns = xsd_capture_unit_tns(e);
+                } else {
+                    nm = leptris_element_attribute(e, "name");
+                    /* name-form: @form wins; otherwise the unit's
+                     * elementFormDefault decides */
+                    const char* form =
+                        leptris_element_attribute(e, "form");
+                    const char* efd = NULL;
+                    if (!form) {
+                        for (LeptrisElement up =
+                                 leptris_element_parent(e);
+                             up; up = leptris_element_parent(up)) {
+                            const char* ul = NULL;
+                            leptris_element_expanded_name(
+                                up, &ul, NULL, NULL);
+                            if (ul && strcmp(ul, "schema") == 0) {
+                                efd = leptris_element_attribute(
+                                    up, "elementFormDefault");
+                                break;
+                            }
+                        }
+                    }
+                    int qualified =
+                        form ? strcmp(form, "qualified") == 0
+                             : (efd &&
+                                strcmp(efd, "qualified") == 0);
+                    if (qualified) {
+                        char* tns = xsd_capture_unit_tns(e);
+                        if (tns && tns[0])
+                            cm->ns = tns;
+                        else
+                            free(tns);
+                    }
+                }
                 cm->name = xsd_strdup(nm);
                 const char* pty =
                     leptris_element_attribute(e, "type");
@@ -3379,14 +3428,19 @@ static const XsdElementDecl* xsd_find_element_decl(
     return NULL;
 }
 
-int xsd_is_substitute(struct leptris_xsd_schema* s,
-                      const char* name, const char* head) {
+const XsdElementDecl* xsd_substitute_member(
+    struct leptris_xsd_schema* s, const char* name, const char* head) {
     const XsdElementDecl* d = xsd_find_element_decl(s, name);
     for (int hops = 0; d && d->sub_head && hops < 16; hops++) {
-        if (strcmp(d->sub_head, head) == 0) return 1;
+        if (strcmp(d->sub_head, head) == 0) return d;
         d = xsd_find_element_decl(s, d->sub_head);
     }
-    return 0;
+    return NULL;
+}
+
+int xsd_is_substitute(struct leptris_xsd_schema* s,
+                      const char* name, const char* head) {
+    return xsd_substitute_member(s, name, head) != NULL;
 }
 
 int xsd_schema_version_11(struct leptris_xsd_schema* s) {

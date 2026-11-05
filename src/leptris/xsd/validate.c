@@ -599,6 +599,14 @@ static void validate_children(struct xsd_validator* v,
         if (wpc == 2) continue;
         const char* ptype = NULL;
         const char* pfill = NULL;
+        /* elemZ020 lenient fallback: an unqualified particle may
+         * still type a namespaced child when NO global declaration
+         * in the child's namespace could (the OOXML-style wp.xsd
+         * corpus: no elementFormDefault, no globals). The strict
+         * pass remembers the candidate; the global lookup below
+         * decides whether it is needed. */
+        const char* ltype = NULL;
+        const char* lfill = NULL;
         if (model) {
             XsdCm* stack[64];
             int sp = 0;
@@ -606,15 +614,34 @@ static void validate_children(struct xsd_validator* v,
             while (sp > 0 && ptype == NULL) {
                 XsdCm* p = stack[--sp];
                 for (; p; p = p->next) {
+                    int child_ns = cu && cu[0];
+                    /* asymmetric ns gate (elemZ020 + the pinned
+                     * #1871 lenient posture): qualified particles
+                     * match their own ns and leniently admit no-ns
+                     * children; unqualified particles are strict —
+                     * no-ns children only, with the lenient
+                     * fallback when nothing else can type it. */
+                    int pns_ok =
+                        p->ns ? (!child_ns ||
+                                 strcmp(p->ns, cu) == 0)
+                              : !child_ns;
                     if (p->kind == XSD_CM_ELEMENT && p->name &&
                         strcmp(p->name, cl) == 0 && p->type) {
-                        ptype = p->type;
-                        /* leptris-rs#35 (isDefault005): the
-                         * particle's fixed/default value satisfies
-                         * EMPTY content (§3.12.2). */
-                        pfill = p->fixed_value ? p->fixed_value
-                                               : p->default_value;
-                        break;
+                        if (pns_ok) {
+                            ptype = p->type;
+                            /* leptris-rs#35 (isDefault005): the
+                             * particle's fixed/default value
+                             * satisfies EMPTY content (§3.12.2). */
+                            pfill = p->fixed_value ? p->fixed_value
+                                                   : p->default_value;
+                            break;
+                        }
+                        if (!ltype) {
+                            ltype = p->type;
+                            lfill = p->fixed_value
+                                        ? p->fixed_value
+                                        : p->default_value;
+                        }
                     }
                     if (p->kind == XSD_CM_GROUP_REF) {
                         XsdGroupDef* g = xsd_find_group(s, p->name);
@@ -650,7 +677,15 @@ static void validate_children(struct xsd_validator* v,
         } else {
             const XsdElementDecl* cd =
                 xsd_find_element_child_ns(s, cl, cu);
-            if (cd) validate_element_decl(v, s, ce, 0, cd);
+            if (cd)
+                validate_element_decl(v, s, ce, 0, cd);
+            else if (ltype) {
+                /* nothing global claims the namespaced child —
+                 * the unqualified particle's type governs
+                 * (wp.xsd corpus posture) */
+                validate_local(v, s, ce, cl, ltype, lfill,
+                               ct ? ct->ns : NULL);
+            }
         }
         /* wildcard-admitted children without a declaration pass:
          * strict and lax alike admit undeclared names (the pinned
