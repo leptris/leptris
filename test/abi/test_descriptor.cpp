@@ -8,6 +8,7 @@
 #include <leptris.h>
 #include <leptris/descriptor.h>
 #include <cstring>
+#include <cstdio>
 #include <string>
 
 namespace {
@@ -783,6 +784,117 @@ TEST(PlanBuild, CopiesTheSpecStrings) {
     leptris_plan_result_free(r);
     leptris_plan_free(plan);
     leptris_document_free(doc);
+}
+
+/* #1967: every spec string the plan carries must be retained past
+ * build — the bindings anchor ns_prefix in FFI buffers that die with
+ * the build call, so a struct-copied pointer reads freed heap bytes
+ * at serialize time. The attr row's ns_prefix missed the dp_strdup
+ * the element plans (#1551) and child rows (#1585) already had, and
+ * the element plan's copy sat inside the ns_uri branch (a prefix
+ * with no URI never copied). Mirrors CopiesTheSpecStrings: the spec
+ * buffers are freed right after build, then the plan serializes. */
+TEST(PlanBuild, CopiesAttrAndElementNsPrefixesPastSpecFree) {
+    LeptrisStatus st = LEPTRIS_OK;
+
+    /* Heap-anchored like the bindings' FFI::MemoryPointer strings:
+     * freed the moment build returns, so a retained pointer reads
+     * freed heap bytes. (Stack buffers would survive the whole test
+     * and hide the defect.) */
+    char* root_prefix_buf = strdup("w");
+    char* attr_name_buf = strdup("val");
+    char* attr_prefix_buf = strdup("w");
+
+    leptris_attr_plan* attrs =
+        (leptris_attr_plan*)calloc(1, sizeof(leptris_attr_plan));
+    attrs[0].wire_name = attr_name_buf;
+    attrs[0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+    attrs[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    attrs[0].ns_uri = "urn:w";
+    attrs[0].ns_prefix = attr_prefix_buf;
+
+    /* Element plan: prefix WITHOUT a uri — the un-nesting defect. */
+    leptris_element_plan* plans =
+        (leptris_element_plan*)calloc(1, sizeof(leptris_element_plan));
+    plans[0].element_name = "updateFields";
+    plans[0].ns_form = LEPTRIS_PLAN_NS_EXACT;
+    plans[0].ns_uri = "urn:w";
+    plans[0].ns_prefix = root_prefix_buf;
+    plans[0].attribute_count = 1;
+    plans[0].attribute_plans = attrs;
+
+    leptris_plan_spec spec = {};
+    spec.abi_version = leptris_plan_abi_version();
+    spec.plan_count = 1;
+    spec.plans = plans;
+
+    LeptrisPlan plan = leptris_plan_build(&spec, &st);
+    ASSERT_NE(plan, nullptr);
+    /* Anchor drop: the bindings free their buffers as soon as build
+     * returns. */
+    free(attrs);
+    free(plans);
+    free(root_prefix_buf);
+    free(attr_name_buf);
+    free(attr_prefix_buf);
+
+    leptris_plan_row_op ops[3] = {};
+    ops[0].kind = LEPTRIS_PLAN_OP_ELEMENT;
+    ops[0].row_index = 0xFFFFFFFFu;
+    ops[1].kind = LEPTRIS_PLAN_OP_ATTR;
+    ops[1].row_index = 0;
+    ops[1].name = "val";
+    ops[1].value = "0";
+    ops[1].value_len = 1;
+    ops[2].kind = LEPTRIS_PLAN_OP_END;
+
+    /* Two serializations: the first may still read live bytes; the
+     * second runs after churn has had a chance to reuse the freed
+     * buffers' memory. */
+    for (int round = 0; round < 2; round++) {
+        if (round == 1) {
+            /* Churn through the plan-build allocation paths
+             * themselves (the repro that surfaced #1967): build and
+             * drop descriptors so their internal dp_strdup traffic
+             * consumes and rewrites the freed anchor chunks. Plain
+             * strdup cycles do not reliably reuse them under
+             * macOS's nano allocator. */
+            for (int i = 0; i < 50; i++) {
+                leptris_element_plan churn_plans[8] = {};
+                leptris_child_plan churn_kids[8][1] = {};
+                for (int j = 0; j < 8; j++) {
+                    churn_plans[j].element_name = "elem";
+                    churn_plans[j].ns_form = LEPTRIS_PLAN_NS_EXACT;
+                    churn_plans[j].ns_uri = "urn:w";
+                    churn_plans[j].ns_prefix = "wx";
+                    churn_plans[j].child_count = 1;
+                    churn_plans[j].child_plans = churn_kids[j];
+                    churn_kids[j][0].wire_name = "CT_RPr";
+                    churn_kids[j][0].kind = LEPTRIS_PLAN_KIND_SCALAR;
+                    churn_kids[j][0].child_plan_index = -1;
+                }
+                leptris_plan_spec churn_spec = {};
+                churn_spec.abi_version = leptris_plan_abi_version();
+                churn_spec.plan_count = 8;
+                churn_spec.plans = churn_plans;
+                LeptrisPlan churned = leptris_plan_build(&churn_spec, &st);
+                ASSERT_NE(churned, nullptr);
+                leptris_plan_free(churned);
+            }
+        }
+        LeptrisPlanResult r =
+            leptris_plan_result_build(plan, ops, 3, &st);
+        ASSERT_NE(r, nullptr);
+        char* out = leptris_plan_serialize(plan, r, &st);
+        ASSERT_NE(out, nullptr);
+        EXPECT_STREQ(out,
+                     "<w:updateFields xmlns:w=\"urn:w\" w:val=\"0\"/>")
+            << "round " << round;
+        leptris_free_string(out);
+        leptris_plan_result_free(r);
+    }
+
+    leptris_plan_free(plan);
 }
 
 TEST(PlanAccessors, NullTolerant) {

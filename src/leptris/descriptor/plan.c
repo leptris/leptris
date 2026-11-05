@@ -370,6 +370,7 @@ static void dp_plan_free(LeptrisPlan p) {
         for (uint32_t a = 0; a < d->attribute_count; a++) {
             free((char *)d->attribute_plans[a].wire_name);
             free((char *)d->attribute_plans[a].ns_uri);
+            free((char *)d->attribute_plans[a].ns_prefix);
             for (uint16_t pi = 0;
                  pi < d->attribute_plans[a].predicate_count; pi++) {
                 free((char*)d->attribute_plans[a]
@@ -449,9 +450,12 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
         if (s->ns_uri) {
             d->ns_uri = dp_strdup(s->ns_uri);
             if (!d->ns_uri) goto oom;
+        }
+        /* #1967: the prefix must copy OUTSIDE the ns_uri branch — a
+         * plan carrying a prefix with no URI otherwise keeps the
+         * caller's anchor pointer. */
         d->ns_prefix = s->ns_prefix ? dp_strdup(s->ns_prefix) : NULL;
         if (s->ns_prefix && !d->ns_prefix) goto oom;
-        }
         d->flags = s->flags;
 
         if (s->attribute_count) {
@@ -508,6 +512,17 @@ LEPTRIS_API LeptrisPlan leptris_plan_build(const leptris_plan_spec* spec,
                         dp_strdup(s->attribute_plans[a].wire_name);
                     if (!d->attribute_plans[a].wire_name) goto oom;
                 }
+                /* #1967: attr ns_prefix rode the struct copy — a
+                 * dangling pointer into the caller's build buffers
+                 * once the bindings GC their anchors (the #1585
+                 * lesson; child rows already retain). */
+                d->attribute_plans[a].ns_prefix =
+                    s->attribute_plans[a].ns_prefix
+                        ? dp_strdup(s->attribute_plans[a].ns_prefix)
+                        : NULL;
+                if (s->attribute_plans[a].ns_prefix &&
+                    !d->attribute_plans[a].ns_prefix)
+                    goto oom;
                 uint16_t pc = s->attribute_plans[a].predicate_count;
                 if (pc) {
                     if (!s->attribute_plans[a].predicates) goto oom;
