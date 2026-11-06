@@ -154,15 +154,14 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
              * dp_scan_name_fused / mutation-side
              * leptris_name_hash_compute agree), and node_name IS the
              * stored local name, so a hash mismatch rejects exactly.
-             * The test's hash caches on the AST node (one compute
-             * per expression, not per candidate); the strcmps below
-             * remain as the collision guard. */
-            if (!test->local_hash_set) {
-                test->local_hash =
-                    leptris_name_hash_compute(test_local);
-                test->local_hash_set = 1;
-            }
-            if (elem->name_hash != test->local_hash) return 0;
+             * The hash is computed WRITE-ONCE at parser construction
+             * (the AST is thread-shared across concurrent evals —
+             * TSan caught the lazy-cache write). Tests constructed
+             * without a hash (PI targets, legacy paths) skip the
+             * filter; the strcmps below remain as the collision
+             * guard. */
+            if (test->local_hash_set &&
+                elem->name_hash != test->local_hash) return 0;
 
             if (!test_prefix) {
                 /* Simple name match - no prefix in test */
