@@ -71,8 +71,15 @@ whole tree to assign ranks (#485 table).
       ops/s. C0's sample attribution over-weighted the rank-table
       build; the build is not a bottleneck the offsets can remove.
       The xpath 3.48x gap therefore lives in the eval/axis layer,
-      not the sort — fold into A4's scanner arc or profile the axis
-      walks separately before touching this again.
+      not the sort.
+      **Track C lever 1 SHIPPED** (perf/1842-node-test-hash): the
+      line-level profile of the eval layer named node-test strcmp
+      (~65 samples) — matches_node_test now pre-filters candidates
+      on elem->name_hash (the AST node caches the test's local-name
+      hash lazily; the strcmp remains as the collision guard).
+      ABBA x6 median 1.011x on parse+3-query mix, all pairs
+      positive, suite 2241/2241. Next: the apply_axis sibling-chain
+      decode (~94 samples) and the step dispatch (~316).
 - [ ] **C3** mingw/Windows parity investigation: we are AT parity
       there — diff the codegen assumptions (branch-heavy loops?
       LTO behavior on gcc-win vs clang-mac?) and port whatever
