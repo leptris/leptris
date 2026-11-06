@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.411] - 2026-11-06
+
+### Fixed
+
+- drop the duplicated XsdRegexRs47 pair from #1980 (redefinition broke the Linux/ASAN/amalgam lanes) (test)
+
+### Performance
+
+- fuse the element-open name scan with the hash split (parse)
+
+
+
 ## [1.9.410] - 2026-11-05
 
 ### Fixed
