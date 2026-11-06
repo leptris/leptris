@@ -492,6 +492,160 @@ static struct leptris_xpath_result* vm_apply_absolute(XPathContext* ctx,
     return r;
 }
 
+static void descendant_walk_two_names(XPathContext* ctx, XPathNodeSet* out,
+                                      LeptrisElement elem,
+                                      const char* name_a, const char* name_b);
+
+/* #1842 Track C lever 2: `//a | //b` fused union (compile gate: both
+ * branches are bare unprefixed descendant-name shapes). Each side is
+ * a doc-ordered run of elements — bucket memcpy when the element
+ * index is up, preorder walk otherwise — and the runs are DISJOINT
+ * (an element has one local name, no prefixes involved). The merge
+ * is an O(n+m) two-pointer over the parse-offset keys; the generic
+ * path concatenates then doc-order-sorts per eval. Same-name unions
+ * collapse to one run's copy when the index is up; mutated or
+ * synthetic-node documents fall back to concat + the generic sort
+ * (which also dedups, covering the same-name-no-index case). */
+static struct leptris_xpath_result* vm_apply_absolute_union_names(
+    XPathContext* ctx, const char* name_a, const char* name_b) {
+    if (!ctx || !ctx->document) return NULL;
+    if (!name_a || !name_b) return NULL;
+    struct leptris_document* ctx_doc = xpath_context_document(ctx);
+    LeptrisElement root = (LeptrisElement)ctx_doc->new_dom_root;
+    if (!root) return NULL;
+
+    int same = strcmp(name_a, name_b) == 0;
+    struct leptris_element_index* idx = ctx_doc->element_index;
+    /* TODO 190 law: build on the SECOND axis query — the union
+     * participates in the same count as single-name queries. */
+    if (!idx &&
+        ++ctx_doc->axis_query_count >= LEPTRIS_ELEMENT_INDEX_MIN_QUERIES) {
+        idx = leptris_element_index_build(ctx_doc);
+        ctx_doc->element_index = idx;
+    }
+
+    if (!idx && !same) {
+        /* First axis query on this document: ONE combined pre-order
+         * walk matching either name. Two separate walks double the
+         * traversal; the generic path would additionally sort the
+         * concatenation. Emission order is document order by
+         * construction. */
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        if (vm_unprefixed_name_matches(ctx, root, name_a) ||
+            vm_unprefixed_name_matches(ctx, root, name_b))
+            xpath_nodeset_add_fast(out, root);
+        descendant_walk_two_names(ctx, out, root, name_a, name_b);
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+
+    if (same && idx && !(ctx->document && ctx->document->has_namespaces)) {
+        /* One bucket copy IS the union. */
+        const LeptrisElementIndexBucket* b =
+            leptris_element_index_lookup(idx, name_a);
+        XPathNodeSet* out = xpath_nodeset_new();
+        if (!out) return NULL;
+        if (b && b->count > 0) {
+            void** arr = (void**)malloc(b->count * sizeof(void*));
+            if (arr) {
+                memcpy(arr, b->matches, b->count * sizeof(void*));
+                out->nodes = arr;
+                out->count = b->count;
+                out->capacity = b->count;
+            }
+        }
+        struct leptris_xpath_result* r =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (!r) { xpath_nodeset_free(out); return NULL; }
+        r->value.nodeset_value = out;
+        return r;
+    }
+
+    struct leptris_xpath_result* ra = vm_apply_absolute(ctx, name_a, 0, 2);
+    struct leptris_xpath_result* rb = vm_apply_absolute(ctx, name_b, 0, 2);
+    if (!ra || !rb) {
+        if (ra) xpath_result_free(ra);
+        if (rb) xpath_result_free(rb);
+        return NULL;
+    }
+    XPathNodeSet* la = ra->value.nodeset_value;
+    XPathNodeSet* lb = rb->value.nodeset_value;
+
+    size_t n = la->count + lb->count;
+    XPathNodeSet* out = xpath_nodeset_new();
+    struct leptris_xpath_result* r = xpath_result_new(XPATH_RESULT_NODESET);
+    void** arr = out ? (void**)malloc((n ? n : 1) * sizeof(void*)) : NULL;
+    if (!out || !r || !arr) {
+        free(arr);
+        if (out) xpath_nodeset_free(out);
+        if (r) xpath_result_free(r);
+        xpath_nodeset_free(la);
+        xpath_nodeset_free(lb);
+        ra->value.nodeset_value = NULL;
+        rb->value.nodeset_value = NULL;
+        xpath_result_free(ra);
+        xpath_result_free(rb);
+        return NULL;
+    }
+    out->nodes = arr;
+    out->capacity = n ? n : 1;
+
+    int merged = 0;
+    if (!same && ctx->document->mutation_version == 0) {
+        uint64_t* ka =
+            la->count ? (uint64_t*)malloc(la->count * sizeof(uint64_t))
+                      : (uint64_t*)malloc(sizeof(uint64_t));
+        uint64_t* kb =
+            lb->count ? (uint64_t*)malloc(lb->count * sizeof(uint64_t))
+                      : (uint64_t*)malloc(sizeof(uint64_t));
+        if (ka && kb) {
+            int ok = 1;
+            for (size_t i = 0; i < la->count && ok; i++)
+                if (!xpath_doc_order_offset_key(la->nodes[i], &ka[i]))
+                    ok = 0;
+            for (size_t j = 0; j < lb->count && ok; j++)
+                if (!xpath_doc_order_offset_key(lb->nodes[j], &kb[j]))
+                    ok = 0;
+            if (ok) {
+                size_t i = 0, j = 0, k = 0;
+                while (i < la->count && j < lb->count)
+                    out->nodes[k++] = (ka[i] <= kb[j]) ? la->nodes[i++]
+                                                       : lb->nodes[j++];
+                while (i < la->count) out->nodes[k++] = la->nodes[i++];
+                while (j < lb->count) out->nodes[k++] = lb->nodes[j++];
+                out->count = k;
+                merged = 1;
+            }
+        }
+        free(ka);
+        free(kb);
+    }
+    if (!merged) {
+        if (la->count)
+            memcpy(out->nodes, la->nodes, la->count * sizeof(void*));
+        if (lb->count)
+            memcpy(out->nodes + la->count, lb->nodes,
+                   lb->count * sizeof(void*));
+        out->count = n;
+        /* Sort dedups adjacent equal pointers — covers the
+         * same-name-no-index case (two identical runs). */
+        xpath_nodeset_sort_doc_order(ctx, out, 0);
+    }
+
+    xpath_nodeset_free(la);
+    xpath_nodeset_free(lb);
+    ra->value.nodeset_value = NULL;
+    rb->value.nodeset_value = NULL;
+    xpath_result_free(ra);
+    xpath_result_free(rb);
+    r->value.nodeset_value = out;
+    return r;
+}
+
 struct leptris_xpath_result* vm_apply_axis_child(XPathContext* ctx, XPathVM* vm,
                                                  const char* name, int wild) {
     XPathNodeSet* input = vm_detach_input_nodeset(vm);
@@ -875,6 +1029,46 @@ static void descendant_walk(XPathContext* ctx, XPathNodeSet* out, LeptrisElement
             cur = leptris_element_get_parent(cur);
         }
         if (cur == elem) break;  /* exhausted subtree */
+    }
+}
+
+/* #1842 Track C lever 2: descendant_walk matching EITHER of two
+ * plain names in one pre-order pass. Both tests are unprefixed
+ * (compile gate) and disjoint — an element can match at most one —
+ * so the emission is doc-ordered without any merge or sort. */
+static void descendant_walk_two_names(XPathContext* ctx, XPathNodeSet* out,
+                                      LeptrisElement elem,
+                                      const char* name_a, const char* name_b) {
+    if (!elem) return;
+    if (out->capacity < 32) {
+        void** new_nodes = (void**)malloc(32 * sizeof(void*));
+        if (new_nodes) {
+            if (out->count > 0) {
+                memcpy(new_nodes, out->nodes, out->count * sizeof(void*));
+            }
+            out->nodes = new_nodes;
+            out->capacity = 32;
+        }
+    }
+    LeptrisElement cur = leptris_element_get_first_child(elem);
+    while (cur) {
+        if (vm_unprefixed_name_matches(ctx, cur, name_a) ||
+            vm_unprefixed_name_matches(ctx, cur, name_b))
+            xpath_nodeset_add_fast(out, cur);
+        LeptrisElement next = leptris_element_get_first_child(cur);
+        if (next) {
+            cur = next;
+            continue;
+        }
+        while (cur && cur != elem) {
+            LeptrisElement sib = leptris_element_get_next_sibling(cur);
+            if (sib) {
+                cur = sib;
+                break;
+            }
+            cur = leptris_element_get_parent(cur);
+        }
+        if (cur == elem) break;
     }
 }
 
@@ -2103,6 +2297,22 @@ static struct leptris_xpath_result* vm_run(LeptrisXPathBytecode* bc,
                                         ? bc->constants[tgt].v.string : NULL;
                 struct leptris_xpath_result* r =
                     vm_apply_absolute_type(ctx, type_name, pi_target);
+                if (!r) { vm.error = 1; break; }
+                vm_push(&vm, r);
+                break;
+            }
+
+            case XPATH_BC_ABSOLUTE_UNION_NAMES: {
+                uint16_t ia = read_u16(&pc);
+                uint16_t ib = read_u16(&pc);
+                const char* na = (ia < bc->const_count &&
+                                  bc->constants[ia].type == XPATH_CONST_STRING)
+                                 ? bc->constants[ia].v.string : NULL;
+                const char* nb = (ib < bc->const_count &&
+                                  bc->constants[ib].type == XPATH_CONST_STRING)
+                                 ? bc->constants[ib].v.string : NULL;
+                struct leptris_xpath_result* r =
+                    vm_apply_absolute_union_names(ctx, na, nb);
                 if (!r) { vm.error = 1; break; }
                 vm_push(&vm, r);
                 break;

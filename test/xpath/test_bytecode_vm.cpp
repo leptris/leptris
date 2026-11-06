@@ -788,4 +788,151 @@ TEST(XPathBytecodeFusedAxisPredicate, DescendantWildWithAttrExists) {
     leptris_document_free(doc);
 }
 
+// ---- #1842 Track C lever 2: descendant-name union fusion ----
+// `//a | //b` compiles to ONE pre-order walk matching either name
+// (the generic path walks the tree once per branch and unions the
+// results). The fused form must be results-identical: same members,
+// document order, dedup. Coverage gate: only plain-name branches
+// fuse — prefixed, wildcard-mixed, deep, and variable branches stay
+// generic and must keep working.
+
+static void expect_names_in_order(LeptrisDocument doc, const char* expr,
+                                  const char* const* names, size_t n) {
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, expr);
+    ASSERT_NE(r, nullptr) << expr;
+    ASSERT_EQ(leptris_xpath_result_count(r), n) << expr;
+    for (size_t i = 0; i < n; i++) {
+        LeptrisElement e = leptris_xpath_result_get(r, i);
+        ASSERT_NE(e, (LeptrisElement)nullptr) << expr << " [" << i << "]";
+        const char* nm = leptris_element_name(e);
+        ASSERT_NE(nm, nullptr);
+        EXPECT_STREQ(nm, names[i]) << expr << " [" << i << "]";
+    }
+    leptris_xpath_result_free(r);
+}
+
+TEST(XPathUnionFusion, DocumentOrderCompleteness) {
+    const char xml[] =
+        "<lib><b><c>X</c></b><b><c>Y</c></b><d><b><c>Z</c></b></d></lib>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Doc order: b, b, d (then its child b), i.e. the nested b
+     * comes AFTER d — a branch-ordered concatenation (b b then d b)
+     * would still match here, but the count must be 4. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//b | //d)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), 4.0);
+    leptris_xpath_result_free(r);
+
+    /* Full order pin: the nested b must follow its d parent. */
+    static const char* const names[] = {"b", "b", "d", "b"};
+    expect_names_in_order(doc, "//b | //d", names, 4);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, SelfUnionDedups) {
+    const char xml[] = "<r><b/><b/><b/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//b | //b)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), 3.0);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, InterleavedBranchesDocOrder) {
+    /* The merge trap: branch-concatenation ([b b] ++ [d]) violates
+     * document order when the names interleave. The fused union
+     * must interleave the runs — [b, d, b], not [b, b, d]. */
+    const char xml[] = "<r><b/><d/><b/></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    static const char* const names[] = {"b", "d", "b"};
+    expect_names_in_order(doc, "//b | //d", names, 3);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, NestedContainerOverlap) {
+    const char xml[] =
+        "<lib><b><c>X</c></b><b><c>Y</c></b><d><b><c>Z</c></b></d></lib>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* lib contains all three c's — the union must dedup across the
+     * ancestor/descendant overlap. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//lib | //c)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), 4.0);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, DisjointBranch) {
+    const char xml[] = "<users><user/><user/><user/></users>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* The scoreboard shape: one branch matches nothing. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//user | //record)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), 3.0);
+    leptris_xpath_result_free(r);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, ThreeBranches) {
+    const char xml[] =
+        "<lib><b><c>X</c></b><b><c>Y</c></b><d><b><c>Z</c></b></d></lib>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    static const char* const names[] = {"b", "c", "b", "c", "d", "b", "c"};
+    expect_names_in_order(doc, "//b | //c | //d", names, 7);
+
+    leptris_document_free(doc);
+}
+
+TEST(XPathUnionFusion, NonFusableShapesStayCorrect) {
+    const char xml[] =
+        "<lib><b><c>X</c></b><b><c>Y</c></b><d><b><c>Z</c></b></d></lib>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    /* Wildcard branch — outside the plain-name coverage gate. */
+    LeptrisXPathResult r = leptris_xpath_eval(doc, nullptr, "count(//* | //c)");
+    ASSERT_NE(r, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r), 8.0);
+    leptris_xpath_result_free(r);
+
+    /* Deep branch — child::c under //b, not a bare //name. */
+    LeptrisXPathResult r2 = leptris_xpath_eval(doc, nullptr, "count(//b/c | //d)");
+    ASSERT_NE(r2, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r2), 4.0);
+    leptris_xpath_result_free(r2);
+
+    /* Prefixed name branch — unbound prefix selects nothing. */
+    LeptrisXPathResult r3 = leptris_xpath_eval(doc, nullptr, "count(//lib | //x:c)");
+    ASSERT_NE(r3, nullptr);
+    EXPECT_DOUBLE_EQ(leptris_xpath_result_number(r3), 1.0);
+    leptris_xpath_result_free(r3);
+
+    leptris_document_free(doc);
+}
+
 }  // namespace

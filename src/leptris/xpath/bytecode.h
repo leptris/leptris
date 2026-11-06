@@ -129,6 +129,9 @@ typedef enum {
     XPATH_BC_ABSOLUTE_DESCENDANT_TYPE, /* u16 u16: type name (node/text/
                                           comment/processing-instruction),
                                           PI target (0xFFFF = any) */
+    XPATH_BC_ABSOLUTE_UNION_NAMES, /* u16 u16: two plain names — one
+                                      merged doc-ordered match of
+                                      `//a | //b` (#1842 Track C) */
 
     /* Inline function opcodes (TODO 130). The compiler emits
      * <arg bytecode> + BC_FUNC_<NAME> for the common XPath functions

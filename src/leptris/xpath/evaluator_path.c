@@ -619,8 +619,9 @@ void leptris_doc_order_index_free(void* table) {
  * (issue #485: a per-call walk made union-heavy benchmark loops
  * quadratic). */
 /* Offset fast path (#1842 Track C2, EXPERIMENT): unmutated
- * parse-created documents rank by parse-time byte offset. */
-static int doc_order_offset_key(void* node, uint64_t* out) {
+ * parse-created documents rank by parse-time byte offset.
+ * Exported for the fused union merge (vm.c — Track C lever 2). */
+int xpath_doc_order_offset_key(void* node, uint64_t* out) {
     int tag = (int)XPATH_NODE_TYPE(node);
     if (tag == (int)LEPTRIS_NODE_TYPE_DOCUMENT) {
         *out = (uint64_t)INT64_MAX -
@@ -663,7 +664,7 @@ int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
         if (keys) {
             int ok = 1;
             for (size_t i = 0; i < n; i++) {
-                if (!doc_order_offset_key(ns->nodes[i], &keys[i])) {
+                if (!xpath_doc_order_offset_key(ns->nodes[i], &keys[i])) {
                     ok = 0;
                     break;
                 }

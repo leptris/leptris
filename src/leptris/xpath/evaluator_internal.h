@@ -64,6 +64,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
  * Issue #485. Defined in evaluator_path.c. */
 int xpath_nodeset_sort_doc_order(XPathContext* ctx, XPathNodeSet* ns,
                                  int reverse);
+/* #1842 Track C: parse-time byte-offset doc-order key — valid ONLY
+ * while the document is unmutated (mutation_version == 0). The
+ * fused union merge (vm.c) merges its two doc-ordered runs with it,
+ * no sort. Defined in evaluator_path.c. */
+int xpath_doc_order_offset_key(void* node, uint64_t* out);
 
 /* From evaluator_path.c */
 struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
