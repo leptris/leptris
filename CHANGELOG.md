@@ -2,13 +2,15 @@
 
 ## [1.9.411] - 2026-11-06
 
-### Fixed
-
-- drop the duplicated XsdRegexRs47 pair from #1980 (redefinition broke the Linux/ASAN/amalgam lanes) (test)
-
 ### Performance
 
-- fuse the element-open name scan with the hash split (parse)
+- **parse**: the element-open name scan is FUSED with the hash split — `dp_scan_name_fused` produces the extent, the FNV-1a chain, and the last-colon offset in one 4-byte-unrolled walk instead of two passes over the name bytes (#1842 slice 3; line-level-profiled at ~7% of parse on the serialbench shape — attrs 473 / text-scan 405 / wire 219 / name-scan 130 / hash-split 82; ABBA x6 median 1.018x parse, all pairs positive). Hash semantics proven identical to `dp_split_hash_name` and `leptris_name_hash_compute` — parsed and mutated elements keep matching in the child-axis hash lookups.
+
+### Tests
+
+- engine-level pins for the leptris-rs#47 faces (reG8 char-range + the Cyrillic `\p{IsCyrillic}` block escape — the sweep showed the regex corpus scoring identically on 1.9.406/407/410 with the engine leading libxml2 1400 vs 1390)
+- the vendored W3C schG2 composition (compile_file + both compile_set unit orders + the roundtrip artifact) riding the #1976 no-ns resolution fix
+- the bench harness gained `LEPTRIS_BENCH_ITERS` for sampling-window profiling
 
 
 
