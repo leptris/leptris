@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.412] - 2026-11-06
+
+### Fixed
+
+- compute the node-test hash at construction - write-once, race-free (xpath)
+- initialize the lazy node-test hash fields in ast_node_new (xpath)
+
+### Performance
+
+- fuse `//a | //b` into one doc-ordered pass (#1842 Track C lever 2) (xpath)
+- hash pre-filter in matches_node_test (#1842 Track C) (xpath)
+
+
+
 ## [1.9.411] - 2026-11-06
 
 ### Performance
