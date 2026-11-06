@@ -348,6 +348,69 @@ static LEPTRIS_ALWAYS_INLINE void dp_scan_name_p(char** pos) {
     *pos = s;
 }
 
+/* Fused element-open name scan (#1842 slice 3): the extent walk
+ * doubles as dp_split_hash_name's FNV-1a hash + last-colon finder,
+ * so the name bytes are walked ONCE instead of twice (the profile's
+ * name-scan + hash-split cluster, ~7% of parse). Semantics match
+ * dp_split_hash_name exactly: h_since restarts at each colon (the
+ * split's hash chain), h_all never resets (the hash a colon-bearing
+ * name shorter than 3 bytes must keep — the guard would have skipped
+ * its colon test), and `colon` is the LAST colon's offset (-1 when
+ * none). Returns the scan end. */
+static LEPTRIS_ALWAYS_INLINE char* dp_scan_name_fused(
+    char* s, uint16_t* hash_out, ptrdiff_t* colon_out, size_t* len_out) {
+    unsigned h_since = 0x811C;
+    unsigned h_all = 0x811C;
+    ptrdiff_t colon = -1;
+    size_t len = 0;
+    for (;;) {
+        char c = s[0];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) break;
+        c = s[1];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) {
+            h_since = ((h_since ^ (unsigned char)s[0]) * 0x0193) & 0xFFFF;
+            h_all = ((h_all ^ (unsigned char)s[0]) * 0x0193) & 0xFFFF;
+            if (s[0] == ':') { colon = len; h_since = 0x811C; }
+            len += 1;
+            s += 1;
+            break;
+        }
+        c = s[2];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) {
+            for (int i = 0; i < 2; i++) {
+                h_since = ((h_since ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+                h_all = ((h_all ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+                if (s[i] == ':') { colon = len; h_since = 0x811C; }
+                len += 1;
+            }
+            s += 2;
+            break;
+        }
+        c = s[3];
+        if (DP_UNLIKELY(!IS_NAME_CHAR(c))) {
+            for (int i = 0; i < 3; i++) {
+                h_since = ((h_since ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+                h_all = ((h_all ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+                if (s[i] == ':') { colon = len; h_since = 0x811C; }
+                len += 1;
+            }
+            s += 3;
+            break;
+        }
+        for (int i = 0; i < 4; i++) {
+            h_since = ((h_since ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+            h_all = ((h_all ^ (unsigned char)s[i]) * 0x0193) & 0xFFFF;
+            if (s[i] == ':') { colon = len; h_since = 0x811C; }
+            len += 1;
+        }
+        s += 4;
+    }
+    *hash_out = (uint16_t)((colon >= 0 && len < 3) ? h_all : h_since);
+    *colon_out = (colon >= 0 && len >= 3) ? colon : -1;
+    *len_out = len;
+    return s;
+}
+
 static LEPTRIS_ALWAYS_INLINE void dp_scan_name(DParser* p) {
     dp_scan_name_p(&p->pos);
 }
@@ -1993,8 +2056,11 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * AFTER dp_parse_attrs returns. */
             p.pos++; /* skip '<' */
             char* name_start = p.pos;
-            dp_scan_name(&p);
-            size_t name_len = p.pos - name_start;
+            uint16_t name_hash;
+            ptrdiff_t name_colon;
+            size_t name_len;
+            p.pos = dp_scan_name_fused(p.pos, &name_hash, &name_colon,
+                                       &name_len);
 
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
@@ -2010,8 +2076,23 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * has finished scanning the open tag. */
             if (dp_nul(&p, name_start + name_len)) goto fail;
 
-            if (dp_split_hash_name(&p, elem, name_start, name_len))
-                goto fail;
+            /* #1842 slice 3: the hash + colon split point came out
+             * of the fused name scan — the second walk is gone. */
+            elem->name_hash = name_hash;
+            if (name_colon >= 0) {
+                char* colon = name_start + name_colon;
+                *colon = '\0';
+                leptris_elem_set_prefix(elem, name_start, p.pool);
+                elem_set_name(elem, colon + 1);
+                size_t local_len =
+                    name_len - (size_t)(colon + 1 - name_start);
+                elem->name_len =
+                    (local_len > 254) ? 0xFF : (uint8_t)local_len;
+            } else {
+                elem_set_name(elem, name_start);
+                elem->name_len =
+                    (name_len > 254) ? 0xFF : (uint8_t)name_len;
+            }
 
             /* Wire into parent. */
             if (p.depth > 0) {
