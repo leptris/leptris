@@ -138,7 +138,11 @@ void bench_children_iterator(void* ctx) {
 }
 
 int main(void) {
-    const size_t ITERATIONS = 1000;
+    /* LEPTRIS_BENCH_ITERS: profiling hook — `sample` needs a
+     * multi-second window; the default 1000 finishes too fast. */
+    const char* iters_env = getenv("LEPTRIS_BENCH_ITERS");
+    const size_t ITERATIONS =
+        iters_env ? (size_t)strtoul(iters_env, NULL, 10) : 1000;
 
     printf("\n");
     printf("================================================================\n");
