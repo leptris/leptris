@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [1.9.412] - 2026-11-07
+
 ## Changed
 
 - **XPath: `//a | //b` fuses to one doc-ordered pass** (#1842 Track C lever 2). The scoreboard's first XPath query shape (serialbench-c bench.c:104) compiled to two fused descendant walks plus the generic union operator — per-eval concatenation then an O(n log n) doc-order sort. Both bare plain-name descendant branches now compile to one `XPATH_BC_ABSOLUTE_UNION_NAMES` opcode: one combined pre-order walk when the element index is not yet built, an O(n+m) two-pointer merge over the parse-offset keys once it is, and a single bucket copy for same-name unions. Wildcards, prefixed names, predicates, and deep branches stay on the generic path. Measured (ABBA x6, fresh RelWithDebInfo+LTO builds, serialbench medium.xml): union-only shape +8.5%, full scoreboard row (parse + 3 canonical queries) **888 → 945 ops/s (+6.4%)**, all pairs positive. Seven new `XPathUnionFusion` pins, including the interleaved-layout document-order trap a branch-concatenation would get wrong.
