@@ -1,16 +1,14 @@
 ## [Unreleased]
 
-## [1.9.412] - 2026-11-06
+## Changed
 
-### Fixed
+- **XPath: `//a | //b` fuses to one doc-ordered pass** (#1842 Track C lever 2). The scoreboard's first XPath query shape (serialbench-c bench.c:104) compiled to two fused descendant walks plus the generic union operator — per-eval concatenation then an O(n log n) doc-order sort. Both bare plain-name descendant branches now compile to one `XPATH_BC_ABSOLUTE_UNION_NAMES` opcode: one combined pre-order walk when the element index is not yet built, an O(n+m) two-pointer merge over the parse-offset keys once it is, and a single bucket copy for same-name unions. Wildcards, prefixed names, predicates, and deep branches stay on the generic path. Measured (ABBA x6, fresh RelWithDebInfo+LTO builds, serialbench medium.xml): union-only shape +8.5%, full scoreboard row (parse + 3 canonical queries) **888 → 945 ops/s (+6.4%)**, all pairs positive. Seven new `XPathUnionFusion` pins, including the interleaved-layout document-order trap a branch-concatenation would get wrong.
 
-- compute the node-test hash at construction - write-once, race-free (xpath)
-- initialize the lazy node-test hash fields in ast_node_new (xpath)
+- **XPath: node-test hash pre-filter shipped write-once** (#1842 Track C lever 1, #1986). `matches_node_test` rejects candidates on the element's stored `name_hash` before the strcmp; the AST node's hash is computed at parser construction (compiled ASTs are thread-shared across concurrent evals — the lazy cache was a TSan data race and `ast_node_new` initializes every field explicitly after gcc read garbage where clang zeroed). 1.011x on the parse+query mix.
 
-### Performance
+## Tests
 
-- fuse `//a | //b` into one doc-ordered pass (#1842 Track C lever 2) (xpath)
-- hash pre-filter in matches_node_test (#1842 Track C) (xpath)
+- schG2 through every three-unit `compile_set` order (#1979 coverage): the lutaml-xsd hints lane delivers the resolved units in any order — all six permutations pinned to the W3C oracle (valid). #1979 itself was answered by v1.9.410's resolved-lane spec; this closes the ordering gap so merged-table order can never flip the verdict again.
 
 
 
