@@ -331,6 +331,67 @@ static int op_is_comparison(XPathOperatorType op) {
            op == XPATH_OP_GREATER || op == XPATH_OP_GREATER_EQUAL;
 }
 
+/* #1842 Track C lever 2: is this union branch a bare `//name`?
+ * ABSOLUTE_PATH whose whole body is descendant-or-self::node() (or
+ * ::*) followed by ONE unprefixed child-name step, no predicates,
+ * no further steps. On match, *out is the branch name. Mirrors the
+ * first-step unwrapping in compile_absolute_path. */
+static int union_branch_plain_name(XPathASTNode* ast, const char** out) {
+    *out = NULL;
+    if (!ast || ast->type != XPATH_AST_ABSOLUTE_PATH) return 0;
+
+    XPathASTNode* steps[2] = {NULL, NULL};
+    size_t step_count = 0;
+    if (ast->child_count >= 1 &&
+        ast->children[0]->type == XPATH_AST_RELATIVE_PATH) {
+        const XPathASTNode* rp = ast->children[0];
+        if (rp->child_count >= 1) steps[0] = rp->children[0];
+        if (rp->child_count >= 2) steps[1] = rp->children[1];
+        step_count = rp->child_count;
+    } else {
+        if (ast->child_count >= 1) steps[0] = ast->children[0];
+        if (ast->child_count >= 2) {
+            /* The second child may be a STEP directly or a
+             * RELATIVE_PATH wrapping the remaining steps (the same
+             * duality compile_absolute_path unwraps). */
+            if (ast->children[1]->type == XPATH_AST_RELATIVE_PATH) {
+                if (ast->children[1]->child_count >= 1)
+                    steps[1] = ast->children[1]->children[0];
+                step_count = 1 + ast->children[1]->child_count;
+            } else {
+                steps[1] = ast->children[1];
+                step_count = ast->child_count;
+            }
+        }
+        step_count = ast->child_count >= 2 ? step_count : ast->child_count;
+    }
+    if (step_count != 2 || !steps[0] || !steps[1]) return 0;
+    if (steps[0]->type != XPATH_AST_STEP || steps[1]->type != XPATH_AST_STEP)
+        return 0;
+
+    /* descendant-or-self::node() or descendant-or-self::* */
+    if (steps[0]->axis_id != XPATH_AXIS_DESCENDANT_OR_SELF ||
+        steps[0]->child_count != 1)
+        return 0;
+    const XPathASTNode* ds = steps[0]->children[0];
+    int ds_node = (ds && ds->type == XPATH_AST_NODE_TEST_TYPE && ds->value &&
+                   strcmp(ds->value, "node") == 0);
+    int ds_wild = (ds && ds->type == XPATH_AST_NODE_TEST_ALL && !ds->prefix);
+    if (!ds_node && !ds_wild) return 0;
+
+    /* child::name — unprefixed, no predicates */
+    if (steps[1]->axis_id != XPATH_AXIS_CHILD ||
+        steps[1]->child_count != 1)
+        return 0;
+    const XPathASTNode* ct = steps[1]->children[0];
+    if (!ct || ct->type != XPATH_AST_NODE_TEST_NAME || !ct->value ||
+        strchr(ct->value, ':'))
+        return 0;
+
+    *out = ct->value;
+    return 1;
+}
+
 /* Try to lower a STEP AST to a specialized axis opcode (TODO 126).
  * Returns 1 if emitted, 0 if the shape doesn't match a fast path
  * and the caller should fall back to BC_AXIS_STEP.
@@ -1391,6 +1452,28 @@ static void compile_node(CompilerState* st, XPathASTNode* node) {
                 emit_op_u16(st, XPATH_BC_FALLBACK_EVAL,
                             add_const_ast(st, node));
                 break;
+            }
+
+            /* #1842 Track C lever 2: `//a | //b` with both branches
+             * bare plain-name descendant shapes lowers to ONE opcode
+             * whose handler merges the doc-ordered runs directly —
+             * the generic path concatenates then doc-order-sorts per
+             * eval. Wildcards, prefixed names, predicates, and deep
+             * branches stay generic. */
+            if (op == XPATH_OP_UNION && node->child_count == 2) {
+                const char* ua = NULL;
+                const char* ub = NULL;
+                if (union_branch_plain_name(node->children[0], &ua) &&
+                    union_branch_plain_name(node->children[1], &ub)) {
+                    emit_op_u16(st, XPATH_BC_ABSOLUTE_UNION_NAMES,
+                                add_const_string(st, ua));
+                    if (reserve_code(st, 2) == 0) {
+                        uint16_t v = add_const_string(st, ub);
+                        st->bc->code[st->bc->code_len++] = (v >> 8) & 0xFF;
+                        st->bc->code[st->bc->code_len++] = v & 0xFF;
+                    }
+                    break;
+                }
             }
 
             /* Comparison operators with a nodeset operand require
