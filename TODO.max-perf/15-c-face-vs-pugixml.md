@@ -78,8 +78,33 @@ whole tree to assign ranks (#485 table).
       on elem->name_hash (the AST node caches the test's local-name
       hash lazily; the strcmp remains as the collision guard).
       ABBA x6 median 1.011x on parse+3-query mix, all pairs
-      positive, suite 2241/2241. Next: the apply_axis sibling-chain
-      decode (~94 samples) and the step dispatch (~316).
+      positive, suite 2241/2241.
+      **RE-SCOPED 2026-11-07**: the sample inventory above was
+      measured on a synthetic `[@stock > '50']` shape that
+      classify_predicate does NOT cover — the SCOREBOARD set
+      (serialbench-c bench.c:104: `//user | //record`,
+      `//user[@id='101']`, `//preferences/theme`) is fully VM-fused
+      already; the interpreter is absent from the row. Measured
+      shares (RelWithDebInfo+LTO, fresh-doc driver): parse 56.9%,
+      union 20.1%, theme 12.4%, attreq 10.7%. The apply_axis/
+      step-dispatch levers are de-prioritized (they only pay on
+      non-fused shapes).
+      **Track C lever 2 SHIPPED** (perf/1842-union-fusion, PR
+      #1987): `//a | //b` fuses to ONE doc-ordered pass —
+      XPATH_BC_ABSOLUTE_UNION_NAMES. Compiler gate = both branches
+      bare plain-name descendant shapes (second step arrives
+      RELATIVE_PATH-wrapped — same duality compile_absolute_path
+      unwraps). VM: index up = O(n+m) two-pointer merge on the
+      parse-offset keys (xpath_doc_order_offset_key exported);
+      index not yet built (first query per doc) = one combined
+      pre-order walk matching either name; same-name unions =
+      one bucket copy. ABBA x6, serialbench medium.xml: union-only
+      1255 vs 1156 ops/s (+8.5%), full scoreboard row 945 vs 888
+      (+6.4%), all pairs positive, suite 2248/2248 (7 new
+      XPathUnionFusion pins incl. the interleaved doc-order trap).
+      Next: A4 (parse, 56.9% of the row) remains the other live
+      arc; the attr-num-cmp predicate family ([@a > '50']) is a
+      real-world fallback shape but NOT on the scoreboard row.
 - [ ] **C3** mingw/Windows parity investigation: we are AT parity
       there — diff the codegen assumptions (branch-heavy loops?
       LTO behavior on gcc-win vs clang-mac?) and port whatever
