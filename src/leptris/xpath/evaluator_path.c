@@ -149,6 +149,21 @@ int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) 
                 }
             }
 
+            /* #1842 Track C: hash pre-filter — elem->name_hash is
+             * the 16-bit FNV-1a of the stored LOCAL name (parse-side
+             * dp_scan_name_fused / mutation-side
+             * leptris_name_hash_compute agree), and node_name IS the
+             * stored local name, so a hash mismatch rejects exactly.
+             * The test's hash caches on the AST node (one compute
+             * per expression, not per candidate); the strcmps below
+             * remain as the collision guard. */
+            if (!test->local_hash_set) {
+                test->local_hash =
+                    leptris_name_hash_compute(test_local);
+                test->local_hash_set = 1;
+            }
+            if (elem->name_hash != test->local_hash) return 0;
+
             if (!test_prefix) {
                 /* Simple name match - no prefix in test */
                 /* Issue #525 (XPath 1.0 §2.3): an unprefixed test
