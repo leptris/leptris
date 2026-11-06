@@ -192,20 +192,4 @@ TEST(XsdRegexRs47, CyrillicBlockEscapeStaysValid) {
                             cases_path("rs47-regex/Cyrillic.xml")), 1);
 }
 
-// ---- leptris-rs#47: the block-escape + char-range faces ----------
-// The rs#47 claim (407 regressed ~177 regex cases) does not
-// reproduce at the engine level: the identical 1432-case sweep
-// scores 1400/1432 on v1.9.406, v1.9.407, and main alike. These two
-// pins keep the representative faces (char range, Unicode block
-// escape) green at the engine level.
-
-TEST(XsdRegexRs47, ReG8CharRangeStaysValid) {
-    EXPECT_EQ(validate_case(cases_path("rs47-regex/reG8.xsd"),
-                            cases_path("rs47-regex/reG8.xml")), 1);
-}
-
-TEST(XsdRegexRs47, CyrillicBlockEscapeStaysValid) {
-    EXPECT_EQ(validate_case(cases_path("rs47-regex/Cyrillic.xsd"),
-                            cases_path("rs47-regex/Cyrillic.xml")), 1);
-}
 
