@@ -164,6 +164,13 @@ static XPathASTNode* ast_node_new(XPathASTType type) {
     node->prefix = NULL;
     node->local_name = NULL;
 
+    /* #1842 Track C: the lazy node-test hash starts unset — the
+     * explicit init is load-bearing (this constructor sets fields
+     * individually, no memset; garbage local_hash_set rejected
+     * every name test on gcc/Linux CI). */
+    node->local_hash = 0;
+    node->local_hash_set = 0;
+
     return node;
 }
 
