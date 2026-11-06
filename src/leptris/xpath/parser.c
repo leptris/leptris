@@ -9,6 +9,7 @@
 #include "lexer.h"
 #include "evaluator_internal.h"  /* xpath_axis_from_name (TODO 113) */
 #include "../leptris_internal.h"
+#include "../dom/element.h"  /* leptris_name_hash_compute (#1842 Track C) */
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -3722,6 +3723,8 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
             node->prefix = NULL;
             node->local_name = leptris_strdup(full_name);
         }
+        node->local_hash = leptris_name_hash_compute(node->local_name);
+        node->local_hash_set = 1;
 
         node->value = full_name;  /* Keep full name for backward compat */
         advance_token(parser);
@@ -3745,6 +3748,8 @@ static XPathASTNode* parse_node_test(XPathParser* parser) {
 
         node->prefix = NULL;
         node->local_name = leptris_strdup(name);
+        node->local_hash = leptris_name_hash_compute(node->local_name);
+        node->local_hash_set = 1;
         node->value = name;
         advance_token(parser);
 
