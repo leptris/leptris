@@ -649,6 +649,13 @@ typedef struct xpath_ast_node {
      * to skip the strcmp dispatch chain in apply_axis. Defaults to
      * XPATH_AXIS_CHILD (the default axis per XPath spec). */
     XPathAxisType axis_id;
+
+    /* #1842 Track C: lazily cached 16-bit FNV-1a of local_name
+     * (leptris_name_hash_compute) — matches_node_test pre-filters
+     * candidates on elem->name_hash before the strcmp. local_hash_set
+     * guards the lazy init (0 until first use). */
+    uint16_t local_hash;
+    uint8_t local_hash_set;
 } XPathASTNode;
 
 /* XPath parser - Matches ext/leptris/xpath.h _xpath_parser */
