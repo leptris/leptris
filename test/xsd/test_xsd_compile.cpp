@@ -5011,3 +5011,75 @@ TEST(XsdCrossNs, RedefineExtensionKeepsTheExtensionModel) {
     std::remove(redef_p.c_str());
     leptris_xsd_free(s);
 }
+
+/* leptris#1979: the schG2 corpus shape through an import-RESOLVED
+ * compile (compile_file, so the import's schemaLocation loads).
+ * Both units define same-named components with SWAPPED member
+ * types — ns-a's ct-A (a1 int, a2 bool) vs the no-targetNamespace
+ * unit's ct-A (a1 bool, a2 int). The instance's no-ns <e1> must
+ * bind ITS OWN unit's ct-A; resolving the unprefixed type="
+ * ct-A" reference against the importing namespace's same-name
+ * type (which sits ahead in the merged table) types a1 as
+ * xsd:int and manufactures a false lexical row on a1=true. */
+/* leptris#1979: the schG2 corpus shape through an import-RESOLVED
+ * compile (compile_file on the vendored corpus case, so the
+ * import's schemaLocation chain loads: a imports b, b imports c).
+ * THREE units define same-named ct-A/e1 with different member
+ * types — ns-a (a1 int, a2 bool), the no-targetNamespace unit
+ * (a1 bool, a2 int), ns-c (a1 int, a2 int). The instance's no-ns
+ * <e1> must bind ITS OWN unit's ct-A; the no-ns unit's unprefixed
+ * type="ct-A" reference resolving against an earlier same-name
+ * entry in the merged table types a1 as xsd:int and manufactures
+ * a false lexical row on a1=true. The 1.9.410 fix (#1976) covered
+ * the roundtrip (location-less) lane; this is the resolved lane. */
+/* #1979 variant: the lutaml-xsd EngineContext passes ALL resolved
+ * units to compile_set (hints) — the three-unit orders. The merged
+ * table order differs from the import-chase order; every permutation
+ * must keep the W3C oracle (valid). */
+TEST(XsdCrossNs, SchG2CompileSetThreeUnitOrdersValid) {
+    const char* units[] = {
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_a.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2_b.xsd",
+        LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG1_c.xsd",
+    };
+    const int perms[6][3] = {{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
+    for (int pi = 0; pi < 6; pi++) {
+        const char* paths[3];
+        for (int u = 0; u < 3; u++) paths[u] = units[perms[pi][u]];
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisXsdSchema s = leptris_xsd_compile_set(paths, 3, &st);
+        ASSERT_NE(s, (LeptrisXsdSchema)0) << "perm " << pi;
+        LeptrisDocument d = leptris_parse_file(
+            LEPTRIS_XSD_CASES_DIR "/schG2-import-compose/schG2.xml", &st);
+        ASSERT_NE(d, nullptr) << "perm " << pi;
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << "perm " << pi;
+        for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+            ADD_FAILURE() << "perm " << pi << ": "
+                          << leptris_xsd_error_at(s, i);
+        leptris_document_free(d);
+        leptris_xsd_free(s);
+    }
+}
+
+TEST(XsdCrossNs, SchG2ImportResolvedNoNsUnitBindsOwnTypes) {
+    std::string dir = LEPTRIS_XSD_CASES_DIR;
+    std::string main_path = dir + "/schG2-import-compose/schG2_a.xsd";
+    std::string inst;
+    {
+        std::ifstream f(dir + "/schG2-import-compose/schG2.xml");
+        ASSERT_TRUE(f.is_open()) << "corpus instance missing";
+        std::stringstream ss;
+        ss << f.rdbuf();
+        inst = ss.str();
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(main_path.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+
+    /* W3C oracle: the whole instance is VALID. */
+    EXPECT_EQ(validate_compiled(s, inst.c_str()), 1)
+        << "schG2 import-resolved lane: "
+        << leptris_xsd_error(s);
+    leptris_xsd_free(s);
+}
