@@ -110,6 +110,18 @@ whole tree to assign ranks (#485 table).
       LTO behavior on gcc-win vs clang-mac?) and port whatever
       wins back to the other legs.
 
+      **A4 INVENTORY COMPLETE (2026-11-07, non-LTO function-level
+      profile, parse-only scoreboard shape)**: tokenizer own body
+      ~39% (the arc itself — char dispatch + element-open/close),
+      NEON text scan ~25% (already SIMD; residual = loop overhead
+      + scalar tails), dp_wire_child ~15% (branchless, memory-bound
+      — near-optimal), dp_text_create 6.3% (carved, lean), pos
+      journal 2.8%. Named sub-levers in the element-open region:
+      dp_parse_attrs call site (~1300), the source-position gate +
+      record (~600), the close-tag scan (dp_scan_name NOT fused —
+      a bounded fusion lever ~300). Evidence: #1842 comment
+      (function-level table).
+
 ## Laws
 
 - CI benchmark legs (quiet runners) gate every number; local A/B
