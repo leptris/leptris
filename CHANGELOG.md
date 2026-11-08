@@ -1,12 +1,13 @@
 ## [Unreleased]
 
 ## [1.9.413] - 2026-11-08
+## Performance
 
-### Performance
+- **parse: the loop-invariant parser fields hoisted to const locals** (#1842 A4 slice 1). The main parse loop read `line_offsets_ok` / `drop_ws_text` / `keep_entity_refs` / `recover` from the parser struct per node — all written once before the loop, but un-hoistable by the compiler across the parser-pointer-taking callees, so every node paid memory loads. ABBA x6 on the parse-only scoreboard shape: **+3.5% median parse, 9/9 pairs positive**. Suite 2250/2250.
 
-- hoist the loop-invariant DParser fields to const locals (#1842 A4) (parse)
+## Documentation
 
-
+- A4 function-level inventory: the tokenizer's remaining arc precisely scoped (dispatch own body ~39%, text scan already 25% SIMD, wiring near-optimal) — the roadmap for the next parse slices.
 
 ## [1.9.412] - 2026-11-07
 
