@@ -15,6 +15,8 @@ static double now_ns() {
 }
 
 int main(void) {
+    volatile size_t sink = 0;
+    (void)sink;
     const int N_APPEND = 200000;
     const int N_PARSE = 20000;
 
@@ -106,46 +108,104 @@ int main(void) {
         xml += "/>";
     }
     xml += "</r>";
+    /* #1842 attr-parse methodology (corrected 2026-11-09): the old
+     * rows measured parse-without-access — apples to oranges, since
+     * pugixml's load_buffer parses EAGERLY while leptris defers
+     * until first tree access (the no-access loop completed at
+     * handle-setup cost and the row compared setup vs parse). The
+     * honest workload: parse + walk + read every attribute name and
+     * value on BOTH engines. Statistic: MIN of 5 repetitions — the
+     * standard noise-robust estimator for microbenchmarks (max
+     * responsiveness, min scheduler noise). */
     {
-        double t0 = now_ns();
-        for (int i = 0; i < N_PARSE; i++) {
-            LeptrisDocument d =
-                leptris_parse_string(xml.data(), xml.size(), NULL);
-            leptris_document_free(d);
+        const int REPS = 5;
+        double best_lx = 1e18, best_lx_a = 1e18, best_pugi = 1e18;
+        for (int rep = 0; rep < REPS; rep++) {
+            {
+                double t0 = now_ns();
+                for (int i = 0; i < N_PARSE; i++) {
+                    LeptrisDocument d = leptris_parse_string(
+                        xml.data(), xml.size(), NULL);
+                    if (!d) return 4;
+                    LeptrisElement r = leptris_document_root(d);
+                    if (!r) return 5;
+                    for (LeptrisElement c =
+                             leptris_element_first_child_any(r);
+                         c;
+                         c = leptris_element_next_sibling_any(c)) {
+                        const char* names[32]; const char* vals[32];
+                        size_t na = leptris_element_attributes_raw(
+                            c, names, vals, 32);
+                        for (size_t k = 0; k < na; k++) {
+                            sink += strlen(names[k]);
+                            sink += strlen(vals[k]);
+                        }
+                    }
+                    leptris_document_free(d);
+                }
+                double t1 = now_ns();
+                double ns = (t1 - t0) / N_PARSE;
+                if (ns < best_lx) best_lx = ns;
+            }
+            {
+                /* Door A (leptris#1436, shipped v1.9.272): the opt-in
+                 * fast path — duplicate detection and source positions
+                 * off. Full conformance work pugixml does none of. */
+                LeptrisParseFlags flags = static_cast<LeptrisParseFlags>(
+                    LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+                    LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS);
+                double t0 = now_ns();
+                for (int i = 0; i < N_PARSE; i++) {
+                    LeptrisDocument d = leptris_parse_string_flags(
+                        xml.data(), xml.size(), flags, NULL);
+                    if (!d) return 6;
+                    LeptrisElement r = leptris_document_root(d);
+                    if (!r) return 7;
+                    for (LeptrisElement c =
+                             leptris_element_first_child_any(r);
+                         c;
+                         c = leptris_element_next_sibling_any(c)) {
+                        const char* names[32]; const char* vals[32];
+                        size_t na = leptris_element_attributes_raw(
+                            c, names, vals, 32);
+                        for (size_t k = 0; k < na; k++) {
+                            sink += strlen(names[k]);
+                            sink += strlen(vals[k]);
+                        }
+                    }
+                    leptris_document_free(d);
+                }
+                double t1 = now_ns();
+                double ns = (t1 - t0) / N_PARSE;
+                if (ns < best_lx_a) best_lx_a = ns;
+            }
+            {
+                double t0 = now_ns();
+                for (int i = 0; i < N_PARSE; i++) {
+                    pugi::xml_document d;
+                    pugi::xml_parse_result res =
+                        d.load_buffer((void*)xml.data(), xml.size());
+                    if (!res) return 8;
+                    for (pugi::xml_node c = d.first_child().first_child();
+                         c; c = c.next_sibling()) {
+                        for (pugi::xml_attribute a = c.first_attribute();
+                             a; a = a.next_attribute()) {
+                            sink += strlen(a.name());
+                            sink += strlen(a.value());
+                        }
+                    }
+                }
+                double t1 = now_ns();
+                double ns = (t1 - t0) / N_PARSE;
+                if (ns < best_pugi) best_pugi = ns;
+            }
         }
-        double t1 = now_ns();
-        printf("attrparse leptris: %7.1f ns/doc (%zu bytes)\n",
-               (t1 - t0) / N_PARSE, xml.size());
-    }
-    {
-        /* Door A (leptris#1436, shipped v1.9.272): the opt-in fast
-         * path — duplicate detection and source positions off. The
-         * default row above carries full conformance work pugixml
-         * does none of; this row shows the speed callers can opt
-         * into when their pipeline guarantees uniqueness and skips
-         * position reporting. */
-        LeptrisParseFlags flags = static_cast<LeptrisParseFlags>(
-            LEPTRIS_PARSE_SKIP_DUP_DETECTION |
-            LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS);
-        double t0 = now_ns();
-        for (int i = 0; i < N_PARSE; i++) {
-            LeptrisDocument d = leptris_parse_string_flags(
-                xml.data(), xml.size(), flags, NULL);
-            leptris_document_free(d);
-        }
-        double t1 = now_ns();
-        printf("attrparse leptris+flags: %7.1f ns/doc (Door A)\n",
-               (t1 - t0) / N_PARSE);
-    }
-    {
-        double t0 = now_ns();
-        for (int i = 0; i < N_PARSE; i++) {
-            pugi::xml_document d;
-            d.load_buffer((void*)xml.data(), xml.size());
-        }
-        double t1 = now_ns();
-        printf("attrparse pugixml: %7.1f ns/doc\n",
-               (t1 - t0) / N_PARSE);
+        printf("attrparse leptris: %7.1f ns/doc (%zu bytes, min of %d)\n",
+               best_lx, xml.size(), REPS);
+        printf("attrparse leptris+flags: %7.1f ns/doc (Door A, min of %d)\n",
+               best_lx_a, REPS);
+        printf("attrparse pugixml: %7.1f ns/doc (min of %d)\n",
+               best_pugi, REPS);
     }
     return 0;
 }
