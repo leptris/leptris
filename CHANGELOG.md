@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.413] - 2026-11-08
+
+### Performance
+
+- hoist the loop-invariant DParser fields to const locals (#1842 A4) (parse)
+
+
+
 ## [1.9.412] - 2026-11-07
 
 ## Changed
