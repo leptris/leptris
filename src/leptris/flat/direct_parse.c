@@ -1568,10 +1568,6 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         leptris_arena_destroy(arena);
         return NULL;
     }
-    if (len >= 256) {
-        pool->string_cache = leptris_hash_table_create(pool, 128);
-    }
-
     /* Round 8 carve: scratch first, then the pristine copy for
      * const inputs — the first pool bumps, so the scanner's buffers
      * sit at the front of the document-owned span. doc_free skips

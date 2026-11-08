@@ -780,13 +780,23 @@ char* leptris_pool_intern_string(LeptrisMemoryPool* pool, const LeptrisStringVie
         return NULL;
     }
 
-    /* If no hash table, fall back to direct allocation (no deduplication) */
+    /* The table is created LAZILY on the first intern (#1842 A4):
+     * direct_parse created a 128-bucket table eagerly for every
+     * >=256-byte document, but the scanner stores borrowed views and
+     * most documents never intern anything through this path — the
+     * eager create cost ~70 ns/doc on the attrparse shape (5.6% of
+     * the parse, line-level profiled). Callers that intern pay the
+     * create once, on first use. */
     if (!pool->string_cache) {
-        char* str = (char*)leptris_pool_alloc(pool, sv->length + 1);
-        if (!str) return NULL;
-        memcpy(str, sv->data, sv->length);
-        str[sv->length] = '\0';
-        return str;
+        pool->string_cache = leptris_hash_table_create(pool, 128);
+        if (!pool->string_cache) {
+            /* cold-path OOM: fall back to direct allocation */
+            char* str = (char*)leptris_pool_alloc(pool, sv->length + 1);
+            if (!str) return NULL;
+            memcpy(str, sv->data, sv->length);
+            str[sv->length] = '\0';
+            return str;
+        }
     }
 
     StringHashTable* table = pool->string_cache;
