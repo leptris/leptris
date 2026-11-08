@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.414] - 2026-11-08
+
+### Performance
+
+- lazy string_cache + honest attrparse benchmark methodology (#1842) (parse)
+
+
+
 ## [1.9.413] - 2026-11-08
 ## Performance
 
