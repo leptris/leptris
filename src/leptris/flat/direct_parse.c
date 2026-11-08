@@ -1743,6 +1743,18 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         p.pos += 3;
     }
 
+    /* #1842 A4 slice: the loop-invariant DParser fields hoisted to
+     * const locals — written once above, never inside the loop, but
+     * every per-node read pays a memory load because the compiler
+     * cannot prove the DParser*-taking callees (dp_parse_attrs and
+     * friends) never store through p. The A4 parse profile's
+     * dispatch stubs carry those loads. */
+    const int ho_line_offsets_ok = p.line_offsets_ok;
+    const int ho_drop_ws_text = p.drop_ws_text;
+    const int ho_keep_entity_refs = p.keep_entity_refs;
+    const int ho_recover = p.recover;
+#define P_LINE_OFFSETS_OK line_offsets_ok
+    (void)ho_drop_ws_text; (void)ho_keep_entity_refs; (void)ho_recover;
     while (p.pos < p.end) {
         /* Top-level whitespace: a TEXT child of the document node —
          * chained like prolog comments/PIs so /node() counts it and
@@ -1776,7 +1788,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * dropped only when every byte up to the next markup
              * delimiter is whitespace; otherwise the text path sees
              * the leading whitespace untouched. */
-            if (p.drop_ws_text &&
+            if (ho_drop_ws_text &&
                 (*p.pos == ' ' || *p.pos == '\t' || *p.pos == '\n' ||
                  *p.pos == '\r')) {
                 char* q = p.pos + 1;
@@ -1798,7 +1810,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * [text_start, lt) only. */
             char* text_start = p.pos;
             uint32_t text_off =
-                p.line_offsets_ok
+                ho_line_offsets_ok
                     ? (uint32_t)(text_start - p.buf) + 1u : 0u;
             char* lt = NULL;
             int has_amp = 0;
@@ -1847,7 +1859,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
 
             if (tlen == 0) continue;
             /* (ws handling lives at the text-branch ENTRY — see the
-             * drop_ws_text fast path before text_start.) */
+             * ho_drop_ws_text fast path before text_start.) */
             if (p.depth == 0) {
                 /* Whitespace-only between root and PIs. */
                 for (char* c = text_start; c < p.pos; c++) {
@@ -1866,7 +1878,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * character references still expand lazily on read);
              * named references become ENTITY_REF nodes. A '&' that
              * is not a well-formed reference stays literal text. */
-            if (p.keep_entity_refs && has_amp) {
+            if (ho_keep_entity_refs && has_amp) {
                 const char* seg = text_start;
                 const char* tq = text_start;
                 const char* t_end = text_start + tlen;
@@ -2011,7 +2023,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         if (IS_NAME_START(next)) {
             /* Element. Snapshot line BEFORE scanning the open tag so
              * the element reports the line where '<' appeared. */
-            uint32_t elem_off = p.line_offsets_ok
+            uint32_t elem_off = ho_line_offsets_ok
                 ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             LeptrisElement elem;
             if (elem_idx < est_elems) {
@@ -2065,7 +2077,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             /* Parse attributes (scans from the delimiter position). */
             int self_closing = dp_parse_attrs(&p, elem);
             if (self_closing < 0) goto fail;
-            if (p.line_offsets_ok &&
+            if (ho_line_offsets_ok &&
                 !(p.skip_flags & LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS)) {
                 uint32_t ste = (uint32_t)(p.pos - p.buf);
                 p.pos_slot_stack[p.depth] = leptris_elem_pos_record(
@@ -2248,7 +2260,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                 "Element %s closed implicitly by </%.*s>",
                                 elem_name(ce),
                                 (int)close_local_len, close_local);
-                            if (p.line_offsets_ok) {
+                            if (ho_line_offsets_ok) {
                                 leptris_elem_pos_close_at(
                                     p.doc,
                                     p.pos_slot_stack[p.depth - 1],
@@ -2270,7 +2282,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 }
             }
             close_matched:
-            if (p.line_offsets_ok) {
+            if (ho_line_offsets_ok) {
                 /* Round 10: fill the open element's journal slot in
                  * place — no hash probe, and the recorded start offset
                  * survives verbatim. open_stack[p.depth-1] is `open`;
@@ -2288,7 +2300,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         }
         else if (next == '!') {
             /* Comment, CDATA, or DOCTYPE. */
-            uint32_t markup_off = p.line_offsets_ok
+            uint32_t markup_off = ho_line_offsets_ok
                 ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             if (p.end - p.pos >= 4 && p.pos[2] == '-' && p.pos[3] == '-') {
                 /* Comment: <!-- ... --> */
@@ -2378,7 +2390,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         }
         else if (next == '?') {
             /* PI: <?target data?> or XML declaration. */
-            uint32_t pi_off = p.line_offsets_ok
+            uint32_t pi_off = ho_line_offsets_ok
                 ? (uint32_t)(p.pos - p.buf) + 1u : 0u;
             p.pos += 2;
             char* target_start = p.pos;
@@ -2493,7 +2505,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 LEPTRIS_DIAG_UNCLOSED_ELEMENT, NULL,
                 "Element %s still open at end of document",
                 elem_name(ce));
-            if (p.line_offsets_ok) {
+            if (ho_line_offsets_ok) {
                 leptris_elem_pos_close_at(
                     p.doc, p.pos_slot_stack[p.depth - 1],
                     (uint32_t)(p.pos - p.buf));
