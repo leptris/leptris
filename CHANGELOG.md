@@ -1,12 +1,13 @@
 ## [Unreleased]
 
 ## [1.9.414] - 2026-11-08
+## Performance
 
-### Performance
+- **parse: the pool string_cache is lazy** (#1842 A4). direct_parse created a 128-bucket hash table eagerly for every >=256-byte document, but the scanner stores borrowed views and most documents never intern anything through that path — the eager create cost ~70 ns/doc (5.6% of the parse on the attribute-dense attrparse shape, line-level profiled). The intern path now creates the table on first use; the OOM path falls back to direct allocation exactly as before. Users-doc parse +2%, attribute-dense shape +1%, one 128-bucket pool block saved per document.
 
-- lazy string_cache + honest attrparse benchmark methodology (#1842) (parse)
+## Benchmarks
 
-
+- **The attrparse comparison rows are honest now.** They measured parse-WITHOUT-tree-access: pugixml's `load_buffer` parses eagerly while leptris defers until first tree access, so the old rows compared handle-setup against parsing (apples to oranges) under loaded-machine wall timing. The rows now measure parse + walk + read every attribute name and value on BOTH engines with a min-of-5-reps statistic — on this machine leptris ~1600 ns/doc vs pugixml ~1420, and the CPU-clock head-to-head with the tree walk shows parity (the previously reported 2.0x deficit was the methodology artifact; full post-mortem on #1842).
 
 ## [1.9.413] - 2026-11-08
 ## Performance
