@@ -171,3 +171,26 @@ Local measurement discipline note: under parallel agent load,
 leptris degrades ~20% while pugixml stays flat (leptris's scratch +
 pristine + arena working set is far more cache-sensitive). Loaded
 ratios are meaningless; the CI artifacts gate this row from here on.
+
+## Track D addendum — the first CI-gated numbers (2026-11-11, PR #2001)
+
+bench_append_attr_pugixml's first quiet-runner rows SPLIT BY PLATFORM:
+- macos-latest: leptris 1728.6 vs pugixml 2182.9 — leptris 1.26x WIN.
+- ubuntu-latest: leptris 2798.6 vs pugixml 1885.2 — leptris 1.48x LOSS.
+
+The ubuntu anomaly is NOT attr-specific: benchmark_parse (tiny/small/
+medium, cold-start) shows pugixml ahead on BOTH legs at 0.52-0.65x
+(macos) but 0.31-0.40x (ubuntu) — the ubuntu factor roughly DOUBLES
+leptris's deficit on every small-parse shape. pugixml is FASTER on
+ubuntu than macos (1885 vs 2183), so runner speed does not explain it.
+
+Compiler dimension isolated locally: gcc-16/arm64 builds leptris
+FASTER than clang (1428 vs 1500, same machine, same clang-built
+pugixml dylib) — the arm64/gcc dimension is healthy. The suspect set
+is gcc-13 x86-64 codegen on the fused scanner or a glibc interaction;
+ubuntu-24.04-arm joins the benchmark matrix to split the dimension
+(same gcc-13 + glibc, different arch+codegen).
+
+Slack-floor shrink for small docs: DO NOT re-attempt — #1846
+falsified it (the retained pool amortizes the reservation; measured
+0.9743x = negative).
