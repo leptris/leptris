@@ -1,12 +1,13 @@
 ## [Unreleased]
 
 ## [1.9.415] - 2026-11-10
+## Performance
 
-### Performance
+- **parse: single-pass attribute-name scan** (#1842 attrparse arc, agent-implemented). `dp_parse_attrs` classified the byte after every attribute name twice — the fused name scan stopped on a non-name-char with its chartype already in a register, then a second fused-classification call re-loaded and re-tested the same byte. The scan now captures the stop byte's full class (`DP_CT_NAME_CHAR` mirrors IS_NAME_CHAR's bits) and the `=` dispatch consumes it directly; whitespace continues inline; all error paths, hash order, colon tracking, and NUL discipline byte-identical. User-CPU on the attribute-dense attrparse workload: **−4.2% quiet / −1.8% interleaved-under-load**. Suite 2250/2250; two negative results from the same slice documented in the commit (a noise-level dup-probe skip, and a `need_dup_hash` loop-hoist that *regressed* 17% under LTO — reverted).
 
-- single-pass attr-name scan — stop-byte class captured, delimiter re-load dropped (#1842 attrparse) (flat)
+## Benchmarks
 
-
+- The attrparse comparison rows (v1.9.414) already use the corrected parse+read methodology; this release narrows the remaining gap to pugixml on that shape by ~4%.
 
 ## [1.9.414] - 2026-11-08
 ## Performance
