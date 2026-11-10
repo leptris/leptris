@@ -123,7 +123,8 @@ jobs:
               ../build/benchmarks/benchmark_parse_ops \
               ../build/benchmarks/benchmark_first_access \
               ../build/benchmarks/benchmark_memory \
-              ../build/benchmarks/dom_benchmark_v2; do
+              ../build/benchmarks/dom_benchmark_v2 \
+              ../build/benchmarks/bench_append_attr_pugixml; do
             run_bin "$bin"
           done
 

@@ -314,8 +314,10 @@ static LEPTRIS_ALWAYS_INLINE unsigned dp_class_after_ws(DParser* p) {
  * inline loop. */
 #if defined(__GNUC__)
 #  define DP_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#  define DP_LIKELY(x) __builtin_expect(!!(x), 1)
 #else
 #  define DP_UNLIKELY(x) (x)
+#  define DP_LIKELY(x) (x)
 #endif
 /* The name-char mask IS_NAME_CHAR tests, spelled out so the fused
  * attr-name scan can keep the stop byte's FULL chartype class in a
@@ -544,7 +546,13 @@ static int dp_dup_seen_or_add(DParser* p, uint32_t dh) {
         p->attr_dup_mask = 15;
         p->attr_dup_used = 0;
     } else if ((p->attr_dup_used + 1) * 8 >= (p->attr_dup_mask + 1) * 7) {
-        size_t ncap = (p->attr_dup_mask + 1) * 8;
+        /* ×2 growth (was ×8): a 16-attr element hit the 14-slot
+         * threshold inside a 16-slot table, so EVERY such doc paid a
+         * 512B alloc + memset + full rehash on its first element, and
+         * every later element memset 512B. 32 slots (load ≤50% at 16
+         * attrs) keeps the probe at ~1 step; wide elements still grow
+         * geometrically. */
+        size_t ncap = (p->attr_dup_mask + 1) * 2;
         uint32_t* nt = (uint32_t*)leptris_pool_alloc(
             p->pool, ncap * sizeof(uint32_t));
         if (!nt) return 0;
@@ -695,10 +703,33 @@ static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
      * only runs on genuine candidates. First definition wins
      * (libxml2 recover semantics, and the digest's first-wins
      * becomes official); the duplicate never enters the chain, it
-     * costs its already-carved slot. */
+     * costs its already-carved slot.
+     *
+     * #1842 cut: the steady-state probe is INLINED here — the
+     * out-of-line call per attribute cost ~4-6 cycles of
+     * call/prologue on the attrparse row (dp_dup_seen_or_add was
+     * 10% of the no-inline profile). The table-miss fast path is
+     * five loads/stores; alloc/grow falls back to the function. */
     if (!(p->skip_flags & LEPTRIS_PARSE_SKIP_DUP_DETECTION)) {
         int dup = 0;
-        if (dp_dup_seen_or_add(p, name_hash) &&
+        int seen = 0;
+        if (DP_LIKELY(p->attr_dup_slots) &&
+            DP_LIKELY((p->attr_dup_used + 1) * 8 <
+                      (p->attr_dup_mask + 1) * 7)) {
+            uint32_t dh = name_hash ? name_hash : 1;
+            size_t i = dh & p->attr_dup_mask;
+            while (p->attr_dup_slots[i]) {
+                if (p->attr_dup_slots[i] == dh) { seen = 1; break; }
+                i = (i + 1) & p->attr_dup_mask;
+            }
+            if (!seen) {
+                p->attr_dup_slots[i] = dh;
+                p->attr_dup_used++;
+            }
+        } else {
+            seen = dp_dup_seen_or_add(p, name_hash);
+        }
+        if (seen &&
             elem->first_attribute_off != 0) {
             /* hash hit: confirm against the real chain (collision
              * or genuine duplicate) */
