@@ -317,6 +317,12 @@ static LEPTRIS_ALWAYS_INLINE unsigned dp_class_after_ws(DParser* p) {
 #else
 #  define DP_UNLIKELY(x) (x)
 #endif
+/* The name-char mask IS_NAME_CHAR tests, spelled out so the fused
+ * attr-name scan can keep the stop byte's FULL chartype class in a
+ * register (the delimiter byte after the name is whitespace or '=';
+ * its class is already in hand from the scan's table load — a
+ * dp_class_after_ws re-load of the same byte is pure overhead). */
+#define DP_CT_NAME_CHAR (CT_NAME | CT_NAME_START | CT_UTF8)
 /* Round 6: value-scan stop tables. One table load + one test per
  * byte replaces the three-compare chain - pugixml's ct_parse_attr
  * loop shape. 0 = boring, 1 = this value's quote, 2 = '&', 3 = ws.
@@ -1097,27 +1103,33 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         const char* attr_colon =
             (name_start[0] == ':') ? name_start : NULL;
         p->pos++;
+        /* Class of the byte that ended the name — captured from the
+         * scan's own table loads (single-pass scan: the byte after
+         * the name IS the delimiter, whitespace or '='). */
+        unsigned delim;
         {
             char* s = p->pos;
+            unsigned k = leptris_chartype_table[(unsigned char)s[0]];
             for (;;) {
-                char c0 = s[0];
-                if (DP_UNLIKELY(!IS_NAME_CHAR(c0))) break;
-                if (need_dup_hash) { dh ^= (unsigned char)c0; dh *= 16777619u; }
-                if (c0 == ':') attr_colon = s;
-                char c1 = s[1];
-                if (DP_UNLIKELY(!IS_NAME_CHAR(c1))) { s += 1; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)c1; dh *= 16777619u; }
-                if (c1 == ':') attr_colon = s + 1;
-                char c2 = s[2];
-                if (DP_UNLIKELY(!IS_NAME_CHAR(c2))) { s += 2; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)c2; dh *= 16777619u; }
-                if (c2 == ':') attr_colon = s + 2;
-                char c3 = s[3];
-                if (DP_UNLIKELY(!IS_NAME_CHAR(c3))) { s += 3; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)c3; dh *= 16777619u; }
-                if (c3 == ':') attr_colon = s + 3;
+                if (DP_UNLIKELY(!(k & DP_CT_NAME_CHAR))) break;
+                if (need_dup_hash) { dh ^= (unsigned char)s[0]; dh *= 16777619u; }
+                if (s[0] == ':') attr_colon = s;
+                unsigned k1 = leptris_chartype_table[(unsigned char)s[1]];
+                if (DP_UNLIKELY(!(k1 & DP_CT_NAME_CHAR))) { s += 1; k = k1; break; }
+                if (need_dup_hash) { dh ^= (unsigned char)s[1]; dh *= 16777619u; }
+                if (s[1] == ':') attr_colon = s + 1;
+                unsigned k2 = leptris_chartype_table[(unsigned char)s[2]];
+                if (DP_UNLIKELY(!(k2 & DP_CT_NAME_CHAR))) { s += 2; k = k2; break; }
+                if (need_dup_hash) { dh ^= (unsigned char)s[2]; dh *= 16777619u; }
+                if (s[2] == ':') attr_colon = s + 2;
+                unsigned k3 = leptris_chartype_table[(unsigned char)s[3]];
+                if (DP_UNLIKELY(!(k3 & DP_CT_NAME_CHAR))) { s += 3; k = k3; break; }
+                if (need_dup_hash) { dh ^= (unsigned char)s[3]; dh *= 16777619u; }
+                if (s[3] == ':') attr_colon = s + 3;
                 s += 4;
+                k = leptris_chartype_table[(unsigned char)s[0]];
             }
+            delim = k;
             p->pos = s;
         }
         char* name_end = p->pos;
@@ -1126,10 +1138,19 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
 
-        /* Skip = and whitespace — the fused class test again: the
-         * stop byte after the name's trailing ws must be '='. NUL
-         * sentinel fails CT_ATTR_EQ. */
-        if (!(dp_class_after_ws(p) & CT_ATTR_EQ)) return -1;
+        /* '=' must follow (possibly after whitespace). The stop byte's
+         * class came out of the name scan — whitespace continues the
+         * skip inline, '=' terminates the dispatch here; the former
+         * dp_class_after_ws call re-loaded and re-tested the same byte
+         * every attribute. NUL sentinel fails CT_ATTR_EQ exactly as
+         * before. */
+        if (delim & CT_WS) {
+            p->pos = name_end + 1;
+            while (leptris_chartype_table[(unsigned char)*p->pos] & CT_WS)
+                p->pos++;
+            delim = leptris_chartype_table[(unsigned char)*p->pos];
+        }
+        if (!(delim & CT_ATTR_EQ)) return -1;
         p->pos++;
         /* '=' consumed — the delimiter byte at name_end is no longer
          * needed. Safe to NUL-terminate the name in-place now. */
