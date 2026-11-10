@@ -6,6 +6,7 @@
 #include "leptris/error.h"
 
 #include <cstring>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -439,6 +440,63 @@ TEST(AttributeNormalization, CleanValuesStayZeroCopy) {
     EXPECT_STREQ(leptris_element_attribute(root, "a"), "plain");
     EXPECT_STREQ(leptris_element_attribute(root, "b"), "with space");
     leptris_document_free(doc);
+}
+
+/* The attr-value scan runs 16-byte SIMD chunks over the probe window
+ * (2016-11-11 #1842 cut): the opposite quote character is ORDINARY
+ * value data, and terminator positions must classify identically at
+ * every offset across the chunk boundary (bytes 15/16 straddle the
+ * SIMD→scalar-tail seam). Pins: opposite quote, boundary terminators,
+ * flag bytes adjacent to the terminator, >48-byte memchr tail. */
+namespace {
+void expect_attr(const char* xml, const char* name, const char* want) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr) << xml;
+    LeptrisElement root = leptris_document_root(doc);
+    const char* v = leptris_element_attribute(root, name);
+    ASSERT_NE(v, nullptr) << xml;
+    EXPECT_STREQ(v, want) << xml;
+    leptris_document_free(doc);
+}
+}  // namespace
+
+TEST(AttributeValueScan, OppositeQuoteIsData) {
+    expect_attr("<r a='it\"s ok'/>", "a", "it\"s ok");
+    expect_attr("<r a=\"it's ok\"/>", "a", "it's ok");
+    /* opposite quote inside the SIMD chunk AND at chunk edges */
+    expect_attr("<r a='x\"xxxxxxxxxxxxxxxxxxx\"y'/>", "a",
+                "x\"xxxxxxxxxxxxxxxxxxx\"y");
+    expect_attr("<r a=\"xxxxxxxxxxxxxxxxxxx'y\"/>", "a",
+                "xxxxxxxxxxxxxxxxxxx'y");
+}
+
+TEST(AttributeValueScan, TerminatorAtChunkBoundary) {
+    /* 11 filler bytes put the terminator at value offset 11..17 —
+     * spanning the 16-byte SIMD chunk end and the scalar tail. */
+    for (int n = 8; n <= 18; n++) {
+        char xml[128];
+        std::snprintf(xml, sizeof(xml), "<r a='%0*d'/>", n, 0);
+        char want[32];
+        std::snprintf(want, sizeof(want), "%0*d", n, 0);
+        expect_attr(xml, "a", want);
+    }
+}
+
+TEST(AttributeValueScan, FlagByteJustBeforeTerminator) {
+    expect_attr("<r a='abc&'/>", "a", "abc&");
+    expect_attr("<r a='ab\tc'/>", "a", "ab c");
+    expect_attr("<r a='ab&\tc'/>", "a", "ab& c");
+    expect_attr("<r a='&amp;tail'/>", "a", "&tail");
+}
+
+TEST(AttributeValueScan, LongValueMemchrTail) {
+    char xml[512];
+    std::snprintf(xml, sizeof(xml),
+                  "<r a='%0200d&amp;end'/>", 0);
+    char want[256];
+    std::snprintf(want, sizeof(want), "%0200d&end", 0);
+    expect_attr(xml, "a", want);
 }
 
 /* Issue #577: a PI in the epilog (after the document element) is

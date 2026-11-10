@@ -131,3 +131,43 @@ whole tree to assign ranks (#485 table).
 - #1218: arena estimates only ever grow.
 
 Refs #1842, serialbench-c#8.
+
+## Track D — attr-dense parse+read row (post-#1842 closure, 2026-11-11)
+
+The row's CI gate was missing: `bench_append_attr_pugixml` was NOT in
+the benchmark.yml binary list, so the attrparse row had no
+quiet-runner arbiter (the 2026-11-09 numbers were local). NOW WIRED
+(this commit): the binary joins the CI benchmark legs (ubuntu + macos,
+Release + LTO, quiet GH runners). The row's verdict comes from those
+artifacts.
+
+Fresh profile (2026-11-11, no-inline attribution, attrparse shape 4x16
+attrs): dp_parse_attrs 37% | dp_add_attr_inline 20% | dup table 10% |
+strlen faces 10% | count3-neon 4.3% | attributes_raw 3.7% | map
+mutex+TLS 2.7% | dp_nul 2%.
+
+Cut ledger:
+- [x] dup-table growth x8 -> x2 (16-attr elements no longer pay a
+      512B rehash per doc).
+- [x] dup-probe fast path INLINED in dp_add_attr_inline (~30-45
+      ns/doc; the per-attr out-of-line call was the cost).
+- [x] REVERTED: inline 16B SIMD value scan (NEON/SSE2) — a 20%
+      REGRESSION for the ~11-byte values the shape has: one chunk of
+      5x cmpeq + vpadd-ladder movemask loses to the branch-fused
+      scalar table loop at short lengths. The 48-byte inline probe
+      threshold was already tuned; do not re-attempt below ~64B.
+- [ ] count3 small-doc inline: DEAD END — without the scan the
+      arena sizing needs len-derived upper bounds that over-reserve
+      ~3x and push small-doc arenas into bigger allocator bins
+      (the madvise teardown cost the slack floor already fights).
+- [ ] A3d pristine-copy skip for newline-free docs (count3 gains a
+      4th counter): PARKED — the declaration's version/encoding
+      views BORROW doc->xml_buffer; switching them to the scratch
+      needs the borrowed-pointer topology audited first.
+- The interleaved lane (LEPTRIS_IL_MIN=0) is NOT faster on this
+  shape (measured; the small-doc threshold stands).
+
+Local measurement discipline note: under parallel agent load,
+leptris degrades ~20% while pugixml stays flat (leptris's scratch +
+pristine + arena working set is far more cache-sensitive). Loaded
+ratios are meaningless; the CI artifacts gate this row from here on.
