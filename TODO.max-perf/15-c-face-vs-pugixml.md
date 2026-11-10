@@ -194,3 +194,28 @@ ubuntu-24.04-arm joins the benchmark matrix to split the dimension
 Slack-floor shrink for small docs: DO NOT re-attempt — #1846
 falsified it (the retained pool amortizes the reservation; measured
 0.9743x = negative).
+
+## Track D addendum 2 — the three parse-vs-pugixml gaps (CI-gated, 2026-11-11)
+
+bench_parse_ab in the same CI run (shape-fair MB/s) splits the parse
+deficit into three NAMED gaps, none attr-specific:
+
+1. **Text-shape scanner gap**: text 1.5/5MB = leptris 1290-1322 MB/s
+   vs pugixml 2086-2199 (1.6x) on macos; 573-577 vs 1896 (3.3x!) on
+   ubuntu. This is Track A's scanner surgery with a platform shape:
+   the text-run fused loop is where the ubuntu-x86 codegen collapses.
+2. **The 13MB collapse (macos)**: attr 502->139 MB/s, text 1290->362
+   as the doc grows to 13MB (5.1-5.8x behind). The arena reservation
+   sums ~3x len (scratch_bytes + pristine_bytes + text_room are EACH
+   len-sized, plus elem/attr/slack terms) -> ~40MB reserved + 2
+   full memcpys per parse. Levers: drop the pristine copy when the
+   input has no newlines (A3d, parked on the borrowed-pointer audit),
+   and fold text_room into scratch (text nodes are substrings of the
+   scratch; text_room's 64B/node overhead is the only true extra).
+3. **The ubuntu x-factor**: leptris 2798 vs its own macos 1728 on the
+   SAME source+flags (62% self-slowdown) while pugixml runs FASTER on
+   ubuntu (1885 vs 2183). gcc-16/arm64 local = healthy. The
+   ubuntu-24.04-arm CI lane (this PR) splits gcc-13-x86 codegen from
+   glibc. Candidate micro-levers once the dimension is known:
+   -fno-plt / mmap-threshold pinning (mallopt) / loop restructuring
+   where gcc-13 jump-threading bails.
