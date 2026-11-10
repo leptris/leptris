@@ -1084,32 +1084,48 @@ removed by the lane-18 append/attr work)
 
 ==== Attribute-dense parse+read (vs pugixml) — 2026-11 refresh
 
-Numbers from `bench_append_attr_pugixml` (the `attrparse` rows),
-methodology corrected in v1.9.414: the workload is parse + walk +
-read every attribute name and value on BOTH engines (the previous
-revision measured parse-without-access, which compared leptris's
-deferred-until-touch handle against pugixml's eager parse), taking
-the MIN of 5 repetitions.
+Numbers from `bench_append_attr_pugixml`, CI-gated since this
+revision: the bench runs in the Benchmark workflow on quiet GH
+runners (Release + LTO, min of 5) on ubuntu-latest, ubuntu-24.04-arm,
+and macos-latest — the rows below are those artifacts, not local
+runs. The bench's attrparse row is parse + free per document (20k
+docs, 4 elements x 16 attributes); the local parse+walk+read
+harness numbers are noted separately.
 
 [cols="2,>1,>1,>1",options="header"]
 |===
-|Benchmark |Leptris |pugixml |Verdict
+|Benchmark (parse + free, CI-gated) |Leptris |pugixml |Verdict
 
-|Parse+read 64-attr doc (default flags)
-|~1.6 µs
-|~1.4 µs
-|parity (1.15x; user-CPU equal at 4M docs)
+|macos-latest
+|1728.6 ns/doc
+|2182.9 ns/doc
+|**1.26x faster**
 
-|Parse+read (Door A: skip dup + positions)
-|~1.55 µs
-|~1.4 µs
-|parity
+|ubuntu-latest (x86-64, gcc-13)
+|2798.6 ns/doc
+|1885.2 ns/doc
+|1.48x slower — platform anomaly under investigation (TODO.max-perf/15 Track D)
 
-|Full-window CPU-clock head-to-head (4M docs)
+|Door A (skip dup + positions), ubuntu
+|2572.7 ns/doc
+|1885.2 ns/doc
+|1.37x slower
+
+|Full-window CPU-clock head-to-head, 4M docs (local, LTO both sides)
 |5.45 s user
 |5.45 s user
-|**equal — user-CPU parity**
+|equal — user-CPU parity
 |===
+
+Findings carried in `TODO.max-perf/15` Track D (the follow-up arc to
+#1842): the ubuntu deficit is leptris-specific (pugixml runs FASTER
+on ubuntu than macos; gcc-16/arm64 builds leptris faster than clang,
+so the arm64/gcc dimension is healthy — the arm64-ubuntu CI lane
+splits gcc-13-x86 codegen from glibc); text-shape parse trails
+pugixml ~1.6x on macos; documents at ~13 MB collapse to ~5x behind
+(the arena reservation sums ~3x the input length: scratch + pristine
++ text room). The dup-table and dup-probe cuts above ship in this
+revision.
 
 ==== Recent performance wins (v1.9.410-v1.9.414)
 
