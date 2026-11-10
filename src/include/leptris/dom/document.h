@@ -49,6 +49,16 @@ extern "C" {
 /**
  * Parse XML string into document
  *
+ * Parsing is EAGER and SYNCHRONOUS: the full node tree is built
+ * before the call returns, so the first access costs the same as
+ * every later one (verified against the 2026-11-10 benchmark
+ * artifact where a no-touch loop was mistaken for deferred
+ * construction — the loop never re-entered the parser per
+ * iteration). Only two facets stay lazy by design INSIDE the
+ * built tree: predefined entity text (&amp; &lt; ...) materializes
+ * on first text read, and per-element namespace caches fill on
+ * first namespace query.
+ *
  * @param xml XML string (must be valid UTF-8)
  * @param length Length of XML string in bytes
  * @param status Output status code (can be NULL)
