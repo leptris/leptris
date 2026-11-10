@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.415] - 2026-11-10
+
+### Performance
+
+- single-pass attr-name scan — stop-byte class captured, delimiter re-load dropped (#1842 attrparse) (flat)
+
+
+
 ## [1.9.414] - 2026-11-08
 ## Performance
 
