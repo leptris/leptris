@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [1.9.417] - 2026-11-11
+
+### Performance
+
+- inline the no-attribute fast-out in the element-open path (parse)
+- count3_high gains an AVX2 kernel — x86 stops running the scalar sizing pre-scan (simd)
+- A3d — newline-free documents skip the pristine buffer carve (parse)
+- the arena copy-budget goes content-census-driven (parse)
+
+
+
 ## [1.9.416] - 2026-11-11
 ## Performance
 
