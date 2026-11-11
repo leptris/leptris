@@ -321,3 +321,17 @@ multi-session. The per-node bookkeeping share (wire 9% + text_create
 7.4% + pos 3.3% + edge 3% = ~23%) is the largest coherent block;
 a layout-level pass (fewer, wider stores per node) is the shape of
 the next slice if the campaign continues.
+
+## Track D addendum 6b — the fast-out's CI verdict + the macos-noise proof (PR #2009)
+
+The no-attribute fast-out delivered on the stable legs: ubuntu-x86
+attr 5/13MB +31-32% (13MB now PARITY at 0.99x), attr 1.5MB 0.72x
+(win deepening), text 1.5/5/13MB +52/53/54% (1.27x/1.16x/1.46x);
+ubuntu-arm text rows all up (937->978, 939->984, 872->906).
+
+THE MACOS 13MB ROWS ARE RUNNER NOISE: attr-13MB measured
+139.4 -> 174.4 -> 503.7 -> 104.3 MB/s across runs of
+near-identical code (the cuts only ADD work-free fast paths) —
+a 4.8x swing on one leg. Single-run macos attr/text-13MB datapoints
+MUST NOT drive verdicts; the macos lane needs repeated-run medians
+before any row there is called a regression or a win.
