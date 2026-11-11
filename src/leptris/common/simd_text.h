@@ -149,6 +149,11 @@ void leptris_text_count3_high_neon(const char* s, size_t len,
                                    size_t* ca, size_t* cb, size_t* cc,
                                    int* saw_high, size_t* amp,
                                    size_t* valws);
+void leptris_text_count3_high_avx2(const char* s, size_t len,
+                                   char a, char b, char c,
+                                   size_t* ca, size_t* cb, size_t* cc,
+                                   int* saw_high, size_t* amp,
+                                   size_t* valws);
 void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
                               char a, char b, char c,
                               size_t* ca, size_t* cb, size_t* cc);

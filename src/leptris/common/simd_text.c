@@ -157,6 +157,11 @@ static void dispatch_init(void);
 int leptris_utf8_valid_scalar(const char* s, size_t len);
 int leptris_utf8_valid_avx2(const char* s, size_t len);
 int leptris_utf8_valid_neon(const char* s, size_t len);
+void leptris_text_count3_high_avx2(const char* s, size_t len,
+                                   char c0, char c1, char c2,
+                                   size_t* n0, size_t* n1, size_t* n2,
+                                   int* saw_high, size_t* amp_count,
+                                   size_t* valws_count);
 static void count3_high_scalar(const char* s, size_t len,
                                char c0, char c1, char c2,
                                size_t* n0, size_t* n1, size_t* n2,
@@ -183,7 +188,7 @@ static void dispatch_init(void) {
         g_contains_fn = leptris_text_contains_avx2;
         g_find3_fn = leptris_text_find3_avx2;
         g_count_fn = leptris_text_count_char_avx2;
-        g_count3_high_fn = count3_high_scalar;
+        g_count3_high_fn = leptris_text_count3_high_avx2;
         g_scan_run_fn = leptris_text_scan_run_avx2;
         g_utf8_fn = leptris_utf8_valid_avx2;
         return;

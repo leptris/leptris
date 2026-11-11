@@ -110,6 +110,70 @@ size_t leptris_text_count_char_avx2(const char* s, size_t len, char c) {
     return n;
 }
 
+/* count3_high — the parser's sizing pre-scan (TODO 183/#1842) with
+ * the Track D copy-census ('&' + tab/LF/CR). x86 previously fell
+ * back to the SCALAR kernel here (only the NEON TU had a SIMD
+ * count3_high), making the pre-scan one of the ubuntu lane's extra
+ * full-buffer passes. Five counters in one pass: three cmpeq+mask
+ * for c0/c1/c2, one for '&', and one for the OR of the three
+ * whitespace bytes (the trio is disjoint, so one popcount of the
+ * OR mask is the exact sum). */
+void leptris_text_count3_high_avx2(const char* s, size_t len,
+                                   char c0, char c1, char c2,
+                                   size_t* n0, size_t* n1, size_t* n2,
+                                   int* saw_high, size_t* amp_count,
+                                   size_t* valws_count) {
+    const char* p = s;
+    const char* end = s + len;
+    const __m256i k0 = _mm256_set1_epi8(c0);
+    const __m256i k1 = _mm256_set1_epi8(c1);
+    const __m256i k2 = _mm256_set1_epi8(c2);
+    const __m256i kamp = _mm256_set1_epi8('&');
+    const __m256i kt = _mm256_set1_epi8('\t');
+    const __m256i kn = _mm256_set1_epi8('\n');
+    const __m256i kr = _mm256_set1_epi8('\r');
+    size_t a = 0, b = 0, c = 0, amp = 0, vws = 0;
+    int h = 0;
+
+    while (end - p >= 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)p);
+        a += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(v, k0)));
+        b += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(v, k1)));
+        c += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(v, k2)));
+        amp += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(v, kamp)));
+        __m256i ws = _mm256_or_si256(
+            _mm256_or_si256(_mm256_cmpeq_epi8(v, kt),
+                            _mm256_cmpeq_epi8(v, kn)),
+            _mm256_cmpeq_epi8(v, kr));
+        vws += (size_t)LEPTRIS_POPCOUNT32((unsigned)_mm256_movemask_epi8(ws));
+        /* any byte >= 0x80: sign bits via the packed-compare trick —
+         * movemask of the sign bits of v (cmp with 0 keeps them) */
+        h |= (_mm256_movemask_epi8(_mm256_cmpgt_epi8(
+                  _mm256_setzero_si256(), v)) != 0);
+        p += 32;
+    }
+    while (p < end) {
+        unsigned char ch = (unsigned char)*p;
+        if (ch == (unsigned char)c0) a++;
+        if (ch == (unsigned char)c1) b++;
+        if (ch == (unsigned char)c2) c++;
+        if (ch == '&') amp++;
+        if (ch == 9 || ch == 10 || ch == 13) vws++;
+        if (ch & 0x80) h = 1;
+        p++;
+    }
+    *n0 = a;
+    *n1 = b;
+    *n2 = c;
+    *saw_high = h;
+    *amp_count = amp;
+    *valws_count = vws;
+}
+
 #endif /* LEPTRIS_ARCH_X86 && __AVX2__ */
 
 /* #1842: one-pass text-run scan — AVX2 mirror of the NEON kernel:
