@@ -363,3 +363,28 @@ ALSO this session: the interleaved-lane default flip REJECTED
 (1.72x slower on element-dense text; addendum 6), and the
 no-attribute fast-out SHIPPED (PR #2009, ubuntu-x86 attr-13MB to
 parity). Release trains v1.9.416 + v1.9.417 sealed, all registries.
+
+## Track D addendum 8 — the region split MEASURED (probe branch probe/close-region)
+
+The close-tag region extracted NOINLINE (dp_close_tag_probe — the
+instrument lives on probe/close-region, DO NOT MERGE) and sampled on
+the post-fast-out text shape (~1250 in-frame samples):
+
+- loop residual (open-tag scan + dispatch + elem carve/zero): 21%
+- text-run family (scan_run_neon 17% + scalar wrapper 2.2% +
+  dp_text_create 8.5% + set_content 1.5%): ~29%
+- wiring (dp_wire_child 9% + int32 encode 5.8% + edge_idx 0.7%): ~15%
+- CLOSE-TAG REGION (probe 7.2% + pos_close_at 4.4%): 11.6%
+- positions journal (pos_record 6.6% + the close_at share above): ~11%
+- count3 pre-scan: 5.8%
+
+Next-cut ranking by (size x boundedness):
+1. text_scan_run's NEON residual (17% in-kernel — the chunk loop +
+   flag handling; an AVX2 mirror also lands for x86).
+2. The loop residual's elem carve/zeroing (memset per 64-element
+   chunk vs explicit-init stores).
+3. The positions journal (12% combined; SKIP_SOURCE_POSITIONS
+   already opts out — the default-on cost is the conformance/positions
+   faces' price).
+The close-tag region (11.6%) has no obvious algorithmic cut — memcmp
+fast paths already cover it.
