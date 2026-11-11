@@ -2156,9 +2156,34 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             p.pos = dp_scan_name_fused(p.pos, &name_hash, &name_colon,
                                        &name_len);
 
-            /* Parse attributes (scans from the delimiter position). */
-            int self_closing = dp_parse_attrs(&p, elem);
-            if (self_closing < 0) goto fail;
+            /* No-attribute fast-out (Track D, text-shape profile
+             * 2026-11-11: dp_parse_attrs was 5% of a ZERO-attr
+             * document — the call + reset prologue + dup-table memset
+             * per element). '>' or '/' directly after the name means
+             * no attributes: two stores instead of the call. Any
+             * other delimiter (whitespace, '?', unexpected bytes)
+             * falls through to the full parser. */
+            unsigned elem_delim =
+                leptris_chartype_table[(unsigned char)*p.pos];
+            int self_closing;
+            if (elem_delim & (CT_ATTR_GT | CT_ATTR_SLASH)) {
+                p.current_elem_last_attr = NULL;
+                p.current_elem_last_ns = NULL;
+                p.raw_last = NULL;
+                p.cur_elem_cache = NULL;
+                p.attr_dup_used = 0;   /* no adds: stale slots unprobed */
+                if (elem_delim & CT_ATTR_GT) {
+                    p.pos++;
+                    self_closing = 0;
+                } else {
+                    if (p.pos[1] != '>') goto fail;
+                    p.pos += 2;
+                    self_closing = 1;
+                }
+            } else {
+                self_closing = dp_parse_attrs(&p, elem);
+                if (self_closing < 0) goto fail;
+            }
             if (ho_line_offsets_ok &&
                 !(p.skip_flags & LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS)) {
                 uint32_t ste = (uint32_t)(p.pos - p.buf);
@@ -3502,6 +3527,8 @@ int leptris_il_run(const char* xml, size_t len, int drop_ws,
     size_t toff, tlen;
     if (!leptris_il_scan(scratch, len, drop_ws, c, root_out, &toff,
                          &tlen)) {
+        if (getenv("LEPTRIS_PROBE_IL"))
+            fprintf(stderr, "IL FALLBACK: il_scan rejected len=%zu\n", len);
         leptris_il_run_free(c, scratch);
         return 0;
     }
@@ -3609,7 +3636,12 @@ static struct leptris_document* dp_il_try(const char* xml, size_t len,
      * overrides (bytes; 0 = no threshold) for hosts and for the
      * parity gates, which force it to 0 so the lane stays covered
      * by the suite at fixture sizes. */
-    if (len < dp_env_memo.min_len) return NULL;
+    if (len < dp_env_memo.min_len) {
+        if (getenv("LEPTRIS_PROBE_IL"))
+            fprintf(stderr, "IL SKIP: below min_len=%zu len=%zu\n",
+                    dp_env_memo.min_len, len);
+        return NULL;
+    }
 
     /* Scratch is built UP FRONT (slice 2): il_scan reads it with
      * the NUL-sentinel discipline, and dp_il_build reuses the same
