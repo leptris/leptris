@@ -1128,29 +1128,39 @@ newline-free documents (#2005), and the AVX2 sizing pre-scan
 
 |ubuntu-x86 text 1.5/5/13 MB
 |3.4-3.5x behind
-|1.38-1.69x behind
-|+137-183%
+|1.16-1.46x behind
+|+181-276%
 
 |ubuntu-x86 attr 1.5 MB
 |1.37x behind
-|**ahead (0.75x)**
-|+103%
+|**ahead (0.72x)**
+|+176%
+
+|ubuntu-x86 attr 5 MB
+|1.36x behind
+|near-parity (0.90x)
+|+118%
 
 |ubuntu-x86 attr 13 MB
 |1.36x behind
-|parity (1.03x)
-|+55%
+|parity (0.99x)
+|+103%
+
+|macos text 1.5/5/13 MB
+|1.66-1.87x behind
+|1.57-2.01x (runner-noise band; see note)
+|single-run macos 13MB rows swing 4.8x between runs — medians required
 
 |macos attr 13 MB
 |5.14x behind
-|2.18x behind
-|+189%
-
-|macos text 13 MB
-|5.80x behind
-|1.87x behind
-|+120% (cumulative with #2003)
+|unstable (104-504 MB/s across runs)
+|the row is runner noise; verdicts from repeated-run medians only
 |===
+
+The macos 13MB rows oscillate up to 4.8x between runs of
+near-identical code (139/174/504/104 MB/s across this arc) — the
+macos lane needs repeated-run medians before any single-run verdict
+there. The stable legs (ubuntu-x86, ubuntu-arm) carry the verdicts.
 
 Run-to-run CI variance is ~5-10%; all verdicts sit outside that band
 except the macos parity row. Findings and the remaining honest tail
