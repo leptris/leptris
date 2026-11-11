@@ -294,3 +294,30 @@ REMAINING (the honest tail): ubuntu-x86 text 1.38-1.69x, attr
 1.87x — the fused scanner loop is the one lever left, and the
 platform picture is now win/parity-adjacent everywhere instead of
 2-5x behind.
+
+## Track D addendum 6 — the text-shape profile + the IL-default rejection (PR #2009)
+
+Fresh no-inline text-shape attribution (300k elements, 19MB, classic
+lane): direct_parse_internal own body 34% | text_scan_run_neon 17% |
+dp_wire_child 9% | memmove (scratch copy) 8.2% | count3_neon 7.9% |
+dp_text_create 7.4% | dp_parse_attrs 5% | pos journal 3.3% | edge
+encode 3%.
+
+LANDED: the no-attribute fast-out (dp_parse_attrs' 5% on a zero-attr
+doc = per-element call + prologue + dup memset).
+
+REJECTED BY MEASUREMENT: flipping LEPTRIS_INTERLEAVED's default on —
+the IL lane measured 1.72x SLOWER user-CPU on the element-dense-
+with-text 19MB fixture (the record pass + replay outweigh the fused
+copy on this shape). The opt-in gate + 64KB threshold stand; the
+lane's large-doc wins are shape-specific. (Second finding: the lane
+is env-gated OFF in CI rows — every published bench_parse_ab number
+is the classic lane.)
+
+THE REMAINING ARC (unchanged): direct_parse_internal's own body —
+the per-tag dispatch, name scan, close-tag match, and per-node
+bookkeeping spread across wire/pos/edge-create. Instruction-level,
+multi-session. The per-node bookkeeping share (wire 9% + text_create
+7.4% + pos 3.3% + edge 3% = ~23%) is the largest coherent block;
+a layout-level pass (fewer, wider stores per node) is the shape of
+the next slice if the campaign continues.
