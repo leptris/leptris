@@ -260,3 +260,37 @@ per-doc mmap/fault churn that dominates large-doc create/free
 loops);
 (c) ubuntu-x86 scanner codegen (gcc-13; the 1.35-3.7x rows there are
 now the widest platform gap).
+
+## Track D addendum 5 — A3d (PR #2005) + AVX2 pre-scan (PR #2006) LANDED
+
+A3d (pristine skip for the newline-free class), macos CI verdicts:
+attr 13MB 174.4 -> 503.7 MB/s (+189%), text 13MB 794.2 -> 1366.9
+(+72%); 13MB gaps 5.14x -> 2.18x attr, 5.80x -> 1.87x text across
+the two cuts (#2003 census + #2005 pristine). The attr-5MB -32% from
+addendum 4 was between-run variance (+78% this run). ubuntu ratios
+held (that leg itself ran slower; pugixml moved with it).
+
+count3_high's AVX2 kernel (#2006) TRANSFORMED the ubuntu-x86 lane —
+the SCALAR sizing pre-scan was the dominant tax there, NOT scanner
+codegen: attr 1.5MB 286.5 -> 582.7 MB/s (NOW AHEAD: 0.75x), attr
+5MB 1.36x -> 0.93x, attr 13MB 1.36x -> 1.03x (parity), text
+1.5/5/13MB 3.41x/3.37x/3.50x -> 1.45x/1.38x/1.69x. Runner variance
+caveat noted (pugixml's rows moved too); the deltas are far outside
+those bands.
+
+Soundness note for A3d: parse_string frees the caller's buffer by
+contract — the skip repoints xml_buffer at the doc-owned SCRATCH
+(newline-free: no dp_nul clobber can lose a newline), never the
+caller's const buffer. Teeth: NewlineTerminatedNameNeedsPristine
+parses `a\n='1'` (whitespace before '=' is legal; an attr NAME can
+be newline-terminated) — RED under unconditional skip, GREEN gated.
+Two pin drafts discarded for wrong premises (element names are not
+NUL'd; `<e a b='1'>` is malformed XML). Also learned: the eager
+line-breaks table in direct_parse_internal is OOM-path-only; the
+live resolver is node_public.c's lazy table off xml_buffer.
+
+REMAINING (the honest tail): ubuntu-x86 text 1.38-1.69x, attr
+0.75-1.03x (parity-to-ahead!), arm text ~1.9-2.1x, macos text 13MB
+1.87x — the fused scanner loop is the one lever left, and the
+platform picture is now win/parity-adjacent everywhere instead of
+2-5x behind.
