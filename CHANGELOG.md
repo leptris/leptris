@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.416] - 2026-11-11
+
+### Performance
+
+- attr-dense row cuts + CI gate for the attrparse bench (parse)
+
+
+
 ## [1.9.415] - 2026-11-10
 ## Performance
 
