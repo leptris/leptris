@@ -1096,20 +1096,20 @@ harness numbers are noted separately.
 |===
 |Benchmark (parse + free, CI-gated) |Leptris |pugixml |Verdict
 
-|macos-latest
-|1728.6 ns/doc
-|2182.9 ns/doc
-|**1.26x faster**
+|macos-latest (clang, arm64)
+|1512.4 ns/doc
+|1492.4 ns/doc
+|parity (1.01x)
 
 |ubuntu-latest (x86-64, gcc-13)
-|2798.6 ns/doc
-|1885.2 ns/doc
-|1.48x slower — platform anomaly under investigation (TODO.max-perf/15 Track D)
+|1709.6 ns/doc
+|1891.3 ns/doc
+|**1.10x faster**
 
-|Door A (skip dup + positions), ubuntu
-|2572.7 ns/doc
-|1885.2 ns/doc
-|1.37x slower
+|ubuntu-24.04-arm (gcc-13, glibc)
+|2222.4 ns/doc
+|1850.2 ns/doc
+|1.20x slower
 
 |Full-window CPU-clock head-to-head, 4M docs (local, LTO both sides)
 |5.45 s user
@@ -1117,15 +1117,45 @@ harness numbers are noted separately.
 |equal — user-CPU parity
 |===
 
-Findings carried in `TODO.max-perf/15` Track D (the follow-up arc to
-#1842): the ubuntu deficit is leptris-specific (pugixml runs FASTER
-on ubuntu than macos; gcc-16/arm64 builds leptris faster than clang,
-so the arm64/gcc dimension is healthy — the arm64-ubuntu CI lane
-splits gcc-13-x86 codegen from glibc); text-shape parse trails
-pugixml ~1.6x on macos; documents at ~13 MB collapse to ~5x behind
-(the arena reservation sums ~3x the input length: scratch + pristine
-+ text room). The dup-table and dup-probe cuts above ship in this
-revision.
+The shape-fair parse rows (`bench_parse_ab`, same CI run) after the
+content-census copy budget (#2003), the pristine-copy skip for
+newline-free documents (#2005), and the AVX2 sizing pre-scan
+(#2006):
+
+[cols="2,>1,>1,>1",options="header"]
+|===
+|Row (MB/s, leptris vs pugixml) |Before the cuts |After |Delta
+
+|ubuntu-x86 text 1.5/5/13 MB
+|3.4-3.5x behind
+|1.38-1.69x behind
+|+137-183%
+
+|ubuntu-x86 attr 1.5 MB
+|1.37x behind
+|**ahead (0.75x)**
+|+103%
+
+|ubuntu-x86 attr 13 MB
+|1.36x behind
+|parity (1.03x)
+|+55%
+
+|macos attr 13 MB
+|5.14x behind
+|2.18x behind
+|+189%
+
+|macos text 13 MB
+|5.80x behind
+|1.87x behind
+|+120% (cumulative with #2003)
+|===
+
+Run-to-run CI variance is ~5-10%; all verdicts sit outside that band
+except the macos parity row. Findings and the remaining honest tail
+(the fused scanner loop on the arm legs) live in `TODO.max-perf/15`
+Track D.
 
 ==== Recent performance wins (v1.9.410-v1.9.414)
 
