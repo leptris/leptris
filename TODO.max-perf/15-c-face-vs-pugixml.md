@@ -388,3 +388,20 @@ Next-cut ranking by (size x boundedness):
    faces' price).
 The close-tag region (11.6%) has no obvious algorithmic cut — memcmp
 fast paths already cover it.
+
+## Track D addendum 8b — the scan-kernel analysis (2026-11-11, ranked cut #1 CLOSED as structural)
+
+The text_scan_run NEON kernel read + analysis: the 17% in-kernel
+share for the fixture-class run lengths (30-64B) is dominated by
+PER-RUN FIXED COST — the call, the 3 needle vdup setups, the
+accumulator zeroing, and one vmaxvq reduction per 16B chunk — not
+per-byte throughput. The batched-reduction redesign (8 chunks
+reduction-free, then chunk-rescan on hit) only wins runs >128B;
+the bench-class runs break even or lose. The cut that actually
+moves this block = merging the run scan INTO the caller's loop
+(killing the per-run call+setup for short runs entirely), which is
+the loop-body surgery slice — it inherits the region-wrap probe
+(the text branch wraps the same way the close-tag region did).
+
+RANKED CUT #1 therefore moves to the loop-surgery slice with the
+scan-merge as its first step. Nothing ships from the kernel alone.
