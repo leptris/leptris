@@ -335,3 +335,31 @@ near-identical code (the cuts only ADD work-free fast paths) —
 a 4.8x swing on one leg. Single-run macos attr/text-13MB datapoints
 MUST NOT drive verdicts; the macos lane needs repeated-run medians
 before any row there is called a regression or a win.
+
+## Track D addendum 7 — the scanner arc OPENED (2026-11-11 evening)
+
+Post-all-cuts text-shape samples (300k-element fixture, no-inline
+build): direct_parse_internal's own body dominates the parse at
+34-73% across samples — the per-tag dispatch loop (open scan, close
+scan+match, text-run dispatch, elem carve/zero) is THE remaining
+arc, exactly as the ledger predicted. The region split needs
+inFunction attribution: the sample tool cannot see inside one frame,
+so the next session's opening move is the noinline region-wrap probe
+(close-tag region first — biggest single suspect; needs the
+goto/label surgery threaded through DParser).
+
+INSTRUMENT LAWS learned tonight: (1) `git checkout main -- <file>`
+on a worktree branch copies from the STALE LOCAL main — always
+`git checkout HEAD --` or origin/<ref>; it silently reverted the
+fast-out mid-profile and produced one void sample. (2) The Bash tool
+shell layers make `$!`/pgrep -f unreliable for backgrounding a
+sample target — pgrep -x with the binary name + the process printing
+its own getpid() is the reliable pattern. (3) Sample files written
+into the wt/ worktree dirs vanished between commands (sandbox
+sweep class) — write samples into the main repo tree and extract in
+the same command.
+
+ALSO this session: the interleaved-lane default flip REJECTED
+(1.72x slower on element-dense text; addendum 6), and the
+no-attribute fast-out SHIPPED (PR #2009, ubuntu-x86 attr-13MB to
+parity). Release trains v1.9.416 + v1.9.417 sealed, all registries.
