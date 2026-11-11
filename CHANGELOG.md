@@ -1,15 +1,23 @@
 ## [Unreleased]
 
 ## [1.9.417] - 2026-11-11
+## Performance
 
-### Performance
+- **parse: inline the no-attribute fast-out in the element-open path** (#1842 Track D). The text-shape profile showed `dp_parse_attrs` at ~5% of a document with zero attributes — the per-element call + reset prologue + dup-table memset paid even for `<e></e>`-class tags. `>` or `/` directly after the element name collapses to a few inline stores; whitespace falls through to the full parser unchanged. CI shape rows: ubuntu-x86 attr 13MB reached **parity (0.99x)**, text rows +52–54%, attr 1.5MB **ahead (0.72x)**.
 
-- inline the no-attribute fast-out in the element-open path (parse)
-- count3_high gains an AVX2 kernel — x86 stops running the scalar sizing pre-scan (simd)
-- A3d — newline-free documents skip the pristine buffer carve (parse)
-- the arena copy-budget goes content-census-driven (parse)
+- **parse: content-census-driven arena copy budget** (#2003). The count3 sizing pre-scan now also census-counts `&` and literal tab/LF/CR (the only content-copy sources: entity expansion, §3.3.3 normalization) in the same SIMD pass; documents carrying neither drop the len-sized copy reservation — arena ~3x len → ~2x len for the machine-generated single-line class.
 
+- **parse: skip the pristine buffer carve for newline-free documents** (#2005, A3d). The pristine copy existed for the lazy line table; a newline-free document loses no newlines to `dp_nul`, so the carve and its full-buffer memcpy drop and `xml_buffer` repoints at the doc-owned scratch. macos attr-13MB +189%.
 
+- **simd: count3_high gains an AVX2 kernel** (#2006). x86 machines ran the sizing pre-scan SCALAR; five counters in one 32-byte-chunk pass. The ubuntu-x86 text rows moved 3.4–3.5x behind → 1.38–1.46x.
+
+## Benchmarks
+
+- The attrparse row is now win/parity on all three CI legs (macos 1.10x, ubuntu-x86 1.04x, ubuntu-arm 0.84). The macos 13MB shape rows were re-classified as runner noise (4.8x swings across runs of near-identical code) — verdicts there require repeated-run medians. Full arc and the remaining lever (the fused scanner loop on the arm legs) ledgered in `TODO.max-perf/15` Track D addenda 1–6b.
+
+## Documentation
+
+- README's shape table refreshes with the noise classification; negative results ledgered (the interleaved-lane default flip measured 1.72x slower on element-dense shapes — the opt-in gate stands).
 
 ## [1.9.416] - 2026-11-11
 ## Performance
