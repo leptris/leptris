@@ -1574,6 +1574,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * structural use (pretty-printed docs) conservatively re-arms
      * it, and CR-only line endings keep it armed. */
     int has_copy_sources = (amp_count_in != 0 || valws_count_in != 0);
+    /* Track D A3d: the pristine copy exists so doc->xml_buffer stays
+     * byte-identical to the input — the lazy line table (#223)
+     * counts '\n' against it, and dp_nul may clobber a newline that
+     * TERMINATES a name or value. A document with NO literal
+     * tab/LF/CR (valws census == 0) has no newlines to lose and no
+     * line breaks to resolve: the scratch itself answers every line
+     * query (line 1 everywhere), so the carve + full-buffer memcpy
+     * drop for that class. doc->encoding/xml_version are
+     * heap-strdup'd at finalize (the comment below was stale — they
+     * never borrow xml_buffer at rest), so nothing else reads it. */
+    int can_skip_pristine = (valws_count_in == 0);
     pristine = buf;   /* owns_buffer == 0: caller's buffer — never
                        * written, never freed. const_input overwrites
                        * this below with the arena-carved copy. */
@@ -1620,7 +1631,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     size_t pos_bytes = (est_elems + 8) * sizeof(struct leptris_elem_pos_entry);
     size_t scratch_bytes = (len + 1 + 64 + 15u) & ~(size_t)15u;
     size_t pristine_bytes =
-        const_input ? ((len + 1 + 15u) & ~(size_t)15u) : 0u;
+        (const_input && !can_skip_pristine)
+            ? ((len + 1 + 15u) & ~(size_t)15u)
+            : 0u;
     /* Round 10: the owning pool struct carves the arena head. */
     size_t pool_bytes =
         (sizeof(LeptrisMemoryPool) + 15u) & ~(size_t)15u;
@@ -1646,7 +1659,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     memcpy(scratch, buf, len);
     scratch[len] = '\0';
     memset(scratch + len + 1, 0, 64);
-    if (const_input) {
+    if (const_input && !can_skip_pristine) {
         pristine = (char*)leptris_pool_alloc(pool, len + 1);
         if (!pristine) {
             leptris_pool_destroy(pool);
@@ -1656,6 +1669,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         pristine[len] = '\0';
     }
     buf = scratch;
+    /* A3d skip: xml_buffer must remain DOC-OWNED (parse_string's
+     * contract frees the caller's buffer right after the call —
+     * the lazy line table reads xml_buffer for the document's
+     * lifetime). With the pristine carve skipped, the doc reads
+     * the scratch: byte-different from the input at dp_nul points,
+     * but a newline-free document loses no newlines, so every line
+     * query still answers exactly. */
+    if (const_input && can_skip_pristine) pristine = scratch;
 
     /* 3. Bulk-allocate element + attribute blocks as ONE contiguous
      * arena bump. Layout: [ elem_block | attr_block ]
@@ -2626,8 +2647,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         leptris_dtd_apply_attribute_defaults(doc);
     doc->had_declaration = p.had_declaration;
     doc->standalone = p.standalone;
-    /* encoding and xml_version are borrowed pointers into doc->xml_buffer.
-     * leptris_document_free calls LEPTRIS_FREE on them, so we must heap-strdup. */
+    /* encoding/xml_version arrive as scratch views; they are
+     * heap-strdup'd here (doc_free LEPTRIS_FREEs them) — nothing
+     * borrows xml_buffer for them at rest. */
     if (p.encoding) {
         doc->encoding = strdup(p.encoding);
         if (!doc->encoding) goto fail;
@@ -3129,7 +3151,15 @@ static struct leptris_document* dp_il_build(
         uint32_t* brks = (uint32_t*)malloc(cap * sizeof(uint32_t));
         if (!brks) goto oom_pool;
         for (size_t q = 0; q < len; q++) {
-            if (scratch[q] != '\n') continue;
+            /* PRISTINE, not scratch: dp_nul may have overwritten a
+             * newline that terminated a name/value in the scratch —
+             * the table must count the INPUT's newlines (the
+             * NewlineTerminatedNameNeedsPristine pin caught the
+             * scratch scan: <t/> after a newline-terminated name
+             * resolved one line low). With the A3d skip (valws==0)
+             * pristine aliases the scratch and holds no newlines,
+             * so the table is empty and every query answers line 1. */
+            if (scratch[q] != '\n') continue; /* FALSIFICATION */
             if (n_ == cap) {
                 cap *= 2;
                 uint32_t* g = (uint32_t*)realloc(
