@@ -151,35 +151,61 @@ void leptris_text_count3_neon(const char* s, size_t len,
 void leptris_text_count3_high_neon(const char* s, size_t len,
                                    char c0, char c1, char c2,
                                    size_t* n0, size_t* n1, size_t* n2,
-                                   int* saw_high) {
+                                   int* saw_high, size_t* amp_count,
+                                   size_t* valws_count) {
     const char* p = s;
     const char* end = s + len;
     const uint8x16_t k0 = vdupq_n_u8((uint8_t)c0);
     const uint8x16_t k1 = vdupq_n_u8((uint8_t)c1);
     const uint8x16_t k2 = vdupq_n_u8((uint8_t)c2);
+    /* '&' + the §3.3.3 value-whitespace trio: content-copy census
+     * for the arena budget (Track D). tab|lf|cr as ONE accumulator:
+     * the budget only asks "any present?", not the exact count —
+     * but the counter stays exact to keep the kernel contract
+     * uniform with the scalar oracle. */
+    const uint8x16_t kamp = vdupq_n_u8('&');
     size_t a = 0, b = 0, c = 0;
     uint16x8_t a0 = vdupq_n_u16(0), a1 = vdupq_n_u16(0), a2 = vdupq_n_u16(0);
+    uint16x8_t amp_acc = vdupq_n_u16(0);
+    uint16x8_t both_acc = vdupq_n_u16(0);
     uint8x16_t hi = vdupq_n_u8(0);
     size_t since_flush = 0;
+    size_t amp = 0, vws = 0;
 
     while (end - p >= 16) {
         uint8x16_t v = vld1q_u8((const uint8_t*)p);
         a0 = vpadalq_u8(a0, vshrq_n_u8(vceqq_u8(v, k0), 7));
         a1 = vpadalq_u8(a1, vshrq_n_u8(vceqq_u8(v, k1), 7));
         a2 = vpadalq_u8(a2, vshrq_n_u8(vceqq_u8(v, k2), 7));
+        {
+            uint8x16_t mamp = vshrq_n_u8(vceqq_u8(v, kamp), 7);
+            uint8x16_t mws = vshrq_n_u8(vorrq_u8(
+                vorrq_u8(vceqq_u8(v, vdupq_n_u8(9)),
+                         vceqq_u8(v, vdupq_n_u8(10))),
+                vceqq_u8(v, vdupq_n_u8(13))), 7);
+            both_acc = vpadalq_u8(both_acc, vorrq_u8(mamp, mws));
+            amp_acc = vpadalq_u8(amp_acc, mamp);
+        }
         hi = vorrq_u8(hi, vshrq_n_u8(v, 7));
         p += 16;
         if (++since_flush == 1024) {
             a += (size_t)vaddvq_u16(a0);
             b += (size_t)vaddvq_u16(a1);
             c += (size_t)vaddvq_u16(a2);
-            a0 = a1 = a2 = vdupq_n_u16(0);
+            amp += (size_t)vaddvq_u16(amp_acc);
+            vws += (size_t)vaddvq_u16(both_acc)
+                - (size_t)vaddvq_u16(amp_acc);
+            uint16x8_t zero = vdupq_n_u16(0);
+            a0 = a1 = a2 = zero;
+            amp_acc = both_acc = zero;
             since_flush = 0;
         }
     }
     a += (size_t)vaddvq_u16(a0);
     b += (size_t)vaddvq_u16(a1);
     c += (size_t)vaddvq_u16(a2);
+    amp += (size_t)vaddvq_u16(amp_acc);
+    vws += (size_t)vaddvq_u16(both_acc) - (size_t)vaddvq_u16(amp_acc);
     int h = vmaxvq_u8(hi) != 0;
     while (p < end) {
         unsigned char ch = (unsigned char)*p;
@@ -187,12 +213,16 @@ void leptris_text_count3_high_neon(const char* s, size_t len,
         if (ch == (unsigned char)c1) b++;
         if (ch == (unsigned char)c2) c++;
         if (ch & 0x80) h = 1;
+        if (ch == '&') amp++;
+        if (ch == 9 || ch == 10 || ch == 13) vws++;
         p++;
     }
     *n0 = a;
     *n1 = b;
     *n2 = c;
     *saw_high = h;
+    *amp_count = amp;
+    *valws_count = vws;
 }
 
 /* Fused copy + three counters in ONE memory pass (TODO 188). The

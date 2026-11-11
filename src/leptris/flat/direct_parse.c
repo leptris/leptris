@@ -1518,7 +1518,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      int recover,
                                                      size_t lt_count_in,
                                                      size_t dq_count_in,
-                                                     size_t sq_count_in) {
+                                                     size_t sq_count_in,
+                                                     size_t amp_count_in,
+                                                     size_t valws_count_in) {
 
     /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
@@ -1561,6 +1563,17 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * pre-scan doubles as the UTF-8 fast gate there — #1842). */
     size_t lt_count = lt_count_in, dq_count = dq_count_in,
            sq_count = sq_count_in;
+    /* Track D: '&' and literal tab/LF/CR are the ONLY sources of
+     * content copies at parse time (entity expansion, §3.3.3
+     * attribute-value normalization). A document carrying neither
+     * copies nothing — the len-sized copy reservation below drops
+     * to zero for that class (machine-generated single-line XML,
+     * the serialbench/bench shapes), taking arena_size from
+     * ~3x len to ~2x len. Any '&' or any of the three whitespace
+     * bytes keeps the full worst-case bound: tab/newline/CR
+     * structural use (pretty-printed docs) conservatively re-arms
+     * it, and CR-only line endings keep it armed. */
+    int has_copy_sources = (amp_count_in != 0 || valws_count_in != 0);
     pristine = buf;   /* owns_buffer == 0: caller's buffer — never
                        * written, never freed. const_input overwrites
                        * this below with the arena-carved copy. */
@@ -1582,7 +1595,7 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * at item 4144/5000 with 38 bytes left when this term was
      * missing). */
     size_t node_overhead = est_elems * 64;
-    size_t text_room = len + node_overhead;
+    size_t text_room = (has_copy_sources ? len : 0) + node_overhead;
     /* Mutation headroom + floor. The 64KB floor kept small parsed
      * documents mutation-ready, but it also pushed EVERY small-doc
      * span into the allocator's medium bin - the teardown pays
@@ -3704,8 +3717,10 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
     size_t lt_count, dq_count, sq_count;
     int saw_high = 0;
+    size_t amp_count, valws_count;
     leptris_text_count3_high(xml, len, '<', '"', '\'',
-                             &lt_count, &dq_count, &sq_count, &saw_high);
+                             &lt_count, &dq_count, &sq_count, &saw_high,
+                             &amp_count, &valws_count);
     /* A declared non-UTF-8 encoding is EXEMPT from validation
      * (dp_declares_non_utf8 == 1: its bytes are legitimate in the
      * declared encoding and transcode downstream — leptris-ruby#514).
@@ -3718,7 +3733,8 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
         if (d) return d;
     }
     return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0,
-                                 lt_count, dq_count, sq_count);
+                                 lt_count, dq_count, sq_count,
+                                 amp_count, valws_count);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
@@ -3727,8 +3743,10 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
     if (!xml || len == 0) return NULL;
     size_t lt_count, dq_count, sq_count;
     int saw_high = 0;
+    size_t amp_count, valws_count;
     leptris_text_count3_high(xml, len, '<', '"', '\'',
-                             &lt_count, &dq_count, &sq_count, &saw_high);
+                             &lt_count, &dq_count, &sq_count, &saw_high,
+                             &amp_count, &valws_count);
     /* RECOVER keeps the #1660 best-effort contract (never NULL for
      * malformed input); the fatal encoding check is strict-lane. */
     if (!(parse_flags & LEPTRIS_PARSE_RECOVER) &&
@@ -3758,7 +3776,8 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                      ? 1 : 0,
                                  (parse_flags & LEPTRIS_PARSE_RECOVER)
                                      ? 1 : 0,
-                                 lt_count, dq_count, sq_count);
+                                 lt_count, dq_count, sq_count,
+                                 amp_count, valws_count);
 }
 
 /* Public: parse a caller-owned writable buffer without copying. */
@@ -3766,8 +3785,10 @@ struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
     if (!buf || len == 0) return NULL;
     size_t lt_count, dq_count, sq_count;
     int saw_high = 0;
+    size_t amp_count, valws_count;
     leptris_text_count3_high(buf, len, '<', '"', '\'',
-                             &lt_count, &dq_count, &sq_count, &saw_high);
+                             &lt_count, &dq_count, &sq_count, &saw_high,
+                             &amp_count, &valws_count);
     /* Declared non-UTF-8 is exempt (see direct_parse). */
     if (!dp_declares_non_utf8(buf, len) && saw_high &&
         !dp_utf8_valid(buf, len))
@@ -3777,5 +3798,6 @@ struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
      * INSIDE the buffer; an exactly-sized caller trips ASAN, and
      * bindings hand read-only views). The scanner takes `len`. */
     return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0,
-                                 lt_count, dq_count, sq_count);
+                                 lt_count, dq_count, sq_count,
+                                 amp_count, valws_count);
 }

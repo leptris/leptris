@@ -6,6 +6,10 @@
 extern "C" {
 void leptris_text_count3(const char* s, size_t len, char c0, char c1,
                          char c2, size_t* n0, size_t* n1, size_t* n2);
+void leptris_text_count3_high(const char* s, size_t len, char c0,
+                              char c1, char c2, size_t* n0, size_t* n1,
+                              size_t* n2, int* saw_high, size_t* amp,
+                              size_t* valws);
 void leptris_copy_count3(char* dst, const char* src, size_t len,
                          char c0, char c1, char c2,
                          size_t* n0, size_t* n1, size_t* n2);
@@ -76,29 +80,31 @@ TEST(Count3Kernels, LargeMixedInput) {
  * Counts must match text_count3 EXACTLY at every length (the same
  * arena-sizing contract), including across the SIMD body / scalar
  * tail boundary and with high bytes straddling it. */
-extern "C" {
-void leptris_text_count3_high(const char* s, size_t len, char c0,
-                              char c1, char c2, size_t* n0, size_t* n1,
-                              size_t* n2, int* saw_high);
-}
 
 namespace {
 
 void expect_high(const char* s, size_t len) {
     size_t e0 = 0, e1 = 0, e2 = 0, ehi = 0;
+    size_t eamp = 0, evws = 0;
     for (size_t i = 0; i < len; i++) {
         if (s[i] == '<') e0++;
         if (s[i] == '"') e1++;
         if (s[i] == '\'') e2++;
         if ((unsigned char)s[i] >= 0x80) ehi++;
+        if (s[i] == '&') eamp++;
+        if (s[i] == '\t' || s[i] == '\n' || s[i] == '\r') evws++;
     }
     size_t a = 1, b = 1, c = 1;
     int hi = -1;
-    leptris_text_count3_high(s, len, '<', '"', '\'', &a, &b, &c, &hi);
+    size_t amp = 1, vws = 1;
+    leptris_text_count3_high(s, len, '<', '"', '\'', &a, &b, &c, &hi,
+                             &amp, &vws);
     EXPECT_EQ(a, e0) << "count3_high c0 len=" << len;
     EXPECT_EQ(b, e1) << "count3_high c1 len=" << len;
     EXPECT_EQ(c, e2) << "count3_high c2 len=" << len;
     EXPECT_EQ(hi, ehi > 0 ? 1 : 0) << "count3_high saw_high len=" << len;
+    EXPECT_EQ(amp, eamp) << "count3_high amp len=" << len;
+    EXPECT_EQ(vws, evws) << "count3_high valws len=" << len;
     // cross-check against the plain kernel
     size_t p0 = 0, p1 = 0, p2 = 0;
     leptris_text_count3(s, len, '<', '"', '\'', &p0, &p1, &p2);
@@ -134,5 +140,31 @@ TEST(SimdCountHigh, EmptyAndTiny) {
     expect_high(t, 1);
     const char* h = "\xc3\xa9";
     expect_high(h, 2);
+}
+
+/* The amp/valws counters feed the parse arena's content-copy budget
+ * (TODO Track D): amp_count == 0 AND valws_count == 0 lets the
+ * parser drop the len-sized copy reservation (entity expansion and
+ * §3.3.3 value normalization are the only copy sources). Exactness
+ * at the chunk boundaries is the contract, same as the byte
+ * counters. */
+TEST(SimdCountHigh, AmpAndValueWsAtEveryBoundary) {
+    // '&' / '\t' / '\n' / '\r' walked across every position relative
+    // to the 16-byte SIMD body and the scalar tail
+    const char inserts[] = {'&', '\t', '\n', '\r'};
+    for (char ins : inserts) {
+        for (size_t pad = 0; pad < 40; pad++) {
+            std::string s(pad, 'y');
+            s += ins;
+            s += "<x a='1' b=\"2\">t</x>";
+            expect_high(s.data(), s.size());
+        }
+    }
+}
+
+TEST(SimdCountHigh, CleanOneLinerHasZeroAmpValws) {
+    // the machine-generated class the arena copy-budget keys on
+    const char s[] = "<r><e a0='value-0-xyz' a1='value-1-xyz'/></r>";
+    expect_high(s, sizeof(s) - 1);
 }
 }  // namespace

@@ -108,7 +108,7 @@ static void (*g_count3_fn)(const char*, size_t, char, char, char,
                            size_t*, size_t*, size_t*) = NULL;
 static void (*g_count3_high_fn)(const char*, size_t, char, char, char,
                                 size_t*, size_t*, size_t*,
-                                int*) = NULL;
+                                int*, size_t*, size_t*) = NULL;
 static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
                           size_t*, size_t*, size_t*) = NULL;
 static int (*g_utf8_fn)(const char*, size_t) = NULL;
@@ -160,7 +160,8 @@ int leptris_utf8_valid_neon(const char* s, size_t len);
 static void count3_high_scalar(const char* s, size_t len,
                                char c0, char c1, char c2,
                                size_t* n0, size_t* n1, size_t* n2,
-                               int* saw_high);
+                               int* saw_high, size_t* amp_count,
+                               size_t* valws_count);
 
 #if defined(_MSC_VER)
 #  pragma section(".CRT$XCU", read)
@@ -219,29 +220,37 @@ static void dispatch_init(void) {
 static void count3_high_scalar(const char* s, size_t len,
                                char c0, char c1, char c2,
                                size_t* n0, size_t* n1, size_t* n2,
-                               int* saw_high) {
+                               int* saw_high, size_t* amp_count,
+                               size_t* valws_count) {
     size_t a = 0, b = 0, c = 0;
     int h = 0;
+    size_t amp = 0, vws = 0;
     for (size_t i = 0; i < len; i++) {
         unsigned char ch = (unsigned char)s[i];
         if (ch == (unsigned char)c0) a++;
         if (ch == (unsigned char)c1) b++;
         if (ch == (unsigned char)c2) c++;
         if (ch & 0x80) h = 1;
+        if (ch == '&') amp++;
+        if (ch == 9 || ch == 10 || ch == 13) vws++;
     }
     *n0 = a;
     *n1 = b;
     *n2 = c;
     *saw_high = h;
+    *amp_count = amp;
+    *valws_count = vws;
 }
 
 void leptris_text_count3_high(const char* s, size_t len,
                               char c0, char c1, char c2,
                               size_t* n0, size_t* n1, size_t* n2,
-                              int* saw_high) {
+                              int* saw_high, size_t* amp_count,
+                              size_t* valws_count) {
     if (!g_count3_high_fn) dispatch_init();
     if (!g_count3_high_fn) g_count3_high_fn = count3_high_scalar;
-    g_count3_high_fn(s, len, c0, c1, c2, n0, n1, n2, saw_high);
+    g_count3_high_fn(s, len, c0, c1, c2, n0, n1, n2, saw_high,
+                     amp_count, valws_count);
 }
 
 int leptris_text_contains(const char* s, size_t len, char c) {
