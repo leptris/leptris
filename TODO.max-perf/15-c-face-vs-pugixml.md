@@ -219,3 +219,22 @@ deficit into three NAMED gaps, none attr-specific:
    glibc. Candidate micro-levers once the dimension is known:
    -fno-plt / mmap-threshold pinning (mallopt) / loop restructuring
    where gcc-13 jump-threading bails.
+
+## Track D addendum 3 — the ubuntu dimension RESOLVED (2026-11-11, all three CI legs)
+
+attrparse rows from the final three-leg CI run (same commit):
+- macos-latest (clang arm64): leptris 1830.8 vs pugixml 2036.6 — WIN 1.11x.
+- ubuntu-24.04-arm (gcc-13 + glibc, arm64): 2091.7 vs 1850.3 — loss 1.13x.
+- ubuntu-latest (gcc-13 + glibc, x86-64): 2793.4 vs 1914.7 — loss 1.46x.
+
+Decomposition: gcc-13+glibc on arm64 costs ~0.02-0.2x (mild); the
+EXTRA ~30% penalty is x86-64-SPECIFIC codegen of the fused scanner
+under gcc-13. The lever: gcc-13-x86 scanner codegen (jump-threading /
+register allocation in direct_parse_internal), CI-leg-verified with
+the x86 lane as the gate. pugixml again ran FASTER on ubuntu hardware
+than macos on both linux legs — the hardware/allocator dimension
+favors it; leptris's own linux penalty is the 1.13x arm number.
+
+Also note run-to-run variance: the macos attrparse pair measured
+1728/2183 then 1831/2037 across runs (~5-10%) — treat sub-10% CI
+deltas as noise bands; the win/loss verdicts above sit outside them.
