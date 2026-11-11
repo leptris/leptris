@@ -1,12 +1,19 @@
 ## [Unreleased]
 
 ## [1.9.416] - 2026-11-11
+## Performance
 
-### Performance
+- **parse: the attribute dup-table stops rehashing small documents** (#1842 Track D). Growth was ×8, so an element with ≥14 attributes blew the 14-slot threshold inside a 16-slot table and every such document paid a 512B pool alloc + memset + full rehash on its first element; later elements memset 512B each. ×2 growth keeps the common ≤16-attr element at 32 slots (load ≤50%, ~1 probe step) with no growth, and wide elements still grow geometrically.
+- **parse: the dup-probe fast path is inlined** in `dp_add_attr_inline` — the per-attribute out-of-line call (alloc/grow slow-paths stay out-of-line) was ~10% of the no-inline attrparse profile. Canonical CI bench: ~30-45 ns/doc on the attr-dense shape.
 
-- attr-dense row cuts + CI gate for the attrparse bench (parse)
+## Benchmarks
 
+- **The attrparse row is CI-gated and platform-split.** `bench_append_attr_pugixml` now runs in the Benchmark workflow on quiet GH runners (Release + LTO, min of 5) with a new ubuntu-24.04-arm leg. First gated rows: macos-latest **1.11x win** (1830.8 vs 2036.6 ns/doc); ubuntu-24.04-arm 1.13x behind (gcc-13 + glibc, mild); ubuntu-latest x86-64 1.46x behind — the extra ~30% is isolated as **x86-64-specific codegen of the fused scanner under gcc-13** (same toolchain family on arm64 is healthy; gcc-16/arm64 builds leptris faster than clang locally). Run-to-run CI variance is ~5-10%; all verdicts sit outside that band.
+- The same run's `bench_parse_ab` names the next parse gaps with CI-gated shape data: text-shape parse 1.6x behind pugixml on macos and 3.3x on ubuntu-x86; documents at ~13MB collapse to 5.1-5.8x behind on macos (the arena reservation sums ~3x the input length — scratch + pristine + text-room are each len-sized). Full ledger in `TODO.max-perf/15` Track D.
 
+## Documentation
+
+- README's attribute-dense section now reads from CI artifacts with the platform-split table; negative results ledgered so they are not re-attempted (inline 16B SIMD value scan = 20% regression at ~11-byte values; count3 small-doc skip dead-ends into an allocator-bin cliff; the interleaved lane is not faster below the small-doc threshold).
 
 ## [1.9.415] - 2026-11-10
 ## Performance
