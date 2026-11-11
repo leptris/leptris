@@ -238,3 +238,25 @@ favors it; leptris's own linux penalty is the 1.13x arm number.
 Also note run-to-run variance: the macos attrparse pair measured
 1728/2183 then 1831/2037 across runs (~5-10%) — treat sub-10% CI
 deltas as noise bands; the win/loss verdicts above sit outside them.
+
+
+## Track D addendum 4 — the arena cut LANDED (PR #2003, 2026-11-11)
+
+Content-census copy budget (count3_high amp/valws outputs): macos
+13MB collapse CONFIRMED as the reservation — CI-gated bench_parse_ab
+before/after: text 13MB 361.6 -> 794.2 MB/s (+120%), attr 13MB
+139.4 -> 174.4 (+25%); the 13MB gaps halved (5.8x -> 2.57x text,
+5.14x -> 3.84x attr). macos attr-5MB measured -32% in the same run —
+single-datapoint between-run variance on that row (two runs only);
+watch it on the next run before treating as real.
+
+Remaining 13MB terms: scratch (len, required) + pristine (len, A3d
+parked on the borrowed-decl audit). NEXT LEVER CANDIDATES, in order:
+(a) A3d pristine skip — needs the decl-views audit (direct_parse.c
+borrowed version/encoding point INTO xml_buffer);
+(b) parse-path arena reuse (thread-local spare-span recycle, the
+#1846 warm-span idea applied to fresh parse arenas — amortizes the
+per-doc mmap/fault churn that dominates large-doc create/free
+loops);
+(c) ubuntu-x86 scanner codegen (gcc-13; the 1.35-3.7x rows there are
+now the widest platform gap).
