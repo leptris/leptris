@@ -1698,6 +1698,100 @@ TEST(NodeLine, ReportsOneBasedLineOfParsedNodes) {
     leptris_document_free(doc);
 }
 
+/* A3d (Track D): a document with no literal tab/LF/CR skips the
+ * pristine buffer carve entirely — the scratch answers every line
+ * query (line 1 everywhere). The declaration fields must survive
+ * (they are heap-strdup'd at finalize, never borrowed from the
+ * pristine at rest), line resolution must stay exact, and a
+ * malformed single-line document must still report line 1. */
+TEST(NodeLine, NewlineFreeDocSkipsPristineButKeepsContract) {
+    /* > 4 KB so the parse takes the classic lane at a realistic
+     * size; declaration present; attributes dense; zero newlines. */
+    std::string xml =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r>";
+    for (int i = 0; i < 300; i++) {
+        xml += "<e id='";
+        xml += std::to_string(i);
+        xml += "' name='item' type='widget' stock='7' price='1.50'/>";
+    }
+    xml += "</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml.data(), xml.size(), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    /* Every node resolves to line 1 through the scratch line table. */
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(root)), 1);
+    LeptrisElement a = leptris_element_first_child_any(root);
+    ASSERT_NE(a, nullptr);
+    LeptrisElement last = a;
+    int count = 0;
+    for (LeptrisElement c = a; c;
+         c = leptris_element_next_sibling_any(c)) {
+        EXPECT_EQ(leptris_node_line(leptris_element_as_node(c)), 1);
+        last = c;
+        count++;
+    }
+    EXPECT_EQ(count, 300);
+    /* Deep attribute read still works off the scratch views. */
+    EXPECT_STREQ(leptris_element_attribute(last, "name"), "item");
+    /* Declaration fields survive the skipped carve. */
+    EXPECT_STREQ(leptris_document_encoding(doc), "UTF-8");
+    leptris_document_free(doc);
+}
+
+TEST(NodeLine, NewlineTerminatedNameNeedsPristine) {
+    /* THE clobber case: an ATTRIBUTE NAME terminated directly by a
+     * newline (`a` ends at the newline before `b`). dp_nul
+     * overwrites that newline with NUL in the scratch when the
+     * attribute parses — the lazy line table (built from
+     * doc->xml_buffer on first query) must still count the INPUT's
+     * newline, or every node after it resolves one line low. True
+     * lines: <r>=1, <e=2, text=3 (its tag ends line 3? no — the
+     * element's line is its '<'; text sits on line 3), <t/>=4. */
+    /* Legal XML: whitespace between an attribute name and '='.
+     * The attr name `a` terminates at the newline (dp_nul clobbers
+     * it when `a` parses); everything after resolves against the
+     * INPUT's newline set via doc->xml_buffer. */
+    const char xml[] =
+        "<r>\n<e a\n='1'>text</e>\n<t/>\n</r>\n";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    LeptrisElement e = leptris_element_first_child_any(root);
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(root)), 1);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(e)), 2);
+    LeptrisNodeRef text = leptris_node_first_child(
+        leptris_element_as_node(e));
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(leptris_node_get_type(text), LEPTRIS_NODE_TYPE_TEXT);
+    /* Lines: \n@3 ends line 1; \n@6 (the clobbered one — `a`'s
+     * terminator) ends line 2; text's offset is past @6, before @17
+     * → line 3. A scratch-derived table loses @6 and answers 2. */
+    EXPECT_EQ(leptris_node_line(text), 3)
+        << "text must resolve against the INPUT's newlines";
+    LeptrisElement t = leptris_element_next_sibling_any(e);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(leptris_node_line(leptris_element_as_node(t)), 4);
+    leptris_document_free(doc);
+}
+
+TEST(NodeLine, NewlineFreeMalformedDocReportsLineOne) {
+    const char xml[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r><a></r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml, std::strlen(xml), &st);
+    EXPECT_EQ(doc, nullptr);
+    EXPECT_NE(st, LEPTRIS_OK);
+    int line = -1, col = -1;
+    leptris_last_error_position(&line, &col);
+    EXPECT_EQ(line, 1);
+}
+
 TEST(NodeSourcePosition, ReportsParserRecordedElementColumns) {
     const char xml[] =
         "<root><a x='1'/><b>text</b><multi\n"
