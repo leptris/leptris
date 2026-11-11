@@ -1509,6 +1509,136 @@ static inline LeptrisTextNode* dp_text_create_norm(DParser* p,
 /* §3.3.2 defaults pass: walk the finished tree; for every default-
  * bearing declaration whose element matches, materialize the value
  * when the element does not carry the attribute. */
+/* PROBE (addendum 7): the close-tag region extracted NOINLINE so
+ * the sampler can attribute it separately inside the parse loop's
+ * own-body share. Diagnostic branch only — do not merge. Returns
+ * 0 = matched (caller falls through), 1 = stray close dropped
+ * (caller continues), -1 = fatal (caller goto fail). */
+static LEPTRIS_NOINLINE int dp_close_tag_probe(
+    DParser* p, int ho_line_offsets_ok) {
+    /* Scan name (includes prefix:local). */
+    char* close_start = p->pos;
+    dp_scan_name(p);
+    size_t close_len = p->pos - close_start;
+    dp_skip_ws(p);
+    if (p->pos >= p->end || *p->pos != '>') return -1;
+    p->pos++;
+    if (p->depth == 0) return -1;
+    /* Verify close tag matches open element. The open
+     * element's name is the LOCAL part (prefix stripped).
+     * Compare the local part of the close tag, which is
+     * everything after ':' (or the whole name if no ':'). */
+    LeptrisElement open = p->open_stack[p->depth - 1];
+    const char* open_name = elem_name(open);
+    size_t open_len = (open->name_len != 0xFF)
+        ? (size_t)open->name_len : strlen(open_name);
+    const char* close_local = close_start;
+    size_t close_local_len = close_len;
+    const char* colon = NULL;
+    if (open_name[-1] == '\0') {
+        if (close_len < 16) {
+            for (const char* c = close_start;
+                 c < close_start + close_len; c++) {
+                if (*c == ':') { colon = c; break; }
+            }
+        } else {
+            colon = (const char*)memchr(close_start, ':', close_len);
+        }
+    }
+    if (colon) {
+        close_local = colon + 1;
+        close_local_len = close_len - (colon + 1 - close_start);
+    }
+    if (open_len != close_local_len) goto close_mismatch;
+    if (close_local_len <= 8 &&
+        (p->probe_slack ||
+         close_local + 8 <= p->end + 1)) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        uint64_t mask = (close_local_len == 8)
+            ? ~(uint64_t)0
+            : (~(uint64_t)0 << (64 - close_local_len * 8));
+#else
+        uint64_t mask = (close_local_len == 8)
+            ? ~(uint64_t)0
+            : ((1ull << (close_local_len * 8)) - 1);
+#endif
+        uint64_t a, b;
+        memcpy(&a, open_name, 8);
+        memcpy(&b, close_local, 8);
+        if ((a & mask) != (b & mask)) goto close_mismatch;
+    } else if (memcmp(open_name, close_local,
+                      close_local_len) != 0) {
+        goto close_mismatch;
+    }
+    if (0) {
+    close_mismatch:
+        if (!p->recover) {
+            snprintf(p->strict_fail_msg,
+                     sizeof(p->strict_fail_msg),
+                     "Opening and ending tag mismatch: expected "
+                     "</%.*s>, got </%.*s>",
+                     (int)open_len, open_name,
+                     (int)close_local_len, close_local);
+            return -1;
+        }
+        {
+            int anc = -1;
+            for (int d = (int)p->depth - 1; d >= 0; d--) {
+                LeptrisElement ae = p->open_stack[d];
+                const char* an = elem_name(ae);
+                size_t al = (ae->name_len != 0xFF)
+                    ? (size_t)ae->name_len : strlen(an);
+                if (al == close_local_len &&
+                    memcmp(an, close_local,
+                           close_local_len) == 0) {
+                    anc = d;
+                    break;
+                }
+            }
+            if (anc >= 0) {
+                while ((int)p->depth - 1 > anc) {
+                    LeptrisElement ce =
+                        p->open_stack[p->depth - 1];
+                    leptris_diag_emit(
+                        &p->doc->parse_diags,
+                        &p->doc->parse_diag_count,
+                        &p->doc->parse_diag_cap,
+                        LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
+                        "Element %s closed implicitly by </%.*s>",
+                        elem_name(ce),
+                        (int)close_local_len, close_local);
+                    if (ho_line_offsets_ok) {
+                        leptris_elem_pos_close_at(
+                            p->doc,
+                            p->pos_slot_stack[p->depth - 1],
+                            (uint32_t)(p->pos - p->buf));
+                    }
+                    p->depth--;
+                    p->last_child_stack[p->depth] = NULL;
+                }
+                return 0;
+            }
+            leptris_diag_emit(
+                &p->doc->parse_diags,
+                &p->doc->parse_diag_count,
+                &p->doc->parse_diag_cap,
+                LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
+                "Stray close tag </%.*s> dropped",
+                (int)close_local_len, close_local);
+            return 1;  /* p->pos is already past the '>' */
+        }
+    }
+    /* close_matched: */
+    if (ho_line_offsets_ok) {
+        leptris_elem_pos_close_at(
+            p->doc, p->pos_slot_stack[p->depth - 1],
+            (uint32_t)(p->pos - p->buf));
+    }
+    p->depth--;
+    p->last_child_stack[p->depth] = NULL;
+    return 0;
+}
+
 static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                       unsigned skip_flags,
                                                      int owns_buffer,
@@ -2234,176 +2364,13 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             }
         }
         else if (next == '/') {
-            /* Close tag. */
+            /* Close tag (PROBE: noinline region). */
             p.pos += 2;
-            /* Scan name (includes prefix:local). */
-            char* close_start = p.pos;
-            dp_scan_name(&p);
-            size_t close_len = p.pos - close_start;
-            dp_skip_ws(&p);
-            if (p.pos >= p.end || *p.pos != '>') goto fail;
-            p.pos++;
-            if (p.depth == 0) goto fail;
-            /* Verify close tag matches open element. The open
-             * element's name is the LOCAL part (prefix stripped).
-             * Compare the local part of the close tag, which is
-             * everything after ':' (or the whole name if no ':'). */
-            LeptrisElement open = p.open_stack[p.depth - 1];
-            const char* open_name = elem_name(open);
-            size_t open_len = (open->name_len != 0xFF)
-                ? (size_t)open->name_len : strlen(open_name);
-            const char* close_local = close_start;
-            size_t close_local_len = close_len;
-            /* Strip the close tag's prefix ONLY when the open element
-             * was prefixed. Exact, allocation-independent test: the
-             * open tag's colon was NUL-terminated in-place, so
-             * name[-1] is that NUL for prefixed names and '<'
-             * for unprefixed ones (element names directly follow '<').
-             * An unprefixed open closed by a prefixed name already
-             * fails the length compare below — same result as the old
-             * unconditional scan, without the per-element memchr call
-             * (a libc call for a 1-6 byte span — the TODO 174 law). */
-            const char* colon = NULL;
-            if (open_name[-1] == '\0') {
-                if (close_len < 16) {
-                    for (const char* c = close_start;
-                         c < close_start + close_len; c++) {
-                        if (*c == ':') { colon = c; break; }
-                    }
-                } else {
-                    colon = (const char*)memchr(close_start, ':', close_len);
-                }
+            {
+                int cr = dp_close_tag_probe(&p, ho_line_offsets_ok);
+                if (cr < 0) goto fail;
+                if (cr > 0) continue;
             }
-            if (colon) {
-                close_local = colon + 1;
-                close_local_len = close_len - (colon + 1 - close_start);
-            }
-            if (open_len != close_local_len) goto close_mismatch;
-            /* Masked 64-bit compare for short names — one load
-             * each side vs a libc memcmp call (the TODO 174 law:
-             * setup dominates sub-8-byte compares; ~9% of the
-             * element-heavy corpus profile). The 8-byte load may
-             * read past the name: safe outright on the owned copy
-             * (zeroed slack), and safe on caller buffers whenever
-             * the load stays inside [buf, end] (the sentinel at
-             * buf[len] is the +1) — only names within 8 bytes of the
-             * document end fall back to memcmp (issue #561: gating
-             * the whole fast path on probe_slack cost inplace
-             * parsing a memcmp per element). */
-            if (close_local_len <= 8 &&
-                (p.probe_slack ||
-                 close_local + 8 <= p.end + 1)) {
-                /* The mask follows MEMORY order: memcpy fills the low
-                 * bytes on little-endian and the high bytes on
-                 * big-endian, so each dialect must mask the end its
-                 * load populated. The unconditional low-bytes mask
-                 * compared bytes past the name on big-endian and
-                 * failed every close tag (#1197). */
-#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-                uint64_t mask = (close_local_len == 8)
-                    ? ~(uint64_t)0
-                    : (~(uint64_t)0 << (64 - close_local_len * 8));
-#else
-                uint64_t mask = (close_local_len == 8)
-                    ? ~(uint64_t)0
-                    : ((1ull << (close_local_len * 8)) - 1);
-#endif
-                uint64_t a, b;
-                memcpy(&a, open_name, 8);
-                memcpy(&b, close_local, 8);
-                if ((a & mask) != (b & mask)) goto close_mismatch;
-            } else if (memcmp(open_name, close_local,
-                              close_local_len) != 0) {
-                goto close_mismatch;
-            }
-            if (0) {
-            close_mismatch:
-                /* leptris#1660: RECOVER keeps the best-effort tree.
-                 * A close tag naming an open ANCESTOR closes the
-                 * intermediates implicitly (libxml2 semantics); a
-                 * close matching nothing open is dropped. Either way
-                 * the recovery records a diagnostic.
-                 * leptris#1700: the STRICT path fails with the same
-                 * mismatch named — tag names + line:column ride the
-                 * error message, not a bare byte offset. */
-                if (!p.recover) {
-                    snprintf(p.strict_fail_msg,
-                             sizeof(p.strict_fail_msg),
-                             "Opening and ending tag mismatch: expected "
-                             "</%.*s>, got </%.*s>",
-                             (int)open_len, open_name,
-                             (int)close_local_len, close_local);
-                    goto fail;
-                }
-                {
-                    int anc = -1;
-                    for (int d = (int)p.depth - 1; d >= 0; d--) {
-                        LeptrisElement ae = p.open_stack[d];
-                        const char* an = elem_name(ae);
-                        size_t al = (ae->name_len != 0xFF)
-                            ? (size_t)ae->name_len : strlen(an);
-                        if (al == close_local_len &&
-                            memcmp(an, close_local,
-                                   close_local_len) == 0) {
-                            anc = d;
-                            break;
-                        }
-                    }
-                    if (anc >= 0) {
-                        while ((int)p.depth - 1 > anc) {
-                            LeptrisElement ce =
-                                p.open_stack[p.depth - 1];
-                            /* #1749 severity: the implicit close
-                             * is the MISMATCH recovery (libxml2
-                             * reports a tag mismatch; recoverable
-                             * class) — UNCLOSED_ELEMENT stays
-                             * reserved for the still-open-at-EOF
-                             * fatal class. */
-                            leptris_diag_emit(
-                                &p.doc->parse_diags,
-                                &p.doc->parse_diag_count,
-                                &p.doc->parse_diag_cap,
-                                LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
-                                "Element %s closed implicitly by </%.*s>",
-                                elem_name(ce),
-                                (int)close_local_len, close_local);
-                            if (ho_line_offsets_ok) {
-                                leptris_elem_pos_close_at(
-                                    p.doc,
-                                    p.pos_slot_stack[p.depth - 1],
-                                    (uint32_t)(p.pos - p.buf));
-                            }
-                            p.depth--;
-                            p.last_child_stack[p.depth] = NULL;
-                        }
-                        goto close_matched;
-                    }
-                    leptris_diag_emit(
-                        &p.doc->parse_diags,
-                        &p.doc->parse_diag_count,
-                        &p.doc->parse_diag_cap,
-                        LEPTRIS_DIAG_MISMATCHED_TAG, NULL,
-                        "Stray close tag </%.*s> dropped",
-                        (int)close_local_len, close_local);
-                    continue;  /* p.pos is already past the '>' */
-                }
-            }
-            close_matched:
-            if (ho_line_offsets_ok) {
-                /* Round 10: fill the open element's journal slot in
-                 * place — no hash probe, and the recorded start offset
-                 * survives verbatim. open_stack[p.depth-1] is `open`;
-                 * its slot sits at the same depth. */
-                leptris_elem_pos_close_at(
-                    p.doc, p.pos_slot_stack[p.depth - 1],
-                    (uint32_t)(p.pos - p.buf));
-            }
-            p.depth--;
-            /* Clear the closed level's tail cache (AFTER the
-             * decrement: at max depth the pre-decrement index would
-             * write past the array): a stale prev_last here wires
-             * cross-level siblings (issue #478). */
-            p.last_child_stack[p.depth] = NULL;
         }
         else if (next == '!') {
             /* Comment, CDATA, or DOCTYPE. */
