@@ -478,3 +478,36 @@ scan-merge 64B, kernel-width 32B): the kernel is at its floor. The
 remaining text-row gap to pugixml is the parser's text-branch call
 overhead (the scalar wrapper measures separably at 2.2% — the only
 untried lever in this class), not the kernel.
+
+## Track D addendum 12 — the text-branch call-overhead class CLOSED (measured tie + the bound-vs-run datum)
+
+The named remainder from addendum 11 ("the parser's text-branch call
+overhead, the scalar wrapper at 2.2%") went through the full
+instrumentation pass and closes the class:
+
+1. **The microbench decomposition**: the dispatch entry costs 2-3x the
+   kernel's own work per call (7.1 vs 3.0 ns at 5B, 17.9 vs 6.9 ns at
+   31B) — the fn-pointer defeats thin-LTO and forces the full call ABI
+   plus per-call key re-materialization. A devirtualized cut (arch-
+   direct calls + a <16B scalar fast path) was implemented, pinned,
+   and mutation-falsified — and measured a DOC-LEVEL TIE in interleaved
+   A/B (−0.7/−2.3/−1.4%, inside the noise band). The microbench's
+   variant-B "win" was LTO INLINING the local kernel into the bench
+   loop — a zero-call comparison the real direct-call cut cannot
+   replicate across TUs.
+
+2. **The bound-vs-run instrument datum** (the decisive one): the
+   parser's scan calls pass the REMAINING BUFFER as `len`
+   (`p.end - p.pos`), not the run length — so a length-gated fast path
+   never engages in the parser context (bucket census on the bench
+   text fixture: <16B = 0 of 2.1M calls, 64+ = 99.999%). The
+   run-length histogram that motivated the fast path describes the
+   RUN distribution, which the kernel only knows after scanning.
+
+Disposition after four closures in the call-structure class
+(scan-merge 32B/64B, kernel-width 32B, devirtualization): **the
+text-branch call structure is at its floor.** The remaining text-row
+gap to pugixml is the kernel's per-byte throughput itself — and the
+accumulator chain that binds it was measured at addendum 11. Next
+text-row work, if any, is a kernel redesign (Track A scanner class),
+not call-structure rearrangement.
