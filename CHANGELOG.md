@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.419] - 2026-11-12
+
+### Fixed
+
+- wildcards ride group refs across units; bare anyAttribute is live; 1.0 one-ID-per-element (leptris-rs#72/#73) (xsd)
+
+
+
 ## [1.9.418] - 2026-11-12
 ## Fixed
 
