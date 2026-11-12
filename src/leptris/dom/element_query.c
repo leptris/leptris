@@ -1526,7 +1526,15 @@ LEPTRIS_API size_t leptris_element_attribute_pairs(
          a; a = leptris_attr_next(a)) {
         if (written >= max_count) break;
         if (out_names) out_names[written] = attr_cname(a);
-        if (out_values) out_values[written] = attr_cvalue(a);
+        /* The values column serves the SAME view the per-attribute
+         * getter does — decoded (XML 1.0 §4.6: character references
+         * decode in attribute values exactly as in content). The
+         * raw views belong to leptris_element_attributes_raw
+         * (#635). Decoding caches into the attribute (the entities
+         * flag clears), so repeat bulk reads skip the work. The
+         * element's pool carries the decoded copies. */
+        if (out_values) out_values[written] =
+            leptris_attribute_get_value(elem, (LeptrisAttribute)a);
         if (out_attrs) out_attrs[written] = (LeptrisAttribute)a;
         written++;
     }
