@@ -311,6 +311,10 @@ static void xsd_member_canon(const char* mname, char* out, size_t cap) {
  * numerically ("1.0" == "1.000"), booleans identify across the
  * {true,1}/{false,0} spellings, everything else is exact text. */
 static int xsd_value_equal(const char* canon_type, const char* a,
+                           const char* b);
+static int xsd_collapse_str(const char* src, char* out, size_t cap);
+
+static int xsd_value_equal(const char* canon_type, const char* a,
                            const char* b) {
     if (strcmp(a, b) == 0) return 1;
     if (strcmp(canon_type, "xs:boolean") == 0) {
@@ -326,6 +330,20 @@ static int xsd_value_equal(const char* canon_type, const char* a,
         strstr(canon_type, "byte") ||
         strstr(canon_type, "Negative") || strstr(canon_type, "positive"))
         return strtod(a, NULL) == strtod(b, NULL);
+    /* leptris-rs#74 (stE065/066): whitespace-variant families — the
+     * token family collapses and normalizedString replaces — equate
+     * trailing-blank spellings in the union member's value space
+     * (the suite's oracle accepts the collapse reading for the
+     * union fixed-comparison class). */
+    if (token_family_builtin(canon_type) ||
+        strcmp(canon_type, "xs:normalizedString") == 0) {
+        char na[512], nb[512];
+        if (strlen(a) < sizeof(na) && strlen(b) < sizeof(nb) &&
+            xsd_collapse_str(a, na, sizeof(na)) &&
+            xsd_collapse_str(b, nb, sizeof(nb)) &&
+            strcmp(na, nb) == 0)
+            return 1;
+    }
     return 0;
 }
 
@@ -381,6 +399,80 @@ static int xsd_union_fixed_match(struct leptris_xsd_schema* s,
                xsd_value_equal(canon, fixed, text);
     const XsdSimple* m = xsd_find_simple_ns_pub(s, canon, ns);
     return m && xsd_simple_valid_chain(s, m, text);
+}
+
+/* leptris-rs#74 (stE096): a LIST-typed fixed constraint compares in
+ * the list VALUE SPACE — whitespace runs separate items, so the
+ * itemization of "2004 ---04 --05" and "2004  ---04  --05" is the
+ * same list. Each item pair then compares through the item type
+ * (a union rides its first-accepting-member mapping; a name rides
+ * the value-equality rules). */
+static int xsd_list_fixed_match(struct leptris_xsd_schema* s,
+                                const XsdSimple* lt, const char* ns,
+                                const char* fixed, const char* text);
+
+static int xsd_item_fixed_match(struct leptris_xsd_schema* s,
+                                const XsdSimple* item_def,
+                                const char* item_name, const char* ns,
+                                const char* fixed, const char* text) {
+    if (item_def && item_def->deriv == XSD_SIMPLE_UNION)
+        return xsd_union_fixed_match(s, item_def, ns, fixed, text);
+    if (item_def) return xsd_simple_valid_chain(s, item_def, text) &&
+                         strcmp(fixed, text) == 0;
+    if (!item_name) return strcmp(fixed, text) == 0;
+    char canon[128];
+    xsd_member_canon(item_name, canon, sizeof(canon));
+    const XsdSimple* m =
+        strncmp(canon, "xs:", 3) == 0
+            ? NULL
+            : xsd_find_simple_ns_pub(s, canon, ns);
+    if (m && m->deriv == XSD_SIMPLE_UNION)
+        return xsd_union_fixed_match(s, m, ns, fixed, text);
+    if (strncmp(canon, "xs:", 3) != 0)
+        return m && xsd_simple_valid_chain(s, m, text) &&
+               strcmp(fixed, text) == 0;
+    return xsd_builtin_valid(canon, text) &&
+           xsd_value_equal(canon, fixed, text);
+}
+
+static int xsd_list_fixed_match(struct leptris_xsd_schema* s,
+                                const XsdSimple* lt, const char* ns,
+                                const char* fixed, const char* text) {
+    if (!lt || lt->deriv != XSD_SIMPLE_LIST) return 0;
+    /* itemize both lexicals on whitespace runs */
+    const char* fi[128];
+    size_t fl[128], fn = 0;
+    const char* p = fixed;
+    while (*p && fn < 128) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        fi[fn] = p;
+        size_t n = 0;
+        while (*p && !isspace((unsigned char)*p)) { p++; n++; }
+        fl[fn++] = n;
+    }
+    const char* ti[128];
+    size_t tl[128], tn = 0;
+    p = text;
+    while (*p && tn < 128) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        ti[tn] = p;
+        size_t n = 0;
+        while (*p && !isspace((unsigned char)*p)) { p++; n++; }
+        tl[tn++] = n;
+    }
+    if (fn != tn) return 0;
+    char fb[128], tb[128];
+    for (size_t i = 0; i < fn; i++) {
+        if (fl[i] >= sizeof(fb) || tl[i] >= sizeof(tb)) return 0;
+        memcpy(fb, fi[i], fl[i]); fb[fl[i]] = 0;
+        memcpy(tb, ti[i], tl[i]); tb[tl[i]] = 0;
+        if (!xsd_item_fixed_match(s, lt->item_def, lt->item_type, ns,
+                                  fb, tb))
+            return 0;
+    }
+    return 1;
 }
 
 static void validate_element_decl(struct xsd_validator* v,
@@ -795,6 +887,27 @@ static int any_attr_matches(const char* grammar, const char* uri,
     return 0;
 }
 
+/* Collapse one lexical per whiteSpace=collapse: trim, internal runs
+ * to single spaces. Returns 0 when the source overflows the buffer. */
+static int xsd_collapse_str(const char* src, char* out, size_t cap) {
+    char* o = out;
+    const char* p = src;
+    while (*p && isspace((unsigned char)*p)) p++;
+    int spaced = 0;
+    while (*p) {
+        if (isspace((unsigned char)*p)) {
+            spaced = 1;
+            p++;
+            continue;
+        }
+        if (spaced) { *o++ = ' '; spaced = 0; }
+        *o++ = *p++;
+        if ((size_t)(o - out) >= cap - 1) return 0;
+    }
+    *o = 0;
+    return 1;
+}
+
 /* leptris-rs#36 (addB104, attO006): the fixed constraint holds on
  * the TYPE's value, not the raw lexical (XSD 1.0 §3.2.3/§4.3.1.2) —
  * a whitespace-variant lexical of a collapsing type (token family,
@@ -807,28 +920,10 @@ static int attr_fixed_matches(struct leptris_xsd_schema* s,
     if (!type_collapses_ws(s, type, ns)) return 0;
     char norm_v[512];
     char norm_f[512];
-    size_t n = strlen(val);
-    if (n >= sizeof(norm_v)) return 0;
-    size_t m = strlen(fixed);
-    if (m >= sizeof(norm_f)) return 0;
-    for (int pass = 0; pass < 2; pass++) {
-        const char* src = pass ? fixed : val;
-        char* out = pass ? norm_f : norm_v;
-        char* o = out;
-        const char* p = src;
-        while (*p && isspace((unsigned char)*p)) p++;
-        int spaced = 0;
-        while (*p) {
-            if (isspace((unsigned char)*p)) {
-                spaced = 1;
-                p++;
-                continue;
-            }
-            if (spaced) { *o++ = ' '; spaced = 0; }
-            *o++ = *p++;
-        }
-        *o = 0;
-    }
+    if (strlen(val) >= sizeof(norm_v)) return 0;
+    if (strlen(fixed) >= sizeof(norm_f)) return 0;
+    if (!xsd_collapse_str(val, norm_v, sizeof(norm_v))) return 0;
+    if (!xsd_collapse_str(fixed, norm_f, sizeof(norm_f))) return 0;
     return strcmp(norm_v, norm_f) == 0;
 }
 
@@ -1107,7 +1202,10 @@ static void validate_element_decl(struct xsd_validator* v,
                 const XsdSimple* ut =
                     d->type ? xsd_find_simple_ns_pub(s, d->type, d->ns)
                             : NULL;
-                if (ut)
+                if (ut && ut->deriv == XSD_SIMPLE_LIST)
+                    match = xsd_list_fixed_match(s, ut, d->ns, d->fixed,
+                                                 text);
+                else if (ut)
                     match = xsd_union_fixed_match(s, ut, d->ns, d->fixed,
                                                   text);
             }
