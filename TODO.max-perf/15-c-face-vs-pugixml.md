@@ -425,3 +425,26 @@ a run-length histogram (one counting pass per fixture, reusable),
 which decides whether the scan-merge has a paying window at all —
 and at what threshold. Until then the kernel stands unchanged; the
 PR closed with the full data (three legs, two rounds, CI artifacts).
+
+## Track D addendum 10 — the scan-merge slice CLOSED (PR #2020, closed unmerged)
+
+The 64-byte window (histogram-driven) went through the full gate and
+regressed WORSE than the 32-byte attempt: macos -45/-39/-46%, arm
+-32/-32/-29%, x86 -53/-53/-50% (vs the AVX2 run) — even for runs
+fully inside the window. THE VERDICT: the branchy scalar loop
+(~3-5 ops/byte) loses to the SIMD kernel (~1 op/byte) at every run
+length on every platform; the kernel's per-run fixed cost is small
+next to its per-byte advantage. The scan-merge slice is structurally
+dead — two windows, two full CI runs, one consistent verdict.
+
+THE TEXT-ROW LEVER REDIRECTS to the kernel's own per-byte
+throughput: the text_scan_run NEON kernel processes ~1 byte/op
+while pugixml's scanner sustains 2.1-2.7 GB/s — the Track A scanner
+class. The next concrete candidate: process 32B chunks (NEON
+registers ×2) per iteration instead of 16B, halving the reduction
+frequency; and the parser's text-branch call overhead already
+measures separably (the scalar wrapper at 2.2%).
+
+The histogram instrument (probe/run-histogram) remains in the repo
+history on probe/run-histogram; both rejected cut branches carry
+their full data.
