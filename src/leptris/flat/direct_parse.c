@@ -1901,13 +1901,41 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * runs (the norm) keep the zero-copy carve. */
             int has_cr = 0;
             {
-                int saw_amp = 0, saw_cr = 0;
-                ptrdiff_t t_off = leptris_text_scan_run(
-                    p.pos, (size_t)(p.end - p.pos), '<', '&', '\r',
-                    &saw_amp, &saw_cr);
-                lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
-                has_amp |= saw_amp;
-                has_cr |= saw_cr;
+                /* Short-run inline scan (Track D addendum 9/10): the
+                 * kernel's fixed cost — the call, three needle dups,
+                 * accumulator zeroing, one reduction per chunk —
+                 * dominated the fixture-class run lengths. The
+                 * run-length histogram (probe/run-histogram) puts
+                 * 100% of the serialbench corpus's run bytes at <=32B
+                 * and 65% of large_catalog at <=32B (the rest mostly
+                 * 33-64B): a 64-byte window covers them fully inline;
+                 * runs that outgrow it fall to the kernel over the
+                 * REMAINDER (prefix flags already folded — restarting
+                 * at the run start would double-scan, the first CI
+                 * round's regression). */
+                const char* q = p.pos;
+                const char* lim = (p.end - p.pos > 64) ? p.pos + 64
+                                                       : p.end;
+                while (q < lim) {
+                    char c = *q;
+                    if (c == '<') break;
+                    has_amp |= (c == '&');
+                    has_cr |= (c == '\r');
+                    q++;
+                }
+                if (q < lim) {
+                    lt = (char*)q;
+                } else if (lim >= p.end) {
+                    lt = NULL;   /* whole run scanned, no '<' */
+                } else {
+                    int saw_amp = 0, saw_cr = 0;
+                    ptrdiff_t t_off = leptris_text_scan_run(
+                        q, (size_t)(p.end - q), '<', '&', '\r',
+                        &saw_amp, &saw_cr);
+                    lt = (t_off >= 0) ? (char*)(q + t_off) : NULL;
+                    has_amp |= saw_amp;
+                    has_cr |= saw_cr;
+                }
             }
             /* leptris#1748: a '<' that opens no markup construct
              * ('!', '?', '/', name-start) is unescaped text. Strict
