@@ -1901,13 +1901,36 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
              * runs (the norm) keep the zero-copy carve. */
             int has_cr = 0;
             {
-                int saw_amp = 0, saw_cr = 0;
-                ptrdiff_t t_off = leptris_text_scan_run(
-                    p.pos, (size_t)(p.end - p.pos), '<', '&', '\r',
-                    &saw_amp, &saw_cr);
-                lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
-                has_amp |= saw_amp;
-                has_cr |= saw_cr;
+                /* Short-run inline scan (Track D addendum 8b): the
+                 * kernel's fixed cost — the call, three needle dups,
+                 * accumulator zeroing, one reduction per chunk —
+                 * dominated the fixture-class run lengths (30-64B).
+                 * The first 32 bytes scan scalar in-register; runs
+                 * that outgrow the window fall to the kernel with
+                 * the prefix flags folded in. */
+                const char* q = p.pos;
+                const char* lim = (p.end - p.pos > 32) ? p.pos + 32
+                                                       : p.end;
+                while (q < lim) {
+                    char c = *q;
+                    if (c == '<') break;
+                    has_amp |= (c == '&');
+                    has_cr |= (c == '\r');
+                    q++;
+                }
+                if (q < lim) {
+                    lt = (char*)q;
+                } else if (lim >= p.end) {
+                    lt = NULL;   /* whole run scanned, no '<' */
+                } else {
+                    int saw_amp = 0, saw_cr = 0;
+                    ptrdiff_t t_off = leptris_text_scan_run(
+                        p.pos, (size_t)(p.end - p.pos), '<', '&',
+                        '\r', &saw_amp, &saw_cr);
+                    lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
+                    has_amp |= saw_amp;
+                    has_cr |= saw_cr;
+                }
             }
             /* leptris#1748: a '<' that opens no markup construct
              * ('!', '?', '/', name-start) is unescaped text. Strict
