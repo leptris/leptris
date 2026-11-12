@@ -1923,11 +1923,16 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                 } else if (lim >= p.end) {
                     lt = NULL;   /* whole run scanned, no '<' */
                 } else {
+                    /* Kernel over the REMAINDER only — the prefix is
+                     * already scanned and its flags folded in; a full
+                     * restart would scan the first 32 bytes twice
+                     * (the first CI run caught exactly that: every
+                     * leg regressed on long-run fixtures). */
                     int saw_amp = 0, saw_cr = 0;
                     ptrdiff_t t_off = leptris_text_scan_run(
-                        p.pos, (size_t)(p.end - p.pos), '<', '&',
-                        '\r', &saw_amp, &saw_cr);
-                    lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
+                        q, (size_t)(p.end - q), '<', '&', '\r',
+                        &saw_amp, &saw_cr);
+                    lt = (t_off >= 0) ? (char*)(q + t_off) : NULL;
                     has_amp |= saw_amp;
                     has_cr |= saw_cr;
                 }
