@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.418] - 2026-11-12
+
+### Fixed
+
+- the bulk attribute-pairs export serves decoded values (entities)
+- unknown named entities preserve their terminating semicolon (entities)
+
+
+
 ## [1.9.417] - 2026-11-11
 ## Performance
 
