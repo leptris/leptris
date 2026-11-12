@@ -95,6 +95,10 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
 static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                                           LeptrisElement container,
                                           int depth);
+static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
+                                             LeptrisElement container,
+                                             int depth,
+                                             const XsdAttrGroupDef* owner);
 XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
                            const char* type_name, const char* uri);
 extern XsdCm* xsd_find_complex(struct leptris_xsd_schema* s,
@@ -3589,6 +3593,13 @@ static const char* xsd_inline_attr_type(
 static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
                                           LeptrisElement container,
                                           int depth) {
+    return xsd_capture_attr_rows_ex(s, container, depth, NULL);
+}
+
+static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
+                                             LeptrisElement container,
+                                             int depth,
+                                             const XsdAttrGroupDef* owner) {
     XsdAttrDecl* head = NULL;
     XsdAttrDecl* tail = NULL;
     if (depth > 8) return NULL;
@@ -3661,6 +3672,18 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
             XsdAttrGroupDef* g = s->attr_groups;
             for (; g; g = g->next)
                 if (strcmp(g->name, ref) == 0) break;
+            /* XSD 1.0 §4.2.2 redefine hook (moxml#545, attgC035-038):
+             * a body redefining group N refs N to mean the ORIGINAL
+             * group. The name-keyed slot may hold the redefining
+             * body itself — when expanding THAT def and the ref
+             * names it again, take the shadowed def instead, or the
+             * original's members never splice into the composition. */
+            if (g && g == owner) {
+                XsdAttrGroupDef* alt = g->next;
+                for (; alt; alt = alt->next)
+                    if (strcmp(alt->name, g->name) == 0) break;
+                g = alt;
+            }
             if (!g) continue;
             /* leptris#1957: expand lazily through the def's own
              * element when its rows are not captured yet (a group
@@ -3669,7 +3692,8 @@ static XsdAttrDecl* xsd_capture_attr_rows(struct leptris_xsd_schema* s,
              * the cycle guard. */
             XsdAttrDecl* copied =
                 g->attrs ? xsd_copy_attr_rows(g->attrs)
-                         : xsd_capture_attr_rows(s, g->elem, depth + 1);
+                         : xsd_capture_attr_rows_ex(s, g->elem, depth + 1,
+                                                    g);
             if (!copied) continue;
             if (!head)
                 head = copied;
