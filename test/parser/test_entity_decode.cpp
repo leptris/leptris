@@ -41,5 +41,14 @@ TEST(EntityDecode, UnknownEntityMixedWithKnownDecodesBoth) {
         leptris_text_node_get_content(
             leptris_node_first_child(leptris_element_as_node(root))),
         "&<");
+
+    /* The bulk pairs export serves the decoded values column too —
+     * the binding's listing faces route through it (moxml#540). */
+    const char* names[4];
+    const char* values[4];
+    size_t n = leptris_element_attribute_pairs(
+        root, names, values, NULL, 4);
+    ASSERT_EQ(n, 1u);
+    EXPECT_STREQ(values[0], "& &copy; &nbsp; <");
     leptris_document_free(doc);
 }
