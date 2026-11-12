@@ -1471,6 +1471,35 @@ TEST(XsdValidate, Rs74UnionFixedStillRejectsDifferentValues) {
     leptris_xsd_free(s);
 }
 
+// moxml#545 (W3C attgC035-038, msData/attributeGroup, valid): an
+// attributeGroup-redefine body that refs its OWN name means the
+// ORIGINAL group (XSD 1.0 §4.2.2) — the name-keyed slot holds the
+// redefining body, and the original's members must splice into the
+// composition (att1 reaches through the .red unit, imp:att4 through
+// the imported bar; attgC038 chains two redefines).
+TEST(XsdValidate, AttgCRedefineHookMembersAdmitted) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* cases[] = {"attgC035", "attgC036", "attgC037",
+                           "attgC038"};
+    for (const char* c : cases) {
+        char path[256];
+        snprintf(path, sizeof(path),
+                 LEPTRIS_XSD_CASES_DIR "/attgC-redefine/%s.xsd", c);
+        LeptrisXsdSchema s = leptris_xsd_compile_file(path, &st);
+        ASSERT_NE(s, (LeptrisXsdSchema)0) << c << " status " << (int)st;
+        snprintf(path, sizeof(path),
+                 LEPTRIS_XSD_CASES_DIR "/attgC-redefine/%s.xml", c);
+        LeptrisDocument d = leptris_parse_file(path, &st);
+        ASSERT_NE(d, nullptr) << c << " status " << (int)st;
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << c << ": "
+            << leptris_xsd_error_at(s, 0);
+        for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+            ADD_FAILURE() << c << ": " << leptris_xsd_error_at(s, i);
+        leptris_document_free(d);
+        leptris_xsd_free(s);
+    }
+}
+
 TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"2\" status=\"ok\">"
