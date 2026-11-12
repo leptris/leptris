@@ -1426,6 +1426,51 @@ TEST(XsdValidate, AttZ014aVersion11ReadingIsValid) {
     leptris_xsd_free(s);
 }
 
+// leptris-rs#74 (W3C stE065/066/096, msData/simpleType, valid): the
+// element fixed constraint compares in the VALUE SPACE — a union
+// maps each lexical through its first accepting member, so token
+// collapse equates the trailing-blank fixed spelling, and a list
+// itemizes on whitespace runs before per-item union comparison.
+TEST(XsdValidate, Rs74UnionFixedValueSpaceValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* cases[] = {"stE065", "stE066", "stE096"};
+    for (const char* c : cases) {
+        char path[256];
+        snprintf(path, sizeof(path),
+                 LEPTRIS_XSD_CASES_DIR "/rs74-union-fixed/%s.xsd", c);
+        LeptrisXsdSchema s = leptris_xsd_compile_file(path, &st);
+        ASSERT_NE(s, (LeptrisXsdSchema)0) << c << " status " << (int)st;
+        snprintf(path, sizeof(path),
+                 LEPTRIS_XSD_CASES_DIR "/rs74-union-fixed/%s.xml", c);
+        LeptrisDocument d = leptris_parse_file(path, &st);
+        ASSERT_NE(d, nullptr) << c << " status " << (int)st;
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << c << ": "
+            << leptris_xsd_error_at(s, 0);
+        leptris_document_free(d);
+        leptris_xsd_free(s);
+    }
+}
+
+// leptris-rs#74 teeth: a genuinely different value must still fail
+// — the collapse reading equates whitespace spellings, not content.
+TEST(XsdValidate, Rs74UnionFixedStillRejectsDifferentValues) {
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='root' fixed='abcd edfgh '>"
+        " <xs:simpleType><xs:union memberTypes='xs:gYearMonth"
+        " xs:token xs:normalizedString'/></xs:simpleType>"
+        "</xs:element></xs:schema>";
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* doc = "<root>wxyz pqrs</root>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"2\" status=\"ok\">"
