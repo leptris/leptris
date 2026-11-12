@@ -362,8 +362,10 @@ size_t leptris_text_scan_events_neon(const char* buf, size_t len,
 /* #1842: one-pass text-run scan — first `term` byte plus f1/f2
  * seen-flags over the prefix. Full chunks OR-accumulate the f1/f2
  * compare masks; a term hit resolves its lane scalar (once per run,
- * at most 15 bytes of prefix re-check) and returns without folding
- * the post-hit lanes. */
+ * at most 31 bytes of prefix re-check) and returns without folding
+ * the post-hit lanes. 32B windows (two registers, one combined
+ * reduction) halve the per-byte reduction frequency vs the 16B
+ * form — the AVX2 kernel already runs 32B per movemask. */
 ptrdiff_t leptris_text_scan_run_neon(const char* s, size_t len, char term,
                                      char f1, char f2,
                                      int* saw_f1, int* saw_f2) {
@@ -375,6 +377,30 @@ ptrdiff_t leptris_text_scan_run_neon(const char* s, size_t len, char term,
     uint8x16_t acc1 = vdupq_n_u8(0);
     uint8x16_t acc2 = vdupq_n_u8(0);
 
+    while (end - p >= 32) {
+        uint8x16_t v0 = vld1q_u8((const uint8_t*)p);
+        uint8x16_t v1 = vld1q_u8((const uint8_t*)(p + 16));
+        uint8x16_t eq0 = vceqq_u8(v0, kt);
+        uint8x16_t eq1 = vceqq_u8(v1, kt);
+        if (vmaxvq_u8(vorrq_u8(eq0, eq1)) != 0) {
+            int i = 0;
+            while (p[i] != term) i++;
+            int a = vmaxvq_u8(acc1) != 0;
+            int b = vmaxvq_u8(acc2) != 0;
+            for (int j = 0; j < i; j++) {
+                a |= (p[j] == f1);
+                b |= (p[j] == f2);
+            }
+            *saw_f1 = a;
+            *saw_f2 = b;
+            return (ptrdiff_t)(p + i - s);
+        }
+        acc1 = vorrq_u8(vorrq_u8(acc1, vceqq_u8(v0, k1)),
+                        vceqq_u8(v1, k1));
+        acc2 = vorrq_u8(vorrq_u8(acc2, vceqq_u8(v0, k2)),
+                        vceqq_u8(v1, k2));
+        p += 32;
+    }
     while (end - p >= 16) {
         uint8x16_t v = vld1q_u8((const uint8_t*)p);
         uint8x16_t eqt = vceqq_u8(v, kt);
