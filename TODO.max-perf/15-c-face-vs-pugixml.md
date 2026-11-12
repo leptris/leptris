@@ -448,3 +448,33 @@ measures separably (the scalar wrapper at 2.2%).
 The histogram instrument (probe/run-histogram) remains in the repo
 history on probe/run-histogram; both rejected cut branches carry
 their full data.
+
+## Track D addendum 11 — the 32B kernel window measured-NEGATIVE (PR #2022, closed unmerged)
+
+The addendum-10 candidate (NEON text_scan_run at 32B windows — two
+uint8x16 registers, term masks OR-combined before ONE vmaxvq, halving
+the horizontal-reduction frequency) passed the full CI suite but the
+CI split was poisoned by fleet variance (x86 +31% on code the diff
+does not touch). The decisive instrument was a same-machine
+interleaved A/B on Apple silicon (Release+LTO, 3 rounds ABBA, pugixml
+side flat ~2370/1800 MB/s across rounds — machine verified stable):
+
+| shape | 16B (main) | 32B (PR) | delta |
+|-------|-----------|----------|-------|
+| 1.5MB | ~1341 MB/s | ~1144 MB/s | −15% |
+| 5MB   | ~1332 MB/s | ~1135 MB/s | −15% |
+| 13MB  | ~1029 MB/s | ~913 MB/s  | −11% |
+
+THE INVARIANT: horizontal-reduction frequency is NOT the binding term
+in text_scan_run on M-series. The accumulator chain is — two extra
+cmpeq+orr per register per window lengthen the dependency chain and
+raise live-register pressure (9+ Q registers) without removing any
+real per-byte work. Widening the window cannot pay; the kernel's
+per-byte op count is already minimal for its contract (first-term
+scan + f1/f2 seen-flags).
+
+TEXT-ROW STATUS after three measured closures (scan-merge 32B,
+scan-merge 64B, kernel-width 32B): the kernel is at its floor. The
+remaining text-row gap to pugixml is the parser's text-branch call
+overhead (the scalar wrapper measures separably at 2.2% — the only
+untried lever in this class), not the kernel.
