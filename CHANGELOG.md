@@ -1,10 +1,15 @@
 ## [Unreleased]
 
 ## [1.9.419] - 2026-11-12
-
 ### Fixed
 
-- wildcards ride group refs across units; bare anyAttribute is live; 1.0 one-ID-per-element (leptris-rs#72/#73) (xsd)
+- **xsd: wildcards ride attributeGroup refs across units** (leptris-rs#72, W3C wildZ013b/c). The #1964 deep capture left two holes: the extension branch still scanned shallow, so a wildcard living inside a REFERENCED attributeGroup under the extension element was invisible (strict admission rejected attributes the composed union admits); and a wildcard found in a group from ANOTHER unit (a namespace-less import) resolved against the CONSUMING schema's targetNamespace instead of its declaring unit's — `##other` flipped meaning across the boundary and the union collapsed to admitting only half the instance's attribute namespaces. The capture now follows refs in the extension branch and carries the declaring group's own unit tns (absent for the import).
+
+- **xsd: a bare `<xs:anyAttribute />` is a live ##any wildcard** (leptris-rs#73, W3C attZ014a/b). Absent @namespace means ##any (the moxml#460 posture) — the capture mapped it to NULL, an invisible wildcard, so wildcard-admitted attributes fell to strict rejection for the wrong reason. With admission live, XSD 1.0's one-ID-per-element rule fires: an element assessed with more than one ID-typed attribute (declared rows AND wildcard-admitted names whose global declaration is ID-derived) is invalid; XSD 1.1 lifted the constraint and reads the same shape valid. The rule is version-gated (`xsd_schema_version_11`).
+
+## Tests
+
+- wildZ013b/c + attZ014a/b fixtures vendored from w3c/xsdtests (msData/wildcards, msData/attribute); attZ014a also pinned under `@version="1.1"` (valid). Falsified: an always-false ID test failed exactly the two 1.0 pins and passed the 1.1 reading.
 
 
 
