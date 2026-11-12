@@ -147,6 +147,11 @@ size_t decode_entity(const char* input, char* output, size_t outlen) {
                 while (input[in_pos]) {
                     char c = input[in_pos];
                     if (c == ';') {
+                        /* The ';' belongs to the literal entity —
+                         * emit it or the preserved spelling loses
+                         * its terminator (&copy; came back as
+                         * &copy). */
+                        if (out_pos < outlen - 1) output[out_pos++] = ';';
                         in_pos++; /* Skip ';' */
                         break;
                     }
