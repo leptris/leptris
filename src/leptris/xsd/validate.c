@@ -832,6 +832,11 @@ static int attr_fixed_matches(struct leptris_xsd_schema* s,
     return strcmp(norm_v, norm_f) == 0;
 }
 
+/* leptris-rs#73: xs:ID itself or a user simpleType whose restriction
+ * chain roots at xs:ID. */
+static int attr_type_is_id(struct leptris_xsd_schema* s,
+                           const char* type);
+
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
@@ -962,6 +967,73 @@ static void validate_attributes(struct xsd_validator* v,
         verrf_atk(v, elem, "attribute-use", local, "attribute", local,
                   "not declared (strict)");
     }
+    /* leptris-rs#73 (W3C attZ014, XSD 1.0): an element assessed with
+     * more than one ID-typed attribute is invalid — declared rows
+     * AND wildcard-admitted attributes whose GLOBAL declaration is
+     * ID-derived both count. 1.1 lifted the constraint. */
+    if (!xsd_schema_version_11(s)) {
+        int id_count = 0;
+        for (XsdAttrDecl* a = ta->attrs; a; a = a->next)
+            if (attr_type_is_id(s, a->type)) id_count++;
+        for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+             at && id_count < 2; at = leptris_attribute_next(at)) {
+            const char* qn = leptris_attribute_get_name(at);
+            if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
+            const char* colon = strchr(qn, ':');
+            const char* local = colon ? colon + 1 : qn;
+            int declared = 0;
+            for (XsdAttrDecl* a = ta->attrs; a && !declared; a = a->next)
+                if (strcmp(a->name, local) == 0 ||
+                    strcmp(a->name, qn) == 0)
+                    declared = 1;
+            if (declared) continue;
+            const char* auri = leptris_attribute_namespace_uri(at);
+            if (auri && strcmp(auri,
+                               "http://www.w3.org/2001/XMLSchema-instance")
+                    == 0)
+                continue;
+            if (ta->any_attr_not_qname &&
+                attr_not_qname_hits(ta->any_attr_not_qname, s, local))
+                continue;
+            int admitted =
+                ((ta->any_attr_ns || ta->any_attr_not_qname) &&
+                 any_attr_matches(ta->any_attr_ns, auri,
+                                  ta->any_attr_unit_ns
+                                      ? ta->any_attr_unit_ns
+                                      : xsd_target_ns(s))) ||
+                (ta->any_attr_base_ns &&
+                 any_attr_matches(ta->any_attr_base_ns, auri,
+                                  ta->any_attr_base_unit_ns
+                                      ? ta->any_attr_base_unit_ns
+                                      : xsd_target_ns(s)));
+            if (!admitted) continue;
+            const XsdAttrDecl* g =
+                xsd_find_top_attr(s, local);
+            if (g && attr_type_is_id(s, g->type)) id_count++;
+        }
+        if (id_count > 1)
+            verrf_atk(v, elem, "attribute-use", "ID", "attribute",
+                      "ID",
+                      "more than one ID-typed attribute (XSD 1.0 "
+                      "one-ID-per-element)");
+    }
+}
+
+/* leptris-rs#73: xs:ID itself or a user simpleType whose restriction
+ * chain roots at xs:ID. */
+static int attr_type_is_id(struct leptris_xsd_schema* s,
+                           const char* type) {
+    if (!type) return 0;
+    if (strcmp(type, "xs:ID") == 0 || strcmp(type, "xsd:ID") == 0)
+        return 1;
+    const XsdSimple* st = xsd_find_simple_ns_pub(s, type, NULL);
+    for (int hops = 0; st && st->base && hops < 8; hops++) {
+        if (strcmp(st->base, "xs:ID") == 0 ||
+            strcmp(st->base, "xsd:ID") == 0)
+            return 1;
+        st = xsd_find_simple_pub(s, st->base);
+    }
+    return 0;
 }
 
 static void validate_element(struct xsd_validator* v,

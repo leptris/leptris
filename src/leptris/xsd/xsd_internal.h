@@ -87,6 +87,9 @@ int xsd_element_name_defined(struct leptris_xsd_schema* s,
                              const char* local, const char* uri);
 int xsd_attr_name_defined(struct leptris_xsd_schema* s,
                           const char* local);
+struct xsd_attr_decl;
+const struct xsd_attr_decl* xsd_find_top_attr(
+    struct leptris_xsd_schema* s, const char* local);
 
 /* One validation finding (slice 4). text is malloc'd; kind and
  * component are BORROWED (static names / schema-owned component

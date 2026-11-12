@@ -128,9 +128,9 @@ static char* xsd_capture_unit_tns(LeptrisElement e);
 static void xsd_resolve_qname(LeptrisElement e, const char* qname,
                               char* uri, size_t urisz, char* local,
                               size_t localsz);
-static char* xsd_capture_any_attr_ns(LeptrisElement container);
 static char* xsd_capture_any_attr_ns_deep(
-    struct leptris_xsd_schema* s, LeptrisElement container, int depth);
+    struct leptris_xsd_schema* s, LeptrisElement container, int depth,
+    char** out_unit);
 static char* xsd_capture_any_attr_not_qname(LeptrisElement container);
 
 /* #1626: prefixed QName refs (type="w:CT_Border") resolve by local
@@ -3257,13 +3257,26 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 /* XSD 1.1: asserts nested under the derivation */
                 if (s->version_11)
                     xsd_capture_assert_children(s, dq, root);
-                if (!any_attr_ns)
+                if (!any_attr_ns) {
                     if (!any_attr_unit_ns)
                         any_attr_unit_ns = xsd_capture_unit_tns(dq);
-                    any_attr_ns = xsd_capture_any_attr_ns(dq);
+                    /* leptris-rs#72: the extension's wildcard rides
+                     * attributeGroup refs too — the shallow scan
+                     * misses attgD019/wildZ013 shapes. Cross-unit
+                     * found-groups carry their own tns. */
+                    char* deep_unit = NULL;
+                    any_attr_ns = xsd_capture_any_attr_ns_deep(
+                        s, dq, 0, &deep_unit);
+                    if (any_attr_ns && deep_unit) {
+                        free(any_attr_unit_ns);
+                        any_attr_unit_ns = deep_unit;
+                    } else {
+                        free(deep_unit);
+                    }
                     if (!any_attr_not_qname)
                         any_attr_not_qname =
                             xsd_capture_any_attr_not_qname(dq);
+                }
             }
         } else if (strcmp(local, "simpleContent") == 0) {
             for (LeptrisNodeRef q = leptris_node_first_child(
@@ -3344,8 +3357,19 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         if (!attrs) attrs = xsd_capture_attr_rows(s, ct, 0);
         if (!any_attr_unit_ns)
             any_attr_unit_ns = xsd_capture_unit_tns(ct);
-        if (!any_attr_ns)
-            any_attr_ns = xsd_capture_any_attr_ns_deep(s, ct, 0);
+        if (!any_attr_ns) {
+            char* deep_unit = NULL;
+            any_attr_ns = xsd_capture_any_attr_ns_deep(s, ct, 0,
+                                                       &deep_unit);
+            if (any_attr_ns && deep_unit) {
+                /* the wildcard lives in a REFERENCED group from
+                 * another unit — its declaring tns wins */
+                free(any_attr_unit_ns);
+                any_attr_unit_ns = deep_unit;
+            } else {
+                free(deep_unit);
+            }
+        }
         if (!any_attr_not_qname)
             any_attr_not_qname = xsd_capture_any_attr_not_qname(ct);
     }
@@ -3455,7 +3479,9 @@ XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
     return NULL;
 }
 
-static const XsdAttrDecl* xsd_find_top_attr(
+/* leptris-rs#73: the global attribute declaration for a local name
+ * (the ID-count pass resolves wildcard-admitted names against it). */
+const XsdAttrDecl* xsd_find_top_attr(
     struct leptris_xsd_schema* s, const char* name) {
     if (!s || !name) return NULL;
     for (XsdAttrDecl* a = s->top_attrs; a; a = a->next)
@@ -3686,7 +3712,7 @@ static char* xsd_capture_unit_tns(LeptrisElement e) {
  * (depth-bounded); the group's OWN element is the walk root. */
 static char* xsd_capture_any_attr_ns_deep(
     struct leptris_xsd_schema* s, LeptrisElement container,
-    int depth) {
+    int depth, char** out_unit) {
     if (depth > 8) return NULL;
     for (LeptrisNodeRef ac = leptris_node_first_child(
              leptris_element_as_node(container));
@@ -3697,9 +3723,14 @@ static char* xsd_capture_any_attr_ns_deep(
         const char* al = NULL, *au = NULL;
         leptris_element_expanded_name(ae, &al, NULL, &au);
         if (!al || (au && strcmp(au, XSD_NS) != 0)) continue;
-        if (strcmp(al, "anyAttribute") == 0)
-            return xsd_strdup(
-                leptris_element_attribute(ae, "namespace"));
+        if (strcmp(al, "anyAttribute") == 0) {
+            /* leptris-rs#73: absent @namespace means ##any — a
+             * bare <xs:anyAttribute /> is a live wildcard, not an
+             * invisible one. */
+            const char* ns =
+                leptris_element_attribute(ae, "namespace");
+            return xsd_strdup(ns ? ns : "##any");
+        }
         if (strcmp(al, "attributeGroup") == 0) {
             const char* ref = xsd_local_name(
                 leptris_element_attribute(ae, "ref"));
@@ -3708,27 +3739,22 @@ static char* xsd_capture_any_attr_ns_deep(
             for (; g; g = g->next)
                 if (strcmp(g->name, ref) == 0) break;
             if (g && g->elem) {
-                char* r = xsd_capture_any_attr_ns_deep(s, g->elem,
-                                                       depth + 1);
-                if (r) return r;
+                char* inner_unit = NULL;
+                char* r = xsd_capture_any_attr_ns_deep(
+                    s, g->elem, depth + 1, &inner_unit);
+                if (r) {
+                    /* leptris-rs#72: the wildcard resolves against
+                     * its DECLARING unit's tns — the group's own
+                     * unit ("" for a namespace-less import), which
+                     * may differ from the consuming type's. */
+                    if (out_unit)
+                        *out_unit = inner_unit
+                                        ? inner_unit
+                                        : xsd_capture_unit_tns(g->elem);
+                    return r;
+                }
             }
         }
-    }
-    return NULL;
-}
-
-static char* xsd_capture_any_attr_ns(LeptrisElement container) {
-    for (LeptrisNodeRef ac = leptris_node_first_child(
-             leptris_element_as_node(container));
-         ac; ac = leptris_node_next_sibling(ac)) {
-        if (leptris_node_get_type(ac) != LEPTRIS_NODE_TYPE_ELEMENT)
-            continue;
-        LeptrisElement ae = (LeptrisElement)ac;
-        const char* al = NULL;
-        leptris_element_expanded_name(ae, &al, NULL, NULL);
-        if (al && strcmp(al, "anyAttribute") == 0)
-            return xsd_strdup(
-                leptris_element_attribute(ae, "namespace"));
     }
     return NULL;
 }
