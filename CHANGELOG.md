@@ -1,13 +1,15 @@
 ## [Unreleased]
 
 ## [1.9.418] - 2026-11-12
+## Fixed
 
-### Fixed
+- **entities: unknown named entities preserve their terminating semicolon**. decode_entity's lenient unknown-entity branch consumed the `;` while copying the name — `&copy;` came back as `&copy` (one character short) on every consumer of the decode face: the attribute accessor's lazy expansion, text content, and the bindings' decode calls. The semicolon is part of the literal spelling; it is now emitted. Pins: unknown entities byte-exact in attributes and text; mixed known/unknown decode (`&amp;` decodes; `&copy;`/`&nbsp;` stay literal — HTML-only, not XML-predefined).
 
-- the bulk attribute-pairs export serves decoded values (entities)
-- unknown named entities preserve their terminating semicolon (entities)
+- **attributes: the bulk attribute-pairs export serves decoded values**. `leptris_element_attribute_pairs`' values column read the RAW view while the per-attribute getter decoded — every listing face that routes through the bulk export (the bindings' `attribute_pairs` and the native packet/pairs faces the adapters use) showed literals where the accessor decoded (lutaml/moxml#540: the XSD unicode-block pattern cases flipped to failing between trains). The values column now routes through the per-attribute getter (same decode, cached into the attribute — repeat bulk reads skip the work). The raw views remain on `leptris_element_attributes_raw` (#635).
 
+## Tests
 
+- New `test_entity_decode` battery: the unknown-entity byte-exactness contract, mixed known/unknown decode, and the bulk values column. Two pin drafts were discarded for wrong premises (attribute-name NUL behavior; `&copy;`/`&nbsp;` as XML-predefined — they are HTML-only).
 
 ## [1.9.417] - 2026-11-11
 ## Performance
