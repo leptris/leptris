@@ -1331,6 +1331,101 @@ TEST(XsdValidate, SchG2RoundtripUnitAAlone) {
     leptris_xsd_free(s);
 }
 
+// leptris-rs#72 (W3C wildZ013b, msData/wildcards, expected VALID):
+// the extension's wildcard lives inside a REFERENCED attributeGroup
+// (attG2-51 under the extension element) — the deep capture must
+// ride group refs in the extension branch too. The composed union
+// (base ##other ∪ extension ##targetNamespace ##local b c) admits
+// all five instance attribute namespaces.
+TEST(XsdValidate, WildZ013bExtensionGroupRefWildcardValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/wildZ013-set/test328873.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR "/wildZ013-set/test328873b.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << leptris_xsd_error_at(s, 0);
+    for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+        ADD_FAILURE() << leptris_xsd_error_at(s, i);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// leptris-rs#72 (W3C wildZ013c): BOTH wildcards live in the
+// namespace-less IMPORT (attG1-61/attG2-61). Each resolves against
+// its DECLARING unit's tns (absent), not the consuming schema's —
+// ##other@absent ∪ {absent, b, c}@absent = ##any.
+TEST(XsdValidate, WildZ013cCrossUnitImportUnionValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/wildZ013-set/test328873.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR "/wildZ013-set/test328873c.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << leptris_xsd_error_at(s, 0);
+    for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+        ADD_FAILURE() << leptris_xsd_error_at(s, i);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// leptris-rs#73 (W3C attZ014a, version-contested): <xs:anyAttribute />
+// without @namespace is a LIVE ##any (absent @namespace means ##any,
+// the moxml#460 posture) — a and b admit through it and resolve
+// against their global ID-typed declarations. XSD 1.0's
+// one-ID-per-element rule then makes the instance INVALID (two
+// ID-typed attributes on one element); XSD 1.1 lifted the rule.
+TEST(XsdValidate, AttZ014aIdCountInvalid10) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014a.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014a.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// leptris-rs#73 (attZ014b): the declared att2 row is xs:ID and the
+// wildcard-admitted b resolves to a global restriction of xs:ID —
+// still two ID-typed attributes on the element. INVALID in 1.0.
+TEST(XsdValidate, AttZ014bDeclaredAndAdmittedIdInvalid10) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014b.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014b.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 0);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
+// leptris-rs#73 (1.1 reading): the same shape under @version="1.1"
+// is VALID — 1.1 lifted the one-ID-per-element constraint.
+TEST(XsdValidate, AttZ014aVersion11ReadingIsValid) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014a-11.xsd", &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    LeptrisDocument d = leptris_parse_file(
+        LEPTRIS_XSD_CASES_DIR "/attZ014-set/attZ014a.xml", &st);
+    ASSERT_NE(d, nullptr) << "status " << (int)st;
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << leptris_xsd_error_at(s, 0);
+    for (size_t i = 0; i < leptris_xsd_error_count(s); i++)
+        ADD_FAILURE() << leptris_xsd_error_at(s, i);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
+
 TEST(XsdValidate, ValidDocumentPasses) {
     EXPECT_EQ(validate_doc(k_v_schema,
                            "<rows version=\"2\" status=\"ok\">"
