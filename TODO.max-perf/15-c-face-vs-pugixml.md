@@ -405,3 +405,23 @@ the loop-body surgery slice — it inherits the region-wrap probe
 
 RANKED CUT #1 therefore moves to the loop-surgery slice with the
 scan-merge as its first step. Nothing ships from the kernel alone.
+
+## Track D addendum 9 — the inline text-scan cut REJECTED by CI (PR #2018, closed)
+
+The ranked-#1 cut (inline 32-byte scalar prefix scan for short text
+runs, kernel for the remainder) went through the full gate: round 1
+caught the restart-at-run-start flaw (the kernel rescanned the
+scalar prefix — every leg regressed), round 2 fixed that (kernel
+from the prefix end) and STILL regressed on all three legs vs the
+A3d baselines (macos -39-46%, ubuntu-arm -26-27%, ubuntu-x86 -37-45%
+vs its AVX2 run). Cause: the bench-class run lengths (33-64B) sit
+exactly where the cut loses — 32 branchy scalar bytes plus a kernel
+pass over a 1-32B remainder exceeds the kernel alone, and runs
+<=32B are too few in these shapes to carry it.
+
+THE MISSING DATUM: the run-length distribution of the real fixtures
+and the scoreboard corpus. The next session's opening instrument =
+a run-length histogram (one counting pass per fixture, reusable),
+which decides whether the scan-merge has a paying window at all —
+and at what threshold. Until then the kernel stands unchanged; the
+PR closed with the full data (three legs, two rounds, CI artifacts).
