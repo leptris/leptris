@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.420] - 2026-11-13
+
+### Fixed
+
+- a redefine body's self-referencing attributeGroup ref splices the original (moxml#545) (xsd)
+- the element fixed constraint compares in the value space (leptris-rs#74) (xsd)
+
+
+
 ## [1.9.419] - 2026-11-12
 ### Fixed
 
