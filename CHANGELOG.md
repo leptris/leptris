@@ -1,11 +1,15 @@
 ## [Unreleased]
 
 ## [1.9.420] - 2026-11-13
-
 ### Fixed
 
-- a redefine body's self-referencing attributeGroup ref splices the original (moxml#545) (xsd)
-- the element fixed constraint compares in the value space (leptris-rs#74) (xsd)
+- **xsd: the element fixed constraint compares in the value space** (leptris-rs#74, W3C stE065/066/096). Union-typed elements' final equality ran strcmp-level lexicals — the accepting member's whitespace semantics never applied. The token family and normalizedString now equate collapse-equal spellings (`fixed="abcd edfgh "` admits `abcd edfgh`, `fixed="ENU "` admits `ENU`), and LIST-typed elements itemize both lexicals on whitespace runs before per-item union comparison (a list of gYear/gMonth/gDay equates single- and double-space item separation). The collapse normalization is factored and shared with the attribute fixed path; preserve-types (xs:string) still compare exactly.
+
+- **xsd: the §4.2.2 redefine hook splices the original attributeGroup** (the engine root of lutaml/moxml#545, W3C attgC035-038). An attributeGroup-redefine body that refs its OWN name means the ORIGINAL group — the name-keyed slot held the redefining body itself, so expanding it looped through the depth guard and the original's members never joined the composition (strict admission false-reports "not declared (strict)"). The rows capture threads the def being expanded; a self-ref resolves to the shadowed def. attgC038's chained double-redefine composes through the same path.
+
+## Tests
+
+- stE065/066/096 + attgC035/036/037/038 vendored from w3c/xsdtests as pins; the union fixed change is falsified by a no-op-collapse mutation (fails exactly the value-space pin, passes the teeth pin — a genuinely different value still fails). Full ctest 2269/2269.
 
 
 
