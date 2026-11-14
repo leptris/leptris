@@ -321,6 +321,40 @@ ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
     return g_scan_run_fn(s, len, term, f1, f2, saw_f1, saw_f2);
 }
 
+/* leptris#2033 round 2: the census-gated term-only scan. For
+ * documents whose count3_high pre-scan proved zero '&' and zero
+ * tab/LF/CR, the f1/f2 accumulator chains are dead weight — the
+ * flags are constant 0 by census, so the vector loop carries ONLY
+ * the term compare and the no-term tail returns immediately (the
+ * round-1 rescan penalty cannot occur: the census answered the
+ * flags). Arch kernels live in their own TUs, dispatched like
+ * text_scan_run. */
+ptrdiff_t leptris_text_scan_run_pristine(const char* s, size_t len,
+                                         char term,
+                                         int* saw_f1, int* saw_f2) {
+#if defined(LEPTRIS_ARCH_ARM) && defined(__aarch64__)
+    return leptris_text_scan_run_pristine_neon(s, len, term,
+                                               saw_f1, saw_f2);
+#elif defined(LEPTRIS_ARCH_X86) && defined(LEPTRIS_HAS_AVX2_BUILD)
+    return leptris_text_scan_run_pristine_avx2(s, len, term,
+                                               saw_f1, saw_f2);
+#else
+    const char* p = s;
+    const char* end = s + len;
+    while (p < end) {
+        if (*p == term) {
+            *saw_f1 = 0;
+            *saw_f2 = 0;
+            return (ptrdiff_t)(p - s);
+        }
+        p++;
+    }
+    *saw_f1 = 0;
+    *saw_f2 = 0;
+    return -1;
+#endif
+}
+
 /* ---- Structural span scan (TODO 193 Phase 1) ---- */
 
 unsigned char leptris_dp_class_table[256];

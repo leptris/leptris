@@ -523,3 +523,34 @@ int leptris_utf8_valid_neon(const char* src, size_t len) {
     return leptris_utf8_valid_scalar((const char*)(p + start), len - start);
 }
 #undef IN_RANGE
+
+/* leptris#2033 round 2: the census-gated term-only scan — no
+ * accumulator chains (the census proved the flags constant 0). */
+ptrdiff_t leptris_text_scan_run_pristine_neon(const char* s, size_t len,
+                                              char term,
+                                              int* saw_f1, int* saw_f2) {
+    const char* p = s;
+    const char* end = s + len;
+    const uint8x16_t kt = vdupq_n_u8((uint8_t)term);
+    while (end - p >= 16) {
+        if (vmaxvq_u8(vceqq_u8(vld1q_u8((const uint8_t*)p), kt)) != 0) {
+            int i = 0;
+            while (p[i] != term) i++;
+            *saw_f1 = 0;
+            *saw_f2 = 0;
+            return (ptrdiff_t)(p + i - s);
+        }
+        p += 16;
+    }
+    while (p < end) {
+        if (*p == term) {
+            *saw_f1 = 0;
+            *saw_f2 = 0;
+            return (ptrdiff_t)(p - s);
+        }
+        p++;
+    }
+    *saw_f1 = 0;
+    *saw_f2 = 0;
+    return -1;
+}

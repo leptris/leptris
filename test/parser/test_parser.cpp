@@ -1064,3 +1064,25 @@ TEST(RoundTrip, OoxmlRunPropertiesKeepValAttributes) {
     leptris_free_string(out);
     leptris_document_free(doc);
 }
+
+/* leptris#2033 round 2 gate teeth: a DTD custom entity requires the
+ * EAGER entity path (the lazy read cannot resolve custom entities),
+ * routed by the text scan's has_amp flag. The census-gated
+ * pristine-text kernel must NEVER take a document whose census
+ * counts '&' — forcing it leaves the entity reference raw. */
+TEST(Parser, DtdCustomEntityExpandsThroughTheEagerPath) {
+    const char* xml =
+        "<!DOCTYPE r [<!ENTITY x \"hello\">]><r>&x; world</r>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_EQ(st, LEPTRIS_OK);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+    LeptrisNodeRef text =
+        leptris_node_first_child(leptris_element_as_node(root));
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(leptris_text_node_get_content(text), "hello world");
+    leptris_document_free(doc);
+}
