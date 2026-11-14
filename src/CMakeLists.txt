@@ -678,3 +678,13 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/leptris
     COMPONENT leptris_Development
 )
+# leptris#2032 (the arm bench leg): gcc-13's -O2+LTO codegen of the
+# flat parser costs the attr path ~40% on aarch64 against the same
+# build without LTO — the text rows are LTO-neutral. -O3 on the
+# parser TU alone recovers the difference (full-tree -O3 measured
+# the same recovery, so the TU is the whole story). Clang (macos)
+# and non-aarch64 builds keep the default.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set_source_files_properties(leptris/flat/direct_parse.c
+      PROPERTIES COMPILE_OPTIONS -O3)
+endif()
