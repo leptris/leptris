@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: pugixml (the benchmark's comparison engine)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libpugixml-dev
+      - name: pugixml + utf8proc (the benchmark's comparison engine + the required dependency)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libpugixml-dev libutf8proc-dev
       - name: Configure
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLEPTRIS_BUILD_CLI=OFF -DLEPTRIS_BUILD_BENCHMARKS=ON
       - name: Build benchmarks
