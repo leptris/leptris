@@ -1574,6 +1574,12 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * structural use (pretty-printed docs) conservatively re-arms
      * it, and CR-only line endings keep it armed. */
     int has_copy_sources = (amp_count_in != 0 || valws_count_in != 0);
+    /* leptris#2033 round 2: the census proved zero '&' and zero
+     * tab/LF/CR in the whole buffer — text runs cannot carry the
+     * f1/f2 flags, so the term-only kernel drops the accumulator
+     * chains. The entity/CR branches downstream are unreachable on
+     * this class by the same census. */
+    int pristine_text = (amp_count_in == 0 && valws_count_in == 0);
     /* Track D A3d: the pristine copy exists so doc->xml_buffer stays
      * byte-identical to the input — the lazy line table (#223)
      * counts '\n' against it, and dp_nul may clobber a newline that
@@ -1902,9 +1908,14 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
             int has_cr = 0;
             {
                 int saw_amp = 0, saw_cr = 0;
-                ptrdiff_t t_off = leptris_text_scan_run(
-                    p.pos, (size_t)(p.end - p.pos), '<', '&', '\r',
-                    &saw_amp, &saw_cr);
+                ptrdiff_t t_off =
+                    pristine_text
+                        ? leptris_text_scan_run_pristine(
+                              p.pos, (size_t)(p.end - p.pos), '<',
+                              &saw_amp, &saw_cr)
+                        : leptris_text_scan_run(
+                              p.pos, (size_t)(p.end - p.pos), '<', '&',
+                              '\r', &saw_amp, &saw_cr);
                 lt = (t_off >= 0) ? (char*)(p.pos + t_off) : NULL;
                 has_amp |= saw_amp;
                 has_cr |= saw_cr;

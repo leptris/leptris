@@ -371,3 +371,36 @@ int leptris_utf8_valid_avx2(const char* src, size_t len) {
     }
     return leptris_utf8_valid_scalar((const char*)(p + start), len - start);
 }
+
+/* leptris#2033 round 2: the census-gated term-only scan — no
+ * accumulator chains (the census proved the flags constant 0). */
+ptrdiff_t leptris_text_scan_run_pristine_avx2(const char* s, size_t len,
+                                              char term,
+                                              int* saw_f1, int* saw_f2) {
+    const char* p = s;
+    const char* end = s + len;
+    const __m256i kt = _mm256_set1_epi8(term);
+    while (end - p >= 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)p);
+        uint32_t mt =
+            (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(v, kt));
+        if (mt) {
+            unsigned idx = (unsigned)LEPTRIS_CTZ(mt);
+            *saw_f1 = 0;
+            *saw_f2 = 0;
+            return (ptrdiff_t)(p + idx - s);
+        }
+        p += 32;
+    }
+    while (p < end) {
+        if (*p == term) {
+            *saw_f1 = 0;
+            *saw_f2 = 0;
+            return (ptrdiff_t)(p - s);
+        }
+        p++;
+    }
+    *saw_f1 = 0;
+    *saw_f2 = 0;
+    return -1;
+}

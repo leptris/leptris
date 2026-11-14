@@ -98,6 +98,22 @@ ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
                                 char f1, char f2,
                                 int* saw_f1, int* saw_f2);
 
+/* The census-gated variant (leptris#2033 round 2): identical
+ * contract, for documents whose pre-scan census proved ZERO '&' and
+ * zero tab/LF/CR bytes anywhere — the flags are constant 0 and the
+ * accumulator chains drop out of the loop. saw_f1/saw_f2 are
+ * WRITTEN as 0 (callers read them unconditionally). */
+ptrdiff_t leptris_text_scan_run_pristine(const char* s, size_t len,
+                                         char term,
+                                         int* saw_f1, int* saw_f2);
+
+ptrdiff_t leptris_text_scan_run_pristine_neon(const char* s, size_t len,
+                                              char term,
+                                              int* saw_f1, int* saw_f2);
+ptrdiff_t leptris_text_scan_run_pristine_avx2(const char* s, size_t len,
+                                              char term,
+                                              int* saw_f1, int* saw_f2);
+
 /* ---- Structural span scan (TODO 193 Phase 1: parser v3) ----
  *
  * Records every byte of the XML structural set in [buf, buf+len)
