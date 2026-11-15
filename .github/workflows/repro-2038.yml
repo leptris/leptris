@@ -1,5 +1,7 @@
 name: repro-2038
 on:
+  push:
+    branches: ['repro/2038']
   workflow_dispatch:
 
 jobs:
