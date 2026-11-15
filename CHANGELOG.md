@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.423] - 2026-11-15
+
+### Fixed
+
+- the AVX2 canary is POSIX-only — MinGW has no sigsetjmp (the mingw py-probe build) (simd)
+
+
+
 ## [1.9.422] - 2026-11-15
 
 ### Fixed
