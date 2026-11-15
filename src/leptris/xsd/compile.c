@@ -2141,10 +2141,10 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
          * alternatives away for every vc-marked schema. */
         const char* ver = leptris_element_attribute(root, "version");
         const char* vmin = leptris_element_attribute_ns(
-            root, "http://www.w3.org/2001/XMLSchema-versioning",
+            root, "http://www.w3.org/2007/XMLSchema-versioning",
             "minVersion");
         const char* vmax = leptris_element_attribute_ns(
-            root, "http://www.w3.org/2001/XMLSchema-versioning",
+            root, "http://www.w3.org/2007/XMLSchema-versioning",
             "maxVersion");
         int is11 = (ver && strcmp(ver, "1.1") == 0) ||
                    (vmin && strcmp(vmin, "1.1") == 0);
