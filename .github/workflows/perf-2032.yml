@@ -1,0 +1,56 @@
+name: perf-2032
+on:
+  push:
+    branches: ['repro/2032-perf']
+  workflow_dispatch:
+
+jobs:
+  perf-arm:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build linux-tools-common linux-tools-generic >/dev/null
+          # Azure kernels ship no linux-tools-$(uname -r); the generic
+          # perf binary warns but records (gh-runner precedent)
+          PERF=$(ls /usr/lib/linux-tools*/perf 2>/dev/null | head -1)
+          echo "PERF=$PERF" >> "$GITHUB_ENV"
+          $PERF --version || true
+      - name: build
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DLEPTRIS_BUILD_CLI=OFF -DLEPTRIS_BUILD_BENCHMARKS=ON
+          cmake --build build -j 4 --target bench_append_attr_pugixml
+      - name: perf record
+        run: |
+          set -x
+          # perf_event_paranoid: the runner default (4) blocks even
+          # user-space sampling; 1 allows per-user with callchains
+          sudo sysctl kernel/perf_event_paranoid=1 || true
+          sudo sysctl kernel/kptr_restrict=0 || true
+          "$PERF" record -F 4999 -g --call-graph dwarf,16384 \
+            -o /tmp/perf.data \
+            ./build/benchmarks/bench_append_attr_pugixml
+      - name: perf report
+        run: |
+          PERF=$(ls /usr/lib/linux-tools*/perf | head -1)
+          "$PERF" report --stdio --no-children -g none --percent-limit 1 \
+            < /dev/null -i /tmp/perf.data > perf_report.txt 2>&1 || true
+          "$PERF" report --stdio --children --percent-limit 0.5 \
+            -i /tmp/perf.data > perf_report_children.txt 2>&1 || true
+          head -80 perf_report.txt
+      - name: annotate hotspot
+        run: |
+          PERF=$(ls /usr/lib/linux-tools*/perf | head -1)
+          "$PERF" annotate --stdio -i /tmp/perf.data --percent-limit 2 \
+            > perf_annotate.txt 2>&1 || true
+          wc -l perf_report.txt perf_report_children.txt perf_annotate.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-2032-arm
+          path: |
+            perf_report.txt
+            perf_report_children.txt
+            perf_annotate.txt
