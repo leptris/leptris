@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.422] - 2026-11-15
+
+### Fixed
+
+- the versioning namespace is 2007, not 2001 — vc-marked schemas compiled as 1.0 (moxml#556) (xsd)
+- verify AVX2 executability — CPUID alone SIGILLs under Rosetta/QEMU (leptris#2039) (simd)
+
+### Performance
+
+- pack dp_add_attr_inline's scalars into register arguments (leptris#2032) (direct-parse)
+
+
+
 ## [1.9.421] - 2026-11-15
 ### Performance
 
