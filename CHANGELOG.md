@@ -4,13 +4,19 @@
 
 ### Fixed
 
-- the versioning namespace is 2007, not 2001 — vc-marked schemas compiled as 1.0 (moxml#556) (xsd)
-- verify AVX2 executability — CPUID alone SIGILLs under Rosetta/QEMU (leptris#2039) (simd)
+- **xsd: the XSD 1.1 versioning namespace was wrong — every `vc`-marked schema compiled as 1.0** (moxml#556). The version probe looked for `vc:minVersion` in `http://www.w3.org/2001/XMLSchema-versioning`; the namespace per XSD 1.1 §4.3 is **`http://www.w3.org/2007/XMLSchema-versioning`**. The probe therefore missed on every schema in the wild, `version_11` stayed 0, and the whole 1.1 feature set — `xs:assert`, `xs:alternative`, simple-type `xs:assertion` — silently compiled away even though the evaluation machinery was already correct. With the namespace fixed, the exact consumer repro behaves both ways: `sum(a) > 0` passes `<a>5</a>` and fails `<a>-5</a>` with an `assertion` finding. The #1910/#1911 gate fixtures had bound their `vc` prefix to the same wrong 2001 URI; corrected to the spec URI.
+
+### Fixed (Rosetta/QEMU class)
+
+- **simd: the AVX2 kernel selection now verifies executability, not CPUID claims** (leptris#2039). Rosetta 2 (and QEMU user-mode) report AVX2 in CPUID but SIGILL on the first vector op — under Rosetta, every parse through the direct-parse face crashed at `leptris_text_scan_run_pristine_avx2+0x4`. The probe now executes a one-instruction canary (`vpaddb` on a register, under a SIGILL guard, cached per process) before blessing the AVX2 level, and `leptris_text_scan_run_pristine` — the one kernel dispatched compile-time-only — rides the runtime dispatch like every other kernel (pre-Haswell x86_64 falls back to the scalar walk too). Verified on the failing platform: Rosetta reports the level as sse4.2 and parses clean.
 
 ### Performance
 
-- pack dp_add_attr_inline's scalars into register arguments (leptris#2032) (direct-parse)
+- **direct-parse: `dp_add_attr_inline` takes 8 register arguments** (leptris#2032). The 10-argument form overflowed arm64's register window — `name_colon` plus a flags word spilled to the caller's frame, and gcc's prologue (six callee-saved store-pairs plus the stack-arg reload) paid on every attribute. Packing `len|hash<<32` and the two scan flags into scalars is behavior-neutral; the CI-gated attrparse row moved macos −15% to parity (0.98× vs pugixml) with x86's win held. The ubuntu-arm leg improves ~2%; the remaining delta (the caller's stack-frame pressure) is tracked on #2032 with the on-runner profile attached.
 
+### Tooling
+
+- **perf-record harness on the CI arm runner** (branch `repro/2032-perf`): `perf record` + report + annotate artifacts under `perf_event_paranoid=1` with the generic linux-tools binary — the on-runner profile that localized both #2032 levers.
 
 
 ## [1.9.421] - 2026-11-15
