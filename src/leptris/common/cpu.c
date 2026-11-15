@@ -21,7 +21,11 @@
 #  include <intrin.h>
 #endif
 
-#if defined(LEPTRIS_X86_GCC_BUILTINS)
+/* POSIX-only: MinGW's GCC defines the builtins but has no
+ * sigsetjmp/siglongjmp — the mingw py-probe build died here
+ * (leptris-py ride/422 CI). MinGW keeps the CPUID-only verdict. */
+#if defined(LEPTRIS_X86_GCC_BUILTINS) && !defined(_WIN32)
+#  define LEPTRIS_CANARY_POSIX 1
 #  include <setjmp.h>
 #  include <signal.h>
 
@@ -64,7 +68,11 @@ leptris_cpu_level leptris_cpu_detect(void) {
     return LEPTRIS_CPU_NEON;
 #elif defined(LEPTRIS_X86_GCC_BUILTINS)
     __builtin_cpu_init();
+#if defined(LEPTRIS_CANARY_POSIX)
     if (__builtin_cpu_supports("avx2") && leptris_avx2_executable()) {
+#else
+    if (__builtin_cpu_supports("avx2")) {
+#endif
         return LEPTRIS_CPU_AVX2;
     }
     if (__builtin_cpu_supports("sse4.2")) return LEPTRIS_CPU_SSE42;
