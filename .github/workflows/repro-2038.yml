@@ -1,0 +1,69 @@
+name: repro-2038
+on:
+  workflow_dispatch:
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leptris: ['1.9.420.2', '1.9.420.0', '']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+      - name: environment
+        run: |
+          uname -m
+          ruby -v
+          ldd --version | head -1
+      - name: install gems
+        env:
+          LEP_VERSION: ${{ matrix.leptris }}
+        run: |
+          gem install -q yeptris -v 0.6.66.0
+          if [ -n "$LEP_VERSION" ]; then gem install -q leptris -v "$LEP_VERSION"; fi
+      - name: oracle-diff (yeptris alone, then leptris preloaded)
+        env:
+          LEP_VERSION: ${{ matrix.leptris }}
+        run: |
+          cat > /tmp/run.rb <<'RB'
+          preload = ARGV[0]
+          eval(preload) unless preload.empty?
+          require "psych"
+          require "yeptris"
+
+          collect = lambda do |obj, out|
+            case obj
+            when Hash
+              obj.each { |k, v| out << k.to_s; collect.call(v, out) }
+            when Array
+              obj.each { |v| collect.call(v, out) }
+            end
+          end
+
+          oracle_keys = []
+          collect.call(Psych.parse_file("test/fixtures/diagnostics.yml").to_ruby, oracle_keys)
+
+          yep_keys = []
+          collect.call(Yeptris::Psych.parse_file("test/fixtures/diagnostics.yml").to_ruby, yep_keys)
+
+          puts "oracle: #{oracle_keys.length}, yeptris: #{yep_keys.length}"
+          only_oracle = oracle_keys - yep_keys
+          only_yep = yep_keys - oracle_keys
+          unless only_oracle.empty? && only_yep.empty?
+            puts "KEYS MANGLED"
+            puts "only-oracle (#{only_oracle.length}): #{only_oracle.first(10).inspect}"
+            puts "only-yeptris (#{only_yep.length}): #{only_yep.first(10).inspect}"
+            exit 1
+          end
+          puts "KEYS CLEAN (#{oracle_keys.length} keys)"
+          RB
+          echo "=== pass 1: yeptris alone (leptris=${LEP_VERSION:-none}) ==="
+          ruby /tmp/run.rb '' || PASS1=FAILED
+          echo "=== pass 2: leptris preloaded first ==="
+          if [ -n "$LEP_VERSION" ]; then ruby /tmp/run.rb 'require "leptris"'; else echo "skipped (no leptris)"; fi
+          echo "=== pass 3: repeat pass 2 (layout variance) ==="
+          if [ -n "$LEP_VERSION" ]; then ruby /tmp/run.rb 'require "leptris"; GC.start'; else echo "skipped"; fi
