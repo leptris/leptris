@@ -114,6 +114,8 @@ static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
 static int (*g_utf8_fn)(const char*, size_t) = NULL;
 static ptrdiff_t (*g_scan_run_fn)(const char*, size_t, char, char, char,
                                   int*, int*) = NULL;
+static ptrdiff_t (*g_pristine_fn)(const char*, size_t, char,
+                                  int*, int*) = NULL;
 
 /* #1842: one pass, three byte classes — the direct parser's text path
  * (find '<', flag '&'/CR) drops its 48-byte inline loop and up to
@@ -167,6 +169,8 @@ static void count3_high_scalar(const char* s, size_t len,
                                size_t* n0, size_t* n1, size_t* n2,
                                int* saw_high, size_t* amp_count,
                                size_t* valws_count);
+static ptrdiff_t pristine_scalar(const char* s, size_t len, char term,
+                                 int* saw_f1, int* saw_f2);
 
 #if defined(_MSC_VER)
 #  pragma section(".CRT$XCU", read)
@@ -190,6 +194,7 @@ static void dispatch_init(void) {
         g_count_fn = leptris_text_count_char_avx2;
         g_count3_high_fn = leptris_text_count3_high_avx2;
         g_scan_run_fn = leptris_text_scan_run_avx2;
+        g_pristine_fn = leptris_text_scan_run_pristine_avx2;
         g_utf8_fn = leptris_utf8_valid_avx2;
         return;
     }
@@ -203,6 +208,7 @@ static void dispatch_init(void) {
         g_count3_high_fn = leptris_text_count3_high_neon;
         g_copy3_fn = leptris_copy_count3_neon;
         g_scan_run_fn = leptris_text_scan_run_neon;
+        g_pristine_fn = leptris_text_scan_run_pristine_neon;
         g_utf8_fn = leptris_utf8_valid_neon;
         return;
     }
@@ -213,6 +219,7 @@ static void dispatch_init(void) {
     g_count_fn = count_scalar;
     g_count3_high_fn = count3_high_scalar;
     g_scan_run_fn = scan_run_scalar;
+    g_pristine_fn = pristine_scalar;
     g_utf8_fn = leptris_utf8_valid_scalar;
 }
 
@@ -327,18 +334,9 @@ ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
  * flags are constant 0 by census, so the vector loop carries ONLY
  * the term compare and the no-term tail returns immediately (the
  * round-1 rescan penalty cannot occur: the census answered the
- * flags). Arch kernels live in their own TUs, dispatched like
- * text_scan_run. */
-ptrdiff_t leptris_text_scan_run_pristine(const char* s, size_t len,
-                                         char term,
-                                         int* saw_f1, int* saw_f2) {
-#if defined(LEPTRIS_ARCH_ARM) && defined(__aarch64__)
-    return leptris_text_scan_run_pristine_neon(s, len, term,
-                                               saw_f1, saw_f2);
-#elif defined(LEPTRIS_ARCH_X86) && defined(LEPTRIS_HAS_AVX2_BUILD)
-    return leptris_text_scan_run_pristine_avx2(s, len, term,
-                                               saw_f1, saw_f2);
-#else
+ * flags). Arch kernels live in their own TUs. */
+static ptrdiff_t pristine_scalar(const char* s, size_t len, char term,
+                                 int* saw_f1, int* saw_f2) {
     const char* p = s;
     const char* end = s + len;
     while (p < end) {
@@ -352,7 +350,20 @@ ptrdiff_t leptris_text_scan_run_pristine(const char* s, size_t len,
     *saw_f1 = 0;
     *saw_f2 = 0;
     return -1;
-#endif
+}
+
+/* #2039: routed through the RUNTIME cpu level like every other
+ * kernel — the compile-time-only gate ran the AVX2 binary on CPUs
+ * that cannot execute it (Rosetta/QEMU report AVX2 in CPUID and
+ * SIGILL on first use; pre-Haswell x86_64 has none at all). The
+ * dispatch verdict already carries the execute-canary verdict from
+ * cpu.c. */
+ptrdiff_t leptris_text_scan_run_pristine(const char* s, size_t len,
+                                         char term,
+                                         int* saw_f1, int* saw_f2) {
+    if (!g_pristine_fn) dispatch_init();
+    if (!g_pristine_fn) g_pristine_fn = pristine_scalar;
+    return g_pristine_fn(s, len, term, saw_f1, saw_f2);
 }
 
 /* ---- Structural span scan (TODO 193 Phase 1) ---- */
