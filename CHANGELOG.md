@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- the AVX2 canary is POSIX-only — MinGW has no sigsetjmp (the mingw py-probe build) (simd)
-
+- **simd: the AVX2 canary compiles on MinGW** — the #2039 canary (1.9.422) used POSIX `sigsetjmp`/`siglongjmp` unconditionally; MinGW's GCC provides neither, and every mingw build of the engine (the leptris-py native-ops probe, mingw Ruby builds) failed with `unknown type name 'sigjmp_buf'`. The canary block and its call site are now gated on POSIX (`!_WIN32`); MinGW keeps the CPUID-only verdict — its targets run real AVX2 hardware or the MSVC baseline, not the Rosetta/QEMU emulation the canary guards against. All other platforms unchanged: the canary still fires under Rosetta (re-verified on the failing platform after the regate).
 
 
 ## [1.9.422] - 2026-11-15
