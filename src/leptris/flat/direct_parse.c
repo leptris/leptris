@@ -587,11 +587,21 @@ static int dp_dup_seen_or_add(DParser* p, uint32_t dh) {
  * value pool_strdup entirely — direct_parse path excludes entity
  * inputs, so has_entities is always 0. */
 static inline int dp_add_attr_inline(DParser* p, LeptrisElement elem,
-                                      char* name, size_t name_len,
-                                      uint32_t name_hash,
-                                      char* val, size_t val_len,
-                                      int has_amp, int has_ws,
+                                      char* name, char* val,
+                                      uint64_t name_len_hash,
+                                      size_t val_len, uint32_t ws_amp,
                                       const char* name_colon) {
+    /* #2032 arm64 codegen: the 10-argument form overflowed the 8
+     * register-argument window — name_colon plus a flags word spilled
+     * to the caller's frame, and the entry reload dominated the
+     * on-runner profile (the prologue's six store-pairs plus the
+     * stack-arg reload were ~13% of the function's samples under
+     * gcc-13). Packing len|hash<<32 and the two scan flags into
+     * scalars keeps every argument in a register. */
+    size_t name_len = (size_t)(name_len_hash & 0xFFFFFFFFu);
+    uint32_t name_hash = (uint32_t)(name_len_hash >> 32);
+    int has_amp = (int)(ws_amp & 1u);
+    int has_ws = (int)((ws_amp >> 1) & 1u);
     /* Raw-view pointer (pre-normalization) — the #635 surface shows
      * source views; the normalized/entity-expanded replacements
      * below rebind val. */
@@ -1315,9 +1325,13 @@ static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
 
         /* Regular attribute — zero-copy name/value, bulk-allocated
          * struct. 1 = duplicate skipped: neither surface sees it. */
-        int arc = dp_add_attr_inline(p, elem, name_start, name_len,
-                                     dh, val_start, val_len, has_amp,
-                                     has_ws, attr_colon);
+        int arc = dp_add_attr_inline(p, elem, name_start, val_start,
+                                     (uint64_t)name_len |
+                                         ((uint64_t)dh << 32),
+                                     val_len,
+                                     (uint32_t)has_amp |
+                                         ((uint32_t)has_ws << 1),
+                                     attr_colon);
         if (arc < 0) return -1;
     }
     /* for (;;): every exit is a return inside the loop (0 = tag
