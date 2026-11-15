@@ -4,8 +4,11 @@
 
 ### Performance
 
-- dp_parse_attrs keeps its own frame under LTO (leptris#2032) (direct-parse)
+- **direct-parse: the attribute face keeps its own frame** (leptris#2032, two levers). The CI-gated attrparse row moved on every platform: **macos −26% to a 0.96× win over pugixml, ubuntu-x86 −20% to 0.98×, ubuntu-arm −9% (1.20× → 1.09×)**. Lever 1 (#2041): `dp_add_attr_inline`'s 10-argument form overflowed arm64's 8-register window — `name_colon` plus a flags word spilled to the caller's frame; packing `len|hash<<32` and the two scan flags into scalars keeps every argument in a register. Lever 2 (#2046): LTO folded `dp_parse_attrs` into `direct_parse_internal`'s mega-frame, where gcc-13's arm64 register allocator spilled the loop's state (~7KB frame, the on-runner profile's dominant samples); `LEPTRIS_NOINLINE` keeps it in its own frame — the file's own `dp_parse_doctype` pattern. Both levers behavior-neutral; the full suite and the three-leg CI bench gates decided each.
 
+### Tooling
+
+- **perf-record harness on the CI arm runner** (branch `repro/2032-perf`): `perf record` + report + annotate artifacts under `perf_event_paranoid=1` with the generic linux-tools binary — the on-runner profile that localized both levers.
 
 
 ## [1.9.423] - 2026-11-15
