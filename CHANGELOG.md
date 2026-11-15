@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.421] - 2026-11-15
+
+### Performance
+
+- the census-gated pristine scan - the accumulator chains drop out for entity-free documents (leptris#2033 round 2) (text)
+
+
+
 ## [1.9.420] - 2026-11-13
 ### Fixed
 
