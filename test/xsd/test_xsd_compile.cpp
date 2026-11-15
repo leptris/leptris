@@ -2644,6 +2644,24 @@ TEST(XsdAssert11, ExtensionAssertionEnforces) {
 
 /* 1.0-labelled schemas ignore the construct (XSD 1.0 validators
  * see unknown elements) — no assertion enforcement */
+// moxml#556: the vc:minVersion spelling marks 1.1 too — the
+// versioning namespace is http://www.w3.org/2007/XMLSchema-versioning
+// (the engine probed 2001 and silently skipped every vc-marked
+// schema's asserts and alternatives)
+TEST(XsdAssert11, VcMinVersionMarksSchema11) {
+    const char* x =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " vc:minVersion=\"1.1\""
+        " xmlns:vc=\"http://www.w3.org/2007/XMLSchema-versioning\">"
+        "<xs:element name=\"doc\"><xs:complexType>"
+        "<xs:sequence><xs:element name=\"a\" type=\"xs:int\""
+        " maxOccurs=\"unbounded\"/></xs:sequence>"
+        "<xs:assert test=\"sum(a) &gt; 0\"/>"
+        "</xs:complexType></xs:element></xs:schema>";
+    EXPECT_EQ(validate_doc(x, "<doc><a>5</a></doc>"), 1);
+    EXPECT_EQ(validate_doc(x, "<doc><a>-5</a></doc>"), 0);
+}
+
 TEST(XsdAssert11, Version10IgnoresAssertions) {
     const char* x =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
@@ -4900,7 +4918,7 @@ TEST(Xsd11Gate, CtaSelectsAlternativeType) {
     const char xsd[] =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
         " vc:minVersion=\"1.1\""
-        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        " xmlns:vc=\"http://www.w3.org/2007/XMLSchema-versioning\">"
         "<xs:element name=\"shape\" type=\"Shape\">"
         "<xs:alternative test=\"@kind='circle'\" type=\"Circle\"/>"
         "</xs:element>"
@@ -4934,7 +4952,7 @@ TEST(Xsd11Gate, AssertIsEvaluated) {
     const char xsd[] =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
         " vc:minVersion=\"1.1\""
-        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        " xmlns:vc=\"http://www.w3.org/2007/XMLSchema-versioning\">"
         "<xs:element name=\"size\">"
         "<xs:complexType><xs:sequence>"
         "<xs:element name=\"w\" type=\"xs:integer\"/>"
@@ -4972,7 +4990,7 @@ TEST(Xsd11Gate, OverrideLoadsBaseAndReplacesComponents) {
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
         " targetNamespace=\"urn:b\" xmlns=\"urn:b\""
         " elementFormDefault=\"qualified\" vc:minVersion=\"1.1\""
-        " xmlns:vc=\"http://www.w3.org/2001/XMLSchema-versioning\">"
+        " xmlns:vc=\"http://www.w3.org/2007/XMLSchema-versioning\">"
         "<xs:override schemaLocation=\"ovr1913_base.xsd\">"
         "<xs:complexType name=\"Doc\">"
         "<xs:sequence><xs:element name=\"b\" type=\"xs:integer\"/>"
