@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.424] - 2026-11-15
+
+### Performance
+
+- dp_parse_attrs keeps its own frame under LTO (leptris#2032) (direct-parse)
+
+
+
 ## [1.9.423] - 2026-11-15
 
 ### Fixed
