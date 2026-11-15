@@ -1077,7 +1077,15 @@ static int dp_raw_attr(DParser* p, LeptrisElement elem,
 static struct leptris_ns_cache* dp_ensure_cache(DParser* p,
                                                 LeptrisElement elem);
 
-static int dp_parse_attrs(DParser* p, LeptrisElement elem) {
+/* Deliberately noinline (the dp_parse_doctype pattern): under LTO
+ * gcc-13 folded this into direct_parse_internal's mega-frame, and the
+ * arm64 register allocator spilled the attr loop's state into a ~7KB
+ * stack frame (the #2032 on-runner profile: ~13% of the attr face's
+ * samples in prologue spill traffic). Own frame = own allocation —
+ * the hot fields stay in registers; the call cost is one frame per
+ * TAG, not per attribute. */
+static LEPTRIS_NOINLINE int dp_parse_attrs(DParser* p,
+                                           LeptrisElement elem) {
     /* Reset the per-element caches so dp_add_attr_inline and the
      * xmlns wiring below can both run in O(1) per attr. */
     p->current_elem_last_attr = NULL;
