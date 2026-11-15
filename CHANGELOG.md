@@ -1,10 +1,13 @@
 ## [Unreleased]
 
 ## [1.9.421] - 2026-11-15
-
 ### Performance
 
-- the census-gated pristine scan - the accumulator chains drop out for entity-free documents (leptris#2033 round 2) (text)
+- **text: the census-gated pristine scan** (leptris#2033 round 2). The `count3_high` sizing pre-scan already counts `&` and tab/LF/CR for the whole buffer — a document with both counts zero has *provably constant* scan flags, so the text branch dispatches to a term-only kernel (`leptris_text_scan_run_pristine`, NEON/AVX2/scalar) whose vector loop carries only the term compare: the f1/f2 accumulator chains drop out entirely, and the round-1 rescan penalty cannot occur because the census already answered the flags. Gate teeth: a DTD custom entity requires the eager entity path (routed by the scan's has_amp flag — the lazy read cannot resolve custom entities), and the new pin fails when the gate is forced open. Local interleaved A/B on the pristine-class 13MB text shape: median +10%.
+
+### CI
+
+- **perf-gate: the configure stage installs `libutf8proc-dev`** — the gate had errored without measuring since Nov 13, when the runner-image update (20261111.370) removed the runner copy of utf8proc the gate had been implicitly relying on (found during the release audit).
 
 
 
