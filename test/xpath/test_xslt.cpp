@@ -4616,3 +4616,20 @@ TEST(XsltStreamApplyDoc, ValueOfOnlySheetMatchesTreePathTwin) {
         << "stream and tree paths diverged for the same sheet: "
         << "streamed=[" << streamed << "] tree=[" << tree << "]";
 }
+
+/* SOTA C1 (leak-f4fb611c, fuzz_xslt): a union match with an EMPTY
+ * alternative ("a| |b") leaked the part string — the loop's empty-
+ * continue skipped the tail free. The fix keeps both the semantics
+ * (an empty alternative contributes nothing) and the memory. */
+TEST(XsltUnionMatch, EmptyAlternativeCompilesAndMatches) {
+    std::string out = run(
+        "<xsl:template match=\"a| |b\"><x/></xsl:template>",
+        "<r><a/><b/><c/></r>");
+    /* a and b match, c does not — the empty alternative contributes
+     * nothing to the pattern set */
+    EXPECT_NE(out.find("<x/><x/>"), std::string::npos) << "out=" << out;
+    EXPECT_EQ(out.find("<c/>") != std::string::npos &&
+                  out.find("</c>") == std::string::npos,
+              false)
+        << "out=" << out;
+}
