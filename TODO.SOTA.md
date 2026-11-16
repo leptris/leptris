@@ -23,6 +23,15 @@ Everything below is the task board for those four proofs. Every row
 ends with a dated measurement; the scoreboard lives in
 docs/MISSION-PLAN.md and is updated at every release.
 
+> **SSOT rule (2026-11-15, issue #2049):** `docs/MISSION-PLAN.md` is
+> the single source of truth for every measured number. This board
+> links to it and records task state only — where a number appears
+> here, it names the rig it came from, because two rigs can honestly
+> disagree (see B1). The board is re-verified against the shipped
+> state at every release train; stale boxes are findings, not
+> footnotes (the A5 xpointer box outlived its own closure by three
+> weeks).
+
 ---
 
 ## Gate A — Conformance: zero reds everywhere
@@ -70,7 +79,7 @@ older corpus datasets — reported, not gated.
   defaults, identity-constraint checks, derivation-ok attribute
   clauses; 1 oracle bug (bug322411) not chased)
 
-### A4 DTD phase 8 (TODO 91)
+### A4 DTD phase 8 (TODO 91): DONE — both halves shipped
 - [x] ENTITY/ENTITIES attribute resolution (undeclared entity, parsed
       entity without NDATA, undeclared notation, bad ENTITIES token —
       all falsifiably spec'd; shipped bd21acc6/9d3b3a0e)
@@ -83,7 +92,11 @@ older corpus datasets — reported, not gated.
 ### A5 XInclude completeness (TODO 92)
 - [x] `parse="xml"` (ownership-transfer splice + canonical insert face,
       depth-guard resource-error fallback; verified by specs)
-- [ ] xpointer
+- [x] xpointer — **closed 2026-10-22 (PR #1820)**: the schemes are
+      REC-conformant with pointer-miss=resource-error, implemented in
+      `src/leptris/xinclude/xinclude.c` and tested in
+      `test/xinclude/test_xinclude.cpp`. (This box was stale — it
+      predated #1820 and outlived it.)
 
 ### A6 The universality proof (differential corpus)
 - [ ] one curated corpus (the html5lib + QT3-winner + metanorma
@@ -97,7 +110,11 @@ older corpus datasets — reported, not gated.
 
 ## Gate B — Performance: every published row ≥1.00x
 
-### B1 build row: ~2.9x → ≤1.0x (the #242 campaign)
+### B1 build row: trailing on the mission harness (~1.9x red; honest
+baseline 2.72x — `wt/460-harness/build_bench.rb`), while the
+scoreboard-table's 0.87x measures the round-trip rig — DIFFERENT
+rigs, both named here so the boards stop contradicting. The #242
+campaign carries the closure. (the #242 campaign)
 **Measured 2026-10-22: ~1.47-1.54x median after NINE merged levers**
 (honest baseline 2.72x; guard retirement −22%, namespace gate,
 nil-ivar priming, children-cache guard, mint direct-dispatch +
