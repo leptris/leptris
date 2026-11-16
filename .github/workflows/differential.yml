@@ -1,8 +1,9 @@
 name: differential
 
 # TODO.SOTA A6 / Gate D3 — binding universality proof.
-# One curated corpus through the ruby / python / wasm bindings; the three
-# runners' outputs must be byte-identical. See test/differential/README.md.
+# One curated corpus through the ruby / python / wasm / rust bindings;
+# the four runners' outputs must be byte-identical. See
+# test/differential/README.md.
 
 on:
   push:
@@ -19,15 +20,28 @@ on:
 permissions:
   contents: read
 
+env:
+  # The engine tag the four bindings ride (the binding pins' train).
+  # The rust crate links the C library instead of vendoring it, so
+  # its leg builds the SAME engine tag the published ruby/py/wasm
+  # pins carry.
+  ENGINE_TAG: v1.9.424
+
 jobs:
   byte-identical:
-    name: ruby == python == wasm (byte-for-byte)
+    name: ruby == python == wasm == rust (byte-for-byte)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: test/differential
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout the pinned engine (the rust leg links it)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.ENGINE_TAG }}
+          path: engine-src
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -41,26 +55,48 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install the three published bindings
+      - name: Install the published bindings
         run: |
           set -euo pipefail
           gem install leptris -v 1.9.424.0
           pip install "leptris==1.9.424.0"
           npm install --no-audit --no-fund
 
-      - name: Run the three corpus runners
+      - name: Build the shared engine library (the rust leg links it)
         run: |
           set -euo pipefail
-          ruby run.rb  > /tmp/out.ruby
+          sudo apt-get update
+          sudo apt-get install -y libutf8proc-dev
+          cmake -B "$GITHUB_WORKSPACE/engine-src/build" \
+                -S "$GITHUB_WORKSPACE/engine-src" \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DLEPTRIS_BUILD_SHARED=ON \
+                -DBUILD_TESTING=OFF \
+                -DLEPTRIS_ENABLE_ICONV=OFF
+          cmake --build "$GITHUB_WORKSPACE/engine-src/build" \
+                --target leptris_shared -j 4
+
+      - name: Run the four corpus runners
+        env:
+          LEPTRIS_LIB_PATH: ${{ github.workspace }}/engine-src/build/src
+        run: |
+          set -euo pipefail
+          ruby run.rb    > /tmp/out.ruby
           python3 run.py > /tmp/out.python
           node run.mjs   > /tmp/out.wasm
+          # The rpath keeps the runner finding the lib at run time;
+          # LEPTRIS_LIB_PATH tells the crate's build.rs where to link.
+          RUSTFLAGS="-C link-arg=-Wl,-rpath,$LEPTRIS_LIB_PATH" \
+            cargo run --release --quiet \
+            --manifest-path rs-runner/Cargo.toml > /tmp/out.rust
 
       - name: Diff byte-for-byte
         run: |
           set -euo pipefail
           diff /tmp/out.ruby /tmp/out.python
           diff /tmp/out.ruby /tmp/out.wasm
-          echo "All three bindings byte-identical:"
+          diff /tmp/out.ruby /tmp/out.rust
+          echo "All four bindings byte-identical:"
           cat /tmp/out.ruby
 
       - name: Pin the canonical output
@@ -69,3 +105,4 @@ jobs:
           echo "=== ruby ===";   cat /tmp/out.ruby   || true
           echo "=== python ==="; cat /tmp/out.python || true
           echo "=== wasm ===";   cat /tmp/out.wasm   || true
+          echo "=== rust ===";   cat /tmp/out.rust   || true
