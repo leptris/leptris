@@ -76,6 +76,7 @@ endfunction()
 # ----------------------------------------------------------------------------
 # DOM benchmarks (leptris vs libxml2)
 # ----------------------------------------------------------------------------
+leptris_add_benchmark(bench_zerocopy_text  dom/bench_zerocopy_text.c)
 if(LIBXML2_AVAILABLE)
     leptris_add_benchmark(bench_dom_leptris      dom/bench_leptris.c)
 leptris_add_benchmark(bench_text_borrowed   dom/bench_text_borrowed.c)

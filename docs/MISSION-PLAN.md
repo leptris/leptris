@@ -175,6 +175,7 @@ tag that says so.
 | B3 pipeline shape feed-normalization | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.326x libxml2 (~3.1x faster), macos leg; 2.06x pugixml |
 | B3 pipeline shape extract-transform | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.195x libxml2 (~5.1x faster), macos leg; 2.04x pugixml |
 | B2 walk row | `wt/460-harness/walk_read_bench.rb` | 2026-10-20 | 0.88x (green) |
+| B5 zero-copy text verdict | `benchmarks/dom/bench_zerocopy_text.c` | 2026-11-16 | **adopted** — borrowed beats forced-copy on both rows: parse 2.66x, walk+read 2.39x (ABBA x2 medians; #2053) |
 | Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; **shipped in v1.9.378**) |
 | XPath index vs mutations | `XPathIndexInvalidation.*` | 2026-10-21 | green — splice paths invalidate (PR #1802; ruby#519 closed on the 1.9.378.0 gem) |
 | Rides 1.9.379 | registries | 2026-10-21 | rubygems/PyPI 1.9.379.0, npm 0.1.22 (engine v1.9.379; v1.9.378 rides blocked by the GCC-14 cast, fixed in #1806) |
