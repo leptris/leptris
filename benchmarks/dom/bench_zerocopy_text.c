@@ -79,7 +79,8 @@ static size_t walk_read(void) {
 }
 
 /* Parse-only row. */
-static void bench_parse(void) {
+static void bench_parse(void* unused) {
+    (void)unused;
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisDocument doc = leptris_parse_string(g_xml, g_len, &st);
     if (doc) leptris_document_free(doc);
