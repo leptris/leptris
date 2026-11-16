@@ -4633,3 +4633,19 @@ TEST(XsltUnionMatch, EmptyAlternativeCompilesAndMatches) {
               false)
         << "out=" << out;
 }
+
+/* SOTA C1 (nightly run 43840763745, fuzz_xslt): an empty match=""
+ * aborts in add_template AFTER the body and the ns context were
+ * built — free(t) dropped both (the literal result instruction via
+ * instr_new, the ns set via leptris_xpath_ns_set_new). The refusal
+ * stays (match="" is a static error); the payload must not. Under
+ * Linux ASan this spec doubles as the leak regression. */
+TEST(XsltCompile, EmptyMatchTemplateRefusedWithoutLeak) {
+    std::string sheet = std::string("<xsl:stylesheet ") + KXSL +
+                        " version='1.0'>"
+                        "<xsl:template match=\"\"><r/></xsl:template>"
+                        "</xsl:stylesheet>";
+    LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
+    ASSERT_EQ(x, nullptr) << "match=\"\" must fail the stylesheet";
+    leptris_xslt_free(x);
+}
