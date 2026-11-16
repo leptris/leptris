@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:value-of select="normalize-space(.)"/><xsl:for-each select="b[@kind]"><xsl:sort select="-7 mod *[x]"/><xsl:value-of select="number(@id)"/></xsl:for-each></xsl:template></xsl:stylesheet>

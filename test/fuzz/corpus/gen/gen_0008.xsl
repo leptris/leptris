@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:for-each select="item/r[@mode][last()]|//descendant::node[@mode]/b[@sku]"><xsl:value-of select="concat('x',.)"/></xsl:for-each><xsl:value-of select="round(number(@id))"/></xsl:template></xsl:stylesheet>

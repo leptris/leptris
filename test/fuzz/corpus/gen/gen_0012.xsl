@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:for-each select="*|span/child::item[@sku][*[@sku][-7]/b]"><xsl:if test="*[@mode][0]/node"><xsl:value-of select="round(number(@id))"/><xsl:value-of select="//out/node[@kind]"/></xsl:if></xsl:for-each></xsl:template></xsl:stylesheet>

@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><node>@mode</node><xsl:if test="0"><xsl:for-each select="leaf[0]|a[42]/ancestor::*"><xsl:value-of select="number(@id)"/><r>@kind</r></xsl:for-each></xsl:if><xsl:if test="x > 0 &lt; 3.5"><b>@status</b></xsl:if></xsl:template></xsl:stylesheet>
