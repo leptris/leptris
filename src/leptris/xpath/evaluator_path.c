@@ -1160,10 +1160,16 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
         if (head->type != XPATH_RESULT_NODESET) {
             /* A non-nodeset head: per XPath 1.0 the path is applied
              * to the head's VALUE as the context (rare; treat as
-             * empty — the common forms are nodeset heads). */
+             * empty — the common forms are nodeset heads). The
+             * result must CARRY its empty nodeset: a NODESET-typed
+             * result with a NULL union crashed the union operator's
+             * ownership transfer (nightly 43848591647, "0//i|em"). */
             xpath_result_free(head);
             xpath_nodeset_free(current);
-            return xpath_result_new(XPATH_RESULT_NODESET);
+            struct leptris_xpath_result* empty =
+                xpath_result_new(XPATH_RESULT_NODESET);
+            if (empty) empty->value.nodeset_value = xpath_nodeset_new();
+            return empty;
         }
         if (head->value.nodeset_value) {
             XPathNodeSet* source = head->value.nodeset_value;

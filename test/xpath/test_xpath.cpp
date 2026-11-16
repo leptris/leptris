@@ -2833,3 +2833,35 @@ TEST(XPathAttributeTerminal, RelativeAndFilteredShapes) {
 
     leptris_document_free(doc);
 }
+
+/* SOTA C1 (nightly 43848591647, crash-0478c5c2, fuzz_xslt): a union
+ * whose LEFT side is a path applied to a non-node atom ("0//i")
+ * crashed evaluate_operator — the non-nodeset-head branch in
+ * evaluate_location_path returned a NODESET-typed result with a NULL
+ * nodeset, and the union's ownership transfer dereferenced it. The
+ * empty result is the correct answer; the union must produce it. */
+TEST(XPathUnion, NumberHeadLeftSideYieldsEmptyNodeset) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string("<r><em/></r>", 12, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    LeptrisXPathResult r =
+        leptris_xpath_eval(doc, root, "0//i|em");
+    ASSERT_NE(r, nullptr) << "union with a number-head path errored";
+    EXPECT_EQ(leptris_xpath_result_count(r), 1u)
+        << "0//i contributes nothing; em alone fills the union";
+
+    /* The mirrored shape: the poisoned path on the RIGHT side. */
+    LeptrisXPathResult r2 =
+        leptris_xpath_eval(doc, root, "em|0//i");
+    ASSERT_NE(r2, nullptr) << "mirrored union errored";
+    EXPECT_EQ(leptris_xpath_result_count(r2), 1u)
+        << "em survives regardless of operand order";
+
+    leptris_xpath_result_free(r);
+    leptris_xpath_result_free(r2);
+    leptris_document_free(doc);
+}

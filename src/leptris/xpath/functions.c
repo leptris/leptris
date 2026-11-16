@@ -2583,7 +2583,13 @@ static struct leptris_xpath_result* xpath_func_floor(XPathContext* context,
         (!arg_result->value.nodeset_value ||
          xpath_nodeset_count(arg_result->value.nodeset_value) == 0)) {
         xpath_result_free(arg_result);
-        return xpath_result_new(XPATH_RESULT_NODESET);
+        /* The empty result must CARRY its nodeset — a NULL union
+         * crashes strict consumers (the union operator, nightly
+         * 43848591647). */
+        struct leptris_xpath_result* empty =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (empty) empty->value.nodeset_value = xpath_nodeset_new();
+        return empty;
     }
 
     int iv_int = arg_result->is_int;
@@ -2634,7 +2640,10 @@ static struct leptris_xpath_result* xpath_func_ceiling(XPathContext* context,
         (!arg_result->value.nodeset_value ||
          xpath_nodeset_count(arg_result->value.nodeset_value) == 0)) {
         xpath_result_free(arg_result);
-        return xpath_result_new(XPATH_RESULT_NODESET);
+        struct leptris_xpath_result* empty =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (empty) empty->value.nodeset_value = xpath_nodeset_new();
+        return empty;
     }
 
     int iv_int = arg_result->is_int;
@@ -2687,7 +2696,10 @@ static struct leptris_xpath_result* xpath_func_round(XPathContext* context,
         (!arg_result->value.nodeset_value ||
          arg_result->value.nodeset_value->count == 0)) {
         xpath_result_free(arg_result);
-        return xpath_result_new(XPATH_RESULT_NODESET);
+        struct leptris_xpath_result* empty =
+            xpath_result_new(XPATH_RESULT_NODESET);
+        if (empty) empty->value.nodeset_value = xpath_nodeset_new();
+        return empty;
     }
 
     int arg_is_float = xpath_result_is_float(arg_result);
