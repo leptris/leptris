@@ -276,6 +276,30 @@ if(LIBXML2_AVAILABLE)
 endif()
 
 # ----------------------------------------------------------------------------
+# B3 pipeline scoreboard shapes (#2055): parse → query → mutate →
+# serialize over fixed corpora, interleaved-median vs libxml2 and
+# pugixml. Needs C++ (pugixml.hpp); rows are machine-readable.
+# ----------------------------------------------------------------------------
+if(PUGIXML_AVAILABLE OR LIBXML2_AVAILABLE)
+    leptris_add_benchmark(bench_pipeline_shapes CXX
+                          workflows/bench_pipeline_shapes.cpp)
+    if(PUGIXML_AVAILABLE)
+        target_compile_definitions(bench_pipeline_shapes PRIVATE HAVE_PUGIXML=1)
+        if(PUGIXML_TARGET)
+            target_link_libraries(bench_pipeline_shapes PRIVATE ${PUGIXML_TARGET})
+        else()
+            target_include_directories(bench_pipeline_shapes PRIVATE ${PUGIXML_INCLUDE_DIR})
+            target_link_libraries(bench_pipeline_shapes PRIVATE ${PUGIXML_LIBRARY})
+        endif()
+    endif()
+    if(LIBXML2_AVAILABLE)
+        target_compile_definitions(bench_pipeline_shapes PRIVATE HAVE_LIBXML2=1)
+        target_include_directories(bench_pipeline_shapes PRIVATE ${LIBXML2_INCLUDE_DIR})
+        target_link_libraries(bench_pipeline_shapes PRIVATE ${LIBXML2_LIBRARY})
+    endif()
+endif()
+
+# ----------------------------------------------------------------------------
 # Print which targets will be built so CI logs are debuggable.
 # ----------------------------------------------------------------------------
 if(PUGIXML_AVAILABLE)

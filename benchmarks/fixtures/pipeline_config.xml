@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- B3 fixed corpus (SOTA #2055): the config-validation shape. -->
+<config env="prod">
+  <defaults timeout="30" retries="3"/>
+  <services>
+      <service name="cache1" host="cache.svc" port="8267"><route path="/rinu/1"/></service>
+      <service name="cdn2" host="cdn.svc" port="8465" tls="true"><route path="/jego/2"/></service>
+      <service name="api3" host="api.svc" port="8383"><route path="/bate/3"/></service>
+      <service name="cdn4" host="cdn.svc" port="8713" tls="true"><route path="/nuli/4"/></service>
+      <service name="queue5" host="queue.svc" port="8551"><route path="/gudo/5"/></service>
+      <service name="metrics6" host="metrics.svc" port="8313" tls="true"><route path="/turi/6"/></service>
+      <service name="auth7" host="auth.svc" port="8247"><route path="/loje/7"/></service>
+      <service name="cache8" host="cache.svc" port="8281" tls="true"><route path="/dobe/8"/></service>
+      <service name="auth9" host="auth.svc" port="8803"><route path="/ranu/9"/></service>
+      <service name="web10" host="web.svc" port="8741" tls="true"><route path="/jage/10"/></service>
+      <service name="db11" host="db.svc" port="8199"><route path="/batu/11"/></service>
+      <service name="web12" host="web.svc" port="8809" tls="true"><route path="/nele/12"/></service>
+      <service name="metrics13" host="metrics.svc" port="8707"><route path="/gida/13"/></service>
+      <service name="cdn14" host="cdn.svc" port="8617" tls="true"><route path="/ture/14"/></service>
+      <service name="metrics15" host="metrics.svc" port="8207"><route path="/luju/15"/></service>
+      <service name="api16" host="api.svc" port="8157" tls="true"><route path="/debe/16"/></service>
+      <service name="auth17" host="auth.svc" port="8687"><route path="/rinu/17"/></service>
+      <service name="db18" host="db.svc" port="8297" tls="true"><route path="/jega/18"/></service>
+      <service name="db19" host="db.svc" port="8507"><route path="/bute/19"/></service>
+      <service name="api20" host="api.svc" port="8077" tls="true"><route path="/nole/20"/></service>
+      <service name="db21" host="db.svc" port="8547"><route path="/godu/21"/></service>
+      <service name="auth22" host="auth.svc" port="8033" tls="true"><route path="/tare/22"/></service>
+      <service name="metrics23" host="metrics.svc" port="8043"><route path="/luji/23"/></service>
+      <service name="cdn24" host="cdn.svc" port="8189" tls="true"><route path="/doba/24"/></service>
+      <service name="cdn25" host="cdn.svc" port="8411"><route path="/renu/25"/></service>
+      <service name="cdn26" host="cdn.svc" port="8369" tls="true"><route path="/juge/26"/></service>
+      <service name="db27" host="db.svc" port="8495"><route path="/bute/27"/></service>
+      <service name="api28" host="api.svc" port="8609" tls="true"><route path="/nulo/28"/></service>
+      <service name="mail29" host="mail.svc" port="8795"><route path="/godi/29"/></service>
+      <service name="metrics30" host="metrics.svc" port="8545" tls="true"><route path="/tero/30"/></service>
+      <service name="metrics31" host="metrics.svc" port="8007"><route path="/lajo/31"/></service>
+      <service name="queue32" host="queue.svc" port="8369" tls="true"><route path="/doba/32"/></service>
+      <service name="mail33" host="mail.svc" port="8635"><route path="/rone/33"/></service>
+      <service name="web34" host="web.svc" port="8533" tls="true"><route path="/jigo/34"/></service>
+      <service name="queue35" host="queue.svc" port="8759"><route path="/bute/35"/></service>
+      <service name="api36" host="api.svc" port="8473" tls="true"><route path="/noli/36"/></service>
+      <service name="api37" host="api.svc" port="8055"><route path="/gedu/37"/></service>
+      <service name="metrics38" host="metrics.svc" port="8769" tls="true"><route path="/toru/38"/></service>
+      <service name="mail39" host="mail.svc" port="8475"><route path="/laje/39"/></service>
+      <service name="metrics40" host="metrics.svc" port="8409" tls="true"><route path="/duba/40"/></service>
+      <service name="api41" host="api.svc" port="8519"><route path="/rene/41"/></service>
+      <service name="queue42" host="queue.svc" port="8585" tls="true"><route path="/jugi/42"/></service>
+      <service name="db43" host="db.svc" port="8787"><route path="/bitu/43"/></service>
+      <service name="auth44" host="auth.svc" port="8093" tls="true"><route path="/nole/44"/></service>
+      <service name="db45" host="db.svc" port="8395"><route path="/gida/45"/></service>
+      <service name="api46" host="api.svc" port="8377" tls="true"><route path="/toro/46"/></service>
+      <service name="auth47" host="auth.svc" port="8383"><route path="/lijo/47"/></service>
+      <service name="auth48" host="auth.svc" port="8513" tls="true"><route path="/dobo/48"/></service>
+      <service name="web49" host="web.svc" port="8295"><route path="/rona/49"/></service>
+      <service name="cdn50" host="cdn.svc" port="8725" tls="true"><route path="/jega/50"/></service>
+      <service name="db51" host="db.svc" port="8095"><route path="/buto/51"/></service>
+      <service name="cdn52" host="cdn.svc" port="8425" tls="true"><route path="/nile/52"/></service>
+      <service name="db53" host="db.svc" port="8175"><route path="/godo/53"/></service>
+      <service name="web54" host="web.svc" port="8645" tls="true"><route path="/tari/54"/></service>
+      <service name="cdn55" host="cdn.svc" port="8751"><route path="/leja/55"/></service>
+      <service name="queue56" host="queue.svc" port="8765" tls="true"><route path="/dabu/56"/></service>
+      <service name="web57" host="web.svc" port="8759"><route path="/rino/57"/></service>
+      <service name="cdn58" host="cdn.svc" port="8893" tls="true"><route path="/jige/58"/></service>
+      <service name="metrics59" host="metrics.svc" port="8799"><route path="/batu/59"/></service>
+      <service name="mail60" host="mail.svc" port="8545" tls="true"><route path="/nelu/60"/></service>
+      <service name="cdn61" host="cdn.svc" port="8531"><route path="/gida/61"/></service>
+      <service name="queue62" host="queue.svc" port="8517" tls="true"><route path="/tiru/62"/></service>
+      <service name="web63" host="web.svc" port="8627"><route path="/leji/63"/></service>
+      <service name="metrics64" host="metrics.svc" port="8205" tls="true"><route path="/dibo/64"/></service>
+      <service name="db65" host="db.svc" port="8495"><route path="/rini/65"/></service>
+      <service name="queue66" host="queue.svc" port="8589" tls="true"><route path="/jige/66"/></service>
+      <service name="cache67" host="cache.svc" port="8599"><route path="/boto/67"/></service>
+      <service name="db68" host="db.svc" port="8481" tls="true"><route path="/nile/68"/></service>
+      <service name="cache69" host="cache.svc" port="8055"><route path="/gedi/69"/></service>
+      <service name="mail70" host="mail.svc" port="8597" tls="true"><route path="/tura/70"/></service>
+      <service name="api71" host="api.svc" port="8455"><route path="/loje/71"/></service>
+      <service name="web72" host="web.svc" port="8613" tls="true"><route path="/dubu/72"/></service>
+      <service name="db73" host="db.svc" port="8611"><route path="/rino/73"/></service>
+      <service name="db74" host="db.svc" port="8113" tls="true"><route path="/joga/74"/></service>
+      <service name="auth75" host="auth.svc" port="8319"><route path="/batu/75"/></service>
+      <service name="api76" host="api.svc" port="8289" tls="true"><route path="/nulu/76"/></service>
+      <service name="mail77" host="mail.svc" port="8275"><route path="/godo/77"/></service>
+      <service name="cdn78" host="cdn.svc" port="8477" tls="true"><route path="/teri/78"/></service>
+      <service name="api79" host="api.svc" port="8511"><route path="/liji/79"/></service>
+      <service name="metrics80" host="metrics.svc" port="8341" tls="true"><route path="/debu/80"/></service>
+      <service name="cdn81" host="cdn.svc" port="8215"><route path="/ronu/81"/></service>
+      <service name="auth82" host="auth.svc" port="8697" tls="true"><route path="/jegu/82"/></service>
+      <service name="queue83" host="queue.svc" port="8127"><route path="/buta/83"/></service>
+      <service name="cache84" host="cache.svc" port="8185" tls="true"><route path="/nula/84"/></service>
+      <service name="web85" host="web.svc" port="8491"><route path="/gadu/85"/></service>
+      <service name="queue86" host="queue.svc" port="8669" tls="true"><route path="/toro/86"/></service>
+      <service name="db87" host="db.svc" port="8187"><route path="/loji/87"/></service>
+      <service name="cache88" host="cache.svc" port="8693" tls="true"><route path="/dibe/88"/></service>
+      <service name="web89" host="web.svc" port="8251"><route path="/rani/89"/></service>
+      <service name="mail90" host="mail.svc" port="8777" tls="true"><route path="/jige/90"/></service>
+      <service name="db91" host="db.svc" port="8619"><route path="/bite/91"/></service>
+      <service name="web92" host="web.svc" port="8781" tls="true"><route path="/nelu/92"/></service>
+      <service name="metrics93" host="metrics.svc" port="8451"><route path="/gadu/93"/></service>
+      <service name="web94" host="web.svc" port="8885" tls="true"><route path="/tura/94"/></service>
+      <service name="web95" host="web.svc" port="8823"><route path="/liju/95"/></service>
+      <service name="metrics96" host="metrics.svc" port="8709" tls="true"><route path="/dabi/96"/></service>
+    </services>
+  </config>

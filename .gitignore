@@ -40,6 +40,8 @@ bench_*
 !benchmarks/modification/
 !benchmarks/modification/bench_append_attr_pugixml.cpp
 !benchmarks/modification/bench_append_split.cpp
+!benchmarks/workflows/
+!benchmarks/workflows/bench_pipeline_shapes.cpp
 profile_*
 element_layout
 

@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- B3 fixed corpus (SOTA #2055): the metanorma-compile shape. -->
+<standard version="1.0">
+  <clause id="clause-1"><title>Section hepici 1</title>
+    <terms>
+      <term><preferred>kosef</preferred><domain>beta</domain><definition>ronulaj kosof bota.</definition></term>
+      <term><preferred>renul</preferred><domain>coke</domain><definition>sofamuv renol coki.</definition></term>
+      <term><preferred>sofim</preferred><domain>turi</domain><definition>nalijug sufum tira.</definition></term>
+      <term><preferred>nelaj</preferred><domain>kasi</domain><definition>famuvuh nolaj kuse.</definition></term>
+      <term><preferred>fimav</preferred><domain>runi</domain><definition>lojoged femav reni.</definition></term>
+      <term><preferred>lajag</preferred><domain>sifu</domain><definition>mavuhap lujug sofe.</definition></term>
+      <term><preferred>movah</preferred><domain>nelo</domain><definition>jugudub meveh nali.</definition></term>
+      <term><preferred>jiged</preferred><domain>fumu</domain><definition>vohepec joged fuma.</definition></term>
+      <term><preferred>vihep</preferred><domain>leji</domain><definition>godobet vihup lija.</definition></term>
+      <term><preferred>gidab</preferred><domain>mavi</domain><definition>hupecuk gudeb muva.</definition></term>
+      <term><preferred>hapuc</preferred><domain>jigu</domain><definition>dobutir hupuc juge.</definition></term>
+      <term><preferred>debet</preferred><domain>viho</domain><definition>pacokos dubut vohi.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B1-1">pecukasi 1</ref>
+      <ref bibitem="B1-2">fumivohe 2</ref>
+      <ref bibitem="B1-3">pacikise 3</ref>
+      <ref bibitem="B1-4">fumaveho 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-2"><title>Section pociki 2</title>
+    <terms>
+      <term><preferred>sufam</preferred><domain>tiri</domain><definition>nolajag safum tiru.</definition></term>
+      <term><preferred>nilaj</preferred><domain>kisu</domain><definition>fumavih niluj kisi.</definition></term>
+      <term><preferred>famav</preferred><domain>runi</domain><definition>lujogad famev rune.</definition></term>
+      <term><preferred>lejug</preferred><domain>sefu</domain><definition>mivuhop lojag sufe.</definition></term>
+      <term><preferred>mavih</preferred><domain>nule</domain><definition>jogadeb mavuh nalu.</definition></term>
+      <term><preferred>jugad</preferred><domain>fami</domain><definition>vahopoc jegod fuma.</definition></term>
+      <term><preferred>vohip</preferred><domain>luji</domain><definition>gadibet vohep loji.</definition></term>
+      <term><preferred>gidob</preferred><domain>mivu</domain><definition>hapacuk gedub muve.</definition></term>
+      <term><preferred>hipoc</preferred><domain>joga</domain><definition>dubitar hipuc jugu.</definition></term>
+      <term><preferred>debat</preferred><domain>vahi</domain><definition>picekus dubat vehu.</definition></term>
+      <term><preferred>pacok</preferred><domain>gadi</domain><definition>beturin pacok gido.</definition></term>
+      <term><preferred>botir</preferred><domain>hipa</domain><definition>cekisaf bitir hopa.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B2-1">cakusafu 1</ref>
+      <ref bibitem="B2-2">mivohopu 2</ref>
+      <ref bibitem="B2-3">cukisafe 3</ref>
+      <ref bibitem="B2-4">muvehupo 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-3"><title>Section cokiso 3</title>
+    <terms>
+      <term><preferred>fomev</preferred><domain>roni</domain><definition>lijogud fumiv reni.</definition></term>
+      <term><preferred>lijag</preferred><domain>sifu</domain><definition>mivohup lujag sifi.</definition></term>
+      <term><preferred>muvah</preferred><domain>nilu</domain><definition>jugidub mevih nilu.</definition></term>
+      <term><preferred>jigod</preferred><domain>fume</domain><definition>vahipac jagad fome.</definition></term>
+      <term><preferred>vohap</preferred><domain>leje</domain><definition>gidobut vihap liju.</definition></term>
+      <term><preferred>gadub</preferred><domain>movo</domain><definition>hopecok godob mevi.</definition></term>
+      <term><preferred>hupec</preferred><domain>jaga</domain><definition>dubutar hopuc jugi.</definition></term>
+      <term><preferred>dibit</preferred><domain>vuho</domain><definition>pecokus dabut vuhe.</definition></term>
+      <term><preferred>pucik</preferred><domain>geda</domain><definition>bitaran pocok gude.</definition></term>
+      <term><preferred>bitur</preferred><domain>hopo</domain><definition>cokisuf botur hapu.</definition></term>
+      <term><preferred>cikes</preferred><domain>dabo</domain><definition>taronol cikas dobi.</definition></term>
+      <term><preferred>torin</preferred><domain>poca</domain><definition>kesofum tiron pocu.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B3-1">kosafome 1</ref>
+      <ref bibitem="B3-2">vuhopuci 2</ref>
+      <ref bibitem="B3-3">kesifama 3</ref>
+      <ref bibitem="B3-4">vohupocu 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-4"><title>Section kisufe 4</title>
+    <terms>
+      <term><preferred>movih</preferred><domain>nela</domain><definition>jegedeb mavoh nuli.</definition></term>
+      <term><preferred>jagod</preferred><domain>fome</domain><definition>vohopuc jigad famu.</definition></term>
+      <term><preferred>vohap</preferred><domain>lojo</domain><definition>gudabet vihop laje.</definition></term>
+      <term><preferred>gadeb</preferred><domain>muvi</domain><definition>hapecak godub meva.</definition></term>
+      <term><preferred>hipic</preferred><domain>joga</domain><definition>dobotir hopuc jago.</definition></term>
+      <term><preferred>dobut</preferred><domain>vahi</domain><definition>picakus dabut veha.</definition></term>
+      <term><preferred>pecok</preferred><domain>geda</domain><definition>betaren pucok gidi.</definition></term>
+      <term><preferred>botor</preferred><domain>hipi</domain><definition>cokisaf betar hope.</definition></term>
+      <term><preferred>cukos</preferred><domain>daba</domain><definition>tirunil cekas debi.</definition></term>
+      <term><preferred>torun</preferred><domain>pice</domain><definition>kasifom taran paci.</definition></term>
+      <term><preferred>kusif</preferred><domain>bate</domain><definition>rinolij kosaf botu.</definition></term>
+      <term><preferred>runol</preferred><domain>ceka</domain><definition>sofomev runil ceku.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B4-1">sefumevu 1</ref>
+      <ref bibitem="B4-2">hupecoku 2</ref>
+      <ref bibitem="B4-3">safumiva 3</ref>
+      <ref bibitem="B4-4">hepucuke 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-5"><title>Section sefuma 5</title>
+    <terms>
+      <term><preferred>vohop</preferred><domain>liji</domain><definition>godibut vihap lija.</definition></term>
+      <term><preferred>gadub</preferred><domain>mive</domain><definition>hapocak gedub mavi.</definition></term>
+      <term><preferred>hipac</preferred><domain>jegi</domain><definition>dubatar hipic jego.</definition></term>
+      <term><preferred>dobot</preferred><domain>viha</domain><definition>picekes dubot voha.</definition></term>
+      <term><preferred>pocek</preferred><domain>gide</domain><definition>bituren pacak gedo.</definition></term>
+      <term><preferred>botor</preferred><domain>hapo</domain><definition>cukosaf bitur hapu.</definition></term>
+      <term><preferred>cikes</preferred><domain>dobi</domain><definition>torunol cekis debe.</definition></term>
+      <term><preferred>tarun</preferred><domain>poca</domain><definition>kesafam tiren pocu.</definition></term>
+      <term><preferred>kosaf</preferred><domain>buti</domain><definition>riniluj kesaf bito.</definition></term>
+      <term><preferred>ranul</preferred><domain>cuku</domain><definition>sofamav ronal cike.</definition></term>
+      <term><preferred>sufem</preferred><domain>tora</domain><definition>nelejag sefom teri.</definition></term>
+      <term><preferred>nolij</preferred><domain>kisa</domain><definition>femuvah nalej kose.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B5-1">fumevohe 1</ref>
+      <ref bibitem="B5-2">pacokosa 2</ref>
+      <ref bibitem="B5-3">fumevahu 3</ref>
+      <ref bibitem="B5-4">pecikusu 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-6"><title>Section famevi 6</title>
+    <terms>
+      <term><preferred>hupac</preferred><domain>jagi</domain><definition>dobutir hapec jugi.</definition></term>
+      <term><preferred>dubet</preferred><domain>vuha</domain><definition>pocokus dobit vahi.</definition></term>
+      <term><preferred>pucik</preferred><domain>goda</domain><definition>botiren pecok gido.</definition></term>
+      <term><preferred>biter</preferred><domain>hupu</domain><definition>cikasof batur hupu.</definition></term>
+      <term><preferred>cekas</preferred><domain>daba</domain><definition>teronol cukes debe.</definition></term>
+      <term><preferred>turen</preferred><domain>pocu</domain><definition>kasufom terun pecu.</definition></term>
+      <term><preferred>kesof</preferred><domain>boti</domain><definition>ronuluj kasof bate.</definition></term>
+      <term><preferred>ronul</preferred><domain>ciku</domain><definition>sefimav ranol coku.</definition></term>
+      <term><preferred>safam</preferred><domain>tori</domain><definition>nilajag sifim turo.</definition></term>
+      <term><preferred>nalij</preferred><domain>kesa</domain><definition>femuveh nolij kuso.</definition></term>
+      <term><preferred>famav</preferred><domain>rani</domain><definition>lijiged fimuv rane.</definition></term>
+      <term><preferred>lijeg</preferred><domain>sufa</domain><definition>mavahep lojag sufo.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B6-1">mevehopa 1</ref>
+      <ref bibitem="B6-2">cukasefi 2</ref>
+      <ref bibitem="B6-3">mivihupo 3</ref>
+      <ref bibitem="B6-4">cukosufe 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-7"><title>Section muvehu 7</title>
+    <terms>
+      <term><preferred>pucok</preferred><domain>gude</domain><definition>bitiren pucok gidi.</definition></term>
+      <term><preferred>betar</preferred><domain>hopu</domain><definition>cukusuf betor hopu.</definition></term>
+      <term><preferred>cikis</preferred><domain>dubo</domain><definition>tiranul cukis dubo.</definition></term>
+      <term><preferred>tarun</preferred><domain>pacu</domain><definition>kusofom torin pucu.</definition></term>
+      <term><preferred>kosuf</preferred><domain>boti</domain><definition>ranilij kisuf beto.</definition></term>
+      <term><preferred>ranol</preferred><domain>cuka</domain><definition>sifumav rinal cuku.</definition></term>
+      <term><preferred>sifim</preferred><domain>tari</domain><definition>nilojug sefem turu.</definition></term>
+      <term><preferred>nilij</preferred><domain>kase</domain><definition>fimeveh nolij kese.</definition></term>
+      <term><preferred>fumiv</preferred><domain>runa</domain><definition>lojigad fomov roni.</definition></term>
+      <term><preferred>lajog</preferred><domain>safe</domain><definition>mavahep lojug sifo.</definition></term>
+      <term><preferred>movoh</preferred><domain>nilu</domain><definition>jagudob moveh nele.</definition></term>
+      <term><preferred>jugid</preferred><domain>famu</domain><definition>vohepec joged fema.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B7-1">vohipico 1</ref>
+      <ref bibitem="B7-2">kasefumu 2</ref>
+      <ref bibitem="B7-3">vuhepecu 3</ref>
+      <ref bibitem="B7-4">kasefami 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-8"><title>Section vohupu 8</title>
+    <terms>
+      <term><preferred>cokis</preferred><domain>dobe</domain><definition>tarenil cekas debu.</definition></term>
+      <term><preferred>turon</preferred><domain>pece</domain><definition>kesifem turun pice.</definition></term>
+      <term><preferred>kasof</preferred><domain>buti</domain><definition>ronalaj kasif buto.</definition></term>
+      <term><preferred>ronol</preferred><domain>ceku</domain><definition>sifemiv runol cuku.</definition></term>
+      <term><preferred>sifom</preferred><domain>tari</domain><definition>nelajog sufum toru.</definition></term>
+      <term><preferred>nilij</preferred><domain>keso</domain><definition>fumivah nelij koso.</definition></term>
+      <term><preferred>fomuv</preferred><domain>rano</domain><definition>lujagod fumav rene.</definition></term>
+      <term><preferred>lujog</preferred><domain>sofo</domain><definition>movahup lajig safo.</definition></term>
+      <term><preferred>movih</preferred><domain>nali</domain><definition>jegodub maveh nale.</definition></term>
+      <term><preferred>jeged</preferred><domain>foma</domain><definition>vohapac jigid femi.</definition></term>
+      <term><preferred>vuhup</preferred><domain>lajo</domain><definition>gudebat vohup laju.</definition></term>
+      <term><preferred>gedob</preferred><domain>mivu</domain><definition>hapacuk godub movu.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B8-1">hopucoko 1</ref>
+      <ref bibitem="B8-2">sufimavo 2</ref>
+      <ref bibitem="B8-3">hepucaku 3</ref>
+      <ref bibitem="B8-4">sifameva 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-9"><title>Section hapice 9</title>
+    <terms>
+      <term><preferred>kasof</preferred><domain>bute</domain><definition>ranulij kasuf bute.</definition></term>
+      <term><preferred>runul</preferred><domain>coka</domain><definition>sifomov runal coki.</definition></term>
+      <term><preferred>sifim</preferred><domain>turo</domain><definition>nolojeg sifem tiro.</definition></term>
+      <term><preferred>neluj</preferred><domain>kasa</domain><definition>femavah nilij kisi.</definition></term>
+      <term><preferred>fomev</preferred><domain>rune</domain><definition>lijugud fimuv runa.</definition></term>
+      <term><preferred>lujug</preferred><domain>safa</domain><definition>mivuhup lijag sufa.</definition></term>
+      <term><preferred>muvah</preferred><domain>nila</domain><definition>jegadub mevoh nile.</definition></term>
+      <term><preferred>jigad</preferred><domain>femu</domain><definition>vahipuc jeged famo.</definition></term>
+      <term><preferred>vuhap</preferred><domain>luja</domain><definition>godibat vehip lejo.</definition></term>
+      <term><preferred>gudab</preferred><domain>mava</domain><definition>hapacak godob mevo.</definition></term>
+      <term><preferred>hipoc</preferred><domain>juga</domain><definition>dabitor hopuc jige.</definition></term>
+      <term><preferred>dibit</preferred><domain>vehe</domain><definition>picokis dubit vihu.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B9-1">picokise 1</ref>
+      <ref bibitem="B9-2">fumeviha 2</ref>
+      <ref bibitem="B9-3">picakase 3</ref>
+      <ref bibitem="B9-4">famuvahi 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-10"><title>Section pocuke 10</title>
+    <terms>
+      <term><preferred>safim</preferred><domain>tero</domain><definition>nulujog sofem teru.</definition></term>
+      <term><preferred>naluj</preferred><domain>kuso</domain><definition>famavih nalij kuse.</definition></term>
+      <term><preferred>fomuv</preferred><domain>runa</domain><definition>lejogod fomiv rano.</definition></term>
+      <term><preferred>lujog</preferred><domain>sofo</domain><definition>movahop lijag sefe.</definition></term>
+      <term><preferred>mivoh</preferred><domain>nile</domain><definition>jagodub muvah nili.</definition></term>
+      <term><preferred>jegud</preferred><domain>femo</domain><definition>vihopuc joged fome.</definition></term>
+      <term><preferred>vohip</preferred><domain>leja</domain><definition>godabut vohup lajo.</definition></term>
+      <term><preferred>gudib</preferred><domain>mivi</domain><definition>hipocuk gadeb muvu.</definition></term>
+      <term><preferred>hipic</preferred><domain>jugo</domain><definition>dobater hepuc juga.</definition></term>
+      <term><preferred>dobit</preferred><domain>vohi</domain><definition>pucikes dibut vihu.</definition></term>
+      <term><preferred>pacek</preferred><domain>gedu</domain><definition>botiran picek gade.</definition></term>
+      <term><preferred>bator</preferred><domain>hepu</domain><definition>cokisof bator hupo.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B10-1">cakisofi 1</ref>
+      <ref bibitem="B10-2">mevahape 2</ref>
+      <ref bibitem="B10-3">cakosefo 3</ref>
+      <ref bibitem="B10-4">muvihepe 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-11"><title>Section cakesa 11</title>
+    <terms>
+      <term><preferred>fomiv</preferred><domain>renu</domain><definition>lajagad fimov runu.</definition></term>
+      <term><preferred>lojeg</preferred><domain>sofe</domain><definition>mavihep lojig sifo.</definition></term>
+      <term><preferred>mevah</preferred><domain>nalo</domain><definition>jugedeb mevih nulu.</definition></term>
+      <term><preferred>jegid</preferred><domain>fumo</domain><definition>vohepuc jagad fima.</definition></term>
+      <term><preferred>vohop</preferred><domain>lijo</domain><definition>gadobet vahap loje.</definition></term>
+      <term><preferred>gadob</preferred><domain>mivo</domain><definition>hapucak godab mavi.</definition></term>
+      <term><preferred>hopac</preferred><domain>joga</domain><definition>debitur hopuc jogo.</definition></term>
+      <term><preferred>dabat</preferred><domain>voho</domain><definition>pocokis dibot vuhi.</definition></term>
+      <term><preferred>pucak</preferred><domain>gudo</domain><definition>buturin picuk gudi.</definition></term>
+      <term><preferred>betir</preferred><domain>hapo</domain><definition>cekesef butur hepe.</definition></term>
+      <term><preferred>cikus</preferred><domain>doba</domain><definition>terenal cikos dibo.</definition></term>
+      <term><preferred>taron</preferred><domain>pico</domain><definition>kosufem toran pici.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B11-1">kasafume 1</ref>
+      <ref bibitem="B11-2">vahapaci 2</ref>
+      <ref bibitem="B11-3">kusefima 3</ref>
+      <ref bibitem="B11-4">vohopico 4</ref>
+    </references>
+  </clause>
+  <clause id="clause-12"><title>Section kusufe 12</title>
+    <terms>
+      <term><preferred>movoh</preferred><domain>neli</domain><definition>jogadab muvoh nile.</definition></term>
+      <term><preferred>jogud</preferred><domain>fime</domain><definition>vehapuc jugod fome.</definition></term>
+      <term><preferred>vuhep</preferred><domain>leje</domain><definition>gedebet vihop luja.</definition></term>
+      <term><preferred>gudib</preferred><domain>movi</domain><definition>hepacek gadab movu.</definition></term>
+      <term><preferred>hopac</preferred><domain>jago</domain><definition>dabuter hipac jugi.</definition></term>
+      <term><preferred>dubat</preferred><domain>vohi</domain><definition>picakas dobut veha.</definition></term>
+      <term><preferred>pucak</preferred><domain>gode</domain><definition>boturon pecek gude.</definition></term>
+      <term><preferred>bater</preferred><domain>hupu</domain><definition>cukesef bitar hipe.</definition></term>
+      <term><preferred>cikus</preferred><domain>debo</domain><definition>torunol cikus dubu.</definition></term>
+      <term><preferred>taran</preferred><domain>poce</domain><definition>kusufam turin picu.</definition></term>
+      <term><preferred>kusef</preferred><domain>beta</domain><definition>runelej kusof bete.</definition></term>
+      <term><preferred>runul</preferred><domain>cuko</domain><definition>sifimuv renul ciko.</definition></term>
+    </terms>
+    <references>
+      <ref bibitem="B12-1">safimivo 1</ref>
+      <ref bibitem="B12-2">hapucika 2</ref>
+      <ref bibitem="B12-3">sufumuva 3</ref>
+      <ref bibitem="B12-4">hapaceke 4</ref>
+    </references>
+  </clause>
+</standard>

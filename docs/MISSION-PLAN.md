@@ -170,6 +170,10 @@ tag that says so.
 | B1 build row | `wt/460-harness/build_bench.rb` | 2026-10-21 | **~1.9x red** (sota/04 after five levers; honest baseline re-measured 2.72x this day — the old 1.86x record is not reproducible) |
 | B3 pipeline row (parse→query→serialize) | `wt/460-harness/pipeline_bench.rb` | 2026-10-21 | **green** — 0.533-0.573x of Nokogiri's time (~1.8x faster), three runs |
 | B3 pipeline row (build→transform, XSLT) | `wt/460-harness/xslt_pipeline_bench.rb` | 2026-10-21 | **green** — 0.492-0.515x of Nokogiri's time (~2x faster), three runs |
+| B3 pipeline shape metanorma-compile | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.386x libxml2 (~2.6x faster), macos leg; 2.39x pugixml (the conformance-floor rows, #1436) |
+| B3 pipeline shape config-validation | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.299x libxml2 (~3.3x faster), macos leg; 2.76x pugixml |
+| B3 pipeline shape feed-normalization | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.326x libxml2 (~3.1x faster), macos leg; 2.06x pugixml |
+| B3 pipeline shape extract-transform | `benchmarks/workflows/bench_pipeline_shapes.cpp` | 2026-11-16 | **green** — 0.195x libxml2 (~5.1x faster), macos leg; 2.04x pugixml |
 | B2 walk row | `wt/460-harness/walk_read_bench.rb` | 2026-10-20 | 0.88x (green) |
 | Test-suite runtime (fidelity) | `ctest`, 2074 cases | 2026-10-21 | 66.0 s serial → 31.0 s `-j4` (same 2074/2074; **shipped in v1.9.378**) |
 | XPath index vs mutations | `XPathIndexInvalidation.*` | 2026-10-21 | green — splice paths invalidate (PR #1802; ruby#519 closed on the 1.9.378.0 gem) |

@@ -152,7 +152,17 @@ three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
       finishes in 0.492-0.515x of Nokogiri's CPU time (~2x faster),
       three interleaved-median runs
       (`wt/460-harness/xslt_pipeline_bench.rb`)**
-- [ ] both to serialbench as the public scoreboard
+- [x] the whole-pipeline SCOREBOARD SHAPES stand in-repo (#2055,
+      2026-11-16): `benchmarks/workflows/bench_pipeline_shapes.cpp` —
+      four fixed-corpus shapes (metanorma-compile, config-validation,
+      feed-normalization, extract-transform), parse→query→mutate→
+      serialize, interleaved-median vs libxml2 AND pugixml, riding
+      the Benchmark workflow's three legs every train. First run
+      (macos leg): 0.195-0.386x of libxml2 (3-5x faster) on every
+      shape; pugixml rows 2.04-2.76x (the conformance floor, #1436).
+      The nokogiri binding-face rows above stay the wrapper-face
+      record; this binary is the engine face — same corpus both
+      faces, published in MISSION-PLAN.md's scoreboard of record.
 
 ### B4 durability
 - [ ] CI perf regression gates on the chokepoints (parse, walk,
