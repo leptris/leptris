@@ -317,7 +317,7 @@ endif()
 # nightly fuzz workflow, which invokes them at the build root —
 # subdirectory targets land under build/test/ by default).
 if(LEPTRIS_ENABLE_FUZZING)
-    foreach(target fuzz_parse fuzz_mutate fuzz_xpath)
+    foreach(target fuzz_parse fuzz_mutate fuzz_xpath fuzz_xslt fuzz_html)
         add_executable(${target}
             ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/${target}.c)
         target_link_libraries(${target} PRIVATE leptris)
