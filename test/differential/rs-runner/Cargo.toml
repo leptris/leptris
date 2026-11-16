@@ -11,7 +11,7 @@ path = "run.rs"
 [dependencies]
 # The published rs binding; the pin rides every train with the other
 # binding pins (the A6 law). '=' keeps the gate reproducible.
-leptris = "=1.6.19"
+leptris = "=1.6.20"
 sha2 = "0.10"
 
 [profile.release]
