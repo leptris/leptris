@@ -1,0 +1,1 @@
+<root><raw><![CDATA[if (a < b && c > d) { x = "<tag>&"; }]]></raw><after>tail</after></root>

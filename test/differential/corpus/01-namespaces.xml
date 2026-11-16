@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="urn:default" xmlns:p="urn:p" xmlns:q="urn:p">
+  <a p:attr="prefixed" q:other="redeclared-same-uri">text</a>
+  <b>plain</b>
+  <c xml:lang="en" xml:space="preserve">  spaced  </c>
+  <empty/>
+  <empty2></empty2>
+</root>

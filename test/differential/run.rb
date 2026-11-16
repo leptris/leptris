@@ -22,6 +22,28 @@ DOCS = %w[
   mixed_deep.xml
   namespaces.xml
   xpath_target.xml
+  01-namespaces.xml
+  02-entities-predef.xml
+  03-entities-numeric.xml
+  04-cdata.xml
+  05-comments-pi.xml
+  06-doctype-internal.xml
+  07-unicode.xml
+  08-deep-nesting.xml
+  09-mixed-content.xml
+  10-big-attrs.xml
+  11-whitespace.xml
+  12-dup-xmlns.xml
+  13-custom-dtd-entity.xml
+  14-processing-instr-xml-decl.xml
+  15-empty-and-selfclose.xml
+  16-attrs-special-chars.xml
+  17-rss-like.xml
+  18-soap-like.xml
+  19-xinclude.xml
+  20-single-root.xml
+  21-text-only-elems.xml
+  22-long-text.xml
 ].freeze
 
 XPATHS = {
@@ -33,6 +55,28 @@ XPATHS = {
   "mixed_deep.xml" => "count(//p/*)",
   "namespaces.xml" => "count(//b:book)",
   "xpath_target.xml" => "count(//order[@status='active']/item)",
+  "01-namespaces.xml" => "count(//*)",
+  "02-entities-predef.xml" => "count(//*)",
+  "03-entities-numeric.xml" => "count(//*)",
+  "04-cdata.xml" => "count(//*)",
+  "05-comments-pi.xml" => "count(//*)",
+  "06-doctype-internal.xml" => "count(//*)",
+  "07-unicode.xml" => "count(//*)",
+  "08-deep-nesting.xml" => "count(//*)",
+  "09-mixed-content.xml" => "count(//*)",
+  "10-big-attrs.xml" => "count(//*)",
+  "11-whitespace.xml" => "count(//*)",
+  "12-dup-xmlns.xml" => "count(//*)",
+  "13-custom-dtd-entity.xml" => "count(//*)",
+  "14-processing-instr-xml-decl.xml" => "count(//*)",
+  "15-empty-and-selfclose.xml" => "count(//*)",
+  "16-attrs-special-chars.xml" => "count(//*)",
+  "17-rss-like.xml" => "count(//*)",
+  "18-soap-like.xml" => "count(//*)",
+  "19-xinclude.xml" => "count(//*)",
+  "20-single-root.xml" => "count(//*)",
+  "21-text-only-elems.xml" => "count(//*)",
+  "22-long-text.xml" => "count(//*)",
 }.freeze
 
 # Root element start: first `<` followed by a name character. Every prolog

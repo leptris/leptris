@@ -1,0 +1,3 @@
+<?xml version="1.0"?>
+<!-- leading comment -->
+<root><!-- inner --><?target instruction data?><child>ok</child><!-- trailing --></root>
