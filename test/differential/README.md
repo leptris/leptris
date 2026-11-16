@@ -1,13 +1,13 @@
 # Differential corpus (TODO.SOTA A6 / Gate D3)
 
-Universality proof for the three published bindings — **ruby**
+Universality proof for the four published bindings — **ruby**
 (leptris-ruby), **python** (leptris-py), **typescript/wasm**
-(leptris-ts) — driven from ONE curated corpus. Each runner parses every
+(leptris-ts) and **rust** (leptris-rs, #2048 slice 3) — driven from ONE curated corpus. Each runner parses every
 document, evaluates the document's XPath, and prints one canonical line:
 
     docname|xpath_count|serialized_sha256
 
-CI (`.github/workflows/differential.yml`) runs all three runners and
+CI (`.github/workflows/differential.yml`) runs all four runners and
 `diff`s their outputs **byte-for-byte**; any difference fails the job.
 
 ## Corpus (`corpus/`)
@@ -23,8 +23,8 @@ CI (`.github/workflows/differential.yml`) runs all three runners and
 | `mixed_deep.xml` | new | mixed content, numeric charrefs (&#960;, &#10;) |
 | `xpath_target.xml` | new | predicate XPath over attributes/status |
 
-Per-document XPath (identical in all three runners — prefix bindings are
-resolved from in-scope declarations, which all three bindings do):
+Per-document XPath (identical in all four runners — prefix bindings are
+resolved from in-scope declarations, which all four bindings do):
 
     basic.xml          count(//ns:elem)
     cdata.xml          count(//text)
@@ -41,7 +41,7 @@ resolved from in-scope declarations, which all three bindings do):
     python3 test/differential/run.py                                # pip install leptris
     (cd test/differential && npm install && node run.mjs)           # npm install leptris
 
-All three must print identical lines; verify with:
+All four must print identical lines; verify with:
 
     diff <(ruby run.rb) <(python3 run.py) && diff <(ruby run.rb) <(node run.mjs)
 
@@ -53,7 +53,7 @@ All three must print identical lines; verify with:
 | python | pip leptris **1.9.379.0** | 1.9.379 |
 | node/wasm | npm leptris **0.1.22** | 1.9.379 |
 
-Canonical output (all three, byte-identical):
+Canonical output (all four, byte-identical):
 
     basic.xml|1|888f291b7062dbd2e416a68a6f9cf412da6426dbc8a39b372d22f32e1192598a
     cdata.xml|1|21e22f173b8f0f4169dd4e337a24201c75416ddae12b690050888ebf3f3b0b81

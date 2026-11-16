@@ -1,0 +1,18 @@
+[package]
+name = "leptris-differential-runner"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "run"
+path = "run.rs"
+
+[dependencies]
+# The published rs binding; the pin rides every train with the other
+# binding pins (the A6 law). '=' keeps the gate reproducible.
+leptris = "=1.6.19"
+sha2 = "0.10"
+
+[profile.release]
+debug = false
