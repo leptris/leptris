@@ -248,6 +248,55 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Reproducibility smoke (Gate C3, #2050): build the linux-amd64 leg
+  # TWICE from identical inputs in fresh build dirs and require the
+  # library artifacts byte-identical. This is the standing proof that
+  # the manifest's hashes are re-derivable, not runner-mood.
+  # ─────────────────────────────────────────────────────────────────────────
+  reproducibility-smoke:
+    name: Reproducibility smoke — linux-amd64, build twice
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libutf8proc-dev
+
+      - name: Build twice from identical inputs
+        run: |
+          set -euo pipefail
+          CONFIG="-G Ninja -DLEPTRIS_BUILD_CLI=OFF -DBUILD_TESTING=OFF \
+                  -DCMAKE_BUILD_TYPE=Release -DLEPTRIS_ENABLE_ICONV=OFF \
+                  -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON"
+          cmake -B build-a -S . $CONFIG
+          cmake --build build-a --target leptris_static leptris_shared -j 4
+          cmake -B build-b -S . $CONFIG
+          cmake --build build-b --target leptris_static leptris_shared -j 4
+
+      - name: Compare artifacts byte-for-byte
+        run: |
+          set -euo pipefail
+          A=$(find build-a -name 'libleptris.a' -type f | head -1)
+          B=$(find build-b -name 'libleptris.a' -type f | head -1)
+          [ -n "$A" ] && [ -n "$B" ]
+          sha256sum "$A" "$B"
+          cmp "$A" "$B"
+          echo "static lib: byte-identical"
+          SO_A=$(find build-a -name 'libleptris.so.*' -type f | head -1)
+          SO_B=$(find build-b -name 'libleptris.so.*' -type f | head -1)
+          [ -n "$SO_A" ] && [ -n "$SO_B" ]
+          sha256sum "$SO_A" "$SO_B"
+          cmp "$SO_A" "$SO_B"
+          echo "shared lib: byte-identical"
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Merge the legs' fragments into one manifest, print it in the job
   # summary, and attach it to the GitHub Release for the tag.
   # ─────────────────────────────────────────────────────────────────────────
