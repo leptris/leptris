@@ -4,11 +4,27 @@
 
 ### Fixed
 
-- the union operator's NULL-nodeset operand crashed (SOTA C1) (xpath)
-- bench_parse matches the BenchFunc signature (void* ctx) (bench)
-- the B3 pipeline scoreboard shapes stand in-repo (SOTA #2055) (bench)
-- the empty-match abort dropped the template body and ns context (SOTA C1) (xslt)
-- the union-split's empty-alternative continue leaked the part string (SOTA C1, leak-f4fb611c) (xslt)
+- **html: the foreign-CDATA arm fired on any `<!` in SVG/MathML content** (#2059, found by fuzz_html in its first 30 seconds). The arm checked neither the `<![CDATA[` opener nor that it fit the remaining bytes, so a short `<!x` in foreign content wrapped a negative length into `leptris_text_create` — an ASan negative-size-param crash. It now requires a full opener that fits; every other `<!` takes the bogus-comment path per HTML5 §13.2.5.42. The crasher is pinned at `test/fuzz/corpus/html_foreign_cdata_short_opener.bin` with two regression specs.
+- **xpath: the union operator's NULL-nodeset operand crashed — SEGV at 0x18** (#2064, found by fuzz_xslt on the main nightly, run 43848591647). A union whose left side is a path applied to a non-node atom (`0//i|em` in an `xsl:for-each`) dereferenced a NODESET-typed result whose union never received a nodeset: `evaluate_location_path`'s non-nodeset-head branch and the XQuery empty-sequence coercions in `floor`/`ceiling`/`round` all returned bare `xpath_result_new(NODESET)` results, and the union's #514 ownership transfer was the first consumer to deref without a guard. The producers now hand back a real empty nodeset — identical observable semantics for every guarding consumer, correct for the strict ones. Crasher pinned (`xslt_union_number_head_segv.xml`), spec pins both operand orders.
+
+### Fixed (memory)
+
+- **xslt: the union-split's empty-alternative continue leaked the part string** (fuzz_xslt, leak-f4fb611c). An empty alternative in `match="a| |b"` skipped the loop tail's `free`; both the empty-alternative and pattern-calloc paths now free their part.
+- **xslt: an empty `match=""` template dropped its body and ns context** (nightly 43840763745). `add_template` built `t->ns` and `t->body` before validating the match, then the abort freed the bare `XsltTemplate` — the literal result instruction and the ns set leaked on every refusal. The teardown now lives in one `free_template` shared by the sheet free and the abort, so the next field added to the struct cannot reopen the gap; the refusal semantics (`match=""` is a static error) are unchanged and spec'd.
+
+### Performance
+
+- **the B3 pipeline scoreboard shapes stand in-repo** (#2055, closes the SOTA B3 acceptance). Four whole-pipeline shapes — metanorma-compile, config-validation, feed-normalization, extract-transform — each a fixed committed corpus plus a fixed operation script (parse → query → mutate → serialize), measured with interleaved-median against libxml2 AND pugixml in one binary that rides the Benchmark workflow's three legs on every train. Every rig runs the same script — reads included — and gates on its own structural checks. First published rows: **0.195–0.386x of libxml2 (~2.6–5.1x faster) on every shape**; the pugixml rows land at 2.04–2.76x, the measured conformance floor. The zero-copy text lever verdict is recorded too (#2053): the parser's borrowed-text face beats the forced-copy face on both contested rows — **parse 2.66x, walk+read 2.39x** — closing the re-proposal loop with numbers.
+
+### CI
+
+- **the universality gate grew its fourth leg: rust** (#2048). The leptris-rs crate runs the same 30-doc corpus through the same canonical contract; `differential.yml` now asserts ruby == python == wasm == rust byte-for-byte, linking the same engine tag the published pins carry. Verified locally: all 30 docs byte-identical against the published 1.9.424.0 gem.
+- **the build manifest gained the reproducibility smoke** (#2050): the linux-amd64 leg builds twice from identical inputs and requires both library artifacts byte-identical — the standing proof that the manifest's hashes are re-derivable, not runner-mood.
+
+### Tooling
+
+- **the fuzz lane grew the XSLT and HTML grammar families** (#2051): `fuzz_xslt` (compile + apply over attacker stylesheets) and `fuzz_html` (HTML5 and HTML4 faces over the same bytes, serialize + re-parse), seeded corpora and dedicated nightly legs. Three of this release's four fixes came out of it within two nights.
+
 
 
 
