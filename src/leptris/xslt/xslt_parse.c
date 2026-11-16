@@ -1128,9 +1128,20 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
         for (size_t i = 0; i < nalt; i++) {
             char* trimmed = alts[i];
             while (*trimmed == ' ') trimmed++;
-            if (!*trimmed) continue;
+            /* the fuzzer (SOTA C1, leak-f4fb611c) caught both
+             * continues leaking the part string: an empty
+             * alternative ("a| |b" — the 1-byte "") and the
+             * pattern-calloc failure each skipped the loop tail's
+             * free */
+            if (!*trimmed) {
+                free(alts[i]);
+                continue;
+            }
             XsltPattern* p = (XsltPattern*)calloc(1, sizeof(*p));
-            if (!p) continue;
+            if (!p) {
+                free(alts[i]);
+                continue;
+            }
             p->expr = leptris_xpath_compile(trimmed);
             if (!p->expr) {
                 /* Bad pattern: fail the whole stylesheet. */
