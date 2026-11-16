@@ -1822,9 +1822,15 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             evaluate_expr(ctx, ast->children[0]);
         if (!callee) return NULL;
         const char* cc = NULL;
+        /* Only a TEXT node carries the carrier protocol — the blind
+         * cast read element/attribute bytes as a content pointer and
+         * strncmp dereferenced wild memory (nightly 43980029629,
+         * crash-b865a005, "node()()"). */
         if (callee->type == XPATH_RESULT_NODESET &&
             callee->value.nodeset_value &&
-            callee->value.nodeset_value->count > 0)
+            callee->value.nodeset_value->count > 0 &&
+            XPATH_NODE_TYPE(callee->value.nodeset_value->nodes[0]) ==
+                LEPTRIS_NODE_TEXT)
             cc = ((XPathTextNode*)
                       callee->value.nodeset_value->nodes[0])->content;
         if (!cc) {

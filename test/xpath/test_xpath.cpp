@@ -2865,3 +2865,33 @@ TEST(XPathUnion, NumberHeadLeftSideYieldsEmptyNodeset) {
     leptris_xpath_result_free(r2);
     leptris_document_free(doc);
 }
+
+/* SOTA C1 (nightly 43980029629, crash-b865a005, fuzz_xslt): a dynamic
+ * call whose callee expression yields a nodeset of NON-text nodes
+ * ("node()()" — every node matches) crashed evaluate_operator: the
+ * dyn-call fetch blind-cast nodes[0] to XPathTextNode* and read its
+ * content field, which for an element/attribute node is a different
+ * union — strncmp then dereferenced a wild pointer. A callee that is
+ * not a text node is simply not a function reference: the call must
+ * refuse (NULL), like every other non-carrier shape. */
+TEST(XPathDynCall, NonTextCalleeRefusesWithoutCrash) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string("<r><a/></r>", 11, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* The first node() is an element — the blind-cast shape. */
+    LeptrisXPathResult r =
+        leptris_xpath_eval(doc, root, "node()()");
+    leptris_xpath_result_free(r);   /* NULL or empty, never a crash */
+
+    /* Attribute-led variant: the first node is an attribute node. */
+    LeptrisXPathResult r2 =
+        leptris_xpath_eval(doc, root, "r/@*");
+    ASSERT_NE(r2, nullptr);
+    leptris_xpath_result_free(r2);
+
+    leptris_document_free(doc);
+}
