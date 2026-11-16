@@ -42,6 +42,8 @@ bench_*
 !benchmarks/modification/bench_append_split.cpp
 !benchmarks/workflows/
 !benchmarks/workflows/bench_pipeline_shapes.cpp
+!benchmarks/dom/
+!benchmarks/dom/bench_zerocopy_text.c
 profile_*
 element_layout
 

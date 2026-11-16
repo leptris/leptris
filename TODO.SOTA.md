@@ -182,7 +182,15 @@ three interleaved-median runs (`wt/460-harness/pipeline_bench.rb`,
       ~1.37x parse gap = conformance features pugixml doesn't do
       (dup detection, error positions, NUL writes) — the measured
       floor; owner decision in #1436.
-- [ ] zero-copy text lever (#1218) — adopt if it wins any row
+- [x] zero-copy text lever (#1218/#2053) — **VERDICT 2026-11-16:
+      ADOPTED (and it already was).** The parser's text lanes have
+      carved borrowed views since TODO 115 / direct-parse round 8;
+      the measurement closes the re-proposal loop: borrowed beats
+      the forced-copy face on BOTH rows — parse 215.8us vs 573.9us
+      (2.66x) and walk+read 288.8us vs 689.3us (2.39x), ABBA x2
+      medians of 4, 200 iters/run, 520KB text-heavy corpus
+      (`benchmarks/dom/bench_zerocopy_text.c`). The copy lane stays
+      for the entity/mutation spans that require it.
 
 ## Gate C — Safety: trust is auditable
 
