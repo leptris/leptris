@@ -226,6 +226,7 @@ static XsltInstr* parse_instruction(SheetParser* sp, LeptrisElement e);
 static XsltInstr* parse_content_ws(SheetParser* sp, LeptrisElement list,
                                    int preserve_ws);
 #define parse_content(sp, list) parse_content_ws(sp, list, 0)
+static void free_template(XsltTemplate* t);
 
 
 /* §4/§5.3: collect the in-scope namespace bindings for a stylesheet
@@ -1121,7 +1122,7 @@ static void add_template(SheetParser* sp, LeptrisElement e) {
     }
 
     if (match) {
-        if (!*match) { sp->errors = 1; free(t); return; }
+        if (!*match) { sp->errors = 1; free_template(t); return; }
         size_t nalt = 0;
         char** alts = split_alternatives(match, &nalt);
         XsltPattern** tail = &t->matches;
@@ -1860,6 +1861,26 @@ static void free_instr_list(XsltInstr* list) {
     }
 }
 
+/* The one template teardown: the sheet free and the add_template
+ * abort (match="" — nightly run 43840763745) both walk the same
+ * fields; the abort previously freed the bare struct and dropped
+ * the already-built body + ns context. */
+static void free_template(XsltTemplate* t) {
+    XsltPattern* p = t->matches;
+    while (p) {
+        XsltPattern* pn = p->next;
+        if (p->expr) leptris_xpath_compiled_free(p->expr);
+        xslt_pattern_steps_free(p);
+        free(p);
+        p = pn;
+    }
+    free_instr_list(t->body);
+    if (t->ns) leptris_xpath_ns_set_free(t->ns);
+    free((void*)t->name);
+    free((void*)t->mode);
+    free(t);
+}
+
 /* ---- dispatch indexes (#682) ----
  *
  * Named lookup: open-addressed FNV-1a map. Inserts walk the list in
@@ -2112,19 +2133,7 @@ void xslt_stylesheet_free(XsltStylesheet* sheet) {
     XsltTemplate* t = sheet->templates;
     while (t) {
         XsltTemplate* n = t->next;
-        XsltPattern* p = t->matches;
-        while (p) {
-            XsltPattern* pn = p->next;
-            if (p->expr) leptris_xpath_compiled_free(p->expr);
-            xslt_pattern_steps_free(p);
-            free(p);
-            p = pn;
-        }
-        free_instr_list(t->body);
-        if (t->ns) leptris_xpath_ns_set_free(t->ns);
-        free((void*)t->name);
-        free((void*)t->mode);
-        free(t);
+        free_template(t);
         t = n;
     }
     while (sheet->keys) {
