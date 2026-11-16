@@ -6100,7 +6100,16 @@ static LeptrisDocument html_parse_shared(
                 /* #659: CDATA in foreign content is TEXT (raw, no
                  * entity decoding); in HTML content it stays the
                  * bogus-comment skip below. */
-                if (b.whatwg && h_cur_ns(&b) != H_NS_HTML) {
+                /* The opener must fully match AND fit: the fuzzer
+                 * (SOTA C1 #2051, fuzz_html) drove a 3-byte "<!x" in
+                 * foreign content here — cs = p + 9 wrapped past end
+                 * and clen went negative (ASAN negative-size-param in
+                 * leptris_text_create). HTML5 §13.2.5.42: only a
+                 * real "<![CDATA[" opener is a CDATA section in
+                 * foreign content; every other "<!" is the
+                 * bogus-comment path below. */
+                if (b.whatwg && h_cur_ns(&b) != H_NS_HTML &&
+                    end - p >= 9 && memcmp(p, "<![CDATA[", 9) == 0) {
                     const char* cs = p + 9;   /* past "<![CDATA[" */
                     const char* ce = cs;
                     while (ce + 3 <= end && !(ce[0] == ']' &&

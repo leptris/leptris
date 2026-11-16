@@ -2334,3 +2334,52 @@ TEST(HtmlParse, InBodyCommentBodyFirstShape) {
     EXPECT_EQ(comments, 1);
     leptris_document_free(d);
 }
+
+/* SOTA C1 (#2051): the foreign-CDATA arm fired on ANY "<!" in SVG/MathML
+ * content — a 3-byte "<!x" set cs = p + 9 past end and wrapped clen
+ * negative (ASAN negative-size-param in leptris_text_create; found by
+ * fuzz_html, crasher pinned at test/fuzz/corpus/
+ * html_foreign_cdata_short_opener.bin). A real opener is CDATA text;
+ * any other "<!" in foreign content is the bogus-comment path. */
+static const unsigned char k_foreign_cdata_short_opener[] = {
+    0x3c, 0x21, 0x44, 0xcf, 0x43, 0x54, 0x59, 0xb0, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x12, 0x3c, 0x68, 0x74, 0x6d, 0x6c, 0x3e,
+    0x3c, 0x3c, 0x73, 0x76, 0x67, 0x20, 0x24, 0x72, 0x63, 0x3d, 0x22,
+    0x78, 0x2e, 0x70, 0x6e, 0x67, 0x22, 0x00, 0x2f, 0x74, 0x72, 0x3e,
+    0x3c, 0x2f, 0x74, 0x61, 0x62, 0x6c, 0x65, 0x3e, 0x3c, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x3c, 0x21, 0x00, 0x00, 0x65, 0x61, 0x00, 0x00,
+};
+
+TEST(HtmlParse, ForeignShortMarkupDeclNoNegativeSize) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_html_string(
+        (const char*)k_foreign_cdata_short_opener,
+        sizeof(k_foreign_cdata_short_opener), &st);
+    EXPECT_NE(d, (LeptrisDocument)0);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    leptris_document_free(d);
+}
+
+TEST(HtmlParse, ForeignCdataStillText) {
+    /* The fixed arm keeps its contract: a real <![CDATA[ opener in
+     * foreign content is raw text (no entity decoding). */
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_html_string(
+        "<svg><![CDATA[if (a < b) x=1;]]></svg>", 38, &st);
+    ASSERT_NE(d, (LeptrisDocument)0);
+    LeptrisXPathResult r = leptris_xpath_eval(d, NULL, "//text()");
+    ASSERT_NE(r, (LeptrisXPathResult)0);
+    /* the CDATA survives as ONE raw text node with the bytes verbatim
+     * (no entity decoding — §13.2.5.42 foreign-content rule) */
+    ASSERT_EQ(leptris_xpath_result_count(r), 1);
+    LeptrisNodeRef text = 0;
+    LeptrisXPathNodeKind kind = LEPTRIS_XPATH_NODE_OTHER;
+    ASSERT_EQ(leptris_xpath_result_get_nodes_ex(r, &text, &kind, 1),
+              (size_t)1);
+    EXPECT_EQ(kind, LEPTRIS_XPATH_NODE_TEXT);
+    const char* s = leptris_text_node_get_content(text);
+    ASSERT_NE(s, (const char*)0);
+    EXPECT_STREQ(s, "if (a < b) x=1;");
+    leptris_xpath_result_free(r);
+    leptris_document_free(d);
+}

@@ -32,7 +32,7 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF
 
       - name: Build fuzzers
-        run: cmake --build build --target fuzz_parse fuzz_mutate fuzz_xpath
+        run: cmake --build build --target fuzz_parse fuzz_mutate fuzz_xpath fuzz_xslt fuzz_html
 
       - name: Seed corpus
         run: |
@@ -64,6 +64,29 @@ jobs:
             -max_len=4096 \
             -print_final_stats=1 \
             xpath_corpus/
+
+      - name: Seed the grammar-family corpora
+        run: |
+          mkdir -p xslt_corpus html_corpus
+          cp test/fuzz/corpus/seed* xslt_corpus/ 2>/dev/null || true
+          cp test/fuzz/corpus/seed* html_corpus/ 2>/dev/null || true
+          cp test/fuzz/corpus/*.bin html_corpus/ 2>/dev/null || true
+
+      - name: Fuzz XSLT compile (2 minutes)
+        run: |
+          ./build/fuzz_xslt \
+            -max_total_time=120 \
+            -max_len=65536 \
+            -print_final_stats=1 \
+            xslt_corpus/
+
+      - name: Fuzz HTML tokenizer (2 minutes)
+        run: |
+          ./build/fuzz_html \
+            -max_total_time=120 \
+            -max_len=65536 \
+            -print_final_stats=1 \
+            html_corpus/
 
       - name: Upload crashes
         if: always()
