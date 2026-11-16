@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:if test="item[(true())]/*[@kind]/a[@kind]"><out>@id</out><xsl:if test="0"><xsl:value-of select="number(@id)"/><xsl:value-of select="normalize-space(.)"/><xsl:value-of select="concat('x',.)"/></xsl:if><leaf>@mode</leaf></xsl:if></xsl:template></xsl:stylesheet>

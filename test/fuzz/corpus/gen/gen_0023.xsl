@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><span>@kind</span><xsl:if test="true()"><xsl:value-of select="contains(@kind,'x')"/></xsl:if></xsl:template></xsl:stylesheet>

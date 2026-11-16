@@ -71,6 +71,12 @@ jobs:
           cp test/fuzz/corpus/seed* xslt_corpus/ 2>/dev/null || true
           cp test/fuzz/corpus/seed* html_corpus/ 2>/dev/null || true
           cp test/fuzz/corpus/*.bin html_corpus/ 2>/dev/null || true
+          # Grammar-aware generation (#2051): deep valid structures —
+          # unions, predicates, sorts, arithmetic — composed fresh
+          # each run, so libFuzzer anchors at expression depths pure
+          # mutation cannot build.
+          python3 test/fuzz/generators/gen_xslt_seeds.py \
+            xslt_corpus/gen --seed "$GITHUB_RUN_NUMBER" --count 200
 
       - name: Fuzz XSLT compile (2 minutes)
         run: |
@@ -78,7 +84,7 @@ jobs:
             -max_total_time=120 \
             -max_len=65536 \
             -print_final_stats=1 \
-            xslt_corpus/
+            xslt_corpus/ xslt_corpus/gen/
 
       - name: Fuzz HTML tokenizer (2 minutes)
         run: |

@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:for-each select="*/descendant::item[*/item]/following-sibling::leaf"><xsl:for-each select="*[@kind][0]/child::a[@id]"><xsl:value-of select="number(@id)"/><out>@mode</out></xsl:for-each></xsl:for-each><item>@kind</item></xsl:template></xsl:stylesheet>

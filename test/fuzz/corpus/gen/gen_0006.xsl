@@ -1,0 +1,1 @@
+<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:template match="/"><xsl:for-each select="b|child::item|out[@status]/item/leaf[0]"><xsl:value-of select="number(@id)"/></xsl:for-each></xsl:template></xsl:stylesheet>
