@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.425] - 2026-11-16
+
+### Fixed
+
+- the union operator's NULL-nodeset operand crashed (SOTA C1) (xpath)
+- bench_parse matches the BenchFunc signature (void* ctx) (bench)
+- the B3 pipeline scoreboard shapes stand in-repo (SOTA #2055) (bench)
+- the empty-match abort dropped the template body and ns context (SOTA C1) (xslt)
+- the union-split's empty-alternative continue leaked the part string (SOTA C1, leak-f4fb611c) (xslt)
+
+
+
 ## [1.9.424] - 2026-11-15
 
 ### Performance
