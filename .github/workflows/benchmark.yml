@@ -124,7 +124,8 @@ jobs:
               ../build/benchmarks/benchmark_first_access \
               ../build/benchmarks/benchmark_memory \
               ../build/benchmarks/dom_benchmark_v2 \
-              ../build/benchmarks/bench_append_attr_pugixml; do
+              ../build/benchmarks/bench_append_attr_pugixml \
+              ../build/benchmarks/bench_pipeline_shapes; do
             run_bin "$bin"
           done
 
