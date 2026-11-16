@@ -1,0 +1,5 @@
+<env:Envelope xmlns:env="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="urn:msg">
+  <env:Body>
+    <m:request id="42"><m:payload><![CDATA[<raw>not-parsed</raw>]]></m:payload></m:request>
+  </env:Body>
+</env:Envelope>

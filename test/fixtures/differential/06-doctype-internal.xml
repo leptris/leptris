@@ -1,0 +1,6 @@
+<!DOCTYPE root [
+<!ELEMENT root (child*)>
+<!ELEMENT child EMPTY>
+<!ATTLIST child kind CDATA "default">
+]>
+<root><child kind="x"/><child/></root>

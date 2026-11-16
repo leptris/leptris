@@ -1,0 +1,2 @@
+<!DOCTYPE root [<!ENTITY greeting "Hello, World">]>
+<root><msg>&greeting;</msg><raw>&amp;kept;</raw></root>

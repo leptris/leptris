@@ -1,0 +1,1 @@
+<root xmlns:x="urn:1"><a xmlns:x="urn:1"><b x:k="inner"/></a><c xmlns:x="urn:2"><b x:k="outer"/></c></root>
