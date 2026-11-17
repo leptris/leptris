@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+## [1.9.426] - 2026-11-17
+
+### Fixed
+
+The fuzz-lane's finding-6 wave: the nightly's grammar-aware generator drove into the FN-carrier machinery, and five fixes landed in four days.
+
+- **xpath: the dynamic call's blind text-node cast crashed** (fuzz_xslt, nightly 43980029629, `node()()`). The dyn-call fetch read the callee nodeset's first node as an `XPathTextNode` without checking its type — every sibling fetch gates on the node type, this one didn't; an element-led callee read element bytes as a content pointer and `strncmp` dereferenced wild memory. The fetch now type-gates like its siblings; a non-text callee refuses.
+- **xpath: the fast eval path ran its VM on an unpinned bytecode borrow** (nightly 43985564879). libxslt bug-147 (PR #600) taught the ns-context eval path the pinned borrow — a re-entrant store during the run can evict the slot and free the bytecode, whose constants hold cache-AST pointers — but the FAST path (the no-ns route behind the XSLT exec's hot path) never received it. The borrow now lives in one `compiled_eval_bc_pinned` helper shared by both eval paths.
+- **xslt: transient compiles promote to exec-lifetime** (nightly 44046875569). The FN carrier's body is borrowed from its enclosing compiled expression ("transform-lifetime" per the synthesis contract), and three sites compiled transiently and freed after one eval — `op_evaluate`'s dynamic expression, the apply-imports caller-param loop (freed right after pushing the carrier as a binding), and the `@*` pattern probe. All three compile onto an exec-lifetime deduped chain (the AVT cache's pattern) freed at `xslt_exec_free` — the v1 carrier contract becomes true instead of assumed.
+- **xpath: the constant-fold admitted NUMBER literals and strlen'd their NULL value** (the fold crasher, standalone-reproducible). The fold validation accepted STRING *and* NUMBER children while every fold body strlens `child->value` — a NUMBER node's value is NULL; `concat('a', 42)` folded into `strlen(NULL)`. The fold is a string-literal optimization; numbers decline it.
+- **xpath: the FN carrier adopts its closure body.** The lifetime half: synthesis embeds the body's AST address as hex inside the carrier, the body was borrowed, and a carrier surviving in a binding outlived its owner. Synthesis now adopts the body into a process-lifetime registry (`ast_node_free` skips adopted subtrees) — the pointer in the string finally carries ownership, not a hope. Idempotent, bounded by distinct closure bodies, the carrier format unchanged.
+
+### Tooling
+
+- **the grammar-aware XSLT seed generator** (#2051): the nightly composes 200 deep structured stylesheets per run (axis paths, predicates, unions, arithmetic trees, nested constructors) so libFuzzer anchors at expression depths pure mutation cannot build. This wave's findings came out of exactly those depths.
+
+
+
+
 ## [1.9.425] - 2026-11-16
 
 ### Fixed
