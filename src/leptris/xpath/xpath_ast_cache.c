@@ -75,6 +75,18 @@ void xpath_ast_cache_owner_end(int prev) {
 }
 #define XPATH_CACHE_OWNED (g_cache_owner_active)
 
+/* SOTA C1 finding 6: the FN-carrier adoption registry. A closure
+ * body adopted by xpath_ast_cache_adopt is flagged `adopted` (its
+ * subtree skips ast_node_free) and listed here for the PROCESS
+ * lifetime — the carrier embedding its address may be invoked at
+ * any point later, so the body cannot be reclaimed. Bounded by the
+ * distinct closure bodies the process synthesizes. */
+typedef struct adopted_body {
+    struct adopted_body* next;
+    XPathASTNode* body;
+} adopted_body;
+static adopted_body* g_adopted;
+
 /* FNV-1a 32-bit hash. */
 static unsigned xpath_hash(const char* s, size_t len) {
     unsigned h = 2166136261u;
@@ -300,6 +312,30 @@ void xpath_ast_cache_release(XPathASTNode* ast) {
     if (XPATH_CACHE_OWNED) { cache_release_locked(ast); return; }
     LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
     cache_release_locked(ast);
+    LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
+}
+
+/* SOTA C1 finding 6, part 3: adopt a closure body for the FN
+ * carrier. Marks the subtree `adopted` (ast_node_free skips it) and
+ * lists it in g_adopted, so the carrier's embedded address stays
+ * valid no matter when its enclosing compiled expression dies.
+ * Idempotent per node — re-synthesis of the same closure is a
+ * no-op. The node is NOT moved; the carrier's hex address remains
+ * the node's address. */
+void xpath_ast_cache_adopt(XPathASTNode* body) {
+    if (!body || body->adopted) return;
+    LEPTRIS_MUTEX_LOCK(&g_cache_mutex);
+    for (adopted_body* a = g_adopted; a; a = a->next)
+        if (a->body == body) {
+            LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
+            return;
+        }
+    adopted_body* a = (adopted_body*)malloc(sizeof(*a));
+    if (!a) { LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex); return; }
+    a->body = body;
+    a->next = g_adopted;
+    g_adopted = a;
+    body->adopted = 1;
     LEPTRIS_MUTEX_UNLOCK(&g_cache_mutex);
 }
 

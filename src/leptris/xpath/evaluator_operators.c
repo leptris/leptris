@@ -1800,6 +1800,12 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
          * synthetic nodes strlen-wise — a truncated closure made the
          * call memcpy read past the buffer (ASAN heap-overflow). */
         XPathASTNode* body = ast->children[0];
+        /* Finding 6, part 3: ADOPT the body before its address
+         * escapes into the carrier — the registry flags the subtree
+         * (ast_node_free skips it) so the carrier stays invocable no
+         * matter when the enclosing compiled expression dies. The
+         * node is not moved; the hex address below is unchanged. */
+        xpath_ast_cache_adopt(body);
         len += (size_t)snprintf(content + len, 17, "%016llx",
                                 (unsigned long long)(uintptr_t)body);
         cap = len + 2;   /* snprintf may have needed more than 17 */
