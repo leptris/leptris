@@ -656,6 +656,14 @@ typedef struct xpath_ast_node {
      * guards the lazy init (0 until first use). */
     uint16_t local_hash;
     uint8_t local_hash_set;
+
+    /* SOTA C1 finding 6: OWNED by the FN-carrier adoption registry
+     * (xpath_ast_cache_adopt) — a closure body whose carrier can
+     * outlive the enclosing compiled expression. ast_node_free
+     * returns immediately on adopted subtrees; the registry holds
+     * them for the process lifetime (bounded by the distinct closure
+     * bodies the process synthesizes). */
+    uint8_t adopted;
 } XPathASTNode;
 
 /* XPath parser - Matches ext/leptris/xpath.h _xpath_parser */

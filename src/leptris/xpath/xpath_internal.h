@@ -95,6 +95,13 @@ void xpath_ast_cache_owner_end(int prev);
 XPathASTNode* xpath_ast_cache_insert(const char* expr, size_t expr_len, XPathASTNode* ast);
 void xpath_ast_cache_release(XPathASTNode* ast);
 
+/* SOTA C1 finding 6: adopt a closure body for the FN carrier — flags
+ * the subtree `adopted` (ast_node_free skips it) and lists it in the
+ * process-lifetime registry, so the carrier's embedded address stays
+ * valid past its enclosing compiled expression's death. Idempotent
+ * per node; the node is not moved. */
+void xpath_ast_cache_adopt(XPathASTNode* body);
+
 /* Combined lookup (TODO 159 Phase E drive-by): single hash + scan
  * that returns both the AST and the bytecode in one pass. Replaces
  * the previous two-call pattern (xpath_ast_cache_lookup +

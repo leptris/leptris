@@ -171,12 +171,20 @@ static XPathASTNode* ast_node_new(XPathASTType type) {
      * every name test on gcc/Linux CI). */
     node->local_hash = 0;
     node->local_hash_set = 0;
+    /* Finding 6: same load-bearing-init rule — garbage `adopted`
+     * would make ast_node_free silently leak the node. */
+    node->adopted = 0;
 
     return node;
 }
 
 void ast_node_free(XPathASTNode* node) {
     if (!node) return;
+    /* SOTA C1 finding 6: an adopted subtree (the FN-carrier adoption
+     * registry owns a closure body whose carrier outlives the
+     * enclosing compiled expression) is skipped wholesale — the
+     * registry holds it for the process lifetime. */
+    if (node->adopted) return;
 
     if (node->value) {
         LEPTRIS_FREE(node->value);
