@@ -61,6 +61,43 @@ LEPTRIS_API LeptrisXPathCompiled leptris_xpath_compile(const char* expression) {
     return c;
 }
 
+/* The pinned bytecode borrow (libxslt bug-147, PR #600): the raw
+ * get_bc returns an UNPINNED pointer — a re-entrant store during the
+ * run can evict the slot and free the bytecode under a live VM frame
+ * whose constants hold cache-AST pointers. The ns-context eval path
+ * has run through this since #600; the fast path below ran its VM on
+ * the raw pointer and the nightly drove exactly that race (SOTA C1
+ * finding 6: UAF at evaluate_function_call_impl via the FN carrier's
+ * cache-AST constants). Every eval path goes through here. */
+static struct leptris_xpath_result* compiled_eval_bc_pinned(
+        LeptrisXPathCompiled compiled, XPathContext* xpath_ctx) {
+    struct leptris_xpath_result* result = NULL;
+    XPathCacheEntry ce;
+    int hit = xpath_ast_cache_get(compiled->expr, compiled->expr_len,
+                                  &ce);
+    LeptrisXPathBytecode* bc = hit ? ce.bc : NULL;
+    if (hit && !bc) {
+        bc = leptris_xpath_compile_ast(compiled->ast);
+        if (bc) {
+            xpath_ast_cache_store_bc(compiled->expr,
+                                     compiled->expr_len, bc);
+            /* #1079: a twin compile may have won the slot and store
+             * freed OUR bytecode as the loser — re-read the canonical
+             * cached bytecode for the run (the entry is pinned, so it
+             * cannot be evicted here). */
+            LeptrisXPathBytecode* canonical = xpath_ast_cache_get_bc(
+                compiled->expr, compiled->expr_len);
+            if (canonical) bc = canonical;
+        }
+    }
+    if (bc) {
+        result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
+        if (!result) xpath_ctx->error_msg[0] = '\0';
+    }
+    if (hit) xpath_ast_cache_release(ce.ast);
+    return result;
+}
+
 /* Run a compiled expression against a PREPARED context (the XSLT
  * bridge installs its own function registry + variable set before
  * calling this). VM fast path first; AST interpreter fallback. The
@@ -68,18 +105,8 @@ LEPTRIS_API LeptrisXPathCompiled leptris_xpath_compile(const char* expression) {
 struct leptris_xpath_result* leptris_xpath_compiled_eval_in(
         LeptrisXPathCompiled compiled, XPathContext* xpath_ctx) {
     if (!compiled || !xpath_ctx || !xpath_ctx->document) return NULL;
-    LeptrisXPathBytecode* bc = xpath_ast_cache_get_bc(compiled->expr,
-                                                      compiled->expr_len);
-    struct leptris_xpath_result* result = NULL;
-    if (bc) {
-        result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
-    } else {
-        bc = leptris_xpath_compile_ast(compiled->ast);
-        if (bc) {
-            result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
-            xpath_ast_cache_store_bc(compiled->expr, compiled->expr_len, bc);
-        }
-    }
+    struct leptris_xpath_result* result =
+        compiled_eval_bc_pinned(compiled, xpath_ctx);
     if (!result) result = xpath_evaluate(xpath_ctx, compiled->ast);
 
     if (!result && xpath_ctx->error_msg[0]) {
@@ -152,35 +179,8 @@ static struct leptris_xpath_result* compiled_eval_context(
      * The earlier bug-76 divergence was the position-predicate
      * absolute tail — which never merged; position predicates on
      * absolute paths stay on the interpreter path. */
-    struct leptris_xpath_result* result = NULL;
-    {
-        /* Pinned borrow (the raw get_bc returns an unpinned pointer —
-         * a re-entrant store during the run can evict and free it;
-         * ASAN caught exactly that in libxslt bug-147, PR #600). */
-        XPathCacheEntry ce;
-        int hit = xpath_ast_cache_get(compiled->expr, compiled->expr_len,
-                                      &ce);
-        LeptrisXPathBytecode* bc = hit ? ce.bc : NULL;
-        if (hit && !bc) {
-            bc = leptris_xpath_compile_ast(compiled->ast);
-            if (bc) {
-                xpath_ast_cache_store_bc(compiled->expr,
-                                         compiled->expr_len, bc);
-                /* #1079: a twin compile may have won the slot and
-                 * store freed OUR bytecode as the loser — re-read
-                 * the canonical cached bytecode for the run (the
-                 * entry is pinned, so it cannot be evicted here). */
-                LeptrisXPathBytecode* canonical = xpath_ast_cache_get_bc(
-                    compiled->expr, compiled->expr_len);
-                if (canonical) bc = canonical;
-            }
-        }
-        if (bc) {
-            result = leptris_xpath_vm_run_bc(bc, xpath_ctx);
-            if (!result) xpath_ctx->error_msg[0] = '\0';
-        }
-        if (hit) xpath_ast_cache_release(ce.ast);
-    }
+    struct leptris_xpath_result* result =
+        compiled_eval_bc_pinned(compiled, xpath_ctx);
     if (!result)
         result = xpath_evaluate(xpath_ctx, compiled->ast);
 
