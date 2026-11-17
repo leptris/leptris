@@ -132,10 +132,14 @@ static int try_fold_constant_function(CompilerState* st, XPathASTNode* node) {
 
     for (size_t i = 0; i < nargs; i++) {
         XPathASTNode* a = node->children[i];
-        if (!a || (a->type != XPATH_AST_STRING && a->type != XPATH_AST_NUMBER)) {
+        /* Finding 6 (the fold crasher, xslt_astcache_uaf_fold.bin):
+         * NUMBER literals carry NULL value — the number rides
+         * number_value — and every fold below strlens ->value, so a
+         * numeric argument crashed strlen(NULL). The fold is a
+         * STRING-literal optimization; numbers go the generic path. */
+        if (!a || a->type != XPATH_AST_STRING || !a->value) {
             return 0;
         }
-        if (a->type == XPATH_AST_STRING && !a->value) return 0;
     }
 
     if (strcmp(name, "concat") == 0) {
