@@ -25,7 +25,7 @@ env:
   # The rust crate links the C library instead of vendoring it, so
   # its leg builds the SAME engine tag the published ruby/py/wasm
   # pins carry.
-  ENGINE_TAG: v1.9.425
+  ENGINE_TAG: v1.9.426
 
 jobs:
   byte-identical:
@@ -58,8 +58,8 @@ jobs:
       - name: Install the published bindings
         run: |
           set -euo pipefail
-          gem install leptris -v 1.9.425.0
-          pip install "leptris==1.9.425.0"
+          gem install leptris -v 1.9.426.0
+          pip install "leptris==1.9.426.0"
           npm install --no-audit --no-fund
 
       - name: Build the shared engine library (the rust leg links it)
