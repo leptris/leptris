@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.426] - 2026-11-17
+
+### Fixed
+
+- the FN carrier adopts its closure body (SOTA C1 finding 6, part 3) (xpath)
+- the constant-fold admitted NUMBER literals and strlen'd their NULL value (SOTA C1 finding 6, fold crasher) (xpath)
+- transient compiles promote to exec-lifetime (SOTA C1 finding 6, part 2) (xslt)
+- the fast eval path ran its VM on an unpinned bytecode borrow (SOTA C1 finding 6) (xpath)
+- the dynamic call's blind text-node cast crashed (SOTA C1) (xpath)
+
+
+
 ## [1.9.425] - 2026-11-16
 
 ### Fixed
