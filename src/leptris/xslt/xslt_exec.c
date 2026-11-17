@@ -525,6 +525,56 @@ static void xslt_avt_free(XsltExec* ex) {
     }
 }
 
+/* Compile onto the exec-lifetime chain (finding 6, SOTA C1): the FN
+ * carrier's body is borrowed from its enclosing compiled expression,
+ * and a carrier can survive in a variable binding past that
+ * expression's natural scope. Transient compiles at the three
+ * dynamic sites (op_evaluate, the apply-imports caller-param loop,
+ * the @* pattern probe) therefore promote to transform lifetime —
+ * the v1 carrier contract ("borrowed ... transform-lifetime")
+ * becomes true instead of assumed. */
+typedef struct CompiledChain {
+    struct CompiledChain* next;
+    LeptrisXPathCompiled c;
+    char* expr;
+} CompiledChain;
+
+static LeptrisXPathCompiled xslt_exec_compile(XsltExec* ex,
+                                              const char* expr) {
+    /* Same text compiles once per transform (the AVT cache rule) —
+     * the @* probe dispatches per node and must not grow the chain. */
+    for (CompiledChain* e = (CompiledChain*)ex->compiled_cache; e;
+         e = e->next)
+        if (strcmp(e->expr, expr) == 0) return e->c;
+    LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+    if (!c) return NULL;
+    CompiledChain* link = (CompiledChain*)malloc(sizeof(*link));
+    if (!link) {
+        leptris_xpath_compiled_free(c);
+        return NULL;
+    }
+    link->expr = leptris_strdup(expr);
+    if (!link->expr) {
+        free(link);
+        leptris_xpath_compiled_free(c);
+        return NULL;
+    }
+    link->c = c;
+    link->next = (CompiledChain*)ex->compiled_cache;
+    ex->compiled_cache = link;
+    return c;
+}
+
+static void xslt_compiled_cache_free(XsltExec* ex) {
+    while (ex->compiled_cache) {
+        CompiledChain* e = (CompiledChain*)ex->compiled_cache;
+        ex->compiled_cache = e->next;
+        leptris_xpath_compiled_free(e->c);
+        free(e->expr);
+        free(e);
+    }
+}
+
 /* Evaluate an attribute-value template: "a{expr}b" pieces are
  * concatenated; {{ and }} are literal braces (§7.1.1). */
 static char* eval_avt(XsltExec* ex, const char* tmpl, LeptrisElement node) {
@@ -1315,7 +1365,7 @@ static int op_evaluate(XsltExec* ex, const XsltInstr* in,
     char* expr = leptris_xpath_result_string(xr);
     leptris_xpath_result_free(xr);
     if (!expr) return 0;
-    LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+    LeptrisXPathCompiled c = xslt_exec_compile(ex, expr);
     free(expr);
     if (!c) return 0;
     LeptrisElement ctx = NULL;
@@ -1347,7 +1397,8 @@ static int op_evaluate(XsltExec* ex, const XsltInstr* in,
     }
     struct leptris_xpath_result* r = ctx ? xslt_eval(ex, c, ctx) : NULL;
     xslt_pop_vars_to(ex, scope_mark);
-    leptris_xpath_compiled_free(c);
+    /* c rides the exec-lifetime chain (finding 6): its AST may hold
+     * a closure whose carrier escaped into a with-param binding. */
     if (!r) return 0;
     char* sv = value_of_string(ex, r);
     leptris_xpath_result_free(r);
@@ -3493,7 +3544,7 @@ static int builtin_no_match(XsltExec* ex, const char* mode,
      * the attribute templates operate on; the element's raw
      * attribute records do not share that layout. */
     {
-        LeptrisXPathCompiled at = leptris_xpath_compile("@*");
+        LeptrisXPathCompiled at = xslt_exec_compile(ex, "@*");
         if (at) {
             struct leptris_xpath_result* ar = xslt_eval(ex, at, node);
             size_t an = ar ? leptris_xpath_result_count(ar) : 0;
@@ -3506,7 +3557,6 @@ static int builtin_no_match(XsltExec* ex, const char* mode,
                     rc = xslt_invoke_template(ex, best, a, NULL);
             }
             if (ar) leptris_xpath_result_free(ar);
-            leptris_xpath_compiled_free(at);
         }
     }
     if (rc) return rc;
@@ -4844,6 +4894,7 @@ void xslt_exec_free(XsltExec* ex) {
     xslt_ufn_free(ex);
     xslt_gids_free(ex);
     xslt_avt_free(ex);
+    xslt_compiled_cache_free(ex);
     if (ex->fn_result) leptris_xpath_result_free(ex->fn_result);
     while (ex->vars) xslt_pop_var(ex, NULL);
     if (ex->caller_param_names) {
@@ -4961,10 +5012,11 @@ static XsltExec* transform_doc_ex(const XsltStylesheet* sheet,
                 ex->eval_error = 1;
                 break;
             }
-            LeptrisXPathCompiled c = leptris_xpath_compile(expr);
+            LeptrisXPathCompiled c = xslt_exec_compile(ex, expr);
             if (!c) { ex->eval_error = 1; break; }
             struct leptris_xpath_result* v = xslt_eval(ex, c, globals_ctx);
-            leptris_xpath_compiled_free(c);
+            /* c rides the exec-lifetime chain (finding 6): the carrier
+             * it produced is about to become a caller binding. */
             if (!v) { ex->eval_error = 1; break; }
             xslt_push_var(ex, ex->caller_param_names[i], v);
             /* keep the §11 call-template reset point current while

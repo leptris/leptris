@@ -741,6 +741,16 @@ typedef struct xslt_exec {
      * expression text). Freed by xslt_exec_free. */
     void* avt_cache;
 
+    /* xslt_exec.c: TRANSIENT compiled expressions promoted to
+     * exec-lifetime (finding 6, SOTA C1). The FN carrier's body is
+     * borrowed from its enclosing compiled expression — the carrier
+     * may survive in a variable binding past the borrowing expr's
+     * natural scope (op_evaluate's dynamic compile, the
+     * apply-imports caller-param loop, the @* pattern probe), so
+     * those compiles move onto this chain and free at transform end
+     * like the AVT cache. Freed by xslt_exec_free. */
+    void* compiled_cache;
+
     /* RTF ownership chain: result-tree-fragment documents built by
      * <xsl:variable> bodies whose lifetime must outlive the
      * nodeset that references their nodes (§11.4 — the spec calls
