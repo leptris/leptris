@@ -274,9 +274,15 @@ jobs:
       - name: Build twice from identical inputs
         run: |
           set -euo pipefail
+          # -frandom-seed: GCC derives its local-symbol suffix seed from
+          # the input PATH, so two side-by-side build dirs produce
+          # different symbol names inside the .o files and the pair can
+          # never match (the smoke failed on exactly that since birth).
+          # A fixed seed makes the two builds byte-comparable.
           CONFIG="-G Ninja -DLEPTRIS_BUILD_CLI=OFF -DBUILD_TESTING=OFF \
                   -DCMAKE_BUILD_TYPE=Release -DLEPTRIS_ENABLE_ICONV=OFF \
-                  -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON"
+                  -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON \
+                  -DCMAKE_C_FLAGS=-frandom-seed=leptris"
           cmake -B build-a -S . $CONFIG
           cmake --build build-a --target leptris_static leptris_shared -j 4
           cmake -B build-b -S . $CONFIG
