@@ -313,13 +313,134 @@ static int list_consumes_attr(RngVal* v, RngPattern* head,
     return 0;
 }
 
-/* Check the attribute patterns against e's actual attributes. */
+/* ---- ruby#2079: whole-branch attribute-choice selection ----------
+ * A <choice> of attribute branches must pick EXACTLY ONE branch as
+ * a set: per-attribute existence over the union of branches let
+ * attributes from different branches combine (openmath2.rng's OMF
+ * admitted dec AND hex). The selection map assigns one branch per
+ * attr-choice node; the walkers consult it. Unassigned choices keep
+ * the union semantics (collection contexts). */
+#define RNG_ATTR_SEL_MAX 16
+#define RNG_ATTR_SEARCH_MAX_DEPTH 12
+
+typedef struct {
+    RngPattern* choice;
+    RngPattern* branch;
+} AttrSelEntry;
+typedef struct {
+    AttrSelEntry e[RNG_ATTR_SEL_MAX];
+    size_t n;
+} AttrSel;
+
+static int check_required_list_sel(RngVal* v, RngPattern* head,
+                                   LeptrisElement e, const AttrSel* sel);
 static int check_required_list(RngVal* v, RngPattern* head,
                                LeptrisElement e) {
+    return check_required_list_sel(v, head, e, NULL);
+}
+
+static RngPattern* attr_sel_branch(const AttrSel* sel,
+                                   const RngPattern* choice) {
+    if (!sel) return NULL;
+    for (size_t i = 0; i < sel->n; i++)
+        if (sel->e[i].choice == choice) return sel->e[i].branch;
+    return NULL;
+}
+
+static int list_consumes_attr_sel(RngVal* v, RngPattern* head,
+                                  LeptrisElement e, const char* name,
+                                  const AttrSel* sel);
+static int pattern_consumes_attr_sel(RngVal* v, RngPattern* p,
+                                     LeptrisElement e, const char* name,
+                                     const AttrSel* sel) {
+    if (sel) {
+        RngPattern* b = attr_sel_branch(sel, p);
+        if (p->kind == RNG_CHOICE && b)
+            return list_consumes_attr_sel(v, b, e, name, sel);
+        if (p->kind == RNG_CHOICE && !b && p->first_child &&
+            p->first_child->kind == RNG_ATTRIBUTE &&
+            !p->first_child->next) {
+            /* A single-attribute choice with no assignment is
+             * decided by the attribute itself (its own union). */
+        }
+    }
+    return list_consumes_attr_sel(v, p->first_child, e, name, sel);
+}
+
+static int node_consumes_attr_sel(RngVal* v, RngPattern* c,
+                                  LeptrisElement e, const char* name,
+                                  const AttrSel* sel);
+static int list_consumes_attr_sel(RngVal* v, RngPattern* head,
+                                  LeptrisElement e, const char* name,
+                                  const AttrSel* sel) {
     for (RngPattern* c = head; c; c = c->next) {
+        if (node_consumes_attr_sel(v, c, e, name, sel)) return 1;
+    }
+    return 0;
+}
+
+/* ONE node — a branch selection must not walk the sibling chain
+ * (ruby#2079: the choice's children are siblings; a branch walk that
+ * follows ->next crosses into the OTHER branches). */
+static int node_consumes_attr_sel(RngVal* v, RngPattern* c,
+                                  LeptrisElement e, const char* name,
+                                  const AttrSel* sel) {
+    {
+        switch (c->kind) {
+            case RNG_ATTRIBUTE:
+                if (c->any_name) {
+                    const char* got = leptris_element_attribute(e, name);
+                    return attr_content_satisfied(v, c, got ? got : "");
+                }
+                if (c->name && strcmp(c->name, name) == 0) {
+                    const char* got = leptris_element_attribute(e, name);
+                    return attr_content_satisfied(v, c, got ? got : "");
+                }
+                break;
+            case RNG_OPTIONAL: case RNG_ZERO_OR_MORE:
+            case RNG_GROUP: case RNG_INTERLEAVE:
+                if (pattern_consumes_attr_sel(v, c, e, name, sel)) return 1;
+                break;
+            case RNG_CHOICE: {
+                RngPattern* b = attr_sel_branch(sel, c);
+                if (b) {
+                    if (node_consumes_attr_sel(v, b, e, name, sel))
+                        return 1;
+                    break;
+                }
+                /* Unassigned: union semantics (collection contexts). */
+                if (pattern_consumes_attr(v, c, e, name)) return 1;
+                break;
+            }
+            case RNG_REF: {
+                RngDefine* d = find_define(v->g, c->name);
+                if (d && d->body &&
+                    list_consumes_attr_sel(v, d->body, e, name, sel))
+                    return 1;
+                break;
+            }
+            default: break;
+        }
+    }
+    return 0;
+}
+
+static int check_required_node_sel(RngVal* v, RngPattern* c,
+                                   LeptrisElement e, const AttrSel* sel);
+static int check_required_list_sel(RngVal* v, RngPattern* head,
+                                   LeptrisElement e, const AttrSel* sel) {
+    for (RngPattern* c = head; c; c = c->next) {
+        if (!check_required_node_sel(v, c, e, sel)) return 0;
+    }
+    return 1;
+}
+
+static int check_required_node_sel(RngVal* v, RngPattern* c,
+                                   LeptrisElement e, const AttrSel* sel) {
+    {
         switch (c->kind) {
             case RNG_ATTRIBUTE: {
-                if (c->any_name) break;   /* wildcard: satisfiable */
+                if (c->any_name) break;
                 const char* got = leptris_element_attribute(e, c->name);
                 if (!got) {
                     diag(v, LEPTRIS_DIAG_MISSING_REQUIRED_ATTR,  e,
@@ -330,33 +451,121 @@ static int check_required_list(RngVal* v, RngPattern* head,
                 break;
             }
             case RNG_GROUP: case RNG_INTERLEAVE: case RNG_ONE_OR_MORE:
-                if (!check_required_list(v, c->first_child, e)) return 0;
+                if (!check_required_list_sel(v, c->first_child, e, sel))
+                    return 0;
                 break;
             case RNG_REF: {
-                /* #1164: a required attribute behind <ref> is as
-                 * required as an inline one — metanorma bibdata
-                 * schemas are ref'd attribute groups throughout */
                 RngDefine* d = find_define(v->g, c->name);
                 if (d && d->body &&
-                    !check_required_list(v, d->body, e))
+                    !check_required_list_sel(v, d->body, e, sel))
                     return 0;
                 break;
             }
-            case RNG_CHOICE:
-                /* Simplified: any alternative with all its attrs. */
-                if (!check_required_list(v, c->first_child, e)) return 0;
+            case RNG_CHOICE: {
+                RngPattern* b = attr_sel_branch(sel, c);
+                if (b) {
+                    if (!check_required_node_sel(v, b, e, sel)) return 0;
+                    break;
+                }
+                int any_ok = 0;
+                for (RngPattern* alt = c->first_child; alt && !any_ok;
+                     alt = alt->next) {
+                    v->failed = 0;
+                    v->err[0] = 0;
+                    any_ok = check_required_list_sel(v, alt, e, sel);
+                }
+                if (!any_ok) return 0;
                 break;
+            }
             default: break;
         }
     }
     return 1;
 }
 
-static int check_required_attrs(RngVal* v, RngPattern* p, LeptrisElement e) {
-    return check_required_list(v, p->first_child, e);
+/* Collect the attr-consuming CHOICE nodes through the content
+ * (refs expanded, depth-capped). */
+static void collect_attr_choices(RngVal* v, RngPattern* p, int depth,
+                                 AttrSel* out) {
+    if (!p || depth > 24) return;
+    for (RngPattern* c = p->first_child; c; c = c->next) {
+        if (c->kind == RNG_CHOICE) {
+            int consumes = 0;
+            for (RngPattern* b = c->first_child; b && !consumes;
+                 b = b->next)
+                if (b->kind == RNG_ATTRIBUTE) consumes = 1;
+            if (consumes && out->n < RNG_ATTR_SEL_MAX) {
+                out->e[out->n].choice = c;
+                out->e[out->n].branch = NULL;
+                out->n++;
+            }
+        }
+        if (c->kind == RNG_REF) {
+            RngDefine* d = find_define(v->g, c->name);
+            if (d && d->body) collect_attr_choices(v, d->body, depth + 1, out);
+            continue;
+        }
+        collect_attr_choices(v, c, depth + 1, out);
+    }
+}
+
+static int check_required_attrs_sel(RngVal* v, RngPattern* p,
+                                    LeptrisElement e, const AttrSel* sel) {
+    return check_required_list_sel(v, p->first_child, e, sel);
+}
+
+/* One candidate assignment: every instance attribute consumed, every
+ * requirement satisfied — under THIS selection. */
+static int match_attrs_with_sel(RngVal* v, RngPattern* content,
+                                LeptrisElement e, const AttrSel* sel) {
+    v->failed = 0;
+    v->err[0] = 0;
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(e);
+         a; a = leptris_attr_next(a)) {
+        if (!pattern_consumes_attr_sel(v, content, e, attr_cname(a), sel))
+            return 0;
+    }
+    return check_required_attrs_sel(v, content, e, sel);
+}
+
+/* The bounded assignment search: one branch per attr-choice. */
+static int attr_sel_search(RngVal* v, RngPattern* content,
+                           LeptrisElement e, AttrSel* sel, int depth) {
+    if (depth > RNG_ATTR_SEARCH_MAX_DEPTH) return 0;
+    for (size_t i = 0; i < sel->n; i++) {
+        if (sel->e[i].branch) continue;
+        for (RngPattern* b = sel->e[i].choice->first_child; b;
+             b = b->next) {
+            sel->e[i].branch = b;
+            v->failed = 0;
+            v->err[0] = 0;
+            if (attr_sel_search(v, content, e, sel, depth + 1)) return 1;
+            sel->e[i].branch = NULL;
+        }
+        return 0;
+    }
+    return match_attrs_with_sel(v, content, e, sel);
+}
+
+static int check_required_attrs(RngVal* v, RngPattern* p,
+                                LeptrisElement e) {
+    return check_required_list_sel(v, p->first_child, e, NULL);
 }
 
 static int match_attrs(RngVal* v, RngPattern* content, LeptrisElement e) {
+    /* ruby#2079: attr-consuming choices exist → whole-branch
+     * selection search. Otherwise the union path is exact. */
+    AttrSel sel;
+    memset(&sel, 0, sizeof(sel));
+    collect_attr_choices(v, content, 0, &sel);
+    if (sel.n > 0) {
+        if (attr_sel_search(v, content, e, &sel, 0)) return 1;
+        diag(v, LEPTRIS_DIAG_ATTR_NOT_ALLOWED,  e,
+             "attribute combination matches no branch of the "
+             "attribute choice", NULL);
+        return 0;
+    }
     /* Every instance attribute must be consumed by the content. */
     for (struct leptris_attribute* a = leptris_element_get_first_attribute(e);
          a; a = leptris_attr_next(a)) {
