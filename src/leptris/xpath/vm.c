@@ -1622,18 +1622,27 @@ static int vm_apply_binary_op(XPathVM* vm, XPathContext* ctx,
 
                 /* Issue #514: transfer synthetic-node ownership from
                  * the operands — see the twin fix in
-                 * evaluator_operators.c. */
-                if (ln && rn) {
-                    result->value.nodeset_value->owns_attributes =
-                        ln->owns_attributes || rn->owns_attributes;
-                    result->value.nodeset_value->owns_namespaces =
-                        ln->owns_namespaces || rn->owns_namespaces;
-                    result->value.nodeset_value->owns_synthetic_text =
-                        ln->owns_synthetic_text ||
-                        rn->owns_synthetic_text;
+                 * evaluator_operators.c. PER SIDE (finding 8): the
+                 * concat above runs on one leg when the other is
+                 * empty (rn/ln NULL), and gating the transfer on
+                 * `ln && rn` left the result sharing an owned node
+                 * the owning operand still freed at cleanup — the
+                 * pushed result handed out disposed memory. */
+                result->value.nodeset_value->owns_attributes =
+                    (ln ? ln->owns_attributes : 0) ||
+                    (rn ? rn->owns_attributes : 0);
+                result->value.nodeset_value->owns_namespaces =
+                    (ln ? ln->owns_namespaces : 0) ||
+                    (rn ? rn->owns_namespaces : 0);
+                result->value.nodeset_value->owns_synthetic_text =
+                    (ln ? ln->owns_synthetic_text : 0) ||
+                    (rn ? rn->owns_synthetic_text : 0);
+                if (ln) {
                     ln->owns_attributes = 0;
                     ln->owns_namespaces = 0;
                     ln->owns_synthetic_text = 0;
+                }
+                if (rn) {
                     rn->owns_attributes = 0;
                     rn->owns_namespaces = 0;
                     rn->owns_synthetic_text = 0;
