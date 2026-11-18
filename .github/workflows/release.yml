@@ -260,3 +260,17 @@ jobs:
   # (that dispatch mints repository: leptris/leptris-py and matches
   # the registration; the pin bump lives in leptris-py.)
   # ─────────────────────────────────────────────────────────────────────────
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Gate C3 (#2050): the per-release build manifest rides the release.
+  # The reusable workflow builds every platform leg from the tag, hashes
+  # the artifacts, and attaches manifest.json to the GitHub Release —
+  # the exact hook its own header documents (tested by the standalone
+  # dispatch path on v1.9.367-era tags and on v1.9.427).
+  # ─────────────────────────────────────────────────────────────────────────
+  manifest:
+    name: Build manifest (C3)
+    needs: tag-and-release
+    uses: ./.github/workflows/build-manifests.yml
+    with:
+      tag: ${{ needs.tag-and-release.outputs.tag }}
