@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [1.9.427] - 2026-11-18
+
+### Fixed
+
+- <data> content lexes through the XSD builtin library (leptris#2080) (rng)
+- a choice of attributes selects exactly one branch as a set (leptris#2079) (rng)
+- wrapper bodies match as implicit groups (leptris#2078) (rng)
+- the union transfers ownership per side (SOTA C1 finding 8) (xpath)
+- the dispatch name-key lists dedupe their templates (SOTA C1 finding 7) (xslt)
+- the bytecode compiles from the slot's graph, not the handle's (SOTA C1 finding 6, last edge) (xpath)
+
+
+
 ## [1.9.426] - 2026-11-17
 
 ### Fixed
