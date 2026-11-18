@@ -4,12 +4,21 @@
 
 ### Fixed
 
-- <data> content lexes through the XSD builtin library (leptris#2080) (rng)
-- a choice of attributes selects exactly one branch as a set (leptris#2079) (rng)
-- wrapper bodies match as implicit groups (leptris#2078) (rng)
-- the union transfers ownership per side (SOTA C1 finding 8) (xpath)
-- the dispatch name-key lists dedupe their templates (SOTA C1 finding 7) (xslt)
-- the bytecode compiles from the slot's graph, not the handle's (SOTA C1 finding 6, last edge) (xpath)
+The fuzz-lane's memory-safety wave plus the OpenMath2 RELAX NG
+conformance wave — seven fixes in two days, every one from a
+standalone-reproducible input.
+
+- **xpath: the bytecode compiled from the wrong cache graph** (SOTA C1 finding 6, the last edge). Same expression text can hold different parses in different cache records — a compiled handle may carry the graveyard's graph (its insert pinned a pre-eviction parse) while the live slot holds a fresher one. The eval path compiled bytecode from the handle's graph but stored it under the expression key, so the slot's later holders ran bytecode whose constants pointed into a graph only the old handle kept alive, and the handle's teardown freed it under them. The bytecode now compiles from **the slot's own graph**; the crash regime went from 90-seconds-to-UAF to 2.2M clean runs.
+- **xslt: the dispatch key lists dedupe their templates** (SOTA C1 finding 7). `match="…|t|…|t"` names the same leaf twice; every alternative appended the same template to the same dispatch key, running `k->n` past the allocation (heap-buffer-overflow at stylesheet parse). Both append sites dedupe per key — which also stops a template dispatching twice per node.
+- **xpath: the union transfers ownership per side** (SOTA C1 finding 8). The union concatenated one leg when the other operand was empty but gated the #514 ownership transfer on both legs — a carrier nodeset unioned with an empty operand left the result sharing an owned node the owning operand freed at cleanup. The transfer is per side.
+- **rng: wrapper bodies match as implicit groups** (#2078). `optional`/`zeroOrMore`/`oneOrMore` matched only their first child; the XML form flattens multi-child wrapper bodies as siblings (Jing §4.10) — openmath2.rng's OMATP `(a,b)+` rejected `<a/><b/>` while claiming to expect `b`. The three wrappers walk the whole child chain; `oneOrMore` repeats it whole.
+- **rng: a choice of attributes selects exactly one branch as a set** (#2079). Per-attribute existence over the union of branches admitted `dec` AND `hex` together on OMF while the required pass demanded both. The attribute walkers carry a selection map (one branch per attr-choice, refs expanded, bounded search); a branch walks as a single node — the choice's children are siblings, and the old list walk crossed branches.
+- **rng: `<data>` content lexes through the XSD builtin library** (#2080). `data_lexical_ok` handled only `integer`; base64Binary validated `not-base64!!!`. Known XSD types route through the engine's builtin lexers — one shared lexical space with the XSD validator (base64 padding/remainder rules, hex even-length; unknown types stay permissive per the RNG fallback contract).
+
+### Tooling
+
+- The C1 lane's corpus now carries every pinned input from all eight findings (four UAF/SEGV classes, one overflow, two RNG conformance shapes); the nightly's grammar-aware generator regenerates 200 deep structures per run over them.
+
 
 
 
