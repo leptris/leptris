@@ -77,7 +77,19 @@ static struct leptris_xpath_result* compiled_eval_bc_pinned(
                                   &ce);
     LeptrisXPathBytecode* bc = hit ? ce.bc : NULL;
     if (hit && !bc) {
-        bc = leptris_xpath_compile_ast(compiled->ast);
+        /* Finding 6, the last edge: compile from THE SLOT'S graph
+         * (ce.ast), never from compiled->ast. Same expression text
+         * can have DIFFERENT parses in different records: this
+         * compiled handle may hold the graveyard's graph (its insert
+         * pinned a pre-eviction parse) while the live slot holds a
+         * fresher parse of the same text. Bytecode compiled from
+         * compiled->ast but STORED into the slot paired its constants
+         * with a graph the slot does not own — the slot's later
+         * holders ran bytecode whose constants pointed into a graph
+         * only the old handle kept alive, and the handle's teardown
+         * freed that graph under them (the nightly's UAF at
+         * evaluate_function_call_impl). */
+        bc = leptris_xpath_compile_ast(ce.ast);
         if (bc) {
             xpath_ast_cache_store_bc(compiled->expr,
                                      compiled->expr_len, bc);
