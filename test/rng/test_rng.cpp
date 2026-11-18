@@ -1783,8 +1783,8 @@ TEST(Rng2079AttrChoice, ExactlyOneBranchWins) {
     LeptrisStatus st = LEPTRIS_OK;
     struct { const char* doc; int want; const char* why; } cases[] = {
         {"<OMF dec=\"0.5\"/>", 1, "dec alone: the dec branch"},
-        {"<OMF hex=\"A\"/>", 1, "hex alone: the hex branch"},
-        {"<OMF dec=\"0.5\" hex=\"A\"/>", 0,
+        {"<OMF hex=\"4142\"/>", 1, "hex alone (even-length hex): the hex branch"},
+        {"<OMF dec=\"0.5\" hex=\"A\"/>", 0,  /* also: A is invalid hexBinary */
          "both attributes: two branches at once must reject"},
         {"<OMF/>", 0, "neither: the choice is required"},
         {"<OMF id=\"x\" dec=\"0.5\"/>", 1,
@@ -1797,5 +1797,55 @@ TEST(Rng2079AttrChoice, ExactlyOneBranchWins) {
             << c.why << " — doc: " << c.doc;
         leptris_document_free(d);
     }
+    leptris_rng_free(rng);
+}
+
+/* ---- leptris#2080: <data> content lexes through the XSD builtins -- */
+
+TEST(Rng2080Data, Base64BinaryLexes) {
+    /* openmath2.rng's OMB: element content typed base64Binary must
+     * actually lex — "not-base64!!!" validated before the dispatch
+     * reached the engine's builtin lexers. */
+    const char* schema =
+        "<element name=\"OMB\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<data type=\"base64Binary\"/></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; } cases[] = {
+        {"<OMB>not-base64!!!</OMB>", 0},
+        {"<OMB>aGVsbG8=</OMB>", 1},          /* "hello" */
+        {"<OMB>AB==</OMB>", 1},              /* padded */
+        {"<OMB>A===</OMB>", 0},              /* over-padded */
+        {"<OMB>AB</OMB>", 1},                /* unpadded 2 bytes */
+        {"<OMB>ABC</OMB>", 1},   /* unpadded 3 chars: 2 bytes */               /* remainder 1 byte */
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << "doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2080Data, HexBinaryLexes) {
+    const char* schema =
+        "<element name=\"H\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<data type=\"hexBinary\"/></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string("<H>zz</H>", strlen("<H>zz</H>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    leptris_document_free(d);
+    d = leptris_parse_string("<H>0A</H>", strlen("<H>0A</H>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
     leptris_rng_free(rng);
 }
