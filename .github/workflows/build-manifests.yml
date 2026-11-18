@@ -138,18 +138,6 @@ jobs:
 
       # Windows has no `cc`; the MSVC cl.exe path comes out of CMakeCache
       # after configure, and its FileVersion is the compiler version.
-      - name: Record toolchain (Windows / MSVC)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $cl = (Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_C_COMPILER:FILEPATH=(.+)$').Matches[0].Groups[1].Value
-          $ver = (Get-Item $cl).VersionInfo.FileVersion
-          Add-Content $env:GITHUB_ENV "MANIFEST_COMPILER=MSVC cl.exe $ver"
-          Add-Content $env:GITHUB_ENV "MANIFEST_CMAKE=$(cmake --version | Select-Object -First 1)"
-          Add-Content $env:GITHUB_ENV "MANIFEST_COMMIT=$(git rev-parse HEAD)"
-          $v = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
-          Add-Content $env:GITHUB_ENV "MANIFEST_VERSION=$v"
-
       - name: Configure (non-Windows)
         if: runner.os != 'Windows'
         run: |
@@ -181,6 +169,25 @@ jobs:
             -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
             -DCMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
             -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
+
+      - name: Record toolchain (Windows / MSVC)
+        # AFTER Configure: the step reads the compiler path out of the
+        # CMake cache, which only exists once configure has run (the
+        # pre-configure placement failed since birth — the cache file
+        # did not exist yet).
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $m = Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_C_COMPILER:FILEPATH=(.+)$' |
+                 Select-Object -First 1
+          if (-not $m) { throw "CMAKE_C_COMPILER not found in build/CMakeCache.txt" }
+          $cl = $m.Matches[0].Groups[1].Value
+          $ver = (Get-Item $cl).VersionInfo.FileVersion
+          Add-Content $env:GITHUB_ENV "MANIFEST_COMPILER=MSVC cl.exe $ver"
+          Add-Content $env:GITHUB_ENV "MANIFEST_CMAKE=$(cmake --version | Select-Object -First 1)"
+          Add-Content $env:GITHUB_ENV "MANIFEST_COMMIT=$(git rev-parse HEAD)"
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          Add-Content $env:GITHUB_ENV "MANIFEST_VERSION=$v"
 
       - name: Build
         run: cmake --build build --config Release
