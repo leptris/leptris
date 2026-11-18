@@ -36,9 +36,19 @@ char* leptris_encoding_parse_declaration(const char* xml, size_t len) {
         return NULL;
     }
 
-    /* Find encoding=" */
-    const char* encoding_start = strstr(xml, "encoding");
-    if (!encoding_start || encoding_start - xml > (long)len) {
+    /* Find encoding= — BOUNDED: the buffer is NOT NUL-terminated on
+     * every caller (the fuzz harness passes exact-size buffers; the
+     * unbounded strstr read past the end — SOTA C1 finding 9,
+     * fx-art-crash-653f55991b38). */
+    const char* limit = xml + len;
+    const char* encoding_start = NULL;
+    for (const char* p = xml; p + 8 <= limit; p++) {
+        if (memcmp(p, "encoding", 8) == 0) {
+            encoding_start = p;
+            break;
+        }
+    }
+    if (!encoding_start) {
         return NULL;
     }
 

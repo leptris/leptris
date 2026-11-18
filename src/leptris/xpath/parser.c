@@ -507,6 +507,30 @@ static XPathASTNode* parse_expr(XPathParser* parser) {
 XPathASTNode* xpath_parse(XPathParser* parser) {
     if (!parser) return NULL;
 
+    /* Nesting fence: the parse chain recurses per '(' / '[' — a
+     * pathological expression dies on the C stack before any bound.
+     * The tokens are already lexed, so one O(n) scan measures the
+     * exact nesting depth and fails cleanly past the fence (SOTA C1,
+     * nightly 44278536885, crash-94a0fc23: '[[[[...' × thousands). */
+    {
+        int cur = 0, max = 0;
+        for (size_t i = 0; i < parser->token_count; i++) {
+            int t = parser->tokens[i].type;
+            if (t == TOK_LPAREN || t == TOK_LBRACKET) {
+                if (++cur > max) max = cur;
+            } else if (t == TOK_RPAREN || t == TOK_RBRACKET) {
+                if (cur > 0) cur--;
+            }
+        }
+        if (max > 128) {
+            snprintf(parser->error_msg, sizeof(parser->error_msg),
+                     "expression nesting too deep (%d levels)", max);
+            leptris_set_error(LEPTRIS_ERROR_XPATH_SYNTAX,
+                              parser->error_msg);
+            return NULL;
+        }
+    }
+
     XPathASTNode* ast = parse_expr(parser);
     /* XPath 3.1 top-level sequence: Expr ::= ExprSingle ("," ExprSingle)*.
      * One member parses as itself; a comma list builds the sequence

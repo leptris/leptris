@@ -551,6 +551,20 @@ typedef struct xpath_text_node {
     struct leptris_element* owner;           /* Parent element */
 } XPathTextNode;
 
+/* Disposed-synthetic parking (SOTA C1, nightly 44085294402): the
+ * XPath-side heap nodes (LeptrisAttributeNode / LeptrisNamespaceNode
+ * / XPathTextNode) are SHARED by value across nodesets, sequences and
+ * variable bindings — no single set owns them exclusively, so a
+ * dispose by one holder must not free the struct (or its payload)
+ * out from under the others. xpath_nodeset_dispose_node therefore
+ * PARKS: the type byte moves to the sentinel below and the struct
+ * joins a thread-local graveyard (drained by
+ * leptris_xpath_drain_thread_caches at thread exit). Late readers see
+ * a defined dead node and defined-dead content instead of freed
+ * memory — the same contract as the XPATH_RESULT_CACHED result
+ * parking. */
+#define LEPTRIS_NODE_XPATH_PARKED ((LeptrisNodeType)127)
+
 /* XPath node union - type-safe wrapper for all XPath node types */
 typedef union xpath_node {
     LeptrisNodeType type;           /* First field for type checking */
@@ -673,6 +687,11 @@ typedef struct xpath_parser {
     size_t token_count;
     size_t token_pos;
     char error_msg[256];
+    int depth;                   /* Expression nesting fence — the
+                                  * parse_* chain recurses per '(' '['
+                                  * '!' and dies on the C stack past
+                                  * the fence (SOTA C1, nightly
+                                  * 44278536885 family). */
 } XPathParser;
 
 /* XPath nodeset - Holds typed node pointers (elements or attributes).

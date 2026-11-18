@@ -2895,3 +2895,80 @@ TEST(XPathDynCall, NonTextCalleeRefusesWithoutCrash) {
 
     leptris_document_free(doc);
 }
+
+/* SOTA C1 (nightly 44085294402, crash-cd79e090, fuzz_xslt): the
+ * XQuery binding producers (for / switch / HOF params) appended raw
+ * DOCUMENT nodes into nodesets flagged owns_synthetic_text=1 — the
+ * flag lied. When a predicate later DROPPED such a member,
+ * apply_predicates' dispose path freed a document-owned text node;
+ * the document tree then dangled (the nightly's UAF read the freed
+ * node from vm_apply_axis_child on a later axis step). The ownership
+ * contract: a set flag asserts a fact about EVERY member of that
+ * kind — producers that bind document nodes must leave the flag
+ * false (document nodes are never disposed), and flag transfers move
+ * exactly the owned members. These specs hold the two faces: the
+ * dropped binding must not free the document, and a surviving
+ * synthetic member must still be owned. */
+TEST(XPathDispose, ForLoopVarDropMustNotFreeDocumentText) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string("<r><t>a</t><t>b</t></r>", 23, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* The loop var binds the raw document text node; the body's
+     * predicate drops it from the var set. */
+    LeptrisXPathResult r =
+        leptris_xpath_eval(doc, root,
+                           "for $x in /r/t/text() return $x[false()]");
+    ASSERT_NE(r, nullptr) << "for-over-text with a false predicate errored";
+
+    /* The document must be intact after the drop. */
+    LeptrisXPathResult c =
+        leptris_xpath_eval(doc, root, "count(/r/t)");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(c), 2.0)
+        << "the dropped var binding must not free document text nodes";
+    leptris_xpath_result_free(c);
+
+    LeptrisXPathResult s =
+        leptris_xpath_eval(doc, root, "string-join(/r/t/text(), '')");
+    ASSERT_NE(s, nullptr);
+    char* sv = leptris_xpath_result_string(s);
+    ASSERT_NE(sv, nullptr);
+    EXPECT_STREQ(sv, "ab") << "text content must survive the dropped binding";
+    leptris_free_string(sv);
+    leptris_xpath_result_free(s);
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
+
+TEST(XPathDispose, SwitchNodeCaseDropMustNotFreeDocumentText) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc =
+        leptris_parse_string("<r><t>a</t><t>b</t></r>", 23, &st);
+    ASSERT_NE(doc, nullptr);
+    LeptrisElement root = leptris_document_root(doc);
+    ASSERT_NE(root, nullptr);
+
+    /* A nodeset operand binds AS NODES into the case variable; the
+     * arm's predicate drops every member of the binding. */
+    LeptrisXPathResult r =
+        leptris_xpath_eval(
+            doc, root,
+            "switch (/r/t/text()) case \"zz\" return 0"
+            " default return $x[false()]");
+    ASSERT_NE(r, nullptr) << "switch with a nodeset operand errored";
+
+    LeptrisXPathResult c =
+        leptris_xpath_eval(doc, root, "count(/r/t)");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(leptris_xpath_result_number(c), 2.0)
+        << "the case binding must not free document text nodes";
+    leptris_xpath_result_free(c);
+
+    leptris_xpath_result_free(r);
+    leptris_document_free(doc);
+}
