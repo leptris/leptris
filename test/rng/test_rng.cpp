@@ -1762,3 +1762,40 @@ TEST(Rng2078Wrappers, ZeroOrMoreOverMultiElementBody) {
     leptris_document_free(d);
     leptris_rng_free(rng);
 }
+
+/* ---- leptris#2079: a choice of attributes is exclusive ------------ */
+
+TEST(Rng2079AttrChoice, ExactlyOneBranchWins) {
+    /* openmath2.rng's OMF: <choice> of dec(hex? no—double) and hex —
+     * per-attribute existence over the union of branches admitted
+     * BOTH at once; the choice must pick exactly one branch as a
+     * set. */
+    const char* schema =
+        "<element name=\"OMF\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<optional><attribute name=\"id\"><data type=\"string\"/></attribute></optional>"
+        "<choice>"
+        "<attribute name=\"dec\"><data type=\"double\"/></attribute>"
+        "<attribute name=\"hex\"><data type=\"hexBinary\"/></attribute>"
+        "</choice></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMF dec=\"0.5\"/>", 1, "dec alone: the dec branch"},
+        {"<OMF hex=\"A\"/>", 1, "hex alone: the hex branch"},
+        {"<OMF dec=\"0.5\" hex=\"A\"/>", 0,
+         "both attributes: two branches at once must reject"},
+        {"<OMF/>", 0, "neither: the choice is required"},
+        {"<OMF id=\"x\" dec=\"0.5\"/>", 1,
+         "an optional attr outside the choice rides along"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
