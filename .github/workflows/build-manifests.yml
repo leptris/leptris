@@ -190,6 +190,8 @@ jobs:
       - name: Emit manifest fragment
         shell: bash
         env:
+          MANIFEST_PLATFORM: ${{ matrix.platform }}
+          MANIFEST_LEG: ${{ matrix.leg }}
           MANIFEST_FRAGMENT: manifest-fragments/${{ matrix.platform }}.json
         run: |
           mkdir -p manifest-fragments
@@ -287,7 +289,31 @@ jobs:
           B=$(find build-b -name 'libleptris.a' -type f | head -1)
           [ -n "$A" ] && [ -n "$B" ]
           sha256sum "$A" "$B"
-          cmp "$A" "$B"
+          if ! cmp "$A" "$B"; then
+            echo "::error::static libs differ — triage dump"
+            echo "--- first differing bytes (cmp -l) ---"
+            cmp -l "$A" "$B" | head -10 || true
+            echo "--- member headers: A ---"
+            ar tv "$A" | head -20
+            echo "--- member headers: B ---"
+            ar tv "$B" | head -20
+            echo "--- per-member content digests (first divergence) ---"
+            A_ABS=$(readlink -f "$A"); B_ABS=$(readlink -f "$B")
+            mkdir -p /tmp/mema /tmp/memb
+            (cd /tmp/mema && ar x "$A_ABS")
+            (cd /tmp/memb && ar x "$B_ABS")
+            for m in $(ls /tmp/mema); do
+              ha=$(sha256sum "/tmp/mema/$m" | cut -d' ' -f1)
+              hb=$(sha256sum "/tmp/memb/$m" 2>/dev/null | cut -d' ' -f1)
+              if [ "$ha" != "$hb" ]; then
+                echo "DIFFERS: $m"
+                echo "  a=$ha"
+                echo "  b=$hb"
+                objdump -t "/tmp/mema/$m" 2>/dev/null | head -5 || true
+              fi
+            done
+            exit 1
+          fi
           echo "static lib: byte-identical"
           SO_A=$(find build-a -name 'libleptris.so.*' -type f | head -1)
           SO_B=$(find build-b -name 'libleptris.so.*' -type f | head -1)
