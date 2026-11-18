@@ -40,6 +40,12 @@ jobs:
           cp test/fixtures/*.xml corpus/ || true
           printf '%s\n' '//record' '//*[@id="1"]' 'count(//item)' \
             '//a[1]/following-sibling::*' 'sum(//n)' > xpath_corpus/seeds
+          # Grammar-aware XML (#2051): well-formed documents with
+          # nesting, CDATA, DTD entities, namespaces, PIs — composed
+          # fresh each run so the parse leg anchors inside the
+          # grammar, not at byte-flip distance from it.
+          python3 test/fuzz/generators/gen_xml_seeds.py \
+            corpus/gen --seed "$GITHUB_RUN_NUMBER" --count 200
 
       - name: Fuzz parser (3 minutes)
         run: |
@@ -47,7 +53,7 @@ jobs:
             -max_total_time=180 \
             -max_len=65536 \
             -print_final_stats=1 \
-            corpus/
+            corpus/ corpus/gen/
 
       - name: Fuzz mutation engine (2 minutes)
         run: |
