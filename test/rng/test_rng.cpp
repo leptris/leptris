@@ -1849,3 +1849,121 @@ TEST(Rng2080Data, HexBinaryLexes) {
     leptris_document_free(d);
     leptris_rng_free(rng);
 }
+
+/* #2088: a combine="choice" merge wraps BOTH bodies in an implicit
+ * group (Jing §4.10) — the merged combinator's alternatives are
+ * whole bodies, not their first elements. A bare sibling chain as a
+ * branch made match_seq treat the pre-existing body's 2nd..nth
+ * elements as further ALTERNATIVES: <root><a/><b/></root> consumed
+ * a as the whole first alternative and stranded b ("element b not
+ * allowed here") — the openmath3 OMBIND shape. Same rule for
+ * combine="interleave" and for include overrides. */
+TEST(Rng2088CombineMerge, ChoiceBranchesAreWholeBodies) {
+    const char* schema =
+        "<grammar ns=\"http://ex\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<define name=\"content\">"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</define>"
+        "<define name=\"content\" combine=\"choice\">"
+        "<element name=\"c\"><empty/></element>"
+        "</define>"
+        "<start><element name=\"root\"><ref name=\"content\"/></element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<root xmlns=\"http://ex\"><a/></root>", 0,
+         "a alone: the base group requires b too"},
+        {"<root xmlns=\"http://ex\"><a/><b/></root>", 1,
+         "first body is a whole group: a AND b pass"},
+        {"<root xmlns=\"http://ex\"><c/></root>", 1, "the combined-in branch"},
+        {"<root xmlns=\"http://ex\"><a/><c/></root>", 0,
+         "mixing bodies: choice picks one branch, not both"},
+        {"<root xmlns=\"http://ex\"><b/></root>", 0,
+         "b alone: the group needs a first"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2088CombineMerge, InterleaveBranchesAreWholeBodies) {
+    const char* schema =
+        "<grammar ns=\"http://ex\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<define name=\"content\">"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</define>"
+        "<define name=\"content\" combine=\"interleave\">"
+        "<element name=\"c\"><empty/></element>"
+        "</define>"
+        "<start><element name=\"root\"><ref name=\"content\"/></element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<root xmlns=\"http://ex\"><a/><b/><c/></root>", 1,
+         "a,b from the base group; c merged in — any order"},
+        {"<root xmlns=\"http://ex\"><c/><b/><a/></root>", 0,
+         "interleave frees order BETWEEN branches, not within a "
+         "body's group (a precedes b)"},
+        {"<root xmlns=\"http://ex\"><a/><c/></root>", 0,
+         "b is required by the base group even merged"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2088CombineMerge, RepeatedChoiceMergeKeepsEarlierBodiesGrouped) {
+    /* Three merge hops: base(a,b) + choice(c) + choice(d) — every
+     * earlier body stays a whole group through the chain. */
+    const char* schema =
+        "<grammar ns=\"http://ex\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<define name=\"content\">"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</define>"
+        "<define name=\"content\" combine=\"choice\">"
+        "<element name=\"c\"><empty/></element>"
+        "</define>"
+        "<define name=\"content\" combine=\"choice\">"
+        "<element name=\"d\"><empty/></element>"
+        "</define>"
+        "<start><element name=\"root\"><ref name=\"content\"/></element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<root xmlns=\"http://ex\"><a/><b/></root>", 1,
+         "the original body through two merge hops"},
+        {"<root xmlns=\"http://ex\"><c/></root>", 1, "hop 1's branch"},
+        {"<root xmlns=\"http://ex\"><d/></root>", 1, "hop 2's branch"},
+        {"<root xmlns=\"http://ex\"><b/></root>", 0, "b alone still rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
