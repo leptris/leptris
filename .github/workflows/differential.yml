@@ -20,12 +20,18 @@ on:
 permissions:
   contents: read
 
+# Gate C3/A6 integration: the pins come from the LATEST RELEASE's
+# build-manifest.json (the "bindings" section the release workflow
+# records live from the registries) — the gate verifies exactly the
+# published set, machine-readably. The FALLBACK_* values exist only
+# for releases that predate build-manifest/2; they are the diffpins
+# train's last known-good set.
 env:
-  # The engine tag the four bindings ride (the binding pins' train).
-  # The rust crate links the C library instead of vendoring it, so
-  # its leg builds the SAME engine tag the published ruby/py/wasm
-  # pins carry.
-  ENGINE_TAG: v1.9.427
+  FALLBACK_ENGINE_TAG: v1.9.427
+  FALLBACK_GEM: 1.9.427.0
+  FALLBACK_PYPI: 1.9.427.0
+  FALLBACK_NPM: 0.1.62
+  FALLBACK_RS: 1.9.0
 
 jobs:
   byte-identical:
@@ -37,10 +43,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve the pins from the release manifest (C3)
+        id: pins
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          TAG=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          echo "engine_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release: $TAG"
+          if gh release download "$TAG" -p build-manifest.json \
+              -O /tmp/manifest.json --clobber 2>/dev/null; then
+            python3 - <<'PY'
+            import json, os
+            b = json.load(open("/tmp/manifest.json"))["bindings"]
+            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                for k in ("rubygems", "pypi", "npm", "crates_io"):
+                    key = {"rubygems": "gem", "pypi": "pypi",
+                           "npm": "npm", "crates_io": "rs"}[k]
+                    f.write(f"{key}={b[k]}\n")
+            print("pins from manifest:", b)
+            PY
+          else
+            echo "no build-manifest.json on $TAG — falling back to the hardcoded train"
+            for kv in "gem=$FALLBACK_GEM" "pypi=$FALLBACK_PYPI" \
+                      "npm=$FALLBACK_NPM" "rs=$FALLBACK_RS"; do
+              echo "$kv" >> "$GITHUB_OUTPUT"
+            done
+          fi
+        env:
+          FALLBACK_GEM: ${{ env.FALLBACK_GEM }}
+          FALLBACK_PYPI: ${{ env.FALLBACK_PYPI }}
+          FALLBACK_NPM: ${{ env.FALLBACK_NPM }}
+          FALLBACK_RS: ${{ env.FALLBACK_RS }}
+
       - name: Checkout the pinned engine (the rust leg links it)
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.ENGINE_TAG }}
+          ref: ${{ steps.pins.outputs.engine_tag }}
           path: engine-src
 
       - uses: ruby/setup-ruby@v1
@@ -56,11 +98,27 @@ jobs:
           node-version: "22"
 
       - name: Install the published bindings
+        env:
+          GEM_PIN: ${{ steps.pins.outputs.gem }}
+          PYPI_PIN: ${{ steps.pins.outputs.pypi }}
+          NPM_PIN: ${{ steps.pins.outputs.npm }}
+          RS_PIN: ${{ steps.pins.outputs.rs }}
         run: |
           set -euo pipefail
-          gem install leptris -v 1.9.427.0
-          pip install "leptris==1.9.427.0"
-          npm install --no-audit --no-fund
+          gem install leptris -v "$GEM_PIN"
+          pip install "leptris==$PYPI_PIN"
+          npm install --no-audit --no-fund "leptris@$NPM_PIN"
+          # The rs crate links (not vendors) — pin it to the manifest's
+          # version so the leg builds the same train (CI-side rewrite
+          # of the runner's Cargo.toml).
+          python3 - "$RS_PIN" <<'PY'
+          import re, sys
+          p = "rs-runner/Cargo.toml"
+          s = open(p).read()
+          s = re.sub(r'leptris = "=[^"]*"', f'leptris = "={sys.argv[1]}"', s)
+          open(p, "w").write(s)
+          print("rs-runner pin ->", sys.argv[1])
+          PY
 
       - name: Build the shared engine library (the rust leg links it)
         run: |

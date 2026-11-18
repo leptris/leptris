@@ -348,6 +348,38 @@ jobs:
           print(Path("build-manifest.json").read_text())
           PY
 
+      - name: Record the riding binding versions (A6/C3)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          from pathlib import Path
+
+          def get(url):
+              req = urllib.request.Request(
+                  url, headers={"User-Agent": "leptris-build-manifest"})
+              return json.load(urllib.request.urlopen(req, timeout=30))
+
+          gem = get("https://rubygems.org/api/v1/versions/"
+                    "leptris/latest.json")["version"]
+          pypi = get("https://pypi.org/pypi/leptris/json")["info"]["version"]
+          npm = get("https://registry.npmjs.org/leptris")[
+              "dist-tags"]["latest"]
+          rs = get("https://crates.io/api/v1/crates/leptris")[
+              "crate"]["max_stable_version"]
+
+          m = json.loads(Path("build-manifest.json").read_text())
+          m["schema"] = "leptris.build-manifest/2"
+          m["bindings"] = {
+              "rubygems": gem, "pypi": pypi, "npm": npm,
+              "crates_io": rs,
+          }
+          Path("build-manifest.json").write_text(
+              json.dumps(m, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(m["bindings"], indent=2))
+          PY
+
       - name: Job summary
         run: |
           echo "### Build manifest — ${TAG}" >> "$GITHUB_STEP_SUMMARY"
