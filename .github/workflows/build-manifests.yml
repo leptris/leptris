@@ -171,16 +171,21 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
 
       - name: Record toolchain (Windows / MSVC)
-        # AFTER Configure: the step reads the compiler path out of the
-        # CMake cache, which only exists once configure has run (the
-        # pre-configure placement failed since birth — the cache file
-        # did not exist yet).
+        # AFTER Configure: the compiler path is read from the
+        # CMake-generated CMakeCCompiler.cmake (build/CMakeFiles/*/),
+        # which every generator writes and which carries the full
+        # cl.exe path regardless of generator. The CMakeCache does not
+        # use a FILEPATH entry for it under the VS generator, so the
+        # cache is not a reliable source here.
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $m = Select-String -Path build/CMakeCache.txt -Pattern '^CMAKE_C_COMPILER:FILEPATH=(.+)$' |
+          $ccfile = Get-ChildItem -Path build/CMakeFiles -Recurse -Filter CMakeCCompiler.cmake |
+                    Select-Object -First 1
+          if (-not $ccfile) { throw "CMakeCCompiler.cmake not found under build/CMakeFiles" }
+          $m = Select-String -Path $ccfile.FullName -Pattern 'set\(CMAKE_C_COMPILER "([^"]+)"\)' |
                  Select-Object -First 1
-          if (-not $m) { throw "CMAKE_C_COMPILER not found in build/CMakeCache.txt" }
+          if (-not $m) { throw "compiler path not found in $($ccfile.FullName)" }
           $cl = $m.Matches[0].Groups[1].Value
           $ver = (Get-Item $cl).VersionInfo.FileVersion
           Add-Content $env:GITHUB_ENV "MANIFEST_COMPILER=MSVC cl.exe $ver"
