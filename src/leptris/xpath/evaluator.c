@@ -509,6 +509,8 @@ static LEPTRIS_THREAD_LOCAL struct {
     size_t nodeset_count;
     struct leptris_xpath_result* result_head;
     size_t result_count;
+    void* synth_parked_head;
+    size_t synth_parked_count;
 } g_xpath_tls;
 
 
@@ -518,6 +520,15 @@ static LEPTRIS_THREAD_LOCAL struct {
  * slot while on the free-list (smaller than adding a real next field
  * to the struct). */
 #define XPATH_RESULT_FREE_LIST_CAP 32
+
+/* One parked synthetic node: the node keeps its payload readable
+ * (defined-dead), the wrapper remembers the original kind for the
+ * drain. */
+typedef struct ParkedSynth {
+    struct ParkedSynth* next;
+    void* node;
+    LeptrisNodeType kind;
+} ParkedSynth;
 
 XPathNodeSet* xpath_nodeset_new(void) {
     return xpath_nodeset_new_with_capacity(XPATH_NODESET_INLINE_CAPACITY);
@@ -541,6 +552,31 @@ void leptris_xpath_drain_thread_caches(void) {
         g_xpath_tls.result_head = next;
     }
     g_xpath_tls.result_count = 0;
+    /* The parked synthetic nodes (LEPTRIS_NODE_XPATH_PARKED): the
+     * thread is exiting — no consumer can still reach them. */
+    while (g_xpath_tls.synth_parked_head) {
+        ParkedSynth* p = (ParkedSynth*)g_xpath_tls.synth_parked_head;
+        g_xpath_tls.synth_parked_head = p->next;
+        if (p->kind == LEPTRIS_NODE_ATTRIBUTE) {
+            LeptrisAttributeNode* attr = (LeptrisAttributeNode*)p->node;
+            LEPTRIS_FREE(attr->name);
+            LEPTRIS_FREE(attr->value);
+            LEPTRIS_FREE(attr->namespace_uri);
+            LEPTRIS_FREE(attr);
+        } else if (p->kind == LEPTRIS_NODE_NAMESPACE) {
+            LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)p->node;
+            LEPTRIS_FREE(ns->prefix);
+            LEPTRIS_FREE(ns->uri);
+            LEPTRIS_FREE(ns);
+        } else {
+            XPathTextNode* t = (XPathTextNode*)p->node;
+            LEPTRIS_FREE(t->content);
+            LEPTRIS_FREE(t);
+        }
+        LEPTRIS_FREE(p);
+        g_xpath_tls.synth_parked_count--;
+    }
+    g_xpath_tls.synth_parked_count = 0;
 }
 
 XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
@@ -595,27 +631,31 @@ XPathNodeSet* xpath_nodeset_new_with_capacity(size_t capacity) {
 }
 
 /* Dispose ONE heap-owned synthetic node (attribute/namespace/text).
- * Shared by xpath_nodeset_free and the in-place predicate filter,
- * which drops entries without removing the nodeset's ownership
- * (bug: filtered-out namespace nodes leaked — Linux LSan). */
+ * Shared by xpath_nodeset_free and the in-place predicate filter.
+ *
+ * SOTA C1 (nightly 44085294402): these nodes are SHARED by value
+ * across nodesets/sequences/bindings — no set owns them exclusively,
+ * and a dispose by one holder used to free the struct under the
+ * others (the filtered set dropped the node; the flag-losing alias
+ * still held it; the axis step read freed memory). The dispose now
+ * PARKS (LEPTRIS_NODE_XPATH_PARKED + the thread-local graveyard,
+ * drained at thread exit): repeat-dispose and any late read see a
+ * defined dead node instead of freed memory. */
 void xpath_nodeset_dispose_node(void* node) {
     if (!node) return;
-    if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_ATTRIBUTE) {
-        LeptrisAttributeNode* attr = (LeptrisAttributeNode*)node;
-        if (attr->name) LEPTRIS_FREE(attr->name);
-        if (attr->value) LEPTRIS_FREE(attr->value);
-        if (attr->namespace_uri) LEPTRIS_FREE(attr->namespace_uri);
-        LEPTRIS_FREE(attr);
-    } else if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_NAMESPACE) {
-        LeptrisNamespaceNode* ns = (LeptrisNamespaceNode*)node;
-        if (ns->prefix) LEPTRIS_FREE(ns->prefix);
-        if (ns->uri) LEPTRIS_FREE(ns->uri);
-        LEPTRIS_FREE(ns);
-    } else if (XPATH_NODE_TYPE(node) == LEPTRIS_NODE_TEXT) {
-        XPathTextNode* t = (XPathTextNode*)node;
-        if (t->content) LEPTRIS_FREE(t->content);
-        LEPTRIS_FREE(t);
-    }
+    int ty = (int)XPATH_NODE_TYPE(node);
+    if (ty == (int)LEPTRIS_NODE_XPATH_PARKED) return;
+    if (ty != LEPTRIS_NODE_ATTRIBUTE && ty != LEPTRIS_NODE_NAMESPACE &&
+        ty != LEPTRIS_NODE_TEXT)
+        return;
+    ParkedSynth* p = (ParkedSynth*)LEPTRIS_ALLOC(ParkedSynth);
+    if (!p) return;   /* un-parked: the node stays alive, leak over UAF */
+    p->node = node;
+    p->kind = (LeptrisNodeType)ty;
+    p->next = (ParkedSynth*)g_xpath_tls.synth_parked_head;
+    g_xpath_tls.synth_parked_head = p;
+    g_xpath_tls.synth_parked_count++;
+    XPATH_NODE_TYPE(node) = LEPTRIS_NODE_XPATH_PARKED;
 }
 
 void xpath_nodeset_free(XPathNodeSet* nodeset) {

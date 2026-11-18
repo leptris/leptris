@@ -241,7 +241,12 @@ XPathNodeSet* xpath_map_items_over(XPathContext* ctx, XPathNodeSet* ns,
                                    XPathASTNode* expr) {
     XPathNodeSet* out = xpath_nodeset_new();
     if (!out) return NULL;
-    out->owns_synthetic_text = 1;
+    /* The owns flags assert facts about EVERY member of the kind —
+     * this loop appends raw document nodes (the nodeset branch), so
+     * the text flag moves to the synth-append branch below. An
+     * eager flag over mixed members made apply_predicates' dispose
+     * free document-owned text nodes (SOTA C1, nightly
+     * 44085294402). */
     size_t n = ns ? ns->count : 0;
     struct leptris_element* saved_node = ctx->context_node;
     size_t saved_pos = ctx->context_position;
@@ -281,7 +286,10 @@ XPathNodeSet* xpath_map_items_over(XPathContext* ctx, XPathNodeSet* ns,
             XPathTextNode* tn =
                 synth_text(piece ? piece : "", piece ? strlen(piece) : 0);
             free(piece);
-            if (tn) xpath_nodeset_add(out, tn);
+            if (tn) {
+                xpath_nodeset_add(out, tn);
+                out->owns_synthetic_text = 1;
+            }
         }
         xpath_result_free(item);
     }
@@ -1003,6 +1011,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             return NULL;
         }
         out->owns_synthetic_text = 1;
+        /* Safe despite the raw element adds below: only TEXT/ATTR/NS
+         * members are ever disposed and every non-element member here
+         * is synth-wrapped — the raw members are exclusively ELEMENT
+         * nodes. */
         out->is_sequence = 1;
 
         XPathNodeSet* ns =
@@ -1100,6 +1112,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             XPathNodeSet* one = xpath_nodeset_new();
             if (!one) break;
             if (ns) {
+                /* Document node: the var set owns nothing (the
+                 * ownership flag asserts a fact about every member —
+                 * a lie here made the unbind dispose a document
+                 * node, SOTA C1 nightly 44085294402). */
                 xpath_nodeset_add(one, ns->nodes[i]);
             } else {
                 char* sv = xpath_to_string(domain);
@@ -1114,17 +1130,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         XPathTextNode* tn =
                             synth_text(marked, sl + 2);
                         free(marked);
-                        if (tn) xpath_nodeset_add(one, tn);
+                        if (tn) {
+                            xpath_nodeset_add(one, tn);
+                            one->owns_synthetic_text = 1;
+                        }
                     }
                     free(sv);
                 } else {
                     XPathTextNode* tn =
                         synth_text(sv ? sv : "", sv ? strlen(sv) : 0);
                     free(sv);
-                    if (tn) xpath_nodeset_add(one, tn);
+                    if (tn) {
+                        xpath_nodeset_add(one, tn);
+                        one->owns_synthetic_text = 1;
+                    }
                 }
-                /* synth members above are var-owned */
-                one->owns_synthetic_text = 1;
             }
             xpath_variable_set_nodeset(var, one);
             if (pos_var) {
@@ -1900,9 +1920,12 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             pname[pn] = 0;
             XPathNodeSet* one = xpath_nodeset_new();
             if (one) {
-                /* set_remove frees the nodeset — without this flag
-                 * the synthetic arg node leaks (48B, Linux LSan). */
-                one->owns_synthetic_text = 1;
+                /* set_remove frees the nodeset: the flag rides ONLY
+                 * the synth-append branches — carrier-node members
+                 * are document references and must never dispose
+                 * (a whole-set flag over mixed members freed a
+                 * document text node in the nightly, SOTA C1
+                 * 44085294402). */
                 if (ai < (size_t)ast->child_count) {
                     struct leptris_xpath_result* ar =
                         evaluate_expr(ctx, ast->children[ai]);
@@ -1928,7 +1951,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                             } else {
                                 XPathTextNode* tn = synth_text(
                                     mem[j], strlen(mem[j]));
-                                if (tn) xpath_nodeset_add(one, tn);
+                                if (tn) {
+                                    xpath_nodeset_add(one, tn);
+                                    one->owns_synthetic_text = 1;
+                                }
                             }
                             free(mem[j]);
                         }
@@ -1947,7 +1973,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                 synth_text(sv ? sv : "",
                                            sv ? strlen(sv) : 0);
                             free(sv);
-                            if (tn) xpath_nodeset_add(one, tn);
+                            if (tn) {
+                                xpath_nodeset_add(one, tn);
+                                one->owns_synthetic_text = 1;
+                            }
                             sv = NULL;
                         }
                         if (sv) free(sv);
@@ -2090,26 +2119,39 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                     }
                     XPathNodeSet* one = xpath_nodeset_new();
                     if (one) {
-                        one->owns_synthetic_text = 1;
                         if (v->type == XPATH_RESULT_NODESET &&
                             v->value.nodeset_value &&
                             v->value.nodeset_value->count > 0) {
                             /* Node operands bind AS NODES — the arm
                              * body steps axes on them
                              * (fold-left-016: $a/text()); a
-                             * string-value synth has no children. */
-                            for (size_t xi = 0;
-                                 xi < v->value.nodeset_value->count;
-                                 xi++)
-                                xpath_nodeset_add(
-                                    one,
-                                    v->value.nodeset_value->nodes[xi]);
+                             * string-value synth has no children.
+                             * Members v OWNS transfer here (v is
+                             * freed below; the transfer keeps `one`
+                             * the sole owner). Document members ride
+                             * with no flag — a whole-set flag over
+                             * mixed members made the case-arm dispose
+                             * a document text node (SOTA C1, nightly
+                             * 44085294402). */
+                            XPathNodeSet* bv = v->value.nodeset_value;
+                            for (size_t xi = 0; xi < bv->count; xi++)
+                                xpath_nodeset_add(one, bv->nodes[xi]);
+                            one->owns_attributes |= bv->owns_attributes;
+                            one->owns_namespaces |= bv->owns_namespaces;
+                            one->owns_synthetic_text |=
+                                bv->owns_synthetic_text;
+                            bv->owns_attributes = 0;
+                            bv->owns_namespaces = 0;
+                            bv->owns_synthetic_text = 0;
                         } else {
                             const char* bindv =
                                 marked ? marked : (vs_ ? vs_ : "");
                             XPathTextNode* tn = xpath_synth_text(
                                 bindv, strlen(bindv));
-                            if (tn) xpath_nodeset_add(one, tn);
+                            if (tn) {
+                                xpath_nodeset_add(one, tn);
+                                one->owns_synthetic_text = 1;
+                            }
                         }
                         XPathVariable* var = xpath_variable_set_add(
                             vs, vn, XPATH_VAR_TYPE_NODE_SET);
@@ -3578,7 +3620,6 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
     if (op == XPATH_OP_SEQUENCE) {
         XPathNodeSet* out = xpath_nodeset_new();
         if (!out) return NULL;
-        out->owns_synthetic_text = 1;
         out->is_sequence = 1;
         for (size_t i = 0; i < ast->child_count; i++) {
             struct leptris_xpath_result* item =
@@ -3587,6 +3628,11 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             if (item->type == XPATH_RESULT_NODESET &&
                 item->value.nodeset_value) {
                 XPathNodeSet* is = item->value.nodeset_value;
+                /* The sequence flag asserts a fact about every
+                 * member: raw document members ride in with NO flag
+                 * (an eager flag here let apply_predicates dispose
+                 * document-owned text nodes — SOTA C1, nightly
+                 * 44085294402); owned members transfer below. */
                 for (size_t j = 0; j < is->count; j++)
                     xpath_nodeset_add(out, is->nodes[j]);
                 /* #720: an item nodeset may OWN synthetic nodes
@@ -3643,7 +3689,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         marked[2 + pl] = 0;
                         XPathTextNode* tn = synth_text(marked, pl + 2);
                         free(marked);
-                        if (tn) xpath_nodeset_add(out, tn);
+                        if (tn) {
+                            xpath_nodeset_add(out, tn);
+                            out->owns_synthetic_text = 1;
+                        }
                     }
                 } else if (item->type == XPATH_RESULT_BOOLEAN) {
                     /* "\x03B" marks boolean members so EBV
@@ -3659,7 +3708,10 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         XPathTextNode* tn =
                             synth_text(marked, strlen(bp) + 2);
                         free(marked);
-                        if (tn) xpath_nodeset_add(out, tn);
+                        if (tn) {
+                            xpath_nodeset_add(out, tn);
+                            out->owns_synthetic_text = 1;
+                        }
                     }
                 } else {
                     char fam = (item->type == XPATH_RESULT_STRING &&
@@ -3678,13 +3730,19 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                             XPathTextNode* tn =
                                 synth_text(marked, pl + 2);
                             free(marked);
-                            if (tn) xpath_nodeset_add(out, tn);
+                            if (tn) {
+                                xpath_nodeset_add(out, tn);
+                                out->owns_synthetic_text = 1;
+                            }
                         }
                     } else {
                         XPathTextNode* tn =
                             synth_text(piece ? piece : "",
                                        piece ? strlen(piece) : 0);
-                        if (tn) xpath_nodeset_add(out, tn);
+                        if (tn) {
+                            xpath_nodeset_add(out, tn);
+                            out->owns_synthetic_text = 1;
+                        }
                     }
                 }
                 free(piece);

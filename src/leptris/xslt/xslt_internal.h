@@ -662,6 +662,12 @@ typedef struct xslt_exec {
      * resolves candidates against THIS rule's import rank). */
     const XsltTemplate* current_template;
 
+    /* Recursion fence (SOTA C1, nightly 44278536885): template
+     * invocations in flight. apply-templates select="." identity
+     * loops recurse unbounded and die on the C stack — the engine
+     * fails the transform cleanly past the fence instead. */
+    int apply_depth;
+
     /* §4: the in-scope ns bindings of the instruction in flight —
      * installed by the walker, consumed by xslt_eval. */
     LeptrisXPathNsSet current_ns;

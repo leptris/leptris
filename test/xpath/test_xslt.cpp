@@ -3,6 +3,10 @@
 #include <gtest/gtest.h>
 #include <regex>
 #include <string>
+#include <vector>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 extern "C" {
 #ifndef _WIN32
 #include <unistd.h>
@@ -4648,4 +4652,80 @@ TEST(XsltCompile, EmptyMatchTemplateRefusedWithoutLeak) {
     LeptrisXslt x = leptris_xslt_parse(sheet.c_str(), sheet.size());
     ASSERT_EQ(x, nullptr) << "match=\"\" must fail the stylesheet";
     leptris_xslt_free(x);
+}
+
+/* SOTA C1: the pinned fuzz corpus rides the suite. Every corpus
+ * input goes through the harness body (parse -> apply to a seed doc
+ * -> free), then a fresh predicate-heavy probe document exercises
+ * the global xpath caches — the cross-input UAFs surface as stale
+ * graph reuse on the NEXT evaluation, not inside the crashing
+ * transform. ASan makes any stale read a hard failure. */
+TEST(XsltFuzzPins, CorpusInputsParseApplyFree) {
+#ifdef _WIN32
+    GTEST_SKIP() << "POSIX dirent walk (the nightly harness covers Win32)";
+#else
+    std::string here = __FILE__;
+    std::string dir = here.substr(0, here.rfind("/xpath/")) +
+                      "/fuzz/corpus";
+    DIR* d = opendir(dir.c_str());
+    ASSERT_NE(d, nullptr) << "fuzz corpus dir missing: " << dir;
+    std::vector<std::string> pins;
+    struct dirent* e;
+    while ((e = readdir(d)) != nullptr) {
+        std::string n = e->d_name;
+        if (n.size() > 4 && n.compare(n.size() - 4, 4, ".bin") == 0)
+            pins.push_back(n);
+    }
+    closedir(d);
+    ASSERT_FALSE(pins.empty()) << "no pinned inputs in " << dir;
+
+    static const char SEED[] =
+        "<r><item>a</item><item>b</item></r>";
+    for (const std::string& name : pins) {
+        std::string path = dir + "/" + name;
+        FILE* f = fopen(path.c_str(), "rb");
+        ASSERT_NE(f, nullptr) << name;
+        std::string input;
+        char b[8192];
+        size_t n;
+        while ((n = fread(b, 1, sizeof b, f)) > 0) input.append(b, n);
+        fclose(f);
+        ASSERT_FALSE(input.empty()) << name;
+
+        LeptrisXslt xslt =
+            leptris_xslt_parse(input.data(), input.size());
+        if (xslt) {
+            LeptrisStatus st = LEPTRIS_OK;
+            LeptrisDocument doc =
+                leptris_parse_string(SEED, sizeof(SEED) - 1, &st);
+            if (doc) {
+                LeptrisDocument out = leptris_xslt_apply(xslt, doc);
+                if (out) leptris_document_free(out);
+                leptris_document_free(doc);
+            }
+            leptris_xslt_free(xslt);
+        }
+
+        /* The probe: the next consumer of the process-global caches
+         * must see live graphs, not yesterday's freed ones. */
+        LeptrisStatus pst = LEPTRIS_OK;
+        static const char PROBE[] =
+            "<r><x id='1'>p</x><x id='2'>q</x></r>";
+        LeptrisDocument pdoc =
+            leptris_parse_string(PROBE, sizeof(PROBE) - 1, &pst);
+        ASSERT_NE(pdoc, nullptr) << name;
+        LeptrisElement proot = leptris_document_root(pdoc);
+        ASSERT_NE(proot, nullptr);
+        LeptrisXPathResult pr =
+            leptris_xpath_eval(pdoc, proot,
+                               "string-join(/r/x[@id]/text(), '')");
+        ASSERT_NE(pr, nullptr) << "probe errored after " << name;
+        char* psv = leptris_xpath_result_string(pr);
+        ASSERT_NE(psv, nullptr);
+        EXPECT_STREQ(psv, "pq") << "probe corrupted after " << name;
+        leptris_free_string(psv);
+        leptris_xpath_result_free(pr);
+        leptris_document_free(pdoc);
+    }
+#endif
 }

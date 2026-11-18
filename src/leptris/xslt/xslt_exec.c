@@ -3420,6 +3420,21 @@ static int xslt_bind_param_defaults(XsltExec* ex, const XsltInstr* body,
 static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
                                 LeptrisElement node,
                                 const XsltInstr* with_params) {
+    /* Recursion fence (SOTA C1, nightly 44278536885): an identity
+     * template whose apply-templates select re-selects the same node
+     * recurses until the OS stack dies. The fence fails the
+     * transform cleanly instead. 100 sits far below the C stack even
+     * under ASan's frame inflation (~60KB/level measured on the
+     * nightly input) while covering every legitimate rule chain —
+     * libxslt dies on the OS stack for the same input. */
+    if (++ex->apply_depth > 100) {
+        snprintf(ex->error, sizeof(ex->error),
+                 "template recursion exceeded 100 levels "
+                 "(apply-templates/call-template loop)");
+        ex->eval_error = 1;
+        ex->apply_depth--;
+        return -2;
+    }
     const XsltTemplate* saved_t = ex->current_template;
     ex->current_template = t;
     /* §11: with-param expressions evaluate in the CALLER's scope;
@@ -3480,6 +3495,7 @@ static int xslt_invoke_template(XsltExec* ex, const XsltTemplate* t,
     ex->current_template = saved_t;
     xslt_pop_vars_to(ex, mark);
     ex->vars = caller;
+    ex->apply_depth--;
     return rc;
 }
 
