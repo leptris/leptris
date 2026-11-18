@@ -492,44 +492,66 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
             return i;
         }
         case RNG_OPTIONAL: {
-            size_t r = match_seq(v, p->first_child, kids, n, idx);
-            if (r == (size_t)-1) {
-                /* The branch is skippable: an inner mismatch is
-                 * speculative, not a failure — clear the latch like
-                 * ZERO_OR_MORE/CHOICE do, or the stuck failure
-                 * poisons every later match (regression since the
-                 * #878 vocabulary pass made silent mismatches
-                 * loud; optional-omitted documents validated
-                 * false). */
-                v->failed = 0;
-                v->err[0] = 0;
-                return idx;
+            /* ruby-adjacent leptris#2078: the XML form flattens a
+             * multi-child wrapper body as siblings — an implicit
+             * group (Jing §4.10). Walk the WHOLE child chain; the
+             * old first_child-only hand dropped every sibling past
+             * the first (openmath2.rng's OMATP). */
+            size_t i = idx;
+            for (RngPattern* c = p->first_child; c; c = c->next) {
+                i = match_seq(v, c, kids, n, i);
+                if (i == (size_t)-1) {
+                    /* The branch is skippable: an inner mismatch is
+                     * speculative, not a failure — clear the latch like
+                     * ZERO_OR_MORE/CHOICE do, or the stuck failure
+                     * poisons every later match (regression since the
+                     * #878 vocabulary pass made silent mismatches
+                     * loud; optional-omitted documents validated
+                     * false). */
+                    v->failed = 0;
+                    v->err[0] = 0;
+                    return idx;
+                }
             }
-            return r;
+            return i;
         }
         case RNG_ZERO_OR_MORE: {
             for (;;) {
-                size_t r = match_seq(v, p->first_child, kids, n, idx);
-                if (r == (size_t)-1 || r == idx) {
-                    v->failed = 0;
-                    v->err[0] = 0;
-                    return idx;
+                size_t i = idx;
+                for (RngPattern* c = p->first_child; c; c = c->next) {
+                    i = match_seq(v, c, kids, n, i);
+                    if (i == (size_t)-1) {
+                        v->failed = 0;
+                        v->err[0] = 0;
+                        return idx;
+                    }
                 }
-                idx = r;
+                if (i == idx) return idx;
+                idx = i;
             }
         }
         case RNG_ONE_OR_MORE: {
-            size_t r = match_seq(v, p->first_child, kids, n, idx);
-            if (r == (size_t)-1) return (size_t)-1;
-            idx = r;
+            /* First iteration: the whole implicit-group body must
+             * match (#2078). */
+            size_t i = idx;
+            for (RngPattern* c = p->first_child; c; c = c->next) {
+                i = match_seq(v, c, kids, n, i);
+                if (i == (size_t)-1) return (size_t)-1;
+            }
+            /* Subsequent iterations: repeat the body while it makes
+             * progress. */
             for (;;) {
-                r = match_seq(v, p->first_child, kids, n, idx);
-                if (r == (size_t)-1 || r == idx) {
-                    v->failed = 0;
-                    v->err[0] = 0;
-                    return idx;
+                size_t j = i;
+                for (RngPattern* c = p->first_child; c; c = c->next) {
+                    j = match_seq(v, c, kids, n, j);
+                    if (j == (size_t)-1) {
+                        v->failed = 0;
+                        v->err[0] = 0;
+                        return i;
+                    }
                 }
-                idx = r;
+                if (j == i) return i;
+                i = j;
             }
         }
         case RNG_EMPTY:

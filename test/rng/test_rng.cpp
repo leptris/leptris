@@ -1670,3 +1670,95 @@ TEST(Rng1709Shapes, AttributeChoiceWithTextBranchAcceptsAny) {
      * definition here, but the harness shape keeps it simple — the
      * enum hit and text hit are the contract under test. */
 }
+
+/* ---- leptris#2078: wrapper bodies are implicit groups ------------- */
+
+TEST(Rng2078Wrappers, OneOrMoreOverMultiElementBody) {
+    /* Jing §4.10: the XML form flattens a multi-child wrapper body as
+     * siblings — an implicit group. match_seq handed the wrapper only
+     * first_child, so the sibling chain past the first element was
+     * never matched (openmath2.rng's OMATP shape). */
+    const char* schema =
+        "<element name=\"root\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<oneOrMore>"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</oneOrMore></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(
+        "<root><a/><b/></root>", strlen("<root><a/><b/></root>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1)
+        << "oneOrMore over an (a,b) body must accept <a/><b/>";
+    leptris_document_free(d);
+    d = leptris_parse_string(
+        "<root><a/><b/><a/><b/></root>", 29, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1)
+        << "the repetition must cover the WHOLE body per iteration";
+    leptris_document_free(d);
+    d = leptris_parse_string("<root><a/></root>", 17, &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0)
+        << "a half-iteration (a without b) must still reject";
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2078Wrappers, OptionalOverMultiElementBody) {
+    const char* schema =
+        "<element name=\"root\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<optional>"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</optional></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    /* present as a unit: accept; absent: accept; half-present: reject */
+    const char* ok1 = "<root><a/><b/></root>";
+    const char* ok2 = "<root/>";
+    const char* bad = "<root><a/></root>";
+    LeptrisDocument d = leptris_parse_string(ok1, strlen(ok1), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    d = leptris_parse_string(ok2, strlen(ok2), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    d = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2078Wrappers, ZeroOrMoreOverMultiElementBody) {
+    const char* schema =
+        "<element name=\"root\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<zeroOrMore>"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</zeroOrMore></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* doc1 = "<root><a/><b/><a/></root>";  /* trailing half: reject */
+    LeptrisDocument d = leptris_parse_string(
+        "<root><a/><b/></root>", strlen("<root><a/><b/></root>"), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 1);
+    leptris_document_free(d);
+    d = leptris_parse_string(doc1, strlen(doc1), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0)
+        << "a whole-body iteration cannot end mid-body";
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
