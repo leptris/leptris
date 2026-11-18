@@ -2012,6 +2012,15 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                                 n * sizeof(XsltTemplate*));
                             if (!k2->list) continue;
                         }
+                        /* Finding 7, the value-index twin: same
+                         * dedupe (a template can carry two identical
+                         * [@k='v'] alternatives). */
+                        {
+                            int dup = 0;
+                            for (size_t i = 0; i < k2->n && !dup; i++)
+                                dup = (k2->list[i] == t);
+                            if (dup) continue;
+                        }
                         k2->list[k2->n++] = t;
                         continue;
                     }
@@ -2041,6 +2050,17 @@ void xslt_sheet_build_dispatch(XsltStylesheet* sheet) {
                         k->list = (XsltTemplate**)malloc(
                             n * sizeof(XsltTemplate*));
                         if (!k->list) continue;
+                    }
+                    /* Finding 7 (the fuzzer's "a|…|t|…|t" unions): a
+                     * template can name the same leaf in SEVERAL
+                     * alternatives, and every append grew k->n past
+                     * the n-sized list. A template also must not be
+                     * dispatched twice per node — dedupe per key. */
+                    {
+                        int dup = 0;
+                        for (size_t i = 0; i < k->n && !dup; i++)
+                            dup = (k->list[i] == t);
+                        if (dup) continue;
                     }
                     k->list[k->n++] = t;
                 }
