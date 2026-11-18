@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.428] - 2026-11-18
+
+### Fixed
+
+- combine merges wrap each body in an implicit group (leptris#2088) (rng)
+
+
+
 ## [1.9.427] - 2026-11-18
 
 ### Fixed
