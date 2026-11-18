@@ -98,3 +98,12 @@ Add the file to `corpus/`, then add its name + XPath to the `DOCS` /
 `XPATHS` tables in **all three** runners (order matters: fixed corpus
 order, no sorting), re-run all three, and update the verified-output
 block above plus this README's tables.
+
+## Where the pins come from
+
+The gate reads its four binding pins from the LATEST RELEASE's
+`build-manifest.json` (`bindings` section — recorded live from the
+registries by the release workflow, Gate C3). Releases predating
+schema/2 fall back to the hardcoded `FALLBACK_*` train in the
+workflow header; the diffpins branches only need to touch those
+fallbacks, never the install steps.

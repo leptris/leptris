@@ -25,13 +25,21 @@ matched a local file byte-for-byte; 1 = at least one artifact is missing
 or mismatched. A local file with no manifest entry is a warning, not a
 failure (extra build outputs are allowed).
 
-Manifest schema ("leptris.build-manifest/1", as produced by
+Manifest schema ("leptris.build-manifest/2", as produced by
 .github/workflows/build-manifests.yml):
 
     {
-      "schema": "leptris.build-manifest/1",
+      "schema": "leptris.build-manifest/2",
       "tag": "v1.9.367",                      // release tag built
       "generated_at_utc": "2026-10-21T00:00:00Z",
+      "bindings": {                           // schema/2 (A6/C3): the
+        "rubygems": "1.9.427.0",              //   published binding
+        "pypi": "1.9.427.0",                  //   versions riding this
+        "npm": "0.1.62",                      //   engine release, live
+        "crates_io": "1.9.0",                 //   from the registries;
+                                              //   differential.yml reads
+                                              //   these as its pins
+      },
       "platforms": {
         "<platform>": {                       // key: matrix leg name, e.g. linux-amd64
           "leg": "native",                    //   native | amalgamated
@@ -63,7 +71,7 @@ ARTIFACT_RE = re.compile(
     r"^(libleptris\.(a|dll|lib)|libleptris\.so(\.[0-9.]+)?"
     r"|libleptris\.[0-9.]+\.dylib|leptris\.(lib|dll))$")
 
-SCHEMA = "leptris.build-manifest/1"
+SCHEMA = "leptris.build-manifest/2"
 
 
 def sha256_of(path):
