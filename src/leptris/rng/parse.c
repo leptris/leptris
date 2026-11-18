@@ -363,10 +363,20 @@ static int add_define(RngGrammar* g, char* name, char* combine,
     RngPattern* wrap =
         pat_new(strcmp(d->combine, "interleave") == 0 ? RNG_INTERLEAVE
                                                       : RNG_CHOICE);
-    pat_append(wrap, d->body);
-    pat_append(wrap, body->first_child);
+    /* Each merged body is an IMPLICIT GROUP (Jing §4.10): the branch
+     * is the body's whole sibling chain, not its first element. A
+     * bare chain inside the combinator made the validator treat the
+     * body's 2nd..nth elements as further alternatives of the
+     * choice — <a/><b/> consumed a as the entire first branch and
+     * stranded b (openmath3 OMBIND, #2088). */
+    RngPattern* left = pat_new(RNG_GROUP);
+    pat_append(left, d->body);
+    RngPattern* right = pat_new(RNG_GROUP);
+    pat_append(right, body->first_child);
     body->first_child = NULL;
     rng_pattern_free(body);
+    pat_append(wrap, left);
+    pat_append(wrap, right);
     rng_flatten_combinator(wrap);
     d->body = wrap;
     return 1;
@@ -511,15 +521,21 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
                 /* The WRAPPER stays as the define's body — same shape
                  * add_define produces — the combinator node is what
                  * the validator walks; unwrapping leaves bare
-                 * siblings with no interleave/choice between them. */
+                 * siblings with no interleave/choice between them.
+                 * Each branch wraps in GROUP (#2088, Jing §4.10): the
+                 * branch is the body's whole sibling chain. */
                 RngPattern* wrap =
                     pat_new(strcmp(ncombine, "interleave") == 0
                                 ? RNG_INTERLEAVE
                                 : RNG_CHOICE);
-                pat_append(wrap, d->body);
-                pat_append(wrap, body->first_child);
+                RngPattern* left = pat_new(RNG_GROUP);
+                pat_append(left, d->body);
+                RngPattern* right = pat_new(RNG_GROUP);
+                pat_append(right, body->first_child);
                 body->first_child = NULL;
                 rng_pattern_free(body);
+                pat_append(wrap, left);
+                pat_append(wrap, right);
                 rng_flatten_combinator(wrap);
                 free(d->combine);
                 d->combine = ncombine;
