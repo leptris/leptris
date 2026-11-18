@@ -10,6 +10,9 @@
  */
 #include "rng_internal.h"
 #include "../dom/element.h"
+/* #2080: <data> content lexes through the engine's XSD builtin
+ * library — one shared lexical space with the XSD validator. */
+#include "../xsd/xsd_internal.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +128,16 @@ static int data_lexical_ok(const RngPattern* data, const char* t) {
         if (!*q) return 0;
         for (; *q; q++)
             if (!isdigit((unsigned char)*q)) return 0;
+    }
+    /* leptris#2080: <data> content lexes through the XSD builtin
+     * library — the engine's own lexical space (base64Binary admitted
+     * "not-base64!!!" before this; the datatypeLibrary default is the
+     * XSD datatypes). Unknown types stay permissive. */
+    if (data->datatype && *data->datatype) {
+        char qname[64];
+        snprintf(qname, sizeof(qname), "xs:%s", data->datatype);
+        if (xsd_builtin_known(qname))
+            return xsd_builtin_valid(qname, t) == 1;
     }
     return 1;
 }
