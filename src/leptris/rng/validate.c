@@ -602,6 +602,119 @@ static size_t fold_list(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
 static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
                         size_t n, size_t idx);
 
+/* The interleave matcher (ruby#650): branches match NON-contiguously
+ * — that is what interleaving IS — so a window matcher is wrong (a
+ * group(base) branch fails atomically at the frontier even though its
+ * second element matches two positions later, after another branch
+ * consumes there). Each branch carries a CURSOR into its own child
+ * chain; the search advances one branch's head pattern at the shared
+ * frontier, recurses, and backtracks on overall failure. Jing does
+ * the same search over its interleave automaton. */
+typedef struct {
+    RngPattern* cur[64];   /* the branch's remaining member pattern */
+    int unit[64];          /* the branch is a single non-group pattern */
+    int done[64];          /* the branch fully matched */
+    size_t cn;
+    unsigned long steps;   /* search budget: invalid documents explode
+                              combinatorially under full enumeration;
+                              past the budget the match fails
+                              conservatively (the diagnose pass then
+                              reports the shortfall) */
+} IlvState;
+
+static size_t rng_interleave_try(RngVal* v, IlvState* st,
+                                 LeptrisNodeRef* kids, size_t n,
+                                 size_t i, unsigned held_mask);
+
+/* Advance (or hold) branch b after its head matched r. A REPEATABLE
+ * member that CONSUMED stays on its cursor — it may match again after
+ * another branch consumes at the frontier (ruby#650: ics on both
+ * sides of the merged-in element). */
+static void ilv_advance(IlvState* st, size_t b, RngPattern* h,
+                        size_t r, size_t i) {
+    int repeatable = (h->kind == RNG_ZERO_OR_MORE ||
+                      h->kind == RNG_ONE_OR_MORE);
+    if (st->unit[b]) {
+        if (repeatable && r > i) return;   /* hold the cursor */
+        st->done[b] = 1;
+        return;
+    }
+    if (repeatable && r > i) return;       /* hold the cursor */
+    st->cur[b] = h->next;
+    st->done[b] = (h->next == NULL);
+}
+
+static size_t rng_interleave_try(RngVal* v, IlvState* st,
+                                 LeptrisNodeRef* kids, size_t n,
+                                 size_t i, unsigned held_mask) {
+    size_t b;
+    for (b = 0; b < st->cn; b++) {
+        if (!st->done[b]) break;
+    }
+    if (b == st->cn) return i;   /* every branch exhausted */
+    if (++st->steps > 200000) return (size_t)-1;
+    /* The search returns the FURTHEST completion, not the first: a
+     * branch finishing early can complete at a position that strands
+     * a repeatable member's later match (ruby#650 case 4: out=4 vs
+     * the required n=5). */
+    size_t best = (size_t)-1;
+    for (b = 0; b < st->cn; b++) {
+        if (st->done[b]) continue;
+        RngPattern* h = st->cur[b];
+        int repeatable = (h->kind == RNG_ZERO_OR_MORE ||
+                          h->kind == RNG_ONE_OR_MORE);
+        size_t r = match_seq(v, h, kids, n, i);
+        if (r != (size_t)-1 && r > i) {
+            /* consuming: advance-or-hold, recurse at the new frontier
+             * — the frontier moved, so every hold is forgettable */
+            RngPattern* save = st->cur[b];
+            int save_done = st->done[b];
+            ilv_advance(st, b, h, r, i);
+            size_t out = rng_interleave_try(v, st, kids, n, r, 0);
+            st->cur[b] = save;   /* backtrack */
+            st->done[b] = save_done;
+            if (out != (size_t)-1 && (best == (size_t)-1 || out > best))
+                best = out;
+            if (best == n) break;   /* complete — cannot beat */
+            v->failed = 0;
+            v->err[0] = 0;
+        }
+        if (r != (size_t)-1 && r == i) {
+            if (repeatable && !(held_mask & (1u << b))) {
+                /* zero-width: the member may still feed at a LATER
+                 * position — hold it and let the others move first
+                 * (the mask guards the same-branch same-frontier
+                 * ping-pong: each branch holds at most once per
+                 * frontier) */
+                size_t out = rng_interleave_try(v, st, kids, n, i,
+                                                held_mask | (1u << b));
+                if (out != (size_t)-1 && (best == (size_t)-1 ||
+                                          out > best))
+                    best = out;
+                if (best == n) break;
+            }
+            /* or the branch finishes here */
+            RngPattern* save = st->cur[b];
+            int save_done = st->done[b];
+            st->done[b] = 1;
+            size_t out = rng_interleave_try(v, st, kids, n, r, -1);
+            st->cur[b] = save;   /* backtrack */
+            st->done[b] = save_done;
+            if (out != (size_t)-1 && (best == (size_t)-1 || out > best))
+                best = out;
+            if (best == n) break;
+            v->failed = 0;
+            v->err[0] = 0;
+            continue;
+        }
+        if (r == (size_t)-1) {
+            v->failed = 0;   /* speculative: try the next branch */
+            v->err[0] = 0;
+        }
+    }
+    return best;
+}
+
 static int leaf_matches(RngVal* v, RngPattern* p, LeptrisNodeRef node) {
     LeptrisElement e = (LeptrisElement)node;
     switch (p->kind) {
@@ -663,55 +776,34 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
             return i;
         }
         case RNG_INTERLEAVE: {
-            /* Any order; every branch must be satisfied. A single
-             * assignment pass is unsound against interleaved
-             * zeroOrMore branches: a branch whose turn precedes the
-             * elements it matches zero-widths, gets marked used, and
-             * strands them (leptris#1709: relaton-ieee's 2nd/3rd
-             * <ics>). Consume to a fixpoint — branches take turns
-             * while ANY of them advances — then the remainder must
-             * be zero-width satisfiable. */
-            RngPattern* ch[64];
-            size_t cn = 0;
-            for (RngPattern* c = p->first_child; c && cn < 64;
-                 c = c->next)
-                ch[cn++] = c;
-            int used[64] = {0};
-            int progressed = 1;
-            size_t i = idx;
-            while (progressed) {
-                progressed = 0;
-                for (size_t b = 0; b < cn; b++) {
-                    if (used[b]) continue;
-                    size_t r = match_seq(v, ch[b], kids, n, i);
-                    if (r != (size_t)-1 && r > i) {
-                        used[b] = 1;
-                        i = r;
-                        progressed = 1;
-                    } else if (r != (size_t)-1) {
-                        /* zero-width here: leave the branch unused so
-                         * a later position can still feed it. */
-                        v->failed = 0;
-                        v->err[0] = 0;
-                    } else {
-                        v->failed = 0;
-                        v->err[0] = 0;
-                    }
+            /* Any order; every branch must be satisfied. The cursor
+             * machine above: branches match non-contiguously with
+             * full backtracking. The earlier fixpoint walk could not
+             * DEFER a branch — combine="interleave" merges wrap each
+             * body in a GROUP (#2089), and group(base) as one branch
+             * must be able to PAUSE mid-sequence while another branch
+             * consumes at the frontier (ruby#650: the added element
+             * may sit between any two base elements, §4.17). */
+            IlvState st;
+            memset(&st, 0, sizeof(st));
+            for (RngPattern* c = p->first_child; c && st.cn < 64;
+                 c = c->next) {
+                if (c->kind == RNG_GROUP && c->first_child) {
+                    st.cur[st.cn] = c->first_child;
+                    st.unit[st.cn] = 0;
+                } else {
+                    st.cur[st.cn] = c;
+                    st.unit[st.cn] = 1;
                 }
+                st.done[st.cn] = 0;
+                st.cn++;
             }
-            for (size_t b = 0; b < cn; b++) {
-                if (used[b]) continue;
-                size_t r = match_seq(v, ch[b], kids, n, i);
-                if (r == (size_t)-1 || r != i) {
-                    /* A branch that consumes here contradicts the
-                     * fixpoint above — treat as unsatisfied. */
-                    return (size_t)-1;
-                }
+            size_t out = rng_interleave_try(v, &st, kids, n, idx, 0);
+            if (out == (size_t)-1) {
                 v->failed = 0;
                 v->err[0] = 0;
-                used[b] = 1;
             }
-            return i;
+            return out;
         }
         case RNG_OPTIONAL: {
             /* ruby-adjacent leptris#2078: the XML form flattens a

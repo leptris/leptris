@@ -1967,3 +1967,50 @@ TEST(Rng2088CombineMerge, RepeatedChoiceMergeKeepsEarlierBodiesGrouped) {
     }
     leptris_rng_free(rng);
 }
+
+/* ruby#650 (regression in 1.9.428.0): combine="interleave" makes the
+ * merged pattern interleave(base, added) — RELAX NG §4.17. An element
+ * of the ADDED pattern may sit BETWEEN any two elements of the base
+ * sequence: the merged document is any interleaving of the two body
+ * sequences. The bare-chain pre-428 form accidentally allowed this
+ * (every element was its own branch); the grouped form needs the
+ * interleave walk to DEFER a branch — a full partition search with
+ * backtracking, like Jing. */
+TEST(Rng650InterleaveCombine, AddedElementMaySplitTheBaseSequence) {
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"ext\"><ref name=\"Ext\"/></element></start>"
+        "<define name=\"Ext\">"
+        "<element name=\"doctype\"><text/></element>"
+        "<element name=\"flavor\"><text/></element>"
+        "<zeroOrMore><element name=\"ics\"><text/></element></zeroOrMore>"
+        "</define>"
+        "<define name=\"Ext\" combine=\"interleave\">"
+        "<optional><element name=\"price-code\"><text/></element></optional>"
+        "</define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<ext><doctype/><price-code/><flavor/></ext>", 1,
+         "the added element BETWEEN two base elements (§4.17)"},
+        {"<ext><doctype/><flavor/><price-code/></ext>", 1,
+         "the added element after the base"},
+        {"<ext><price-code/><doctype/><flavor/></ext>", 1,
+         "the added element before the base"},
+        {"<ext><doctype/><flavor/><ics/><price-code/><ics/></ext>", 1,
+         "ics both sides of the added element (the relaton ics shape)"},
+        {"<ext><doctype/></ext>", 0, "flavor is required"},
+        {"<ext><price-code/></ext>", 0, "the base is still required"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
