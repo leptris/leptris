@@ -40,12 +40,21 @@ jobs:
           cp test/fixtures/*.xml corpus/ || true
           printf '%s\n' '//record' '//*[@id="1"]' 'count(//item)' \
             '//a[1]/following-sibling::*' 'sum(//n)' > xpath_corpus/seeds
+          # Grammar-aware XPath (#2051): axis steps with predicate
+          # storms, unions, comparisons, arithmetic, FLWOR spellings —
+          # composed fresh each run. Type-error shapes (number |
+          # nodeset) are kept deliberately: they exercise the
+          # evaluator's error paths.
+          python3 test/fuzz/generators/gen_xpath_seeds.py \
+            xpath_corpus/gen --seed "$GITHUB_RUN_NUMBER" --count 200
           # Grammar-aware XML (#2051): well-formed documents with
           # nesting, CDATA, DTD entities, namespaces, PIs — composed
           # fresh each run so the parse leg anchors inside the
           # grammar, not at byte-flip distance from it.
           python3 test/fuzz/generators/gen_xml_seeds.py \
             corpus/gen --seed "$GITHUB_RUN_NUMBER" --count 200
+          python3 test/fuzz/generators/gen_html_seeds.py \
+            html_corpus/gen --seed "$GITHUB_RUN_NUMBER" --count 200
 
       - name: Fuzz parser (3 minutes)
         run: |
@@ -69,7 +78,7 @@ jobs:
             -max_total_time=120 \
             -max_len=4096 \
             -print_final_stats=1 \
-            xpath_corpus/
+            xpath_corpus/ xpath_corpus/gen/
 
       - name: Seed the grammar-family corpora
         run: |
@@ -98,7 +107,7 @@ jobs:
             -max_total_time=120 \
             -max_len=65536 \
             -print_final_stats=1 \
-            html_corpus/
+            html_corpus/ html_corpus/gen/
 
       - name: Upload crashes
         if: always()
