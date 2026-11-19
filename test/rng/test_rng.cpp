@@ -2014,3 +2014,99 @@ TEST(Rng650InterleaveCombine, AddedElementMaySplitTheBaseSequence) {
     }
     leptris_rng_free(rng);
 }
+
+/* ruby#650 follow-up: a zero-width member in the MIDDLE of the base
+ * group (an optional element, an optional attribute, an empty repeat)
+ * must advance the group's cursor, not finish the whole group. The
+ * Metanorma shape is BibDataExtensionType: @schema-version?, doctype,
+ * subdoctype?, flavor, ics*, ... interleaved with a flavor's ext
+ * elements. Jing accepts every valid row below. */
+TEST(Rng650InterleaveCombine, ZeroWidthGroupMemberAdvancesTheCursor) {
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"ext\"><ref name=\"Ext\"/></element></start>"
+        "<define name=\"Ext\">"
+        "<optional><attribute name=\"schema-version\"/></optional>"
+        "<element name=\"doctype\"><text/></element>"
+        "<optional><element name=\"subdoctype\"><text/></element></optional>"
+        "<element name=\"flavor\"><text/></element>"
+        "<zeroOrMore><element name=\"ics\"><text/></element></zeroOrMore>"
+        "</define>"
+        "<define name=\"Ext\" combine=\"interleave\">"
+        "<optional><element name=\"ipn\"><text/></element></optional>"
+        "<optional><element name=\"studyperiod\"><text/></element></optional>"
+        "</define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<ext><doctype/><flavor/><ipn/><studyperiod/></ext>", 1,
+         "optional subdoctype and attribute skipped (metanorma-itu)"},
+        {"<ext><doctype/><flavor/></ext>", 1, "base only, optionals skipped"},
+        {"<ext><doctype/><ipn/><flavor/></ext>", 1,
+         "added element where the skipped optional would sit"},
+        {"<ext schema-version=\"v1\"><doctype/><subdoctype/><flavor/>"
+         "<ics/><studyperiod/></ext>", 1, "every optional present"},
+        {"<ext><doctype/><ipn/><subdoctype/><flavor/></ext>", 1,
+         "added element before the optional member"},
+        {"<ext><doctype/><ipn/></ext>", 0,
+         "skipping the optional still requires flavor"},
+        {"<ext><doctype/><flavor/><subdoctype/></ext>", 0,
+         "base order is kept: subdoctype after flavor rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(RngRegression, PositionErrorFindsTheElementUnderARoleDefine) {
+    /* leptris#1704 in the shape real grammars use: the define is
+     * named after the role (basicdoc "paragraph"), the element
+     * pattern inside it is <p>. The misplaced <p> still gets its
+     * attributes checked against that element pattern (Jing). */
+    const char* sch = SCHEMA(
+        "<start><element name='doc'>"
+        "<element name='preface'><zeroOrMore><ref name='paragraph'/>"
+        "</zeroOrMore></element>"
+        "<element name='sections'><zeroOrMore><element name='clause'>"
+        "<zeroOrMore><ref name='paragraph'/></zeroOrMore></element>"
+        "</zeroOrMore></element>"
+        "</element></start>"
+        "<define name='paragraph'><element name='p'>"
+        "<optional><attribute name='id'/></optional>"
+        "<optional><attribute name='align'><choice>"
+        "<value>left</value><value>right</value>"
+        "</choice></attribute></optional><text/></element></define>"
+        "<define name='paragraph-no-id'><element name='p'>"
+        "<text/></element></define>");
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_last_error();
+    ASSERT_NE(rng, nullptr);
+    const char doc[] =
+        "<doc><preface/><sections><clause><p>a</p></clause>"
+        "<p align='mid-air'>b</p></sections></doc>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), NULL);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_rng_validate(rng, d), 0);
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    ASSERT_GE(n, 2u) << "expected position AND attribute errors";
+    EXPECT_NE(strstr(rep[0].message, "element \"p\" not allowed"),
+              nullptr) << rep[0].message;
+    EXPECT_NE(strstr(rep[1].message,
+        "value of attribute \"align\" is invalid; must be equal to "
+        "\"left\" or \"right\""), nullptr) << rep[1].message;
+    for (size_t i = 0; i < n; i++)
+        EXPECT_EQ(strstr(rep[i].message, "no attributes allowed"),
+                  nullptr) << rep[i].message;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}

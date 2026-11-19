@@ -693,11 +693,24 @@ static size_t rng_interleave_try(RngVal* v, IlvState* st,
                     best = out;
                 if (best == n) break;
             }
-            /* or the branch finishes here */
+            /* or the member is skipped. A unit branch (or a group's
+             * last member) finishes here; a group branch moves its
+             * cursor to the NEXT member - a zero-width optional,
+             * attribute or empty repeat in the middle of a group must
+             * not finish the whole group (doctype, subdoctype?,
+             * flavor: skipping subdoctype still requires flavor, and
+             * still admits it). The cursor strictly advances, so the
+             * same-frontier recursion terminates. */
             RngPattern* save = st->cur[b];
             int save_done = st->done[b];
-            st->done[b] = 1;
-            size_t out = rng_interleave_try(v, st, kids, n, r, -1);
+            size_t out;
+            if (st->unit[b] || h->next == NULL) {
+                st->done[b] = 1;
+                out = rng_interleave_try(v, st, kids, n, r, -1);
+            } else {
+                st->cur[b] = h->next;
+                out = rng_interleave_try(v, st, kids, n, r, held_mask);
+            }
             st->cur[b] = save;   /* backtrack */
             st->done[b] = save_done;
             if (out != (size_t)-1 && (best == (size_t)-1 || out > best))
@@ -1611,6 +1624,69 @@ static RngPattern* find_element_pattern(RngVal* v, RngPattern* p,
     return NULL;
 }
 
+static int collect_attr_patterns(RngVal* v, RngPattern* head,
+                                 RngPattern** out, int* optional,
+                                 int n, int cap, int opt,
+                                 RngPattern** seen, int* nseen);
+
+/* Element patterns named `x` inside `p`, NOT following refs (every
+ * define is visited by the caller, so refs add nothing but cycles).
+ * Collects up to `cap` hits into `out`. */
+static int collect_named_elements(RngPattern* p, const char* x,
+                                  RngPattern** out, int n, int cap,
+                                  int depth) {
+    for (; p && n < cap; p = p->next) {
+        if (depth > 64) return n;
+        if (p->kind == RNG_REF) continue;
+        if (p->kind == RNG_ELEMENT && !p->any_name && p->name &&
+            strcmp(p->name, x) == 0)
+            out[n++] = p;
+        n = collect_named_elements(p->first_child, x, out, n, cap,
+                                   depth + 1);
+    }
+    return n;
+}
+
+/* Does every attribute on `e` have a same-named attribute pattern in
+ * element pattern `el`? */
+static int attrs_named_in(RngVal* v, RngPattern* el, LeptrisElement e) {
+    RngPattern* cands[64];
+    int cand_opt[64];
+    RngPattern* seen[128];
+    int nseen = 0;
+    int nc = collect_attr_patterns(v, el->first_child, cands, cand_opt,
+                                   0, 64, 0, seen, &nseen);
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(e);
+         a; a = leptris_attr_next(a)) {
+        const char* name = attr_cname(a);
+        int found = 0;
+        for (int i = 0; i < nc && !found; i++)
+            if (cands[i]->name && strcmp(cands[i]->name, name) == 0)
+                found = 1;
+        if (!found) return 0;
+    }
+    return 1;
+}
+
+/* leptris#1704 recovery target for a misplaced element: the element
+ * pattern(s) named `x` anywhere in the grammar, as Jing's recovery
+ * does - grammars name the define after the role, not the element
+ * (basicdoc: <define name="paragraph"><element name="p">). Prefer a
+ * pattern that declares every attribute the instance carries, so the
+ * value check runs against the definition that owns the attribute. */
+static RngPattern* recovery_element_pattern(RngVal* v, LeptrisElement e,
+                                            const char* x) {
+    RngPattern* hits[32];
+    int n = collect_named_elements(v->g->start, x, hits, 0, 32, 0);
+    for (RngDefine* d = v->g->defines; d && n < 32; d = d->next)
+        n = collect_named_elements(d->body, x, hits, n, 32, 0);
+    if (n == 0) return NULL;
+    for (int i = 0; i < n; i++)
+        if (attrs_named_in(v, hits[i], e)) return hits[i];
+    return hits[0];
+}
+
 /* Diagnose a matched child element's own content (quiet verdict,
  * then recurse on failure). */
 static void diagnose_child(RngVal* v, RngPattern* content,
@@ -2092,10 +2168,16 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
          * enums) go invisible exactly where documents are most
          * broken. Jing reports both, position first. */
         {
-            RngDefine* own = find_define(v->g, x);
-            if (own && own->body)
-                diagnose_attrs(v, dpat_new(v, RNG_ELEMENT, own->body),
-                               kid);
+            RngPattern* own_el = recovery_element_pattern(v, kid, x);
+            if (own_el) {
+                diagnose_attrs(v, own_el, kid);
+            } else {
+                RngDefine* own = find_define(v->g, x);
+                if (own && own->body)
+                    diagnose_attrs(v,
+                                   dpat_new(v, RNG_ELEMENT, own->body),
+                                   kid);
+            }
         }
         /* Skip the offending child; position unchanged. */
     }
