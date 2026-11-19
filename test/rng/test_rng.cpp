@@ -9,6 +9,7 @@
 #include "rng_internal.h"
 
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -2108,5 +2109,225 @@ TEST(RngRegression, PositionErrorFindsTheElementUnderARoleDefine) {
         EXPECT_EQ(strstr(rep[i].message, "no attributes allowed"),
                   nullptr) << rep[i].message;
     leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+/* ---- leptris#2093: combine="interleave" interleaves INTO a group ---
+ * The merged define is interleave(group(base...), group(added...))
+ * (RELAX NG §4.17). Interleave is a shuffle of the branch sequences:
+ * a group branch keeps its own order, but members of the other
+ * branch may sit between its members. Regression since 1.9.428. */
+
+/* Validate; collect the joined diagnostic messages into *msgs. */
+static int rng2093_check(LeptrisRelaxNG rng, const char* doc,
+                         std::string* msgs) {
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    if (!d) return -2;
+    int ok = leptris_rng_validate(rng, d);
+    msgs->clear();
+    const LeptrisRngErrorRecord* rep = NULL;
+    size_t n = leptris_rng_error_report(rng, &rep);
+    for (size_t i = 0; i < n; i++) {
+        if (i) *msgs += " | ";
+        *msgs += rep[i].message ? rep[i].message : "";
+    }
+    leptris_document_free(d);
+    return ok;
+}
+
+TEST(Rng2093InterleaveIntoGroup, AddedBodyGoesBetweenBaseMembers) {
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"root\"><ref name=\"content\"/></element></start>"
+        "<define name=\"content\">"
+        "<element name=\"a\"><empty/></element>"
+        "<element name=\"b\"><empty/></element>"
+        "</define>"
+        "<define name=\"content\" combine=\"interleave\">"
+        "<element name=\"c\"><empty/></element>"
+        "</define>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    struct { const char* doc; int want; } cases[] = {
+        {"<root><a/><b/><c/></root>", 1},
+        {"<root><c/><a/><b/></root>", 1},
+        {"<root><a/><c/><b/></root>", 1},   /* the #2093 regression */
+        {"<root><c/><b/><a/></root>", 0},   /* a precedes b */
+        {"<root><b/><a/><c/></root>", 0},
+        {"<root><a/><b/></root>", 0},       /* c is required */
+        {"<root><a/><c/><c/><b/></root>", 0},
+    };
+    std::string msgs;
+    for (auto& c : cases) {
+        EXPECT_EQ(rng2093_check(rng, c.doc, &msgs), c.want)
+            << c.doc << " — " << msgs;
+        if (c.want == 1) EXPECT_EQ(msgs, "") << c.doc;
+    }
+    EXPECT_EQ(rng2093_check(rng, "<root><c/><b/><a/></root>", &msgs), 0);
+    EXPECT_NE(msgs.find("element \"b\""), std::string::npos) << msgs;
+    leptris_rng_free(rng);
+}
+
+/* ruby#650 shape: Ext = doctype, flavor, ics*  |=  interleave price-code? */
+static const char* const k2093Valid[] = {
+    "<ext><price-code/><doctype/><flavor/><ics/><ics/></ext>",
+    "<ext><doctype/><price-code/><flavor/><ics/><ics/></ext>",
+    "<ext><doctype/><flavor/><price-code/><ics/><ics/></ext>",
+    "<ext><doctype/><flavor/><ics/><price-code/><ics/></ext>",
+    "<ext><doctype/><flavor/><ics/><ics/><price-code/></ext>",
+    "<ext><doctype/><flavor/></ext>",
+};
+static const char* const k2093Invalid[] = {
+    "<ext><flavor/><doctype/><price-code/></ext>",
+    "<ext><doctype/><price-code/><flavor/><price-code/></ext>",
+    "<ext><doctype/><ics/><flavor/></ext>",
+};
+
+static void rng2093_shape(LeptrisRelaxNG rng) {
+    std::string msgs;
+    for (const char* doc : k2093Valid) {
+        EXPECT_EQ(rng2093_check(rng, doc, &msgs), 1) << doc << " — " << msgs;
+        EXPECT_EQ(msgs, "") << doc;
+    }
+    for (const char* doc : k2093Invalid)
+        EXPECT_EQ(rng2093_check(rng, doc, &msgs), 0) << doc;
+}
+
+TEST(Rng2093InterleaveIntoGroup, Ruby650InlineShape) {
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"ext\"><ref name=\"Ext\"/></element></start>"
+        "<define name=\"Ext\">"
+        "<element name=\"doctype\"><empty/></element>"
+        "<element name=\"flavor\"><empty/></element>"
+        "<zeroOrMore><element name=\"ics\"><empty/></element></zeroOrMore>"
+        "</define>"
+        "<define name=\"Ext\" combine=\"interleave\">"
+        "<optional><element name=\"price-code\"><empty/></element></optional>"
+        "</define>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    rng2093_shape(rng);
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2093InterleaveIntoGroup, Ruby650IncludeForm) {
+    LeptrisRelaxNG rng = parse_file("i2093-ext.rng");
+    ASSERT_NE(rng, nullptr);
+    rng2093_shape(rng);
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2093InterleaveIntoGroup, WindowStopsWhereTheInterleaveEnds) {
+    /* An interleave followed by a sibling (or the next pass of a
+     * repeat) that matches one of its names: the interleave must
+     * leave those children alone. */
+    struct { const char* content; const char* doc; int want; } cases[] = {
+        {"<oneOrMore><interleave><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></interleave></oneOrMore>",
+         "<r><a/><b/><b/><a/></r>", 1},
+        {"<oneOrMore><interleave><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></interleave></oneOrMore>",
+         "<r><b/><a/><a/><b/><a/><b/></r>", 1},
+        {"<interleave><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></interleave>"
+         "<element name='a'><empty/></element>",
+         "<r><a/><b/><a/></r>", 1},
+        /* shuffle needed AND a following sibling of the same name */
+        {"<interleave><group><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></group>"
+         "<element name='c'><empty/></element></interleave>"
+         "<element name='a'><empty/></element>",
+         "<r><a/><c/><b/><a/></r>", 1},
+        {"<oneOrMore><interleave><group><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></group>"
+         "<element name='c'><empty/></element></interleave></oneOrMore>",
+         "<r><a/><c/><b/><a/><c/><b/></r>", 1},
+        {"<oneOrMore><interleave><group><element name='a'><empty/></element>"
+         "<element name='b'><empty/></element></group>"
+         "<element name='c'><empty/></element></interleave></oneOrMore>",
+         "<r><a/><c/><a/><b/><c/><b/></r>", 0},
+    };
+    for (auto& c : cases) {
+        std::string schema =
+            std::string("<grammar xmlns='" RNGNS "'><start>"
+                        "<element name='r'>") +
+            c.content + "</element></start></grammar>";
+        LeptrisRelaxNG rng =
+            leptris_rng_parse(schema.c_str(), schema.size(), nullptr);
+        ASSERT_NE(rng, nullptr) << c.content;
+        std::string msgs;
+        EXPECT_EQ(rng2093_check(rng, c.doc, &msgs), c.want)
+            << c.content << " / " << c.doc << " — " << msgs;
+        leptris_rng_free(rng);
+    }
+}
+
+static std::string rng2093_repeat(const char* unit, int times) {
+    std::string s;
+    for (int i = 0; i < times; i++) s += unit;
+    return s;
+}
+
+TEST(Rng2093InterleaveIntoGroup, RepeatBranchesBeforeASiblingStayInBudget) {
+    /* interleave(a*, b*) followed by a sibling never reaches the
+     * "complete at n" early exit: unmemoized full enumeration spent
+     * its whole 200000-step budget already at 10 pairs and answered
+     * only because the search order found the furthest end first.
+     * Memoized, 31 pairs take ~200 steps. Kept under 64 children:
+     * element_ok reads at most 64 element children. */
+    const char* sch = SCHEMA(
+        "<start><element name='r'><interleave>"
+        "<zeroOrMore><element name='a'><empty/></element></zeroOrMore>"
+        "<zeroOrMore><element name='b'><empty/></element></zeroOrMore>"
+        "</interleave><element name='c'><empty/></element>"
+        "</element></start>");
+    LeptrisRelaxNG rng = leptris_rng_parse(sch, strlen(sch), nullptr);
+    ASSERT_NE(rng, nullptr);
+    std::string msgs;
+    for (int pairs : {5, 20, 31}) {
+        std::string doc = "<r>" + rng2093_repeat("<a/><b/>", pairs) +
+                          "<c/></r>";
+        EXPECT_EQ(rng2093_check(rng, doc.c_str(), &msgs), 1)
+            << pairs << " pairs — " << msgs;
+        doc = "<r>" + rng2093_repeat("<a/><b/>", pairs) + "<c/><a/></r>";
+        EXPECT_EQ(rng2093_check(rng, doc.c_str(), &msgs), 0)
+            << pairs << " pairs + trailing a";
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2093InterleaveIntoGroup, DiagnosisKeepsTheGroupBranchTail) {
+    /* Invalid for an unrelated reason (a stray element at the end).
+     * The diagnosis must name only the stray element: after doctype
+     * consumes, the base group's tail (flavor, ics*) survives in the
+     * interleave state — dropping it reported the correctly placed
+     * flavor as "not allowed here". */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"ext\"><ref name=\"Ext\"/></element></start>"
+        "<define name=\"Ext\">"
+        "<element name=\"doctype\"><empty/></element>"
+        "<element name=\"flavor\"><empty/></element>"
+        "<zeroOrMore><element name=\"ics\"><empty/></element></zeroOrMore>"
+        "</define>"
+        "<define name=\"Ext\" combine=\"interleave\">"
+        "<optional><element name=\"price-code\"><empty/></element></optional>"
+        "</define>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    std::string msgs;
+    const char* doc =
+        "<ext><doctype/><price-code/><flavor/><ics/><bogus/></ext>";
+    EXPECT_EQ(rng2093_check(rng, doc, &msgs), 0);
+    EXPECT_NE(msgs.find("\"bogus\""), std::string::npos) << msgs;
+    EXPECT_EQ(msgs.find("element \"flavor\" not allowed"), std::string::npos)
+        << msgs;
+    EXPECT_EQ(msgs.find("element \"ics\" not allowed"), std::string::npos)
+        << msgs;
     leptris_rng_free(rng);
 }

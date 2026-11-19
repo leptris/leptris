@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <start><element name="ext"><ref name="Ext"/></element></start>
+  <define name="Ext">
+    <element name="doctype"><empty/></element>
+    <element name="flavor"><empty/></element>
+    <zeroOrMore><element name="ics"><empty/></element></zeroOrMore>
+  </define>
+</grammar>
