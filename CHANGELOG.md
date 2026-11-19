@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.429] - 2026-11-19
+
+### Fixed
+
+- interleave branches match with a backtracking cursor machine (ruby#650) (rng)
+- gen_xpath_seeds writes one file per expression - the fuzz legs take corpus DIRECTORIES, and the single-file form made libFuzzer abort on xpath_corpus/gen/ (nightly 44455701815) (fuzz)
+
+
+
 ## [1.9.428] - 2026-11-18
 
 ### Fixed
