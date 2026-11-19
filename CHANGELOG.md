@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- interleave branches match with a backtracking cursor machine (ruby#650) (rng)
-- gen_xpath_seeds writes one file per expression - the fuzz legs take corpus DIRECTORIES, and the single-file form made libFuzzer abort on xpath_corpus/gen/ (nightly 44455701815) (fuzz)
+- **RELAX NG regression (1.9.428.0)**: `combine="interleave"` merges no longer interleaved the added pattern INTO a base sequence — the added element could not sit between two base elements (RELAX NG §4.17; ruby#650). The interleave walk is now a per-branch cursor machine with full backtracking (branches match non-contiguously; repeatable members hold their cursor and may match again after another branch consumes; the search returns the furthest completion with a step budget for pathological documents). Within-a-body order still holds, per Jing. leptris#2094.
+- Fuzz tooling: gen_xpath_seeds emits per-file corpus entries (the nightly's XPath leg takes corpus directories).
 
 
 
