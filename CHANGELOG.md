@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Fixed
+
+- RELAX NG: the interleave cursor machine memoizes its search states. An interleave of repeats followed by a sibling — `interleave(a*, b*), c` over `(a b)×N c` — spent the whole 200 000-step budget already at N = 10 (the answer was right only because the search order found it first); it now takes a few hundred steps, polynomial in the child count (leptris#2093).
+- RELAX NG: the failure diagnosis keeps the remainder of the interleave branch that consumed a child — a group branch keeps its tail, a repeat stays active — so a document with an unrelated error no longer also reports `element "flavor" not allowed here` for a correctly placed merged element (leptris#2093).
+
 ## [1.9.429] - 2026-11-19
 
 ### Fixed

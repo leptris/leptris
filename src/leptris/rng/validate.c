@@ -610,6 +610,20 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
  * chain; the search advances one branch's head pattern at the shared
  * frontier, recurses, and backtracks on overall failure. Jing does
  * the same search over its interleave automaton. */
+/* leptris#2093: one memo slot per visited search state. The result of
+ * rng_interleave_try depends only on (frontier, every cursor, every
+ * done flag, held mask), and full enumeration reaches the same state
+ * along many paths — interleave(a*, b*) followed by a sibling never
+ * hits the best == n early exit, so (a b)x40 exhausted the budget and
+ * rejected a valid document. Memoized, the search is polynomial. */
+typedef struct {
+    size_t hash;          /* 0 = empty slot */
+    size_t i;
+    unsigned mask;
+    size_t off;           /* this state's cur[]/done[] in the pool */
+    size_t val;           /* the memoized result */
+} IlvMemo;
+
 typedef struct {
     RngPattern* cur[64];   /* the branch's remaining member pattern */
     int unit[64];          /* the branch is a single non-group pattern */
@@ -620,7 +634,89 @@ typedef struct {
                               past the budget the match fails
                               conservatively (the diagnose pass then
                               reports the shortfall) */
+    IlvMemo* memo;         /* open addressing, power-of-two capacity */
+    size_t memo_cap, memo_len;
+    RngPattern** pool;     /* cn cursors + cn done markers per state */
+    size_t pool_len, pool_cap;
 } IlvState;
+
+/* done[b] is stored in the pool as a non-NULL marker. */
+static RngPattern ilv_done_mark;
+
+static size_t ilv_hash(const IlvState* st, size_t i, unsigned mask) {
+    size_t h = (size_t)1469598103u ^ i;
+    h = h * 1099511u ^ mask;
+    for (size_t b = 0; b < st->cn; b++) {
+        h = h * 1099511u ^ (size_t)(st->cur[b]);
+        h = h * 1099511u ^ (size_t)st->done[b];
+    }
+    return h ? h : 1;
+}
+
+static int ilv_same(const IlvState* st, const IlvMemo* m, size_t i,
+                    unsigned mask) {
+    if (m->i != i || m->mask != mask) return 0;
+    RngPattern* const* rec = st->pool + m->off;
+    for (size_t b = 0; b < st->cn; b++) {
+        if (rec[b] != st->cur[b]) return 0;
+        if ((rec[st->cn + b] != NULL) != (st->done[b] != 0)) return 0;
+    }
+    return 1;
+}
+
+static const IlvMemo* ilv_lookup(const IlvState* st, size_t h, size_t i,
+                                 unsigned mask) {
+    if (!st->memo) return NULL;
+    for (size_t k = h & (st->memo_cap - 1);; k = (k + 1) & (st->memo_cap - 1)) {
+        const IlvMemo* m = &st->memo[k];
+        if (!m->hash) return NULL;
+        if (m->hash == h && ilv_same(st, m, i, mask)) return m;
+    }
+}
+
+/* Best effort: on an allocation failure the state is simply not
+ * memoized (the step budget still bounds the search). */
+static void ilv_store(IlvState* st, size_t h, size_t i, unsigned mask,
+                      size_t val) {
+    if (st->memo_len * 2 >= st->memo_cap) {
+        size_t cap = st->memo_cap ? st->memo_cap * 2 : 256;
+        if (cap > ((size_t)1 << 22)) return;
+        IlvMemo* t = (IlvMemo*)calloc(cap, sizeof(*t));
+        if (!t) return;
+        for (size_t k = 0; k < st->memo_cap; k++) {
+            if (!st->memo[k].hash) continue;
+            size_t j = st->memo[k].hash & (cap - 1);
+            while (t[j].hash) j = (j + 1) & (cap - 1);
+            t[j] = st->memo[k];
+        }
+        free(st->memo);
+        st->memo = t;
+        st->memo_cap = cap;
+    }
+    if (st->pool_len + 2 * st->cn > st->pool_cap) {
+        size_t cap = st->pool_cap ? st->pool_cap * 2 : 1024;
+        while (cap < st->pool_len + 2 * st->cn) cap *= 2;
+        RngPattern** p =
+            (RngPattern**)realloc(st->pool, cap * sizeof(*p));
+        if (!p) return;
+        st->pool = p;
+        st->pool_cap = cap;
+    }
+    size_t off = st->pool_len;
+    for (size_t b = 0; b < st->cn; b++) {
+        st->pool[off + b] = st->cur[b];
+        st->pool[off + st->cn + b] = st->done[b] ? &ilv_done_mark : NULL;
+    }
+    st->pool_len += 2 * st->cn;
+    size_t k = h & (st->memo_cap - 1);
+    while (st->memo[k].hash) k = (k + 1) & (st->memo_cap - 1);
+    st->memo[k].hash = h;
+    st->memo[k].i = i;
+    st->memo[k].mask = mask;
+    st->memo[k].off = off;
+    st->memo[k].val = val;
+    st->memo_len++;
+}
 
 static size_t rng_interleave_try(RngVal* v, IlvState* st,
                                  LeptrisNodeRef* kids, size_t n,
@@ -652,6 +748,9 @@ static size_t rng_interleave_try(RngVal* v, IlvState* st,
         if (!st->done[b]) break;
     }
     if (b == st->cn) return i;   /* every branch exhausted */
+    size_t h = ilv_hash(st, i, held_mask);
+    const IlvMemo* seen = ilv_lookup(st, h, i, held_mask);
+    if (seen) return seen->val;
     if (++st->steps > 200000) return (size_t)-1;
     /* The search returns the FURTHEST completion, not the first: a
      * branch finishing early can complete at a position that strands
@@ -725,6 +824,7 @@ static size_t rng_interleave_try(RngVal* v, IlvState* st,
             v->err[0] = 0;
         }
     }
+    ilv_store(st, h, i, held_mask, best);
     return best;
 }
 
@@ -811,7 +911,8 @@ static size_t match_seq(RngVal* v, RngPattern* p, LeptrisNodeRef* kids,
                 st.done[st.cn] = 0;
                 st.cn++;
             }
-            size_t out = rng_interleave_try(v, &st, kids, n, idx, 0);
+            size_t out = rng_interleave_try(v, &st, kids, n, idx, 0);            free(st.memo);
+            free(st.pool);
             if (out == (size_t)-1) {
                 v->failed = 0;
                 v->err[0] = 0;
@@ -1507,15 +1608,21 @@ static DiagCell* d_state(RngVal* v, DiagCell* s, const char* x, int* ok) {
                 for (RngPattern* a = d->first_child; a; a = a->next) {
                     DiagCell tmp; tmp.item = a; tmp.next = NULL;
                     int sub = 0;
-                    d_state(v, &tmp, x, &sub);
+                    DiagCell* rest = d_state(v, &tmp, x, &sub);
                     if (!sub) continue;
                     consumed = 1;
-                    /* Survivors = other children (this one consumed
-                     * once; single-use children drop, repeats keep). */
+                    /* Survivors = the other children plus the
+                     * consuming child's RESIDUAL in its place: a
+                     * group branch keeps its tail (leptris#2093), a
+                     * repeat stays active; a used-up single drops. */
                     RngPattern* kids = NULL;
                     for (RngPattern* o = d->first_child; o; o = o->next) {
-                        if (o == a) continue;
-                        RngPattern* cp = dpat_copy(v, o);
+                        RngPattern* src = o;
+                        if (o == a) {
+                            if (!rest) continue;
+                            src = rest->item;
+                        }
+                        RngPattern* cp = dpat_copy(v, src);
                         if (!cp) { consumed = 0; break; }
                         cp->next = kids; kids = cp;
                     }

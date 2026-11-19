@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="">
+  <include href="i2093-base.rng"/>
+  <define name="Ext" combine="interleave">
+    <optional><element name="price-code"><empty/></element></optional>
+  </define>
+</grammar>
