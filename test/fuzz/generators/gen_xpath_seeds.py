@@ -8,7 +8,7 @@ string literals, variables, path/absolute mixes, filtered primaries,
 XQuery FLWOR spellings. Well-formed by construction; deterministic
 under --seed. The nightly feeds them to the fuzz_xpath leg.
 
-Usage: gen_xpath_seeds.py OUTFILE [--seed N] [--count N]
+Usage: gen_xpath_seeds.py OUTDIR [--seed N] [--count N]
 """
 
 import argparse
@@ -97,23 +97,26 @@ def expr(rng, depth):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("outfile")
+    ap.add_argument("outdir")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--count", type=int, default=200)
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
+    os.makedirs(args.outdir, exist_ok=True)
     seen = set()
-    lines = []
+    n = 0
     for _ in range(args.count):
         e = expr(rng, rng.randint(1, 4))
         if e in seen or len(e) > 400:
             continue
         seen.add(e)
-        lines.append(e)
-    with open(args.outfile, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {len(lines)} expressions to {args.outfile}")
+        # One file per expression: the fuzz legs take corpus
+        # DIRECTORIES, and libFuzzer mutates per file.
+        with open(os.path.join(args.outdir, f"gen{n:04d}.xpath"), "w") as f:
+            f.write(e + "\n")
+        n += 1
+    print(f"wrote {n} expressions to {args.outdir}")
 
 
 if __name__ == "__main__":
