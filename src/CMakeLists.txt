@@ -176,8 +176,6 @@ if(LEPTRIS_AMALGAMATED)
         "leptris/common/format_number.c:parse_pattern=fmt_num_parse_pattern"
         "leptris/sax/iterparse.c:set_error=iterparse_set_error"
         "leptris/xpath/vm.c:xpath_context_document=vm_xpath_context_document"
-        "leptris/xpath/xpath_public.c:xslt_register_ufn_handlers=xslt_register_ufn_handlers_impl"
-        "leptris/xslt/xslt_functions.c:xslt_register_ufn_handlers=xslt_register_ufn_handlers_impl"
         "leptris/xslt/xslt_exec.c:utf8_encode=xslt_utf8_encode"
         "leptris/xslt/xslt_exec.c:ws_only=xslt_ws_only"
         "leptris/rng/validate.c:match_seq=rng_match_seq"
