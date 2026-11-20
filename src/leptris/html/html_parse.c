@@ -14,6 +14,7 @@
 #include "../leptris_internal.h"
 #include "../dom/element.h"
 #include "../dom/text.h"
+#include "../dom/edges.h"
 #include "../dom/comment.h"
 #include "../dom/doctype.h"
 #include "../dom/root_doc_map.h"
@@ -3948,6 +3949,71 @@ static int h_id_table_ctx(uint8_t id) {
            id == h_id_thead || id == h_id_tfoot || id == h_id_tr;
 }
 
+/* Unlink n from EVERY chain that currently holds it. A fostered node
+ * was just appended into the table subtree: splicing it before the
+ * table without removing those links left it reachable from two
+ * chains at once, and the sibling walk could loop back into the
+ * nodes it came from - the whole tree walker (count, serialize)
+ * circled a handful of nodes hundreds of millions of times (#2096).
+ * The open stack bounds the search; repeat until no chain holds the
+ * node, so a previously double-linked node heals too. */
+static void h_chain_unlink(HBuilder* b, LeptrisNodeRef n) {
+    if (!n) return;
+    int found = 1;
+    while (found) {
+        found = 0;
+        for (size_t i = b->depth; i-- > 0;) {
+            LeptrisElement p = b->open[i];
+            LeptrisNodeRef first = leptris_node_first_child_internal(
+                (LeptrisNode*)p);
+            if (first == n) {
+                leptris_elem_set_first_child(
+                    p, leptris_node_get_next_sibling(n));
+                if (leptris_node_get_type(n) ==
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    p->child_count--;
+                found = 1;
+                break;
+            }
+            LeptrisNodeRef prev = first;
+            while (prev) {
+                LeptrisNodeRef nx =
+                    leptris_node_get_next_sibling(prev);
+                if (nx == n) {
+                    leptris_node_set_next_sibling(
+                        prev, leptris_node_get_next_sibling(n));
+                    if (leptris_node_get_type(n) ==
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        p->child_count--;
+                    found = 1;
+                    break;
+                }
+                prev = nx;
+            }
+            if (found) break;
+        }
+        if (!found && b->top_head) {
+            if (b->top_head == n) {
+                b->top_head = leptris_node_get_next_sibling(n);
+                found = 1;
+            } else {
+                LeptrisNodeRef prev = b->top_head;
+                while (prev) {
+                    LeptrisNodeRef nx =
+                        leptris_node_get_next_sibling(prev);
+                    if (nx == n) {
+                        leptris_node_set_next_sibling(
+                            prev, leptris_node_get_next_sibling(n));
+                        found = 1;
+                        break;
+                    }
+                    prev = nx;
+                }
+            }
+        }
+    }
+}
+
 /* Insert n into parent's child chain BEFORE `before`. Same surgery
  * pattern as the head-content lift (first_child + sibling links +
  * element child_count). */
@@ -3972,8 +4038,12 @@ static void h_insert_before(HBuilder* b, LeptrisElement parent,
         }
     }
     leptris_node_set_next_sibling(n, (LeptrisNodeRef)before);
-    if (leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT)
+    if (leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT) {
         parent->child_count++;
+        leptris_elem_set_parent((LeptrisElement)n, parent);
+    } else if (leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_TEXT) {
+        leptris_textnode_set_parent((LeptrisTextNode*)n, parent);
+    }
 }
 
 /* O(1) append for open-stack parents (#1225): route through the
@@ -4276,6 +4346,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                     }
                 if (oi >= 0) {
                     LeptrisElement tc = b->open[oi];
+                    h_chain_unlink(b, n);
                     LeptrisNodeRef nxt =
                         leptris_node_get_next_sibling(
                             (LeptrisNodeRef)tc);
@@ -4300,6 +4371,18 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                         leptris_node_set_next_sibling(
                             (LeptrisNodeRef)tc, n);
                     }
+                    {
+                        LeptrisElement npar = leptris_node_parent_inline(
+                            (LeptrisNode*)tc);
+                        if (leptris_node_get_type(n) ==
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            leptris_elem_set_parent(
+                                (LeptrisElement)n, npar);
+                        else if (leptris_node_get_type(n) ==
+                                 LEPTRIS_NODE_TYPE_TEXT)
+                            leptris_textnode_set_parent(
+                                (LeptrisTextNode*)n, npar);
+                    }
                     b->depth = (size_t)oi;
                     return;
                 }
@@ -4307,6 +4390,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
             if (ti >= 1) {
                 LeptrisElement table = b->open[ti];
                 LeptrisElement tparent = b->open[ti - 1];
+                h_chain_unlink(b, n);
                 h_insert_before(b, tparent, table, n);
                 return;
             }
@@ -4314,6 +4398,7 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                 /* Table sits directly on the top chain — splice n
                  * into the chain BEFORE the table node. */
                 LeptrisElement table = b->open[0];
+                h_chain_unlink(b, n);
                 if (b->top_head == (LeptrisNodeRef)table) {
                     leptris_node_set_next_sibling(
                         n, b->top_head);
@@ -4332,6 +4417,12 @@ static void h_append(HBuilder* b, LeptrisNodeRef n) {
                             n, (LeptrisNodeRef)table);
                     }
                 }
+                if (leptris_node_get_type(n) == LEPTRIS_NODE_TYPE_ELEMENT)
+                    leptris_elem_set_parent((LeptrisElement)n, NULL);
+                else if (leptris_node_get_type(n) ==
+                         LEPTRIS_NODE_TYPE_TEXT)
+                    leptris_textnode_set_parent((LeptrisTextNode*)n,
+                                                NULL);
                 return;
             }
         }
