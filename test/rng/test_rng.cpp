@@ -1801,6 +1801,226 @@ TEST(Rng2079AttrChoice, ExactlyOneBranchWins) {
     leptris_rng_free(rng);
 }
 
+/* ---- leptris#2110: a content choice of elements imposes no attr
+ * requirement on the parent ------------------------------------------
+ * Since #2079's whole-branch selection, the requirement walk's
+ * unassigned-choice path descended through the alternatives into the
+ * ELEMENT bodies and demanded the child elements' required attributes
+ * from the PARENT (openmath2.rng's omel: OMS requires cd+name, checked
+ * against OMOBJ) — every OpenMath document rejected in ~seconds.
+ * An element alternative's requirements belong to the child element,
+ * which is validated on its own visit. */
+
+TEST(Rng2110AttrChoiceElementReq, ContentChoiceSparesParent) {
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><ref name=\"root\"/></start>"
+        "<define name=\"root\">"
+        "<element name=\"root\">"
+        "<ref name=\"common\"/>"
+        "<ref name=\"omel\"/>"
+        "</element></define>"
+        "<define name=\"common\">"
+        "<optional><attribute name=\"id\"><data type=\"string\"/></attribute></optional>"
+        "</define>"
+        "<define name=\"omel\">"
+        "<choice><ref name=\"a\"/><ref name=\"b\"/></choice>"
+        "</define>"
+        "<define name=\"a\">"
+        "<element name=\"a\">"
+        "<attribute name=\"req1\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "<define name=\"b\">"
+        "<element name=\"b\">"
+        "<attribute name=\"req2\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<root><a req1=\"x\"/></root>", 1,
+         "element branch: the child's required attr is checked at the child"},
+        {"<root><b req2=\"y\"/></root>", 1, "the other element branch"},
+        {"<root id=\"i\"><a req1=\"x\"/></root>", 1,
+         "the optional parent attr rides along"},
+        {"<root/>", 0, "the choice itself is required"},
+        {"<root><a req1=\"x\" req2=\"y\"/></root>", 0,
+         "an attribute the chosen element does not allow still rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2110AttrChoiceElementReq, OpenmathObjShape) {
+    /* alg1-001 distillation: optional-folded attribute choices beside
+     * a content choice of element refs (the openmath2.rng OMOBJ/omel
+     * shape). Jing-verified valid; 1.9.427+ rejected it in seconds. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"OMOBJ\">"
+        "<optional><attribute name=\"version\"><data type=\"string\"/></attribute></optional>"
+        "<ref name=\"common\"/>"
+        "<ref name=\"omel\"/>"
+        "</element></start>"
+        "<define name=\"common\">"
+        "<optional><attribute name=\"cdbase\"><data type=\"string\"/></attribute></optional>"
+        "</define>"
+        "<define name=\"omel\">"
+        "<choice><ref name=\"OMS\"/><ref name=\"OMV\"/></choice>"
+        "</define>"
+        "<define name=\"OMS\"><element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "<define name=\"OMV\"><element name=\"OMV\">"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMOBJ version=\"2.0\" cdbase=\"x\">"
+         "<OMS cd=\"q\" name=\"forall\"/></OMOBJ>", 1,
+         "the alg1-001 head shape"},
+        {"<OMOBJ><OMS cd=\"q\" name=\"forall\"/></OMOBJ>", 1,
+         "all optionals absent"},
+        {"<OMOBJ><OMV name=\"a\"/></OMOBJ>", 1, "the other omel branch"},
+        {"<OMOBJ><OMS cd=\"q\"/></OMOBJ>", 0,
+         "the CHILD's own missing required attr still rejects"},
+        {"<OMOBJ><OMX/></OMOBJ>", 0, "unknown child rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2110AttrChoiceElementReq, NestedAttrChoiceStaysInTheChild) {
+    /* The alg1-001 trigger: collect_attr_choices descended through
+     * element boundaries, so the omel -> OMF ref pulled OMF's dec/hex
+     * attribute-choice into OMOBJ's selection map — the search then
+     * demanded OMF's attributes from OMOBJ and every assignment
+     * failed ("attribute combination matches no branch"). An element
+     * subtree's attr-choices belong to that element alone. */
+    const char* schema =
+        "<grammar ns=\"http://www.openmath.org/OpenMath\""
+        " xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " datatypeLibrary=\"http://www.w3.org/2001/XMLSchema-datatypes\">"
+        "<start><element name=\"OMOBJ\">"
+        "<optional><attribute name=\"version\"><data type=\"string\"/></attribute></optional>"
+        "<ref name=\"common\"/>"
+        "<ref name=\"omel\"/>"
+        "</element></start>"
+        "<define name=\"common\">"
+        "<optional><attribute name=\"cdbase\"><data type=\"string\"/></attribute></optional>"
+        "</define>"
+        "<define name=\"omel\">"
+        "<choice><ref name=\"OMS\"/><ref name=\"OMF\"/></choice>"
+        "</define>"
+        "<define name=\"OMS\"><element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "<define name=\"OMF\"><element name=\"OMF\">"
+        "<choice>"
+        "<attribute name=\"dec\"><data type=\"double\"/></attribute>"
+        "<attribute name=\"hex\"><data type=\"hexBinary\"/></attribute>"
+        "</choice>"
+        "</element></define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMOBJ xmlns=\"http://www.openmath.org/OpenMath\" version=\"2.0\""
+         " cdbase=\"x\"><OMS cd=\"q\" name=\"forall\"/></OMOBJ>", 1,
+         "OMS branch: OMF's dec/hex choice must not be demanded here"},
+        {"<OMOBJ xmlns=\"http://www.openmath.org/OpenMath\">"
+         "<OMF dec=\"0.5\"/></OMOBJ>", 1,
+         "the OMF branch: its own choice takes dec alone"},
+        {"<OMOBJ xmlns=\"http://www.openmath.org/OpenMath\">"
+         "<OMF hex=\"4142\"/></OMOBJ>", 1, "or hex alone"},
+        {"<OMOBJ xmlns=\"http://www.openmath.org/OpenMath\">"
+         "<OMF dec=\"0.5\" hex=\"41\"/></OMOBJ>", 0,
+         "both branches at once still rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2110AttrChoiceElementReq, CyclicContentDedupesTheAttrChoice) {
+    /* openmath2.rng's real shape: omel reaches OME/notom, which reach
+     * omel again. The collect walk treated the cyclic graph as a tree
+     * (depth cap 24) and collected the same OMF choice once per lap —
+     * 16 entries (RNG_ATTR_SEL_MAX) — while the selection search's
+     * depth cap is 12, so no element could ever validate, and the
+     * re-walk cost seconds per element. Collection must visit each
+     * node once and keep one entry per distinct choice. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"OMOBJ\">"
+        "<optional><attribute name=\"version\"><data type=\"string\"/></attribute></optional>"
+        "<ref name=\"omel\"/>"
+        "</element></start>"
+        "<define name=\"omel\">"
+        "<choice><ref name=\"OMS\"/><ref name=\"OMF\"/><ref name=\"loop\"/></choice>"
+        "</define>"
+        "<define name=\"loop\"><element name=\"L\">"
+        "<zeroOrMore><choice><ref name=\"omel\"/><ref name=\"loop\"/></choice></zeroOrMore>"
+        "</element></define>"
+        "<define name=\"OMS\"><element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element></define>"
+        "<define name=\"OMF\"><element name=\"OMF\">"
+        "<choice>"
+        "<attribute name=\"dec\"><data type=\"double\"/></attribute>"
+        "<attribute name=\"hex\"><data type=\"hexBinary\"/></attribute>"
+        "</choice>"
+        "</element></define>"
+        "</grammar>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMOBJ version=\"2.0\"><OMS cd=\"q\" name=\"forall\"/></OMOBJ>", 1,
+         "the OMF choice must be collected once, not per cycle lap"},
+        {"<OMOBJ><OMF dec=\"0.5\"/></OMOBJ>", 1, "dec alone"},
+        {"<OMOBJ><L><OMS cd=\"q\" name=\"x\"/></L></OMOBJ>", 1,
+         "through the recursive element"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
 /* ---- leptris#2080: <data> content lexes through the XSD builtins -- */
 
 TEST(Rng2080Data, Base64BinaryLexes) {
