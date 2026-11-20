@@ -1108,17 +1108,79 @@ static int content_allows_text(RngGrammar* g, RngPattern* content,
     return 0;
 }
 
-static int has_element_patterns(RngPattern* content) {
+/* Does the content model contain ELEMENT patterns anywhere? The
+ * wrapper kinds must not answer this by themselves: an
+ * <optional> around an ATTRIBUTE beside a <data> leaf is still a
+ * TEXT-content model, and treating the wrapper as element-ish
+ * routed such shapes to the element-content branch where the data
+ * leaf never saw the text - every datatype lexed garbage-valid
+ * (#2080's beside-attribute shape). Descend through wrappers and
+ * refs; unknown content (external refs, depth cap) answers
+ * permissively so the element branch keeps handling it. */
+static int has_element_patterns_deep(RngGrammar* g, RngPattern* content,
+                                     int depth, int* saw_leaf) {
+    if (depth > 32) return 1;
     for (RngPattern* c = content; c; c = c->next) {
         switch (c->kind) {
-            case RNG_ELEMENT: case RNG_REF: case RNG_GROUP:
-            case RNG_INTERLEAVE: case RNG_CHOICE: case RNG_OPTIONAL:
-            case RNG_ZERO_OR_MORE: case RNG_ONE_OR_MORE: case RNG_MIXED:
+            case RNG_ELEMENT:
                 return 1;
-            default: break;
+            case RNG_TEXT: case RNG_DATA: case RNG_VALUE:
+            case RNG_LIST: case RNG_EMPTY:
+                /* A non-attribute leaf pattern: the shape is a
+                 * TEXT-content model — the data leaf must actually
+                 * see the text (#2080's beside-attribute shape lexed
+                 * garbage-valid when a wrapper routed it to the
+                 * element branch instead). */
+                *saw_leaf = 1;
+                continue;
+            case RNG_ATTRIBUTE: case RNG_NOT_ALLOWED:
+                continue;
+            case RNG_REF: {
+                RngDefine* d = find_define(g, c->name);
+                if (d && d->body &&
+                    has_element_patterns_deep(g, d->body, depth + 1,
+                                              saw_leaf))
+                    return 1;
+                continue;
+            }
+            case RNG_CHOICE: {
+                /* A choice of attribute branches is not text content:
+                 * the whole-branch selection machinery (#2079) lives in
+                 * the element-content branch — reclassifying it as a
+                 * text leaf let attributes from different branches
+                 * combine again. */
+                for (RngPattern* b = c->first_child; b; b = b->next)
+                    if (b->kind == RNG_ATTRIBUTE) return 1;
+                if (c->first_child &&
+                    has_element_patterns_deep(g, c->first_child,
+                                              depth + 1, saw_leaf))
+                    return 1;
+                continue;
+            }
+            case RNG_EXTERNAL_REF:
+                return 1;
+            default:
+                if (c->first_child &&
+                    has_element_patterns_deep(g, c->first_child,
+                                              depth + 1, saw_leaf))
+                    return 1;
+                continue;
         }
     }
     return 0;
+}
+
+static int has_element_patterns(RngVal* v, RngPattern* content) {
+    int saw_leaf = 0;
+    if (has_element_patterns_deep(v->g, content, 0, &saw_leaf))
+        return 1;
+    /* No element patterns: the TEXT branch handles text leaves
+     * (data/value/text) and empty. But content with NO leaves at
+     * all — attribute-only defines, bare refs to them — belongs to
+     * the element branch, which walks attributes and the zero-child
+     * checks (#1709's attribute-choice-with-text shape rejected
+     * everything when routed to the text branch). */
+    return !saw_leaf;
 }
 
 /* <list>: the element text tokenizes on whitespace; every token
@@ -1249,7 +1311,7 @@ static int element_ok(RngVal* v, RngPattern* p, LeptrisElement e) {
     }
     if (!match_attrs(v, p, e)) return 0;
 
-    if (!has_element_patterns(p->first_child)) {
+    if (!has_element_patterns(v, p->first_child)) {
         /* Text-level content: each non-attribute child is a leaf.
          * No leaf at all means empty content — wildcard elements
          * consumed their name class at parse, so non-ws text must
@@ -2218,7 +2280,7 @@ static void diagnose_element(RngVal* v, RngPattern* p, LeptrisElement e) {
     if (!p || !e) return;
     diagnose_attrs(v, p, e);
 
-    if (!has_element_patterns(p->first_child)) {
+    if (!has_element_patterns(v, p->first_child)) {
         /* Text-level content. */
         LeptrisNodeRef sub[64];
         size_t sn = elem_children(e, sub, 64);
