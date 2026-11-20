@@ -554,13 +554,17 @@ static void* pool_alloc_oversized(LeptrisMemoryPool* pool, size_t size) {
  * loop. Freed by leptris_pool_destroy via the big-alloc list. */
 static void* pool_alloc_arena_extension(LeptrisMemoryPool* pool, size_t size) {
     size_t asize = ALIGN_SIZE(size);
+    void* ptr = NULL;
 #ifndef POOL_RECYCLE_ASAN
-    if (pool_recycle_active()) {
-        void* parked = pool_recycle_pop(&t_recycle_exts, asize);
-        if (parked) return parked;
-    }
+    /* A recycled block serves the request, but it must STILL get a
+     * tracking node on THIS pool's big-alloc list: pool_contains and
+     * the destroy walk only know claimed blocks, and an unclaimed
+     * recycled block leaks at destroy and reads as not-pool-owned
+     * (the AdoptedAttrs boundary sweep caught both). */
+    if (pool_recycle_active())
+        ptr = pool_recycle_pop(&t_recycle_exts, asize);
 #endif
-    void* ptr = leptris_alloc_hook(asize);
+    if (!ptr) ptr = leptris_alloc_hook(asize);
     if (!ptr) return NULL;
     LeptrisBigAlloc* node =
         (LeptrisBigAlloc*)leptris_alloc_hook(sizeof(LeptrisBigAlloc));
@@ -569,7 +573,12 @@ static void* pool_alloc_arena_extension(LeptrisMemoryPool* pool, size_t size) {
         return NULL;
     }
     node->ptr  = ptr;
-    node->size = size;
+    /* The BLOCK is asize bytes (aligned, and recycled blocks come
+     * back at their aligned length): the tracking node must claim
+     * the true length or leptris_pool_contains leaves the alignment
+     * tail unclaimed and attributes living there read as
+     * not-pool-owned (the AdoptedAttrs boundary sweep caught it). */
+    node->size = asize;
     node->next = NULL;
     *pool->last_big_alloc_link = node;
     pool->last_big_alloc_link  = &node->next;
