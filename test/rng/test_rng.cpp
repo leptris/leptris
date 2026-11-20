@@ -2059,6 +2059,35 @@ TEST(Rng2080Data, Base64BinaryLexes) {
  * text, and every datatype lexed as garbage-in-garbage-valid. The
  * element-pattern question must descend through wrappers and
  * refs. */
+/* #1883's openmath CD-loading shape: a RelaxNG <data type="anyURI"/>
+ * element whose content is space-padded - XSD Part 2's collapse
+ * facet trims before the lexical check (Jing accepts). */
+TEST(Rng2080Data, AnyURICollapsesPaddedContent) {
+    const char* schema =
+        "<element name=\"CDURL\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " datatypeLibrary=\"http://www.w3.org/2001/XMLSchema-datatypes\">"
+        "<data type=\"anyURI\"/></element>";
+    LeptrisRelaxNG rng =
+        leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<CDURL> http://www.openmath.org/cd/alg1.ocd </CDURL>", 1,
+         "the openmath CDURL shape: padded URI collapses"},
+        {"<CDURL>   </CDURL>", 1, "whitespace-only collapses to the empty URI"},
+        {"<CDURL>http://x</CDURL>", 1, "unpadded stays valid"},
+        {"<CDURL>ht\ttp://x</CDURL>", 0, "an interior control character still rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
 TEST(Rng2080Data, DataLexesBesideAttributePatterns) {
     const char* opt_schema =
         "<element name=\"OMB\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
