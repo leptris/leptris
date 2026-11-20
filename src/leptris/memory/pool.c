@@ -109,8 +109,13 @@ static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_pages;
 static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_exts;
 /* Park a block only if worth it: beyond this size one malloc's
  * bookkeeping is noise against the copy/fault cost, and a huge
- * parked block is RSS held hostage by one outlier document. */
+ * parked block is RSS held hostage by one outlier document. Below
+ * sizeof(pool_parked) parking is impossible — the list header is
+ * written INTO the block, so a smaller block would overflow its own
+ * allocation (the Windows heap-corruption 0xc0000374 the windows
+ * lane caught on #2105). */
 #define POOL_EXT_PARK_MAX_BYTES (256u * 1024u)
+#define POOL_EXT_PARK_MIN_BYTES (sizeof(struct pool_parked))
 #endif
 
 static int pool_recycle_active(void) {
@@ -415,10 +420,11 @@ void leptris_pool_destroy(LeptrisMemoryPool* pool) {
         while (big) {
             LeptrisBigAlloc* next = big->next;
 #ifndef POOL_RECYCLE_ASAN
+            size_t esize = ALIGN_SIZE(big->size);
             if (!can_recycle_ext ||
-                ALIGN_SIZE(big->size) > POOL_EXT_PARK_MAX_BYTES ||
-                !pool_recycle_park(&t_recycle_exts, big->ptr,
-                                   ALIGN_SIZE(big->size)))
+                esize > POOL_EXT_PARK_MAX_BYTES ||
+                esize < POOL_EXT_PARK_MIN_BYTES ||
+                !pool_recycle_park(&t_recycle_exts, big->ptr, esize))
 #endif
             {
                 leptris_free_hook(big->ptr);
