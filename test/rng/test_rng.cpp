@@ -2052,6 +2052,53 @@ TEST(Rng2080Data, Base64BinaryLexes) {
     leptris_rng_free(rng);
 }
 
+/* The #2080 residual shape: an attribute pattern (optional or
+ * required) BESIDE the data leaf. has_element_patterns counted the
+ * wrapper kinds as element patterns, so [optional(attr), data]
+ * took the element-content branch, the data leaf never saw the
+ * text, and every datatype lexed as garbage-in-garbage-valid. The
+ * element-pattern question must descend through wrappers and
+ * refs. */
+TEST(Rng2080Data, DataLexesBesideAttributePatterns) {
+    const char* opt_schema =
+        "<element name=\"OMB\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " datatypeLibrary=\"http://www.w3.org/2001/XMLSchema-datatypes\">"
+        "<optional><attribute name=\"id\"><data type=\"string\"/></attribute></optional>"
+        "<data type=\"base64Binary\"/></element>";
+    const char* req_schema =
+        "<element name=\"OMB\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " datatypeLibrary=\"http://www.w3.org/2001/XMLSchema-datatypes\">"
+        "<attribute name=\"id\"><data type=\"string\"/></attribute>"
+        "<data type=\"base64Binary\"/></element>";
+    const char* dbl_schema =
+        "<element name=\"D\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " datatypeLibrary=\"http://www.w3.org/2001/XMLSchema-datatypes\">"
+        "<optional><attribute name=\"id\"><data type=\"string\"/></attribute></optional>"
+        "<data type=\"double\"/></element>";
+    struct { const char* schema; const char* doc; int want; const char* why; } cases[] = {
+        {opt_schema, "<OMB>not-base64!!!</OMB>", 0, "optional attr beside data: garbage base64 rejects"},
+        {opt_schema, "<OMB>aGVsbG8=</OMB>", 1, "optional attr beside data: valid base64 accepts"},
+        {opt_schema, "<OMB id=\"x\">not-base64!!!</OMB>", 0, "with the optional present: still lexes"},
+        {req_schema, "<OMB id=\"x\">not-base64!!!</OMB>", 0, "required attr beside data: garbage rejects"},
+        {req_schema, "<OMB id=\"x\">aGVsbG8=</OMB>", 1, "required attr beside data: valid accepts"},
+        {req_schema, "<OMB>not-base64!!!</OMB>", 0, "missing required attr still rejects"},
+        {dbl_schema, "<D>not-a-double!!!</D>", 0, "the same shape on double rejects"},
+        {dbl_schema, "<D>0.5</D>", 1, "double accepts a real double"},
+    };
+    for (auto& c : cases) {
+        LeptrisRelaxNG rng =
+            leptris_rng_parse(c.schema, strlen(c.schema), nullptr);
+        ASSERT_NE(rng, nullptr) << c.why;
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+        leptris_rng_free(rng);
+    }
+}
+
 TEST(Rng2080Data, HexBinaryLexes) {
     const char* schema =
         "<element name=\"H\" xmlns=\"http://relaxng.org/ns/structure/1.0\">"
