@@ -288,12 +288,18 @@ int xsd_builtin_valid(const char* type, const char* v) {
         return *p == 0;
     }
     if (strcmp(type, "xs:anyURI") == 0) {
-        /* Permissive (libxml2-compatible): no ASCII control
-         * characters, no leading/trailing space. */
-        if (*v && (unsigned char)v[0] <= 0x20) return 0;
+        /* XSD Part 2: anyURI's whiteSpace facet is collapse — trim
+         * before the lexical check, and the collapsed empty string
+         * is a legal anyURI (#1883: Jing accepts space-padded and
+         * whitespace-only values; the openmath CD-loading corpus
+         * pads CDURL elements). Interior control characters still
+         * reject; interior spaces stay permitted. */
+        while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r')
+            v++;
         size_t n = strlen(v);
-        if (n && (unsigned char)v[n - 1] <= 0x20) return 0;
-        for (const char* p = v; *p; p++)
+        while (n > 0 && (unsigned char)v[n - 1] <= 0x20) n--;
+        if (n == 0) return 1;
+        for (const char* p = v; p < v + n; p++)
             if ((unsigned char)*p < 0x20) return 0;
         return 1;
     }

@@ -878,6 +878,28 @@ TEST(XsdDatatypes, BuiltinsLexicalMatrix) {
     }
 }
 
+/* leptris#1883 (the anyURI row): XSD Part 2 gives anyURI the
+ * collapse whiteSpace facet - leading/trailing whitespace trims
+ * before the lexical check, and the collapsed empty string is a
+ * legal anyURI (Jing accepts space-padded and whitespace-only
+ * values; the openmath CD-loading corpus pads CDURL elements). */
+TEST(XsdDatatypes, AnyURICollapseFacet) {
+    const BuiltinCase rows[] = {
+        {"xs:anyURI", "http://x/y", 1},
+        {"xs:anyURI", " http://x/y ", 1},
+        {"xs:anyURI", "\thttp://x\n", 1},
+        {"xs:anyURI", "  ", 1},
+        {"xs:anyURI", "", 1},
+        {"xs:anyURI", "ht\tp://x", 0},
+        {"xs:anyURI", "http://x\n/y", 0},
+    };
+    for (const BuiltinCase& c : rows) {
+        SCOPED_TRACE(std::string(c.type) + " : " + c.value);
+        EXPECT_EQ(leptris_xsd_builtin_valid(c.type, c.value), c.expect)
+            << c.type << " : " << c.value;
+    }
+}
+
 /* leptris#1936: gMonth accepts BOTH XSD 1.0 spellings — the
  * errata's --MM and the first edition's --MM-- — each with the
  * optional timezone; and the g-regional/date family rejects
