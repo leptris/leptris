@@ -4,16 +4,10 @@
 
 ### Fixed
 
-- memoize the interleave cursor search and keep a branch's tail in the diagnosis (leptris#2093) (rng)
-- drop the stale amalgamation rename of xslt_register_ufn_handlers (build)
-- zero-width group members advance the interleave cursor; misplaced elements find their own element pattern (rng)
-
-
-
-### Fixed
-
-- RELAX NG: the interleave cursor machine memoizes its search states. An interleave of repeats followed by a sibling — `interleave(a*, b*), c` over `(a b)×N c` — spent the whole 200 000-step budget already at N = 10 (the answer was right only because the search order found it first); it now takes a few hundred steps, polynomial in the child count (leptris#2093).
-- RELAX NG: the failure diagnosis keeps the remainder of the interleave branch that consumed a child — a group branch keeps its tail, a repeat stays active — so a document with an unrelated error no longer also reports `element "flavor" not allowed here` for a correctly placed merged element (leptris#2093).
+- **RELAX NG: the OpenMath corpus now validates verdict-identical to Jing — 345/345 documents, zero mismatches.** The attr-choice collection walk treated the cyclic content graph (`omel → OME/notom → omel`) as a tree and collected the same attribute-choice once per lap up to the selection cap while the branch search's depth cap is lower, so every element whose content could reach the cycle rejected with "attribute combination matches no branch of the attribute choice" after seconds of re-walking — the corpus-wide failure since 1.9.427 (#2079), independent of the interleave work. alg1-001: 30s-wrong-verdict → sub-millisecond-valid. The walk now carries a pointer set and visits each node once. leptris#2103, disposition on #2088.
+- **RELAX NG regression (1.9.428–429)**: zero-width group members hold and advance the interleave cursor instead of finishing the group, so the simplest OMATTR attribution document — valid on 1.9.428, rejected on 1.9.429 — validates again; misplaced merged elements find their own element pattern. leptris#2099.
+- RELAX NG: the interleave cursor machine memoizes its search states. An interleave of repeats followed by a sibling — `interleave(a*, b*), c` over `(a b)×N c` — spent the whole 200 000-step budget already at N = 10; it now takes a few hundred steps, polynomial in the child count. The failure diagnosis keeps the remainder of the interleave branch that consumed a child, so a document with an unrelated error no longer also reports `element "flavor" not allowed here` for a correctly placed merged element. By @andrew2net. leptris#2098.
+- Build: drop the stale amalgamation rename of xslt_register_ufn_handlers. leptris#2100.
 
 ## [1.9.429] - 2026-11-19
 
