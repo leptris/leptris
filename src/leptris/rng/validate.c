@@ -347,10 +347,6 @@ typedef struct {
 
 static int check_required_list_sel(RngVal* v, RngPattern* head,
                                    LeptrisElement e, const AttrSel* sel);
-static int check_required_list(RngVal* v, RngPattern* head,
-                               LeptrisElement e) {
-    return check_required_list_sel(v, head, e, NULL);
-}
 
 static RngPattern* attr_sel_branch(const AttrSel* sel,
                                    const RngPattern* choice) {
@@ -496,11 +492,49 @@ static int check_required_node_sel(RngVal* v, RngPattern* c,
     return 1;
 }
 
+/* The content graph is CYCLIC (openmath2.rng: omel -> OME/notom ->
+ * omel): a naive tree walk revisits the same nodes once per lap and
+ * collected the same attr-choice up to RNG_ATTR_SEL_MAX times, while
+ * the selection search's depth cap is lower — every element whose
+ * content could reach the cycle rejected, and the re-walk cost
+ * seconds per element. The walk carries a pointer set and visits
+ * each node once. */
+#define RNG_COLLECT_SEEN_MAX 512
+
+typedef struct {
+    const RngPattern* slot[RNG_COLLECT_SEEN_MAX];
+} CollectSeen;
+
+static int collect_seen_add(CollectSeen* s, const RngPattern* p) {
+    size_t h = ((uintptr_t)p >> 4) % RNG_COLLECT_SEEN_MAX;
+    for (size_t i = 0; i < RNG_COLLECT_SEEN_MAX; i++) {
+        size_t j = (h + i) % RNG_COLLECT_SEEN_MAX;
+        if (s->slot[j] == p) return 0;
+        if (!s->slot[j]) {
+            s->slot[j] = p;
+            return 1;
+        }
+    }
+    return 1;
+}
+
+static void collect_walk(RngVal* v, RngPattern* p, int depth, AttrSel* out,
+                         CollectSeen* seen);
+
 /* Collect the attr-consuming CHOICE nodes through the content
- * (refs expanded, depth-capped). */
+ * (refs expanded, depth-capped, cycle-safe). */
 static void collect_attr_choices(RngVal* v, RngPattern* p, int depth,
                                  AttrSel* out) {
     if (!p || depth > 24) return;
+    CollectSeen seen;
+    memset(&seen, 0, sizeof(seen));
+    collect_walk(v, p, depth, out, &seen);
+}
+
+static void collect_walk(RngVal* v, RngPattern* p, int depth, AttrSel* out,
+                         CollectSeen* seen) {
+    if (!p || depth > 24) return;
+    if (!collect_seen_add(seen, p)) return;
     for (RngPattern* c = p->first_child; c; c = c->next) {
         if (c->kind == RNG_CHOICE) {
             int consumes = 0;
@@ -515,10 +549,10 @@ static void collect_attr_choices(RngVal* v, RngPattern* p, int depth,
         }
         if (c->kind == RNG_REF) {
             RngDefine* d = find_define(v->g, c->name);
-            if (d && d->body) collect_attr_choices(v, d->body, depth + 1, out);
+            if (d && d->body) collect_walk(v, d->body, depth + 1, out, seen);
             continue;
         }
-        collect_attr_choices(v, c, depth + 1, out);
+        collect_walk(v, c, depth + 1, out, seen);
     }
 }
 
