@@ -85,6 +85,34 @@ struct pool_recycle_list {
 static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_pools;
 static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_pages;
 
+/* ASAN: recycling hides use-after-free (a freed-then-parked block
+ * stays valid); the retain pool stands down for the same reason
+ * (arena.c's ARENA_RETAIN_ASAN). */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define POOL_RECYCLE_ASAN 1
+#endif
+#elif defined(__SANITIZE_ADDRESS__)
+#define POOL_RECYCLE_ASAN 1
+#endif
+
+/* Arena-extension blocks (#2054's mut-doc-cycle row): a mutation
+ * document that outgrows its 64KB span pays one malloc per oversized
+ * request, and pool_destroy's arena path freed each block straight
+ * back to malloc - a create/build/free cycle re-mallocs and
+ * re-faults hundreds of same-size blocks. Park them on a capped
+ * thread-local list at destroy, pop an exact-size match on the next
+ * extension: same uninitialized-memory contract as malloc, pages
+ * stay warm. Stands down under custom allocators (with the pages
+ * list) and ASAN. */
+#ifndef POOL_RECYCLE_ASAN
+static LEPTRIS_THREAD_LOCAL struct pool_recycle_list t_recycle_exts;
+/* Park a block only if worth it: beyond this size one malloc's
+ * bookkeeping is noise against the copy/fault cost, and a huge
+ * parked block is RSS held hostage by one outlier document. */
+#define POOL_EXT_PARK_MAX_BYTES (256u * 1024u)
+#endif
+
 static int pool_recycle_active(void) {
     return !leptris_custom_allocator_active();
 }
@@ -92,8 +120,14 @@ static int pool_recycle_active(void) {
 /* leptris_thread_cleanup: return every parked block to the
  * allocator so a finishing thread holds no pool memory. */
 void leptris_pool_drain_recycler(void) {
+#ifndef POOL_RECYCLE_ASAN
+    struct pool_recycle_list* lists[3] = {&t_recycle_pools, &t_recycle_pages,
+                                          &t_recycle_exts};
+    for (int i = 0; i < 3; i++) {
+#else
     struct pool_recycle_list* lists[2] = {&t_recycle_pools, &t_recycle_pages};
     for (int i = 0; i < 2; i++) {
+#endif
         struct pool_parked* p = lists[i]->head;
         while (p) {
             struct pool_parked* next = p->next;
@@ -375,10 +409,20 @@ void leptris_pool_destroy(LeptrisMemoryPool* pool) {
      * tracked extension blocks — free those, then the arena (when
      * owned) and the pool struct. */
     if (pool->arena) {
+        const int can_recycle_ext = pool_recycle_active() &&
+                                    !pool->alloc_hook && !pool->dealloc_hook;
         LeptrisBigAlloc* big = pool->first_big_alloc;
         while (big) {
             LeptrisBigAlloc* next = big->next;
-            leptris_free_hook(big->ptr);
+#ifndef POOL_RECYCLE_ASAN
+            if (!can_recycle_ext ||
+                ALIGN_SIZE(big->size) > POOL_EXT_PARK_MAX_BYTES ||
+                !pool_recycle_park(&t_recycle_exts, big->ptr,
+                                   ALIGN_SIZE(big->size)))
+#endif
+            {
+                leptris_free_hook(big->ptr);
+            }
             leptris_free_hook(big);
             big = next;
         }
@@ -503,7 +547,14 @@ static void* pool_alloc_oversized(LeptrisMemoryPool* pool, size_t size) {
  * directly (NOT a recursive pool_alloc) so a near-full arena can't
  * loop. Freed by leptris_pool_destroy via the big-alloc list. */
 static void* pool_alloc_arena_extension(LeptrisMemoryPool* pool, size_t size) {
-    void* ptr = leptris_alloc_hook(ALIGN_SIZE(size));
+    size_t asize = ALIGN_SIZE(size);
+#ifndef POOL_RECYCLE_ASAN
+    if (pool_recycle_active()) {
+        void* parked = pool_recycle_pop(&t_recycle_exts, asize);
+        if (parked) return parked;
+    }
+#endif
+    void* ptr = leptris_alloc_hook(asize);
     if (!ptr) return NULL;
     LeptrisBigAlloc* node =
         (LeptrisBigAlloc*)leptris_alloc_hook(sizeof(LeptrisBigAlloc));
