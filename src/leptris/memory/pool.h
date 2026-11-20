@@ -15,6 +15,10 @@
 #ifndef LEPTRIS_MEMORY_POOL_H
 #define LEPTRIS_MEMORY_POOL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include "../../include/leptris/types.h"  /* Allocator hook typedefs + opaque types */
@@ -441,5 +445,9 @@ typedef int (*LeptrisHashTableIterator)(const char* key, size_t key_len,
 void leptris_hash_table_for_each(StringHashTable* table,
                                 LeptrisHashTableIterator iter,
                                 void* user_data);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* LEPTRIS_MEMORY_POOL_H */
