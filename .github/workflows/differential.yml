@@ -48,6 +48,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          # A step may carry only ONE env mapping — these forward the
+          # workflow-level FALLBACK_* train into the run script.
+          FALLBACK_GEM: ${{ env.FALLBACK_GEM }}
+          FALLBACK_PYPI: ${{ env.FALLBACK_PYPI }}
+          FALLBACK_NPM: ${{ env.FALLBACK_NPM }}
+          FALLBACK_RS: ${{ env.FALLBACK_RS }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
@@ -57,15 +63,15 @@ jobs:
           if gh release download "$TAG" -p build-manifest.json \
               -O /tmp/manifest.json --clobber 2>/dev/null; then
             python3 - <<'PY'
-            import json, os
-            b = json.load(open("/tmp/manifest.json"))["bindings"]
-            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                for k in ("rubygems", "pypi", "npm", "crates_io"):
-                    key = {"rubygems": "gem", "pypi": "pypi",
-                           "npm": "npm", "crates_io": "rs"}[k]
-                    f.write(f"{key}={b[k]}\n")
-            print("pins from manifest:", b)
-            PY
+          import json, os
+          b = json.load(open("/tmp/manifest.json"))["bindings"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              for k in ("rubygems", "pypi", "npm", "crates_io"):
+                  key = {"rubygems": "gem", "pypi": "pypi",
+                         "npm": "npm", "crates_io": "rs"}[k]
+                  f.write(f"{key}={b[k]}\n")
+          print("pins from manifest:", b)
+          PY
           else
             echo "no build-manifest.json on $TAG — falling back to the hardcoded train"
             for kv in "gem=$FALLBACK_GEM" "pypi=$FALLBACK_PYPI" \
@@ -73,11 +79,6 @@ jobs:
               echo "$kv" >> "$GITHUB_OUTPUT"
             done
           fi
-        env:
-          FALLBACK_GEM: ${{ env.FALLBACK_GEM }}
-          FALLBACK_PYPI: ${{ env.FALLBACK_PYPI }}
-          FALLBACK_NPM: ${{ env.FALLBACK_NPM }}
-          FALLBACK_RS: ${{ env.FALLBACK_RS }}
 
       - name: Checkout the pinned engine (the rust leg links it)
         uses: actions/checkout@v4
