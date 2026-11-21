@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- refs keep the element branch - leaves behind a ref are not direct text leaves (the v188 lockstep) (rng)
+- **RELAX NG: refs keep the element branch — the externalRef-splice regression on the 1.9.431 ride.** The 1.9.431 content classifier propagated the leaf mark through ref expansion, so content like `element(e){ref payload}` with `payload = text` routed to the text branch, whose leaf loop cannot resolve refs — every externalRef-spliced text element rejected with "content mismatch" (the ruby v188 lockstep suite caught it: 1273 examples, exactly that one failure). Refs now descend for element patterns but leave the leaf mark unset; the beside-attribute data fix (#2080) is untouched — direct text leaves still route to the text branch.
 
 
 
