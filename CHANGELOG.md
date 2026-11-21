@@ -4,15 +4,14 @@
 
 ### Fixed
 
-- anyURI collapses whitespace before the lexical check (leptris#1883 anyURI row) (xsd)
-- the data leaf lexes beside attribute patterns (leptris#2080 residual) (rng)
-- recycled extension blocks still get a tracking node (pool)
-- never park an extension smaller than the list header (leptris#2105) (pool)
-- the foster splice never links a node into a cycle (leptris#2096) (html)
+- **RELAX NG: the data leaf lexes beside attribute patterns** — an attribute pattern (optional or required) beside a `<data>` leaf disabled the datatype lex entirely, so `not-base64!!` validated as base64Binary and garbage validated as every leaf datatype. The content classifier now descends wrappers and refs and answers from the leaves (leptris#2080 residual; one of the two openmath#25 gates).
+- **XSD: anyURI collapses whitespace before the lexical check** — XSD Part 2's collapse facet: space-padded and whitespace-only values trim before the check and the collapsed empty string is a legal anyURI (Jing accepts both; the engine rejected outright — the entire remaining CD-loading delta in the openmath corpus). Interior control characters still reject (leptris#1883's anyURI row; the second openmath#25 gate).
+- **HTML: the foster splice never links a node into a chain cycle** — the 682-byte fuzz input's "229MB tree" was ~8 nodes linked in a sibling cycle and walked forever; foster splices now unlink nodes from every chain and maintain parent back-pointers (leptris#2096; the reconstruct-on-characters behavior is kept per WHATWG 13.2.6.4.7).
+- **Pool: recycled extension blocks always get a tracking node, and blocks smaller than the list header never park** — the AdoptedAttrs arena-boundary sweep caught both in #2105's own CI.
 
 ### Performance
 
-- recycle arena extension blocks across the mutation doc cycle (leptris#2054 slice 1) (pool)
+- **Pool: arena extension blocks recycle across the mutation document cycle** — a create/build/free cycle re-malloc'd and re-faulted hundreds of same-size blocks; extensions now park/pop on a capped thread-local exact-size list. The corrected mutation rows all beat pugixml on CI: append 2.85x, mut-doc-cycle 15.9 vs 16.0 ns/child, attrparse 1.21x (leptris#2054 closed; the bench methodology warms the recycle layers and reports min-of-3).
 
 
 
