@@ -2088,6 +2088,52 @@ TEST(Rng2080Data, AnyURICollapsesPaddedContent) {
     leptris_rng_free(rng);
 }
 
+/* The externalRef splice rides the ELEMENT branch: a ref whose
+ * target body is a text leaf (the v188 externalRef-splice shape)
+ * is matched by match_seq's ref expansion - routing it to the
+ * text branch failed every spliced text element (the ruby v188
+ * lockstep caught it on the 1.9.431 ride). */
+TEST(Rng2110RefShapes, ExternalRefTextPayloadSplicesAndValidates) {
+    const char* child =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"e\"><ref name=\"payload\"/></element></start>"
+        "<define name=\"payload\"><text/></define></grammar>";
+    const char* host =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"r\"><externalRef href=\"child.rng\"/></element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = nullptr;
+    {
+        LeptrisStatus st = LEPTRIS_OK;
+        /* both files land in the test's cwd; the href resolves there */
+        FILE* f = fopen("child.rng", "wb");
+        ASSERT_NE(f, nullptr);
+        fwrite(child, 1, strlen(child), f);
+        fclose(f);
+        f = fopen("host.rng", "wb");
+        ASSERT_NE(f, nullptr);
+        fwrite(host, 1, strlen(host), f);
+        fclose(f);
+        rng = leptris_rng_parse_file("host.rng", &st);
+        ASSERT_NE(rng, nullptr) << "host parse failed: " << (int)st;
+        remove("child.rng");
+        remove("host.rng");
+    }
+    LeptrisStatus st = LEPTRIS_OK;
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<r><e>t</e></r>", 1, "the spliced text element validates"},
+        {"<r><x/></r>", 0, "a wrong child still rejects"},
+    };
+    for (auto& c : cases) {
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        EXPECT_EQ(leptris_rng_validate(rng, d), c.want)
+            << c.why << " — doc: " << c.doc;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
 TEST(Rng2080Data, DataLexesBesideAttributePatterns) {
     const char* opt_schema =
         "<element name=\"OMB\" xmlns=\"http://relaxng.org/ns/structure/1.0\""
