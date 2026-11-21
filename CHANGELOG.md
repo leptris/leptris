@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.431] - 2026-11-21
+
+### Fixed
+
+- anyURI collapses whitespace before the lexical check (leptris#1883 anyURI row) (xsd)
+- the data leaf lexes beside attribute patterns (leptris#2080 residual) (rng)
+- recycled extension blocks still get a tracking node (pool)
+- never park an extension smaller than the list header (leptris#2105) (pool)
+- the foster splice never links a node into a cycle (leptris#2096) (html)
+
+### Performance
+
+- recycle arena extension blocks across the mutation doc cycle (leptris#2054 slice 1) (pool)
+
+
+
 ## [1.9.430] - 2026-11-20
 
 ### Fixed
