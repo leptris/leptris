@@ -1136,10 +1136,18 @@ static int has_element_patterns_deep(RngGrammar* g, RngPattern* content,
             case RNG_ATTRIBUTE: case RNG_NOT_ALLOWED:
                 continue;
             case RNG_REF: {
+                /* Descend for element patterns, but do NOT propagate
+                 * the leaf mark: leaves behind a ref (ref -> text, the
+                 * externalRef-splice shape) are matched by match_seq's
+                 * ref expansion in the element branch - the text
+                 * branch's leaf loop cannot resolve refs, and routing
+                 * such content there failed every spliced text
+                 * element (the v188 lockstep caught it). */
+                int sub_leaf = 0;
                 RngDefine* d = find_define(g, c->name);
                 if (d && d->body &&
                     has_element_patterns_deep(g, d->body, depth + 1,
-                                              saw_leaf))
+                                              &sub_leaf))
                     return 1;
                 continue;
             }
