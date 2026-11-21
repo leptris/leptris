@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.432] - 2026-11-21
+
+### Fixed
+
+- refs keep the element branch - leaves behind a ref are not direct text leaves (the v188 lockstep) (rng)
+
+
+
 ## [1.9.431] - 2026-11-21
 
 ### Fixed
