@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.435] - 2026-11-22
+
+### Fixed
+
+- the head-run adoption must never re-parent the adopted head under itself (html)
+
+
+
 ## [1.9.434] - 2026-11-22
 
 ### Fixed
