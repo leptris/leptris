@@ -8,6 +8,7 @@
 #include "../dom/document_node.h"
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
+#include "../dom/edges.h"    /* per-type parent/edge tables (any node type) */
 #include "../common/entities.h"
 #include "../memory/pool.h"
 #include <string.h>
@@ -33,6 +34,14 @@ static void collect_descendants(XPathContext* ctx,
                                XPathNodeSet* result,
                                XPathASTNode* node_test) {
     if (!node) return;
+    /* Only elements carry children — text/comment/cdata/pi nodes
+     * are smaller compact structs whose element-layout child read
+     * would run past the allocation (the sibling walks now visit
+     * them correctly, so this gate is what keeps the descent
+     * type-safe). */
+    if (leptris_node_get_type((LeptrisNodeRef)node) !=
+        LEPTRIS_NODE_TYPE_ELEMENT)
+        return;
 
     /* Walk the raw child list — any node type (text, comment, cdata, pi). */
     LeptrisNode* child = leptris_elem_first_child(node);
@@ -209,8 +218,11 @@ static XPathNodeSet* axis_parent(XPathContext* ctx, LeptrisElement node,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    /* Get parent element using compact accessor */
-    LeptrisElement parent = leptris_element_get_parent(node);
+    /* The input node may be any node type (text/comment nodes
+     * live in smaller compact structs) — read the parent through
+     * the per-type edge table, never the element-only layout. */
+    LeptrisElement parent = leptris_node_parent_inline(
+        (LeptrisNodeRef)node);
 
     if (!parent) return result;
 
@@ -227,12 +239,13 @@ static XPathNodeSet* axis_ancestor(XPathContext* ctx, LeptrisElement node,
     XPathNodeSet* result = xpath_nodeset_new();
     if (!result || !node) return result;
 
-    LeptrisElement current = leptris_element_get_parent(node);
+    LeptrisElement current = leptris_node_parent_inline(
+        (LeptrisNodeRef)node);
     while (current) {
         if (matches_node_test(ctx, (LeptrisNode*)current, test)) {
             xpath_nodeset_add(result, current);
         }
-        current = leptris_element_get_parent(current);
+        current = leptris_node_parent_inline((LeptrisNodeRef)current);
     }
 
     return result;
@@ -249,12 +262,13 @@ static XPathNodeSet* axis_ancestor_or_self(XPathContext* ctx,
         xpath_nodeset_add(result, node);
     }
 
-    LeptrisElement current = leptris_element_get_parent(node);
+    LeptrisElement current = leptris_node_parent_inline(
+        (LeptrisNodeRef)node);
     while (current) {
         if (matches_node_test(ctx, (LeptrisNode*)current, test)) {
             xpath_nodeset_add(result, current);
         }
-        current = leptris_element_get_parent(current);
+        current = leptris_node_parent_inline((LeptrisNodeRef)current);
     }
 
     /* XPath §2.2: reverse axes yield REVERSE document order —
@@ -387,7 +401,8 @@ static XPathNodeSet* axis_following(XPathContext* ctx, LeptrisElement node,
     if (!result || !node) return result;
 
     /* Get following siblings and their descendants */
-    LeptrisElement parent = leptris_element_get_parent(node);
+    LeptrisElement parent = leptris_node_parent_inline(
+        (LeptrisNodeRef)node);
     if (!parent) return result;
 
     int found = 0;
@@ -403,7 +418,8 @@ static XPathNodeSet* axis_following(XPathContext* ctx, LeptrisElement node,
             }
             collect_descendants(ctx, sibling, result, test);
         }
-        sibling = leptris_element_get_next_sibling(sibling);
+        sibling = (LeptrisElement)leptris_node_get_next_sibling(
+            (LeptrisNodeRef)sibling);
     }
 
     /* Recursively get parent's following nodes */
@@ -425,7 +441,8 @@ static XPathNodeSet* axis_preceding(XPathContext* ctx, LeptrisElement node,
     if (!result || !node) return result;
 
     /* Get preceding siblings and their descendants */
-    LeptrisElement parent = leptris_element_get_parent(node);
+    LeptrisElement parent = leptris_node_parent_inline(
+        (LeptrisNodeRef)node);
     if (!parent) return result;
 
     /* Iterate through siblings using compact accessor functions */
@@ -435,7 +452,8 @@ static XPathNodeSet* axis_preceding(XPathContext* ctx, LeptrisElement node,
             xpath_nodeset_add(result, sibling);
         }
         collect_descendants(ctx, sibling, result, test);
-        sibling = leptris_element_get_next_sibling(sibling);
+        sibling = (LeptrisElement)leptris_node_get_next_sibling(
+            (LeptrisNodeRef)sibling);
     }
 
     /* Recursively get parent's preceding nodes */
@@ -641,7 +659,7 @@ static XPathNodeSet* axis_namespace(XPathContext* ctx, LeptrisElement node,
     size_t seen_capacity = 0;
 
     for (LeptrisElement current = node; current;
-         current = leptris_element_get_parent(current)) {
+         current = leptris_node_parent_inline((LeptrisNodeRef)current)) {
         for (struct leptris_namespace* decl =
                  leptris_elem_namespaces(current);
              decl; decl = decl->next)
