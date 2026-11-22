@@ -28,9 +28,9 @@ permissions:
 # train's last known-good set.
 env:
   FALLBACK_ENGINE_TAG: v1.9.432
-  FALLBACK_GEM: 1.9.432.0
-  FALLBACK_PYPI: 1.9.431.0
-  FALLBACK_NPM: 0.1.66
+  FALLBACK_GEM: 1.9.432.2
+  FALLBACK_PYPI: 1.9.432.2
+  FALLBACK_NPM: 0.1.68
   FALLBACK_RS: 1.9.0
 
 jobs:
