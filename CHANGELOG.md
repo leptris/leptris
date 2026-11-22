@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- the ancestor/sibling axes read element layouts off non-element nodes (xpath)
+- xpath: six axes (parent, ancestor, ancestor-or-self, following,
+  preceding, namespace) read the element-only compact layout off
+  non-element nodes — text/comment structs are smaller and store
+  their edges behind the per-type offset table, so the read ran past
+  the allocation (ASAN heap-buffer-overflow 0 bytes after a 24-byte
+  region in leptris_elem_parent, the third fuzz-nightly defect). All
+  six now read through the per-type edge tables and the descent
+  gates on the container type (#2129); the axis-conformance rows
+  that passed before only because the garbage walk skipped text
+  siblings still pass with the correct walk.
 
 
 
