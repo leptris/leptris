@@ -76,3 +76,46 @@ TEST(HtmlTreeAmplification, ReconstructionNestStaysBounded) {
     leptris_document_free(d);
     EXPECT_LT(n, 1000u) << "the tree must stay bounded for this input";
 }
+
+/* The fuzz-nightly timeout family (2026-11-19..22): an
+ * explicit <head> token spliced into the table region made the
+ * document-assembly pass ADOPT the head element while its head-run
+ * walk continued PAST it — the move loop re-parented the head element
+ * under ITSELF (head's child chain looped head->head->body), and the
+ * whole tree walk (serialize included) circled forever on a 41-byte
+ * input. Per WHATWG the <head> start tag in table context is a parse
+ * error to ignore; the assembly must never adopt a run that contains
+ * the adopted element itself. */
+TEST(HtmlTreeAmplification, ExplicitHeadInTableStaysBounded) {
+    static const char trig[] =
+        "<meta ct=utf   ><table DAPPER=1 =otel><head></html>";
+    size_t len = sizeof(trig) - 1;
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument d = leptris_parse_html_string(trig, len, &st);
+    ASSERT_NE(d, nullptr);
+    Seen s;
+    memset(&s, 0, sizeof(s));
+    size_t n = 0;
+    LeptrisNodeRef root = (LeptrisNodeRef)leptris_document_root(d);
+    ASSERT_TRUE(walk_tree(root, s, n))
+        << "the head-run adoption must never link head under itself";
+    leptris_document_free(d);
+    EXPECT_LT(n, 100u) << "the tree must stay bounded for this input";
+
+    /* The same shape with the table carrying the run past an
+     * explicit <head> (the 758-byte nightly mutant's core). */
+    static const char trig2[] =
+        "<!DOCTYPE html><html><head><meta charset=utf-8><title>t</title>"
+        "</heai><body><table DATA-UPPER=1 =dinoquotes style=\"color:red\">"
+        "<!-- comment 0 --><li><tr><img s</style></body></hs #DATA-UPPER=1 "
+        "disabled>af (a<b) x();</script><head><meta charset=utf-8></html>";
+    LeptrisDocument d2 = leptris_parse_html_string(
+        trig2, sizeof(trig2) - 1, &st);
+    ASSERT_NE(d2, nullptr);
+    Seen s2;
+    memset(&s2, 0, sizeof(s2));
+    size_t n2 = 0;
+    ASSERT_TRUE(walk_tree((LeptrisNodeRef)leptris_document_root(d2), s2, n2))
+        << "the full nightly shape must stay acyclic";
+    leptris_document_free(d2);
+}
