@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.434] - 2026-11-22
+
+### Fixed
+
+- element name classes inherit the grammar ns - namespace-less docs no longer validate against namespaced schemas (rng)
+
+
+
 ## [1.9.433] - 2026-11-22
 
 ### Fixed
