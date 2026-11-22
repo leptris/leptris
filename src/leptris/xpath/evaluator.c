@@ -1136,8 +1136,19 @@ struct leptris_xpath_result* evaluate_expr(XPathContext* ctx, XPathASTNode* ast)
                 xpath_result_free(base);
                 struct leptris_xpath_result* empty =
                     xpath_result_new(XPATH_RESULT_NODESET);
-                if (empty && empty->value.nodeset_value)
-                    empty->value.nodeset_value->is_sequence = 1;
+                if (!empty) return NULL;
+                /* xpath_result_new initializes the union to NULL —
+                 * a NODESET-typed result carrying that NULL as its
+                 * payload poisoned every consumer that dereferences
+                 * it blind (the union transfer read owns_* at
+                 * 0x18: the fuzz-nightly SEGV). An empty result
+                 * carries a real, empty nodeset. */
+                empty->value.nodeset_value = xpath_nodeset_new();
+                if (!empty->value.nodeset_value) {
+                    xpath_result_free(empty);
+                    return NULL;
+                }
+                empty->value.nodeset_value->is_sequence = 1;
                 return empty;
             }
             if (ast->child_count > 1) {
