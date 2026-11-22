@@ -574,6 +574,28 @@ static struct leptris_xpath_result* vm_apply_absolute_union_names(
     }
     XPathNodeSet* la = ra->value.nodeset_value;
     XPathNodeSet* lb = rb->value.nodeset_value;
+    /* The constructor's contract makes NULL the "empty" state until
+     * a payload is assigned — a fallback-evaluated predicate-empty
+     * path can land here with one. Substitute a real empty nodeset
+     * so the merge below reads them unchanged (each freed once at
+     * the end). */
+    if (!la) {
+        la = xpath_nodeset_new();
+        if (!la) {
+            xpath_result_free(ra);
+            xpath_result_free(rb);
+            return NULL;
+        }
+    }
+    if (!lb) {
+        lb = xpath_nodeset_new();
+        if (!lb) {
+            xpath_nodeset_free(la);
+            xpath_result_free(ra);
+            xpath_result_free(rb);
+            return NULL;
+        }
+    }
 
     size_t n = la->count + lb->count;
     XPathNodeSet* out = xpath_nodeset_new();

@@ -4399,17 +4399,25 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
             xpath_result_free(right);
             return NULL;
         }
+        /* The constructor's contract makes NULL the "empty" state
+         * until a payload is assigned (xpath_result_new). Tolerate
+         * it here: an empty side contributes nothing and owns
+         * nothing. The fuzz-nightly SEGV was the transfer below
+         * dereferencing a NULL payload from the predicate-empty
+         * path's unassigned result. */
+        XPathNodeSet* lns = left->value.nodeset_value;
+        XPathNodeSet* rns = right->value.nodeset_value;
         result = xpath_result_new(XPATH_RESULT_NODESET);
         if (result) {
             XPathNodeSet* ns = xpath_nodeset_new();
             /* Concatenate both sides; the sort dedups adjacent
              * duplicates (the old per-candidate linear duplicate
              * scan was O(n^2)). */
-            for (size_t i = 0; i < xpath_nodeset_count(left->value.nodeset_value); i++) {
-                xpath_nodeset_add(ns, xpath_nodeset_get(left->value.nodeset_value, i));
+            for (size_t i = 0; lns && i < xpath_nodeset_count(lns); i++) {
+                xpath_nodeset_add(ns, xpath_nodeset_get(lns, i));
             }
-            for (size_t i = 0; i < xpath_nodeset_count(right->value.nodeset_value); i++) {
-                xpath_nodeset_add(ns, xpath_nodeset_get(right->value.nodeset_value, i));
+            for (size_t i = 0; rns && i < xpath_nodeset_count(rns); i++) {
+                xpath_nodeset_add(ns, xpath_nodeset_get(rns, i));
             }
 
             /* CRITICAL: Sort in document order per XPath 1.0 spec
@@ -4422,20 +4430,24 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
              * them and leave this nodeset with dangling pointers —
              * transfer the ownership flags before they run. */
             ns->owns_attributes =
-                left->value.nodeset_value->owns_attributes ||
-                right->value.nodeset_value->owns_attributes;
+                (lns && lns->owns_attributes) ||
+                (rns && rns->owns_attributes);
             ns->owns_namespaces =
-                left->value.nodeset_value->owns_namespaces ||
-                right->value.nodeset_value->owns_namespaces;
+                (lns && lns->owns_namespaces) ||
+                (rns && rns->owns_namespaces);
             ns->owns_synthetic_text =
-                left->value.nodeset_value->owns_synthetic_text ||
-                right->value.nodeset_value->owns_synthetic_text;
-            left->value.nodeset_value->owns_attributes = 0;
-            left->value.nodeset_value->owns_namespaces = 0;
-            left->value.nodeset_value->owns_synthetic_text = 0;
-            right->value.nodeset_value->owns_attributes = 0;
-            right->value.nodeset_value->owns_namespaces = 0;
-            right->value.nodeset_value->owns_synthetic_text = 0;
+                (lns && lns->owns_synthetic_text) ||
+                (rns && rns->owns_synthetic_text);
+            if (lns) {
+                lns->owns_attributes = 0;
+                lns->owns_namespaces = 0;
+                lns->owns_synthetic_text = 0;
+            }
+            if (rns) {
+                rns->owns_attributes = 0;
+                rns->owns_namespaces = 0;
+                rns->owns_synthetic_text = 0;
+            }
 
             result->value.nodeset_value = ns;
         }

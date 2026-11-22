@@ -261,3 +261,29 @@ TEST(CompiledXPath, PrefixedWildcardRespectsBindings) {
     leptris_xpath_ns_set_free(ns_none);
     leptris_document_free(doc);
 }
+
+/* The fuzz-nightly SEGV (evaluate_operator, 2026-11-20 + 2026-11-23):
+ * the predicate-empty return path handed back a NODESET-typed result
+ * with a NULL nodeset payload (xpath_result_new initializes the union
+ * to NULL and the path returned it without assigning), and the union
+ * operator's ownership transfer dereferenced it blind — SEGV at
+ * address 0x18, non-deterministic under ASAN heap layout. The empty
+ * result must carry a real (empty) nodeset, and the union must
+ * tolerate the constructor's NULL-as-empty contract. */
+TEST(CompiledXPath, EmptyPredicateResultUnionsSafely) {
+    LeptrisDocument doc = leptris_parse_string(kDoc, strlen(kDoc), nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* false() filters every candidate out — the predicate-empty
+     * return — then the union needs the left operand's nodeset. */
+    LeptrisXPathCompiled c =
+        leptris_xpath_compile("//book[false()] | //book");
+    ASSERT_NE(c, nullptr);
+    LeptrisXPathResult r = leptris_xpath_compiled_eval(c, doc, nullptr);
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(leptris_xpath_result_type(r), LEPTRIS_XPATH_NODESET);
+    EXPECT_EQ(leptris_xpath_result_count(r), 3u)
+        << "the union of an empty set and //book is //book";
+    leptris_xpath_result_free(r);
+    leptris_xpath_compiled_free(c);
+    leptris_document_free(doc);
+}
