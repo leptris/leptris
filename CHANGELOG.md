@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.436] - 2026-11-22
+
+### Fixed
+
+- the predicate-empty path returned a NODESET-typed NULL that the union dereferenced blind (xpath)
+
+
+
 ## [1.9.435] - 2026-11-22
 
 ### Fixed
