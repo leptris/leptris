@@ -5361,11 +5361,29 @@ head_end = leptris_node_get_next_sibling(head_end);
             html_first_new = head;
             size_t hn = 0;
             LeptrisNodeRef hlast = NULL;
+            LeptrisNodeRef run_prev = NULL;
             for (LeptrisNodeRef c = head_start;
                  c && c != (adopt && !run_after_explicit
                                 ? explicit_head
                                 : head_end); ) {
                 LeptrisNodeRef next = leptris_node_get_next_sibling(c);
+                if (adopt && c == (LeptrisNodeRef)explicit_head) {
+                    /* The adopted head cannot move under itself.
+                     * With run_after_explicit the walk continues
+                     * PAST it — cut it out of the run chain (the
+                     * bridge keeps head_start..hlast contiguous)
+                     * or the re-parent writes head as its own
+                     * child and every walker circles forever (the
+                     * fuzz-nightly timeout of 2026-11-19..22:
+                     * head's chain looped head->head->body on a
+                     * 41-byte input). */
+                    if (run_prev)
+                        leptris_node_set_next_sibling(run_prev, next);
+                    else
+                        head_start = next;
+                    c = next;
+                    continue;
+                }
                 /* The run can carry comments (WHATWG in-head) —
                  * set_parent must go through the node-kind setter,
                  * an element-shaped write corrupts them. */
@@ -5389,6 +5407,7 @@ head_end = leptris_node_get_next_sibling(head_end);
                         break;
                 }
                 hlast = c;
+                run_prev = c;
                 hn++;
                 c = next;
             }
