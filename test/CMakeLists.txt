@@ -243,6 +243,11 @@ leptris_add_test(test_recorder   sax/test_recorder.cpp)
 leptris_add_test(test_iterparse  sax/test_iterparse.cpp)
 leptris_add_test(test_streaming  sax/test_streaming.cpp)
 leptris_add_test(test_abi        abi/test_header_hygiene.cpp)
+leptris_add_test(test_version_lockstep abi/test_version_lockstep.cpp)
+# The lockstep spec reads the repo's own version surfaces (CMakeLists,
+# leptris.h, core.c) — hand it the repo root.
+target_compile_definitions(test_version_lockstep PRIVATE
+    LEPTRIS_REPO_ROOT="${PROJECT_SOURCE_DIR}")
 leptris_add_test(test_public_surface abi/test_public_surface.cpp)
 leptris_add_test(test_serialize_abi abi/test_serialize_abi.cpp)
 leptris_add_test(test_nokogiri_api abi/test_nokogiri_api.cpp)
