@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- element name classes inherit the grammar ns - namespace-less docs no longer validate against namespaced schemas (rng)
+- rng: element name classes inherit the grammar ns (RNG 4.1) —
+  namespace-less documents no longer validate as conformant against
+  namespaced schemas, and the root name-class failure short-circuits
+  at one diagnostic exactly as Jing reports. Closes #2117: the
+  OpenMath 2.0 standard's own namespace-less examples now match Jing
+  and the plurimath corpus verdict-for-verdict (l3993 invalid with
+  one error instead of accepted; l2430 one error instead of a
+  double report) — all 4 parity rows on plurimath/openmath#25.
+  Attribute name classes keep the no-namespace default; `<anyName/>`
+  stays unconstrained (#2122).
 
 
 
