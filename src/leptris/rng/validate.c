@@ -204,19 +204,20 @@ static int all_text_ws(LeptrisElement e) {
 }
 
 static int names_match(const RngPattern* p, LeptrisElement e) {
+    /* A namespace-less instance element sits in NO namespace — "".
+     * The NULL check used to reject such elements outright, which is
+     * only right when the name class names a namespace; for the
+     * resolved-empty name class (grammar without ns, #2117) it must
+     * match. */
+    const char* uri = leptris_element_get_namespace_uri(e);
+    if (!uri) uri = "";
     if (p->any_name) {
-        if (p->ns) {
-            const char* uri = leptris_element_get_namespace_uri(e);
-            if (!uri || strcmp(p->ns, uri) != 0) return 0;
-        }
+        if (p->ns && strcmp(p->ns, uri) != 0) return 0;
         return 1;
     }
     const char* n = leptris_element_name(e);
     if (!n || strcmp(p->name, n) != 0) return 0;
-    if (p->ns) {
-        const char* uri = leptris_element_get_namespace_uri(e);
-        if (!uri || strcmp(p->ns, uri) != 0) return 0;
-    }
+    if (p->ns && strcmp(p->ns, uri) != 0) return 0;
     return 1;
 }
 
