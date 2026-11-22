@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- the head-run adoption must never re-parent the adopted head under itself (html)
+- html: the document-assembly pass adopted an explicit `<head>` while
+  its head-run walk continued past it, re-parenting the head element
+  under itself — head's chain looped head->head->body and every walker
+  (serialize included) circled forever on a 41-byte input (libFuzzer
+  reported a 1748-second timeout). The adoption now cuts the head out
+  of the run chain; the minimized input is pinned to the fuzz corpus
+  and a bounded-walk spec covers the family (#2125).
+- fuzz-nightly: the crash upload now carries every libFuzzer artifact
+  class (crash-*/timeout-*/oom-*/leak-*) — the timeout repro had been
+  written and thrown away for four consecutive nights.
 
 
 
