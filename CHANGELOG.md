@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- all four version surfaces move together (release)
+- release: all four version surfaces move together — the bump script
+  updated four files but the release workflow's commit step staged
+  three, so `src/include/leptris.h` was silently discarded on every
+  train since 1.9.145 (287 releases shipped header macros frozen at
+  1.9.145; the non-CMake fallback reported 0.26.8-era strings). The
+  commit step now stages every file the script touches, the script
+  also syncs the core.c fallback block, and
+  `test/abi/test_version_lockstep` pins CMakeLists == leptris.h ==
+  core.c == `leptris_version()` so any future drift fails CI with
+  the drifted surface named (#2118).
 
 
 
