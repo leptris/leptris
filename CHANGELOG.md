@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.433] - 2026-11-22
+
+### Fixed
+
+- all four version surfaces move together (release)
+
+
+
 ## [1.9.432] - 2026-11-21
 
 ### Fixed
