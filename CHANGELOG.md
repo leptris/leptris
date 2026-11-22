@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.437] - 2026-11-22
+
+### Fixed
+
+- the ancestor/sibling axes read element layouts off non-element nodes (xpath)
+
+
+
 ## [1.9.436] - 2026-11-22
 
 ### Fixed
