@@ -121,6 +121,15 @@ static RngPattern* parse_pattern(RngGrammar* g, LeptrisElement e,
                 return NULL;
             }
             p->any_name = 1;
+        } else if (!p->ns) {
+            /* RNG 4.1: a named element name class without its own ns
+             * inherits the nearest ancestor grammar's ns; with none
+             * anywhere, the namespace is none — it matches only
+             * namespace-less instances. Leaving it unresolved made
+             * namespace-less documents validate against namespaced
+             * schemas (#2117: the OpenMath standard's own examples). */
+            p->ns = g->default_ns ? leptris_strdup(g->default_ns)
+                                  : leptris_strdup("");
         }
     } else if (is_rng(e, "attribute")) {
         p = pat_new(RNG_ATTRIBUTE);

@@ -189,14 +189,17 @@ TEST(RngParse, SkipsForeignNamespaceAnnotations) {
 
 TEST(RngParse, AnyNameNameClassMatchesAnyElement) {
     /* <element><anyName/> is the wildcard name class (RELAX NG
-     * 4.14): biblio.rng's recursive AnyElement define. */
+     * 4.14): biblio.rng's recursive AnyElement define. The grammar
+     * carries ns — the root's name class inherits it (#2117) while
+     * anyName stays unconstrained, matching the ns'd children. */
     LeptrisStatus st = LEPTRIS_OK;
-    const char schema[] = SCHEMA(
+    const char schema[] =
+        "<grammar xmlns='" RNGNS "' ns='urn:t'>"
         "<start><element name='r'>"
         "<oneOrMore><element><anyName/>"
         "<attribute><anyName/></attribute><text/>"
         "</element></oneOrMore>"
-        "</element></start>");
+        "</element></start></grammar>";
     LeptrisRelaxNG rng = leptris_rng_parse(schema, sizeof(schema) - 1, &st);
     ASSERT_EQ(st, LEPTRIS_OK) << "anyName must parse";
     ASSERT_NE(rng, nullptr);
@@ -269,7 +272,11 @@ TEST(RngErrors, AccumulatesAndExposesPerError) {
     LeptrisStatus st = LEPTRIS_OK; LeptrisRelaxNG schema = leptris_rng_parse(
         sch, std::strlen(sch), &st);
     ASSERT_NE(schema, nullptr);
-    const char* ins = "<r xmlns='urn:t'><x/><y/></r>";
+    /* Namespace-less instance: with no grammar ns anywhere, the root's
+     * name class is the no-namespace, so an xmlns'd root would
+     * short-circuit at one root error (Jing-verified). The ns-less
+     * instance reaches the content walk — the multi-error subject. */
+    const char* ins = "<r><x/><y/></r>";
     LeptrisDocument doc = leptris_parse_string(
         ins, std::strlen(ins), NULL);
     int valid = leptris_rng_validate(schema, doc);
@@ -308,7 +315,8 @@ TEST(RngErrors, ErrorReportReturnsTheWholeStructuredList) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisRelaxNG schema = leptris_rng_parse(sch, std::strlen(sch), &st);
     ASSERT_NE(schema, nullptr);
-    const char* ins = "<r xmlns='urn:t'><x/><y/></r>";
+    /* Namespace-less instance (see AccumulatesAndExposesPerError). */
+    const char* ins = "<r><x/><y/></r>";
     LeptrisDocument doc = leptris_parse_string(ins, std::strlen(ins), NULL);
     ASSERT_EQ(leptris_rng_validate(schema, doc), 0);
 
@@ -325,7 +333,7 @@ TEST(RngErrors, ErrorReportReturnsTheWholeStructuredList) {
     EXPECT_NE(strstr(report[2].message, "incomplete"), nullptr);
 
     /* A valid document reports an empty report (count 0). */
-    const char* ok_ins = "<r xmlns='urn:t'><a/></r>";
+    const char* ok_ins = "<r><a/></r>";
     LeptrisDocument ok = leptris_parse_string(ok_ins, strlen(ok_ins), NULL);
     ASSERT_EQ(leptris_rng_validate(schema, ok), 1);
     const LeptrisRngErrorRecord* empty = (const LeptrisRngErrorRecord*)1;
@@ -2671,5 +2679,172 @@ TEST(Rng2093InterleaveIntoGroup, DiagnosisKeepsTheGroupBranchTail) {
         << msgs;
     EXPECT_EQ(msgs.find("element \"ics\" not allowed"), std::string::npos)
         << msgs;
+    leptris_rng_free(rng);
+}
+
+/* ---- #2117: RelaxNG name-class namespaces ----
+ *
+ * The grammar-level ns attribute must reach ELEMENT name-classes
+ * (RNG 4.1: a name class without its own ns inherits the nearest
+ * ancestor grammar's ns; ATTRIBUTE name-classes default to NO
+ * namespace). The engine skipped the ns comparison entirely, so
+ * ns-less instances matched namespaced schemas: the OpenMath 2.0
+ * standard's own namespace-less examples validated as conformant
+ * that Jing rejects with exactly one root error (plurimath/
+ * openmath#25: 4/1843 corpus rows). */
+
+TEST(Rng2117NameClassNsInheritance, GrammarNsReachesElementNameClass) {
+    /* openmath2.rng's shape: <grammar ns="http://om"> + <element
+     * name="OMOBJ"> with no ns attribute of its own. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " ns=\"http://om\">"
+        "<start><element name=\"OMOBJ\">"
+        "<optional><attribute name=\"version\"><data type=\"string\"/></attribute></optional>"
+        "<element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element>"
+        "</element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMOBJ xmlns=\"http://om\" version=\"2.0\">"
+         "<OMS cd=\"a\" name=\"b\"/></OMOBJ>", 1,
+         "declared in the grammar's namespace: valid"},
+        {"<OMOBJ version=\"2.0\"><OMS cd=\"a\" name=\"b\"/></OMOBJ>", 0,
+         "namespace-less OMOBJ is NOT the schema's OMOBJ (Jing: 1 error)"},
+        {"<OMOBJ xmlns=\"http://other\"><OMS cd=\"a\" name=\"b\"/></OMOBJ>", 0,
+         "a foreign namespace is not the schema's either"},
+    };
+    for (auto& c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        std::string msgs;
+        EXPECT_EQ(rng2093_check(rng, c.doc, &msgs), c.want)
+            << c.why << " — " << msgs;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2117NameClassNsInheritance, NsLessRootFailsExactlyOnce) {
+    /* The #2117 l2430 shape: a namespace-less document whose CONTENT
+     * is also invalid (OMR carries xref where href is required). Jing
+     * reports ONE error — the root's name-class failure — and does
+     * not descend. The engine reported the two content defects. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " ns=\"http://om\">"
+        "<start><element name=\"OMOBJ\">"
+        "<element name=\"OMA\">"
+        "<element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element>"
+        "<element name=\"OMI\"><text/></element>"
+        "<element name=\"OMA\">"
+        "<element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "<attribute name=\"name\"><data type=\"string\"/></attribute>"
+        "</element>"
+        "<element name=\"OMI\"><text/></element>"
+        "<element name=\"OMR\">"
+        "<attribute name=\"href\"><data type=\"string\"/></attribute>"
+        "</element>"
+        "</element>"
+        "</element>"
+        "</element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    LeptrisStatus st = LEPTRIS_OK;
+    const char* doc =
+        "<OMOBJ version=\"2.0\">"
+        "<OMA><OMS cd=\"arith1\" name=\"divide\"/><OMI>1</OMI>"
+        "<OMA><OMS cd=\"arith1\" name=\"plus\"/><OMI>1</OMI>"
+        "<OMR xref=\"foo\"/></OMA></OMA></OMOBJ>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    std::string msgs;
+    EXPECT_EQ(rng2093_check(rng, doc, &msgs), 0) << msgs;
+    EXPECT_EQ(leptris_rng_error_count(rng), 1u)
+        << "the root namespace failure short-circuits — got: " << msgs;
+    leptris_document_free(d);
+    /* The same document declared in the schema's namespace surfaces
+     * the real content defect, once. */
+    const char* ns_doc =
+        "<OMOBJ xmlns=\"http://om\" version=\"2.0\">"
+        "<OMA><OMS cd=\"arith1\" name=\"divide\"/><OMI>1</OMI>"
+        "<OMA><OMS cd=\"arith1\" name=\"plus\"/><OMI>1</OMI>"
+        "<OMR xref=\"foo\"/></OMA></OMA></OMOBJ>";
+    d = leptris_parse_string(ns_doc, strlen(ns_doc), &st);
+    ASSERT_NE(d, nullptr);
+    msgs.clear();
+    EXPECT_EQ(rng2093_check(rng, ns_doc, &msgs), 0) << msgs;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2117NameClassNsInheritance, NoGrammarNsMatchesOnlyNsLess) {
+    /* Strictness in the other direction: a grammar without any ns
+     * (name-class namespace = none) matches only namespace-less
+     * elements. The engine used to match ANY namespace. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\">"
+        "<start><element name=\"r\">"
+        "<element name=\"s\"><empty/></element>"
+        "</element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<r><s/></r>", 1, "both sides namespace-less"},
+        {"<r xmlns=\"q\"><s/></r>", 0, "root in a namespace cannot match"},
+        {"<r><s xmlns=\"q\"/></r>", 0, "child in a namespace cannot match"},
+    };
+    for (auto& c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        std::string msgs;
+        EXPECT_EQ(rng2093_check(rng, c.doc, &msgs), c.want)
+            << c.why << " — " << msgs;
+        leptris_document_free(d);
+    }
+    leptris_rng_free(rng);
+}
+
+TEST(Rng2117NameClassNsInheritance, AttributeNameClassKeepsNoNsDefault) {
+    /* Attribute name-classes do NOT inherit the grammar ns (Jing's
+     * reading — OpenMath's unprefixed cd/name attributes validate).
+     * A PREFIXED attribute in the schema's namespace must NOT match
+     * a plain name class. */
+    const char* schema =
+        "<grammar xmlns=\"http://relaxng.org/ns/structure/1.0\""
+        " ns=\"http://om\">"
+        "<start><element name=\"OMS\">"
+        "<attribute name=\"cd\"><data type=\"string\"/></attribute>"
+        "</element></start>"
+        "</grammar>";
+    LeptrisRelaxNG rng = leptris_rng_parse(schema, strlen(schema), nullptr);
+    ASSERT_NE(rng, nullptr);
+    struct { const char* doc; int want; const char* why; } cases[] = {
+        {"<OMS xmlns=\"http://om\" cd=\"a\"/>", 1,
+         "unprefixed attribute (no namespace) matches the plain class"},
+        {"<OMS xmlns=\"http://om\" xmlns:cd=\"http://om\" cd:cd=\"a\"/>", 0,
+         "a prefixed attribute is in a namespace and cannot match"},
+    };
+    for (auto& c : cases) {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(c.doc, strlen(c.doc), &st);
+        ASSERT_NE(d, nullptr) << c.doc;
+        std::string msgs;
+        EXPECT_EQ(rng2093_check(rng, c.doc, &msgs), c.want)
+            << c.why << " — " << msgs;
+        leptris_document_free(d);
+    }
     leptris_rng_free(rng);
 }
