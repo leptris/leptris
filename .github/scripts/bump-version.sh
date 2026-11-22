@@ -10,6 +10,7 @@
 #   - CMakeLists.txt        (project(leptris VERSION ...))
 #   - vcpkg.json            (version-semver + version-string)
 #   - src/include/leptris.h (LIBLEPTRIS_VERSION_* macros)
+#   - src/leptris/core.c    (non-CMake fallback block)
 #   - CHANGELOG.md          (new entry template)
 #
 # The script does NOT commit or tag — the caller (release workflow)
@@ -82,6 +83,20 @@ if [ -f "$VERSION_HEADER" ]; then
     perl -i -pe "s/^#define LIBLEPTRIS_VERSION_PATCH [0-9]+\$/#define LIBLEPTRIS_VERSION_PATCH $NEXT_PATCH/" "$VERSION_HEADER"
     perl -i -pe "s/^#define LIBLEPTRIS_VERSION_STRING \"[^\"]*\"/#define LIBLEPTRIS_VERSION_STRING \"$NEXT\"/" "$VERSION_HEADER"
     print_info "Updated src/include/leptris.h version macros"
+fi
+
+# --- Update src/leptris/core.c (non-CMake fallback block) ---
+# The fallback keeps hand-built compilers honest; an unsynced
+# fallback is how wasm payloads shipped 0.26.8-era versions from a
+# 1.9.x engine. Same variables as the header section above.
+CORE_FALLBACK="$REPO_ROOT/src/leptris/core.c"
+if [ -f "$CORE_FALLBACK" ]; then
+    IFS='.' read -r NEXT_MAJOR NEXT_MINOR NEXT_PATCH <<< "$NEXT"
+    perl -i -pe "s/^#define LEPTRIS_VERSION \"[^\"]*\"/#define LEPTRIS_VERSION \"$NEXT\"/" "$CORE_FALLBACK"
+    perl -i -pe "s/^#define LEPTRIS_VERSION_MAJOR [0-9]+\$/#define LEPTRIS_VERSION_MAJOR $NEXT_MAJOR/" "$CORE_FALLBACK"
+    perl -i -pe "s/^#define LEPTRIS_VERSION_MINOR [0-9]+\$/#define LEPTRIS_VERSION_MINOR $NEXT_MINOR/" "$CORE_FALLBACK"
+    perl -i -pe "s/^#define LEPTRIS_VERSION_PATCH [0-9]+\$/#define LEPTRIS_VERSION_PATCH $NEXT_PATCH/" "$CORE_FALLBACK"
+    print_info "Updated src/leptris/core.c version fallback"
 fi
 
 # --- Update vcpkg.json ---
@@ -157,5 +172,5 @@ print_info "Updated CHANGELOG.md"
 
 print_info ""
 print_info "Version bump complete: $CURRENT_VERSION → $NEXT"
-print_info "Files updated: CMakeLists.txt, vcpkg.json, src/include/leptris.h, CHANGELOG.md"
+print_info "Files updated: CMakeLists.txt, vcpkg.json, src/include/leptris.h, src/leptris/core.c, CHANGELOG.md"
 print_info "Next step: commit + push + open release PR"
