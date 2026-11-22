@@ -4,7 +4,16 @@
 
 ### Fixed
 
-- the predicate-empty path returned a NODESET-typed NULL that the union dereferenced blind (xpath)
+- xpath: the predicate-empty return path handed back a NODESET-typed
+  result with a NULL payload — the constructor initializes the union
+  to NULL by contract, and the path returned it without assigning —
+  and the union operator's ownership transfer dereferenced it blind
+  (SEGV at address 0x18 through a for-each select; the second
+  fuzz-nightly defect). The empty path now carries a real empty
+  nodeset with its is_sequence mark, and both union consumers honor
+  the NULL-as-empty contract (#2127). Verified by the identical
+  fuzz hunt that crashed twice within five minutes running its full
+  budget clean.
 
 
 
