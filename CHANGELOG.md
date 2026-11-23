@@ -4,11 +4,33 @@
 
 ### Fixed
 
-- <include> splices the including grammar's ns into the included name classes (rng)
+- rng: `<include>` splices the including grammar's ns into the
+  included name classes — RNG 6.1 makes the include a lexical
+  splice, so ns-less included fragments inherit the INCLUDING
+  grammar's ns. **This is the #2133 landing**: v1.9.438/439 shipped
+  without it (their PRs marked merged without the commits reaching
+  main — the silent-no-op class), so metanorma's standoc-compile
+  composition kept rejecting valid documents on 438/439.
+  v1.9.440.0 is the release that closes #2133; the 1.9.433.0
+  stopgap pin lifts here (#2137, #2139).
 
 ### Performance
 
-- the fused fresh-append fast path - the mutcycle row's first structural cut (#2132) (dom)
+- dom: the fused fresh-append fast path — the create-then-append
+  shape collapses the three-layer append chain into one provable
+  insert. **This is the #2132 mutcycle cut landing**: v1.9.438
+  shipped without it; the CI bench verdict on this content flips
+  the mutcycle row to a win on x86_64 (19.3 vs 19.9 ns/child).
+  The macos row remains — the mutation-element layout campaign
+  continues on #2132 (#2134, #2139).
+
+### Infrastructure
+
+- The gtest discovery timeout moves 5s to 60s (a load-struck
+  machine timed out the list step wholesale).
+- The release train now verifies every merge by content-on-main
+  and every tag by tarball grep before rides — v1.9.438/439's
+  silent non-landing is the reason.
 
 
 
