@@ -2,12 +2,20 @@
 
 ## [1.9.438] - 2026-11-23
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Performance
 
-### Changed
-
-- (describe changes here)
+- dom: the fused fresh-append fast path — the create-then-append
+  shape collapses the three-layer append chain (wrapper, internal,
+  hint) into one provable insert: the mut-block extent proves
+  same-document (no adoption), the empty child list proves no cycle
+  (#1636), the create-time memset zeroed the parent edge (no
+  unlink), and the type holds by construction. The #1220
+  empty-list guard and the #682 tail-walk fallback carry over
+  verbatim — the mutation suite caught the first draft missing the
+  walk. CI bench verdict: the mutcycle row flips to a win on
+  x86_64 (19.3 vs 19.9 ns/child) and holds the tie on arm64; the
+  macos row narrows but stays behind — its closer is the
+  mutation-element layout campaign (#2132, phase 2 scope recorded).
 
 
 ## [1.9.437] - 2026-11-22
