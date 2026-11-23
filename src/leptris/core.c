@@ -21,7 +21,7 @@
  * reaches here via target_compile_definitions in src/CMakeLists.txt.
  * Fallback keeps hand-built compilers honest. */
 #ifndef LEPTRIS_VERSION
-#define LEPTRIS_VERSION "1.9.438"
+#define LEPTRIS_VERSION "1.9.439"
 #endif
 #ifndef LEPTRIS_VERSION_MAJOR
 #define LEPTRIS_VERSION_MAJOR 1
@@ -30,7 +30,7 @@
 #define LEPTRIS_VERSION_MINOR 9
 #endif
 #ifndef LEPTRIS_VERSION_PATCH
-#define LEPTRIS_VERSION_PATCH 438
+#define LEPTRIS_VERSION_PATCH 439
 #endif
 
 /* Thread-local allocator hooks (TODO 27/74).
