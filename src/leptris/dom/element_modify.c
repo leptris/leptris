@@ -159,6 +159,13 @@ static LeptrisElement mut_elem_carve(struct leptris_document* doc) {
             (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
         if (!blk) return NULL;
     }
+    /* Zero ONCE per block, in one bulk pass, instead of per element
+     * at carve (#2132): the per-element memset's call overhead sat in
+     * the create hot path. Fresh-malloc blocks are NOT guaranteed
+     * zeroed (ISO C) and recycled blocks hold a previous document's
+     * field values — both need the pass. */
+    memset(blk->bytes, 0,
+           (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
 
     blk->next = doc->mut_elem_blocks;
     doc->mut_elem_blocks = blk;
@@ -194,7 +201,10 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
         if (elem) {
             char* name_copy = mut_name_carve(doc, name, name_len);
             if (name_copy) {
-                memset(elem, 0, sizeof(struct leptris_element));
+                /* mut_elem_carve bulk-zeroed the block at acquire —
+                 * the per-element memset is gone (#2132). The fields
+                 * not assigned below (parent/child/sibling/attr/ns
+                 * offsets, counts) are zero from that pass. */
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
                 elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
                 elem_set_name_doc(elem, name_copy, doc);
