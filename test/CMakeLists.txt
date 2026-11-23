@@ -65,10 +65,12 @@ function(leptris_add_test name)
     if(name STREQUAL "test_perf")
         gtest_discover_tests(${name}
                              DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE}
+                             DISCOVERY_TIMEOUT 60
                              PROPERTIES RUN_SERIAL TRUE)
     else()
         gtest_discover_tests(${name}
-                             DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE})
+                             DISCOVERY_MODE ${LEPTRIS_GTEST_DISCOVERY_MODE}
+                             DISCOVERY_TIMEOUT 60)
     endif()
     add_dependencies(check_all ${name})
 endfunction()
