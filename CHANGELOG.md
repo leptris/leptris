@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [1.9.440] - 2026-11-23
+
+### Fixed
+
+- <include> splices the including grammar's ns into the included name classes (rng)
+
+### Performance
+
+- the fused fresh-append fast path - the mutcycle row's first structural cut (#2132) (dom)
+
+
+
 ## [1.9.439] - 2026-11-23
 
 ### Fixed
