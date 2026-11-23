@@ -2,12 +2,21 @@
 
 ## [1.9.439] - 2026-11-23
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- rng: `<include>` splices the including grammar's ns into the
+  included name classes — RNG 6.1 makes the include a lexical
+  splice, so a name class without its own ns (and without the
+  included grammar's own ns attribute) inherits the INCLUDING
+  grammar's ns. v1.9.434's strict no-namespace default (#2122) had
+  made ns-less included fragments unable to match namespaced
+  documents: a top grammar with ns composing ns-less includes via
+  combine=choice/interleave rejected even the root element with
+  the self-contradictory `element "X" not allowed anywhere;
+  expected element "X"`. Closes #2133 — metanorma-standoc's
+  validation suite passes again on this release; the 1.9.433.0
+  stopgap pin can be lifted. `externalRef` keeps the referenced
+  grammar's own context (spec 6.2) (#2137).
 
 
 ## [1.9.438] - 2026-11-23
