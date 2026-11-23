@@ -14,6 +14,7 @@
 #include "compact.h"
 #include "root_doc_map.h"
 #include "node.h"
+#include "edges.h"
 #include "text.h"
 #include "comment.h"
 #include "cdata.h"
@@ -504,6 +505,63 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
                       (leptris_elem_first_child(child) == NULL);
 
     if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
+
+    /* The fused fresh fast path (#2132): the create-then-append
+     * shape carries three proofs that let the whole three-layer
+     * chain collapse to the chain fixup. The mut-block extent
+     * proves same-document (no adoption, #1528); the empty child
+     * list proves the child cannot be an ancestor of parent (no
+     * cycle walk, #1636); the create-time memset zeroed the
+     * child's parent edge (no unlink). The type gate holds by
+     * construction — our own create made it an element. Every
+     * revalidation the wrapper/internal/hint chain performs is
+     * already proven by the time this branch runs. */
+    if (child_fresh) {
+        struct leptris_mut_tail* s =
+            &doc->mut_tail[(((uintptr_t)parent) >> 4) & 63];
+        LeptrisNode* tail = NULL;
+        /* #1220: an empty child list must win over any cached
+         * tail — a recycled slot can validate spuriously (the
+         * stale chain still reads parent == parent), and appending
+         * through it splices onto a detached node while
+         * first_child stays NULL. */
+        int list_empty = (leptris_elem_first_child(parent) == NULL);
+        if (!list_empty && s->parent == parent && s->child &&
+            leptris_node_parent_inline(s->child) == parent)
+            tail = s->child;
+        else if (!list_empty)
+            /* The cache missed on a NON-empty list (an interleaved
+             * parent collision — the #682 shape): the fallback is
+             * the O(children) tail walk, never a first-child store
+             * (that clobbers the chain — the interleaved-strict-
+             * order failure this path's first draft hit). */
+            tail = leptris_elem_last_child(parent);
+        if (tail) {
+            /* Lane 18 P3: sequential appends' tail is an element —
+             * the offset store directly; the type-dispatching node
+             * setter only pays off for mixed-kind tails. */
+            if (tail->type == LEPTRIS_NODE_TYPE_ELEMENT)
+                leptris_elem_set_next_sibling((LeptrisElement)tail,
+                                              (LeptrisNode*)child);
+            else
+                leptris_node_set_next_sibling(tail,
+                                              (LeptrisNode*)child);
+        } else {
+            leptris_elem_set_first_child(parent, (LeptrisNode*)child);
+        }
+        leptris_element_set_parent(child, parent);
+        parent->child_count++;
+        s->parent = parent;
+        s->child = (LeptrisNode*)child;
+        leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(parent));
+        leptris_element_invalidate_child_cache(parent);
+        /* The index invalidate's fast half: bump the version always
+         * (the doc-order rank cache keys on it, #485); the index
+         * itself is only freed when one was ever built. */
+        doc->mutation_version++;
+        if (doc->element_index) leptris_element_index_invalidate(doc);
+        return LEPTRIS_OK;
+    }
     if (!child_fresh) {
         LeptrisElement p = leptris_element_parent(parent);
         int guard = 0;
