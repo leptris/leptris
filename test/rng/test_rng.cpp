@@ -2848,3 +2848,165 @@ TEST(Rng2117NameClassNsInheritance, AttributeNameClassKeepsNoNsDefault) {
     }
     leptris_rng_free(rng);
 }
+
+/* ---- #2133: <include> is a lexical splice - ns inheritance flows ----
+ *
+ * RNG 6.1 replaces <include> with the referenced grammar's CONTENT,
+ * so the included name classes' closest-ancestor grammar is the
+ * INCLUDING grammar: a name class without its own ns (and without
+ * the included grammar's own ns attribute) inherits the INCLUDING
+ * grammar's ns. The engine parsed each included grammar with an
+ * independent default_ns, and the #2122 strict no-namespace default
+ * made ns-less included fragments unable to match namespaced
+ * documents: metanorma's standoc-compile.rng (a top grammar with
+ * ns + two ns-less includes, the second combining defines from the
+ * first) rejected even the root element with the self-contradictory
+ * `element "metanorma" not allowed anywhere; expected element
+ * "metanorma"`. */
+
+TEST(RngIncludeNs, IncludedGrammarInheritsIncludingNs) {
+    const char* frag_path = "leptris_rng_ns_frag.rng";
+    const char* main_path = "leptris_rng_ns_main.rng";
+    /* The fragment: ns-less grammar, defines the element. */
+    const char frag_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<define name='entry'><element name='e'><empty/></element>"
+        "</define></grammar>";
+    /* The top: ns='http://x', includes the fragment, the start
+     * references the FRAGMENT's define. */
+    const char main_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'"
+        " ns='http://x'>"
+        "<include href='leptris_rng_ns_frag.rng'/>"
+        "<start><ref name='entry'/></start></grammar>";
+    FILE* f = fopen(frag_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(frag_xml, 1, sizeof(frag_xml) - 1, f);
+    fclose(f);
+    f = fopen(main_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(main_xml, 1, sizeof(main_xml) - 1, f);
+    fclose(f);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse_file(main_path, &st);
+    ASSERT_NE(rng, nullptr) << leptris_status_string(st);
+    /* The namespaced document validates: the included define
+     * inherited http://x. */
+    const char good[] = "<e xmlns='http://x'/>";
+    LeptrisDocument d = leptris_parse_string(good, strlen(good), &st);
+    ASSERT_NE(d, nullptr);
+    std::string msgs;
+    EXPECT_EQ(rng2093_check(rng, good, &msgs), 1) << msgs;
+    leptris_document_free(d);
+    /* The no-namespace document no longer matches (strict). */
+    const char bad[] = "<e/>";
+    d = leptris_parse_string(bad, strlen(bad), &st);
+    ASSERT_NE(d, nullptr);
+    msgs.clear();
+    EXPECT_EQ(rng2093_check(rng, bad, &msgs), 0) << msgs;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    remove(frag_path);
+    remove(main_path);
+}
+
+TEST(RngIncludeNs, IncludedOwnNsKeepsPrecedence) {
+    /* An included grammar that DECLARES its own ns governs its own
+     * name classes - the including grammar's ns does not leak in. */
+    const char* frag_path = "leptris_rng_ns_own_frag.rng";
+    const char* main_path = "leptris_rng_ns_own_main.rng";
+    const char frag_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'"
+        " ns='http://y'>"
+        "<define name='entry'><element name='e'><empty/></element>"
+        "</define></grammar>";
+    const char main_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'"
+        " ns='http://x'>"
+        "<include href='leptris_rng_ns_own_frag.rng'/>"
+        "<start><ref name='entry'/></start></grammar>";
+    FILE* f = fopen(frag_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(frag_xml, 1, sizeof(frag_xml) - 1, f);
+    fclose(f);
+    f = fopen(main_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(main_xml, 1, sizeof(main_xml) - 1, f);
+    fclose(f);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse_file(main_path, &st);
+    ASSERT_NE(rng, nullptr) << leptris_status_string(st);
+    const char y_doc[] = "<e xmlns='http://y'/>";
+    LeptrisDocument d = leptris_parse_string(y_doc, strlen(y_doc), &st);
+    ASSERT_NE(d, nullptr);
+    std::string msgs;
+    EXPECT_EQ(rng2093_check(rng, y_doc, &msgs), 1) << msgs;
+    leptris_document_free(d);
+    const char x_doc[] = "<e xmlns='http://x'/>";
+    d = leptris_parse_string(x_doc, strlen(x_doc), &st);
+    ASSERT_NE(d, nullptr);
+    msgs.clear();
+    EXPECT_EQ(rng2093_check(rng, x_doc, &msgs), 0) << msgs;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    remove(frag_path);
+    remove(main_path);
+}
+
+TEST(RngIncludeNs, CombineAcrossIncludesInheritsNs) {
+    /* The #2133 core shape: the top composes TWO includes; the
+     * second's define combines (choice) against the first's define
+     * name; the start references that combined name. Both fragments
+     * are ns-less; the top carries the ns. */
+    const char* a_path = "leptris_rng_ns_comb_a.rng";
+    const char* b_path = "leptris_rng_ns_comb_b.rng";
+    const char* main_path = "leptris_rng_ns_comb_main.rng";
+    const char a_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<define name='meta'><element name='metanorma'><empty/></element>"
+        "</define></grammar>";
+    const char b_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'>"
+        "<define name='meta' combine='choice'>"
+        "<element name='other'><empty/></element></define></grammar>";
+    const char main_xml[] =
+        "<grammar xmlns='http://relaxng.org/ns/structure/1.0'"
+        " ns='http://x'>"
+        "<include href='leptris_rng_ns_comb_a.rng'/>"
+        "<include href='leptris_rng_ns_comb_b.rng'/>"
+        "<start><ref name='meta'/></start></grammar>";
+    FILE* f = fopen(a_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(a_xml, 1, sizeof(a_xml) - 1, f);
+    fclose(f);
+    f = fopen(b_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(b_xml, 1, sizeof(b_xml) - 1, f);
+    fclose(f);
+    f = fopen(main_path, "wb");
+    ASSERT_NE(f, nullptr);
+    fwrite(main_xml, 1, sizeof(main_xml) - 1, f);
+    fclose(f);
+
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisRelaxNG rng = leptris_rng_parse_file(main_path, &st);
+    ASSERT_NE(rng, nullptr) << leptris_status_string(st);
+    const char doc1[] = "<metanorma xmlns='http://x'/>";
+    LeptrisDocument d = leptris_parse_string(doc1, strlen(doc1), &st);
+    ASSERT_NE(d, nullptr);
+    std::string msgs;
+    EXPECT_EQ(rng2093_check(rng, doc1, &msgs), 1) << msgs;
+    leptris_document_free(d);
+    const char doc2[] = "<other xmlns='http://x'/>";
+    d = leptris_parse_string(doc2, strlen(doc2), &st);
+    ASSERT_NE(d, nullptr);
+    msgs.clear();
+    EXPECT_EQ(rng2093_check(rng, doc2, &msgs), 1) << msgs;
+    leptris_document_free(d);
+    leptris_rng_free(rng);
+    remove(a_path);
+    remove(b_path);
+    remove(main_path);
+}

@@ -450,6 +450,18 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
         snprintf(err, errsz, "out of memory");
         return 0;
     }
+    /* RNG 6.1: <include> is a lexical splice — the referenced
+     * grammar's CONTENT moves into the including grammar, so the
+     * included name classes' closest-ancestor grammar is the
+     * INCLUDING grammar. Seed its ns as the included grammar's
+     * default; parse_grammar_body below overwrites it when the
+     * included <grammar> declares its own ns (#2133: with the
+     * #2122 strict default, an ns-less fragment resolved to the
+     * no namespace and could not match the including grammar's
+     * namespace — metanorma's standoc-compile rejected even the
+     * root element). */
+    ig->default_ns = g->default_ns ? leptris_strdup(g->default_ns)
+                                   : NULL;
     char nbase[1024];
     snprintf(nbase, sizeof(nbase), "%s", path);
     if (!rng_dir_of(nbase)) snprintf(nbase, sizeof(nbase), ".");
@@ -627,7 +639,18 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
 static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
                               const char* base_dir, unsigned depth,
                               char* err, size_t errsz) {
-    g->default_ns = dup_attr(grammar, "ns");
+    /* The grammar's own ns attr governs its name classes; a
+     * pre-seeded default (the INCLUDING grammar's, via the #2133
+     * include splice) survives when the attr is absent. */
+    {
+        char* own_ns = dup_attr(grammar, "ns");
+        if (own_ns) {
+            free(g->default_ns);
+            g->default_ns = own_ns;
+        } else if (!g->default_ns) {
+            g->default_ns = leptris_strdup("");
+        }
+    }
     g->default_lib = dup_attr(grammar, "datatypeLibrary");
 
     for (LeptrisNodeRef c =
