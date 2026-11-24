@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.441] - 2026-11-24
+
+### Performance
+
+- bulk-zero the mut blocks at acquire - the mutcycle row's second cut (#2132) (dom)
+
+
+
 ## [1.9.440] - 2026-11-23
 
 ### Fixed
