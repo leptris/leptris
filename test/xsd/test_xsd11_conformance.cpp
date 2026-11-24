@@ -113,11 +113,15 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * w3c/xsdtests @ 7bc3365c652a322f3d762021b3879eb92dae7e30,
      * 2206 rows): 1439/2206 — 180 valid rejections, 302 invalid
      * acceptances, and 285 suite-invalid schemas compiling clean.
-     * Every red is classified in
+     * Raised by #2149 (xs:alternative wiring — conditional type
+     * assignment dispatch on global decls and local particles,
+     * test-less defaults, xs:error selections, inherited attributes
+     * in test contexts, assert capture for alternative-carrying
+     * schemas): 1455/2206. Every red is classified in
      * test/xsd/xsd11-dispositions/README.md. Monotonically rising. */
-    EXPECT_GE(pass, 1439) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 1113);
-    EXPECT_GE(pass_invalid, 308);
+    EXPECT_GE(pass, 1455) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 1117);
+    EXPECT_GE(pass_invalid, 320);
     EXPECT_GE(pass_schema_error, 18);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));

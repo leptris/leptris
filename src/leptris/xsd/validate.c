@@ -9,6 +9,7 @@
  * pattern: validate returns 1/0, errors enumerate every miss.
  */
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,8 +65,6 @@ extern void xsd_resolve_qname_inst(LeptrisElement e, const char* qname,
 
 /* ---- error list ---------------------------------------------------- */
 
-static void verr(struct leptris_xsd_schema* s, const char* fmt,
-                 const char* a, const char* b);
 struct xsd_validator {
     struct leptris_xsd_schema* s;
     LeptrisDocument doc; /* the instance (assertion evaluation) */
@@ -524,6 +523,296 @@ static int model_wildcard_pc(const XsdCm* model, const char* uri,
     return best;
 }
 
+/* #2149 — inherited attributes in the CTA test context. §3.12.4
+ * builds the test's data model from E, E's own attributes, and E's
+ * INHERITED attributes (§3.3.5.6: attributes of ancestors carried by
+ * inheritable attribute uses, excluding names E carries itself) —
+ * the ancestors, siblings and children of E are NOT represented. The
+ * engine evaluates tests in place against the instance; when an
+ * inheritable ancestor attribute exists, the context is rebuilt as a
+ * detached root-only document carrying E's own attributes plus the
+ * inherited ones, and the chain evaluates against that. */
+
+static size_t xsd_xml_escape(const char* s, char* out, size_t cap) {
+    size_t o = 0;
+    for (; *s && o + 6 < cap; s++) {
+        char c = *s;
+        if (c == '&') {
+            memcpy(out + o, "&amp;", 5);
+            o += 5;
+        } else if (c == '<') {
+            memcpy(out + o, "&lt;", 4);
+            o += 4;
+        } else if (c == '>') {
+            memcpy(out + o, "&gt;", 4);
+            o += 4;
+        } else if (c == '"') {
+            memcpy(out + o, "&quot;", 6);
+            o += 6;
+        } else {
+            out[o++] = c;
+        }
+    }
+    out[o] = 0;
+    return o;
+}
+
+static int xsd_buf_put(char* buf, size_t cap, size_t* off,
+                       const char* fmt, ...) {
+    if (*off >= cap) return 0;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *off, cap - *off, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= cap - *off) {
+        *off = cap;
+        return 0;
+    }
+    *off += (size_t)n;
+    return 1;
+}
+
+/* The namespace URI a prefixed attribute qname binds to at `from`
+ * (climbing in-scope declarations); NULL when unprefixed or unbound. */
+static const char* xsd_ns_binding_for(LeptrisElement from,
+                                      const char* qname, char* decl,
+                                      size_t cap) {
+    const char* colon = strchr(qname, ':');
+    if (!colon) return NULL;
+    snprintf(decl, cap, "xmlns:%.*s", (int)(colon - qname), qname);
+    for (LeptrisElement up = from; up;
+         up = leptris_element_parent(up)) {
+        if (leptris_node_get_type(leptris_element_as_node(up)) !=
+            LEPTRIS_NODE_TYPE_ELEMENT)
+            break;
+        const char* v = leptris_element_attribute(up, decl);
+        if (v) return v;
+    }
+    return NULL;
+}
+
+/* Effective {inheritable} (§3.3.5.6) of the attribute `qname` as
+ * declared for `owner`'s governing declaration: the governing type's
+ * attribute rows first (a use-attribute value wins — cta0012), then
+ * the global declaration the row references. Unset rows fall back to
+ * the global declaration's flag; 0 when nothing declares it. */
+static int xsd_attr_effective_inheritable(struct leptris_xsd_schema* s,
+                                          LeptrisElement owner,
+                                          const char* qname) {
+    const char* colon = strchr(qname, ':');
+    const char* local = colon ? colon + 1 : qname;
+    const char* ol = NULL, *our = NULL;
+    leptris_element_expanded_name(owner, &ol, NULL, &our);
+    if (ol) {
+        const XsdElementDecl* d = xsd_find_element_ns(s, ol, our);
+        if (d && d->type) {
+            const XsdTypeAttrs* rows =
+                xsd_find_type_attrs_ns(s, d->type, our);
+            if (!rows) rows = xsd_find_type_attrs(s, d->type);
+            for (XsdAttrDecl* a = rows ? rows->attrs : NULL; a;
+                 a = a->next) {
+                if (strcmp(a->name, local) == 0 ||
+                    strcmp(a->name, qname) == 0) {
+                    if (a->inheritable >= 0) return a->inheritable;
+                    break; /* declared, flag unset → global fallback */
+                }
+            }
+        }
+    }
+    const XsdAttrDecl* top = xsd_find_top_attr(s, local);
+    return top ? (top->inheritable >= 0 ? top->inheritable : 0) : 0;
+}
+
+static int xsd_cta_ebv(XsdAlternative* alt, LeptrisDocument doc,
+                       LeptrisElement ctx) {
+    int ebv = 0;
+    if (alt->compiled && doc) {
+        LeptrisXPathResult r =
+            leptris_xquery_eval(alt->compiled, doc, ctx);
+        if (r) {
+            ebv = leptris_xpath_result_boolean(r);
+            leptris_xpath_result_free(r);
+        }
+    }
+    return ebv;
+}
+
+/* #2149 — XSD 1.1 §3.12.4 conditional type assignment: evaluate the
+ * alternative chain in order against the instance element; the first
+ * alternative whose test is true selects its type. A test that fails
+ * to compile (compiled == NULL) evaluates as false — §3.12.4 turns a
+ * dynamic error into a false verdict. A test-less alternative is the
+ * type table's DEFAULT: it ends the chain and its type replaces the
+ * declared type as the no-match fallback (§3.3.2.1). Returns the
+ * selected type name (borrowed), NULL when no alternative applied —
+ * *err is set when the selection is xs:error, which has no valid
+ * instances (§2.2.1.1) and invalidates the element outright. */
+static const char* xsd_cta_select(struct xsd_validator* v,
+                                  struct leptris_xsd_schema* s,
+                                  LeptrisElement elem,
+                                  XsdAlternative* chain, int* err) {
+    *err = 0;
+    if (!chain) return NULL;
+
+    /* Collect the inherited attributes: nearest ancestor first; a
+     * name E carries itself is excluded (§3.12.4 1.1.3), a name
+     * already collected from a nearer ancestor is shadowed, and only
+     * attributes whose effective {inheritable} is true participate. */
+    LeptrisElement ih_src[8];
+    const char* ih_qn[8];
+    const char* ih_val[8];
+    int ih_n = 0;
+    {
+        const char* own[32];
+        int own_n = 0;
+        for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+             at && own_n < 32; at = leptris_attribute_next(at)) {
+            const char* qn = leptris_attribute_get_name(at);
+            if (qn && strncmp(qn, "xmlns", 5) != 0)
+                own[own_n++] = qn;
+        }
+        for (LeptrisElement up = leptris_element_parent(elem);
+             up && ih_n < 8; up = leptris_element_parent(up)) {
+            if (leptris_node_get_type(leptris_element_as_node(up)) !=
+                LEPTRIS_NODE_TYPE_ELEMENT)
+                break;
+            for (LeptrisAttribute at =
+                     leptris_element_first_attribute(up);
+                 at && ih_n < 8; at = leptris_attribute_next(at)) {
+                const char* qn = leptris_attribute_get_name(at);
+                if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
+                int seen = 0;
+                for (int i = 0; i < own_n && !seen; i++)
+                    if (strcmp(own[i], qn) == 0) seen = 1;
+                for (int i = 0; i < ih_n && !seen; i++)
+                    if (strcmp(ih_qn[i], qn) == 0) seen = 1;
+                if (seen) continue;
+                if (xsd_attr_effective_inheritable(s, up, qn) == 1) {
+                    ih_src[ih_n] = up;
+                    ih_qn[ih_n] = qn;
+                    ih_val[ih_n] =
+                        leptris_attribute_get_value(up, at);
+                    ih_n++;
+                }
+            }
+        }
+    }
+
+    LeptrisElement ctx = elem;
+    LeptrisDocument tdoc = (LeptrisDocument)0;
+    if (ih_n > 0) {
+        /* Rebuild the §3.12.4 context as a detached root-only
+         * element (children emptied, parent severed): E's own
+         * attributes, the inherited ones, and the prefix bindings
+         * each emitted name needs. */
+        char buf[4096];
+        size_t off = 0;
+        const char* el = NULL;
+        leptris_element_expanded_name(elem, &el, NULL, NULL);
+        int ok = xsd_buf_put(buf, sizeof(buf), &off, "<%s",
+                             el ? el : "leptris-cta-context");
+        const char* bound[16];
+        int bound_n = 0;
+        char decl[300];
+        /* E's own prefix, so name-shaped tests keep their binding */
+        if (ok) {
+            const char* ep = NULL;
+            leptris_element_expanded_name(elem, NULL, &ep, NULL);
+            if (ep && ep[0]) {
+                char pd[300];
+                snprintf(pd, sizeof(pd), "xmlns:%s", ep);
+                const char* b = NULL;
+                for (LeptrisElement u = elem; u && !b;
+                     u = leptris_element_parent(u)) {
+                    if (leptris_node_get_type(
+                            leptris_element_as_node(u)) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        break;
+                    b = leptris_element_attribute(u, pd);
+                }
+                if (b && bound_n < 16) {
+                    ok = xsd_buf_put(buf, sizeof(buf), &off,
+                                     " xmlns:%s=\"%s\"", ep, b);
+                    bound[bound_n++] = ep;
+                }
+            }
+        }
+        for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+             at && ok; at = leptris_attribute_next(at)) {
+            const char* qn = leptris_attribute_get_name(at);
+            if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
+            char ev[512];
+            xsd_xml_escape(leptris_attribute_get_value(elem, at), ev,
+                           sizeof(ev));
+            ok = xsd_buf_put(buf, sizeof(buf), &off, " %s=\"%s\"", qn,
+                             ev);
+            if (ok && strchr(qn, ':')) {
+                const char* b = xsd_ns_binding_for(elem, qn, decl,
+                                                   sizeof(decl));
+                if (b) {
+                    int dup = 0;
+                    const char* pfx = decl + 6;
+                    for (int i = 0; i < bound_n && !dup; i++)
+                        if (strcmp(bound[i], pfx) == 0) dup = 1;
+                    if (!dup && bound_n < 16) {
+                        ok = xsd_buf_put(buf, sizeof(buf), &off,
+                                         " %s=\"%s\"", decl, b);
+                        bound[bound_n++] = pfx;
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < ih_n && ok; i++) {
+            char ev[512];
+            xsd_xml_escape(ih_val[i] ? ih_val[i] : "", ev, sizeof(ev));
+            ok = xsd_buf_put(buf, sizeof(buf), &off, " %s=\"%s\"",
+                             ih_qn[i], ev);
+            if (ok && strchr(ih_qn[i], ':')) {
+                const char* b = xsd_ns_binding_for(ih_src[i], ih_qn[i],
+                                                   decl, sizeof(decl));
+                if (b) {
+                    int dup = 0;
+                    const char* pfx = decl + 6;
+                    for (int j = 0; j < bound_n && !dup; j++)
+                        if (strcmp(bound[j], pfx) == 0) dup = 1;
+                    if (!dup && bound_n < 16) {
+                        ok = xsd_buf_put(buf, sizeof(buf), &off,
+                                         " %s=\"%s\"", decl, b);
+                        bound[bound_n++] = pfx;
+                    }
+                }
+            }
+        }
+        if (ok) ok = xsd_buf_put(buf, sizeof(buf), &off, "/>");
+        if (ok) {
+            LeptrisStatus pst = (LeptrisStatus)0;
+            tdoc = leptris_parse_string(buf, strlen(buf), &pst);
+            if (tdoc) {
+                LeptrisElement root = leptris_document_root(tdoc);
+                if (root) ctx = root;
+            }
+        }
+        /* overflow or an unparseable context: evaluate without the
+         * inherited set (the lax direction — the test then simply
+         * does not see the ancestor value) */
+    }
+
+    const char* sel = NULL;
+    for (XsdAlternative* alt = chain; alt; alt = alt->next) {
+        if (!alt->test) {
+            *err = alt->xs_error;
+            sel = alt->type;
+            break;
+        }
+        if (xsd_cta_ebv(alt, tdoc ? tdoc : v->doc, ctx)) {
+            sel = alt->type;
+            break;
+        }
+    }
+    if (tdoc) leptris_document_free(tdoc);
+    return sel;
+}
+
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
                               LeptrisElement elem, XsdCm* ct) {
@@ -691,6 +980,7 @@ static void validate_children(struct xsd_validator* v,
         if (wpc == 2) continue;
         const char* ptype = NULL;
         const char* pfill = NULL;
+        XsdCm* pmatch = NULL;
         /* elemZ020 lenient fallback: an unqualified particle may
          * still type a namespaced child when NO global declaration
          * in the child's namespace could (the OOXML-style wp.xsd
@@ -703,7 +993,7 @@ static void validate_children(struct xsd_validator* v,
             XsdCm* stack[64];
             int sp = 0;
             stack[sp++] = model;
-            while (sp > 0 && ptype == NULL) {
+            while (sp > 0 && pmatch == NULL) {
                 XsdCm* p = stack[--sp];
                 for (; p; p = p->next) {
                     int child_ns = cu && cu[0];
@@ -717,10 +1007,16 @@ static void validate_children(struct xsd_validator* v,
                         p->ns ? (!child_ns ||
                                  strcmp(p->ns, cu) == 0)
                               : !child_ns;
+                    /* #2149: a particle may be typed ONLY by its
+                     * alternative chain (no declared type at all) —
+                     * such a particle still governs its instance
+                     * element. */
                     if (p->kind == XSD_CM_ELEMENT && p->name &&
-                        strcmp(p->name, cl) == 0 && p->type) {
+                        strcmp(p->name, cl) == 0 &&
+                        (p->type || p->alternatives)) {
                         if (pns_ok) {
                             ptype = p->type;
+                            pmatch = p;
                             /* leptris-rs#35 (isDefault005): the
                              * particle's fixed/default value
                              * satisfies EMPTY content (§3.12.2). */
@@ -748,7 +1044,7 @@ static void validate_children(struct xsd_validator* v,
         /* leptris-ruby#535 (XSD 1.0 2.6.2): xsi:type applies at every
          * assessed depth -- a child typed by the parent particle is
          * substituted exactly like a globally declared one. */
-        if (ptype) {
+        if (pmatch) {
             const char* cxsi = leptris_element_attribute_ns(
                 ce, "http://www.w3.org/2001/XMLSchema-instance", "type");
             if (cxsi && cxsi[0]) {
@@ -763,8 +1059,23 @@ static void validate_children(struct xsd_validator* v,
                                        pfill, NULL);
                 }
             } else {
-                validate_local(v, s, ce, cl, ptype, pfill,
-                               ct ? ct->ns : NULL);
+                /* #2149: the particle's alternative chain governs the
+                 * instance element (§3.12.4); no match falls back to
+                 * the particle's declared type. */
+                int cta_err = 0;
+                const char* eff = xsd_cta_select(v, s, ce,
+                                                 pmatch ? pmatch->alternatives
+                                                        : NULL,
+                                                 &cta_err);
+                if (cta_err) {
+                    verrf_atk(v, ce, "type-resolution", cl, "element",
+                              cl,
+                              "conditional type assignment selected "
+                              "xs:error");
+                } else {
+                    validate_local(v, s, ce, cl, eff ? eff : ptype,
+                                   pfill, ct ? ct->ns : NULL);
+                }
             }
         } else {
             const XsdElementDecl* cd =
@@ -1161,23 +1472,13 @@ static void validate_element_decl(struct xsd_validator* v,
     }
 
     /* XSD 1.1: the first alternative whose test passes types the
-     * element for this instance (context = the element). */
-    const char* eff_type = d->type;
-    for (XsdAlternative* alt = d->alternatives; alt; alt = alt->next) {
-        int ebv = 0;
-        if (alt->compiled && v->doc) {
-            LeptrisXPathResult r =
-                leptris_xquery_eval(alt->compiled, v->doc, elem);
-            if (r) {
-                ebv = leptris_xpath_result_boolean(r);
-                leptris_xpath_result_free(r);
-            }
-        }
-        if (ebv) {
-            eff_type = alt->type;
-            break;
-        }
-    }
+     * element for this instance (context = the element); a test-less
+     * default alternative replaces the declared type as the
+     * no-match fallback. */
+    int cta_err = 0;
+    const char* eff_type =
+        xsd_cta_select(v, s, elem, d->alternatives, &cta_err);
+    if (!eff_type) eff_type = d->type;
     /* #1936 (stE): the element's fixed VALUE constraint applies
      * regardless of the type resolution — inline anonymous types
      * leave eff_type NULL and used to skip the check entirely.
@@ -1242,6 +1543,15 @@ static void validate_element_decl(struct xsd_validator* v,
         }
         validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q,
                            fill, NULL);
+        return;
+    }
+    /* §3.3.4.3 cl.4: the instance-specified type definition above
+     * overrides the conditionally selected one; only without it does
+     * an xs:error selection (no valid instances, §2.2.1.1) take
+     * effect. */
+    if (cta_err) {
+        verrf_atk(v, elem, "type-resolution", local, "element", local,
+                  "conditional type assignment selected xs:error");
         return;
     }
     validate_local(v, s, elem, local, eff_type, fill,
@@ -1332,15 +1642,52 @@ static void validate_local_uri(struct xsd_validator* v,
         validate_attributes(v, s, elem, rows, ct);
         validate_children(v, s, elem, ct);
         /* XSD 1.1: the type's xs:assert list — context is the
-         * element; evaluation errors are failures */
+         * element; evaluation errors are failures. §3.13.4.1 2.3:
+         * $value binds the content's value for simple-content types
+         * (the lexical, numerics as bare literals), the empty
+         * sequence otherwise — test4.xsd's selected simpleContent
+         * type asserts $value mod 2 = 0 (#2149). */
         for (XsdAssert* a = ct->asserts; a; a = a->next) {
             int ebv = 0;
             if (a->compiled && v->doc) {
-                LeptrisXPathResult r =
-                    leptris_xquery_eval(a->compiled, v->doc, elem);
-                if (r) {
-                    ebv = leptris_xpath_result_boolean(r);
-                    leptris_xpath_result_free(r);
+                if (ct->text_type) {
+                    const char* text = leptris_element_text(elem);
+                    if (!text) text = "";
+                    if (fill && !*text) text = fill;
+                    char sel[1024];
+                    int numeric =
+                        *text &&
+                        strspn(text, "0123456789.+-eE") == strlen(text);
+                    if (numeric) {
+                        snprintf(sel, sizeof(sel), "%s", text);
+                    } else {
+                        size_t w = 0;
+                        sel[w++] = '\'';
+                        for (const char* p = text;
+                             *p && w < sizeof(sel) - 3; p++) {
+                            if (*p == '\'') sel[w++] = '\'';
+                            sel[w++] = *p;
+                        }
+                        sel[w++] = '\'';
+                        sel[w] = 0;
+                    }
+                    const char* names[1] = {"value"};
+                    const char* sels[1] = {sel};
+                    LeptrisXPathResult r = leptris_xquery_eval_params(
+                        a->compiled, v->doc, elem, names, sels, 1);
+                    if (r) {
+                        ebv = leptris_xpath_result_boolean(r);
+                        leptris_xpath_result_free(r);
+                    }
+                } else {
+                    const char* names[1] = {"value"};
+                    const char* sels[1] = {"()"};
+                    LeptrisXPathResult r = leptris_xquery_eval_params(
+                        a->compiled, v->doc, elem, names, sels, 1);
+                    if (r) {
+                        ebv = leptris_xpath_result_boolean(r);
+                        leptris_xpath_result_free(r);
+                    }
                 }
             }
             if (!ebv)

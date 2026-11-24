@@ -50,6 +50,12 @@ struct leptris_xsd_schema {
     XsdElementIcs* element_ics;
     char* target_ns;
     int version_11;    /* xs:schema @version = "1.1" */
+    /* #2149: the schema carries xs:alternative chains — 1.1 syntax
+     * that appears on schemas marked version="1.0" (23 of the 24 cta
+     * schemas). Asserts inside such a schema belong to the CTA
+     * semantics (the selected type's asserts MUST evaluate), so the
+     * assert capture keys on version_11 || saw_alternative. */
+    int saw_alternative;
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth;
     /* xs:override body capture replaces same-named components: the
@@ -167,9 +173,10 @@ static const char* xsd_local_name(const char* qname) {
      * resolve by local name */
     return colon + 1;
 }
-static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
-                                     LeptrisElement decl_elem,
-                                     XsdElementDecl* d);
+static XsdAlternative* xsd_capture_alternatives(
+    struct leptris_xsd_schema* s, LeptrisElement decl_elem);
+static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt);
+static int xsd_doc_has_alternative(LeptrisElement e, int depth);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
 
@@ -195,6 +202,15 @@ static void xsd_cm_free(XsdCm* cm) {
         }
         if (cm->oc_owned && cm->open_any) xsd_cm_free(cm->open_any);
         xsd_cm_free(cm->first_child);
+        XsdAlternative* alt = cm->alternatives;
+        while (alt) {
+            XsdAlternative* an = alt->next;
+            if (alt->compiled) leptris_xquery_free(alt->compiled);
+            free(alt->test);
+            free(alt->type);
+            free(alt);
+            alt = an;
+        }
         free(cm->name);
         free(cm->type);
         free(cm->ns);
@@ -349,6 +365,14 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                     leptris_element_attribute(e, "fixed"));
                 cm->default_value = xsd_strdup(
                     leptris_element_attribute(e, "default"));
+                /* #2149: a name-form particle may carry the 1.1
+                 * alternative chain (§3.3.2.3 — the local declaration
+                 * maps to a full Element Declaration, type table
+                 * included). A ref-form particle resolves to a global
+                 * declaration, which carries its own table. */
+                if (!ref_raw)
+                    cm->alternatives =
+                        xsd_capture_alternatives(s, e);
             }
         } else if (strcmp(local, "group") == 0) {
             /* <xs:group ref="g"/> — expanded at NFA build so
@@ -2161,6 +2185,12 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                    (vmin && strcmp(vmin, "1.1") == 0);
         if (vmax && strcmp(vmax, "1.0") == 0) is11 = 0;
         s->version_11 = is11;
+        /* #2149: order-independent 1.1-syntax evidence — one walk
+         * for xs:alternative elements before any component capture.
+         * Real-world cta schemas carry alternatives while marked
+         * version="1.0" (or unmarked); their selected types' asserts
+         * must evaluate, so the assert capture keys on this flag. */
+        s->saw_alternative = xsd_doc_has_alternative(root, 0);
     }
 
     const char* local = NULL;
@@ -2652,7 +2682,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->name = xsd_strdup(nm);
                     if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                     d->type = xsd_strdup(xsd_local_name(ty));
-                    xsd_capture_alternatives(s, (LeptrisElement)n, d);
+                    d->alternatives =
+                        xsd_capture_alternatives(s, (LeptrisElement)n);
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
@@ -2691,6 +2722,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                     if (has_inline)
                         d->type = xsd_strdup(synth);
+                    d->alternatives =
+                        xsd_capture_alternatives(s, (LeptrisElement)n);
                     /* #1936 (stE): the fixed VALUE constraint rides
                      * the decl whatever the type shape — inline
                      * anonymous types used to lose it entirely. */
@@ -2756,6 +2789,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     const char* use = leptris_element_attribute(
                         (LeptrisElement)n, "use");
                     d->required = (use && strcmp(use, "required") == 0);
+                    d->inheritable =
+                        xsd_bool_attr((LeptrisElement)n, "inheritable",
+                                      -1);
                     d->next = s->top_attrs;
                     s->top_attrs = d;
                 }
@@ -3035,11 +3071,23 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
     }
 }
 
-/* XSD 1.1: xs:alternative children of an element declaration. */
-static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
-                                     LeptrisElement decl_elem,
-                                     XsdElementDecl* d) {
-    if (!s->version_11) return;
+/* XSD 1.1: the xs:alternative children of an element declaration
+ * (§3.12.2), captured as the ordered type table. Capture is keyed on
+ * the alternative ELEMENTS: their presence is 1.1 syntax, so the
+ * schema-wide @version gate must not hide them — the cta corpus
+ * carries version="1.0" (or none) on 23 of its 24 schemas. Each
+ * alternative names its type with exactly one of the two forms
+ * (§3.12.3): a QName attribute (stored as the local name, resolved
+ * through the same ladders as a declared type) or an inline
+ * complexType/simpleType child captured into a synthesized slot.
+ * A test-less alternative is the DEFAULT: it closes the table
+ * (§3.3.2.1 — every alternative but the last carries a test) and its
+ * type becomes the no-match fallback. A test that fails to compile
+ * is stored with compiled == NULL: §3.12.4 evaluates a dynamic
+ * error as false. */
+static XsdAlternative* xsd_capture_alternatives(
+    struct leptris_xsd_schema* s, LeptrisElement decl_elem) {
+    XsdAlternative* head = NULL;
     XsdAlternative* tail = NULL;
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(decl_elem));
@@ -3052,18 +3100,78 @@ static void xsd_capture_alternatives(struct leptris_xsd_schema* s,
         if (!local || strcmp(local, "alternative") != 0) continue;
         const char* test = leptris_element_attribute(e, "test");
         const char* type = leptris_element_attribute(e, "type");
-        if (!test || !type) continue;
         XsdAlternative* a = (XsdAlternative*)calloc(1, sizeof(*a));
-        if (!a) continue;
-        a->test = xsd_strdup(test);
-        a->type = xsd_strdup(type);
-        a->compiled = leptris_xquery_parse(test, strlen(test));
+        if (!a) break;
+        if (test && test[0]) {
+            a->test = xsd_strdup(test);
+            a->compiled = leptris_xquery_parse(test, strlen(test));
+        }
+        if (type && type[0]) {
+            char turi[512], tlocal[256];
+            xsd_resolve_qname(e, type, turi, sizeof(turi), tlocal,
+                              sizeof(tlocal));
+            a->type = xsd_strdup(xsd_local_name(type));
+            if (turi[0] && strcmp(turi, XSD_NS) == 0 &&
+                strcmp(tlocal, "error") == 0)
+                a->xs_error = 1;
+        } else {
+            /* inline type child → synthesized slot ("alternative:"
+             * + the node address: alternatives carry no name, and
+             * NCName type names cannot contain ':' — collision-free) */
+            char synth[64];
+            snprintf(synth, sizeof(synth), "alternative:%p", (void*)e);
+            if (xsd_capture_inline(s, e, synth))
+                a->type = xsd_strdup(synth);
+        }
+        if (!a->type) {
+            /* §3.12.3 requires one of the two forms; neither present
+             * — nothing to select, drop the row */
+            free(a->test);
+            if (a->compiled) leptris_xquery_free(a->compiled);
+            free(a);
+            continue;
+        }
         if (tail)
             tail->next = a;
         else
-            d->alternatives = a;
+            head = a;
         tail = a;
+        s->saw_alternative = 1;
+        if (!a->test) break; /* the default alternative ends the table */
     }
+    return head;
+}
+
+/* xs:boolean attribute reader with the suite's whitespace-tolerant
+ * spellings (" 1 "); dflt when absent or malformed. */
+static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt) {
+    const char* v = leptris_element_attribute(e, name);
+    if (!v) return dflt;
+    while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r') v++;
+    if (strcmp(v, "true") == 0 || strcmp(v, "1") == 0) return 1;
+    if (strcmp(v, "false") == 0 || strcmp(v, "0") == 0) return 0;
+    return dflt;
+}
+
+/* #2149: does the document carry an xs:alternative element at any
+ * depth (1.1 syntax evidence for schemas unmarked or marked 1.0)? */
+static int xsd_doc_has_alternative(LeptrisElement e, int depth) {
+    if (depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            strcmp(cl, "alternative") == 0)
+            return 1;
+        if (xsd_doc_has_alternative(c, depth + 1)) return 1;
+    }
+    return 0;
 }
 
 static XsdCm* xsd_capture_any(LeptrisElement any_child) {
@@ -3092,10 +3200,25 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
     XsdAssert* a = (XsdAssert*)calloc(1, sizeof(*a));
     if (!a) return NULL;
     a->test = xsd_strdup(test);
-    if (s->version_11) {
-        a->compiled = leptris_xquery_parse(test, strlen(test));
-        /* NULL = syntax error: evaluation reports the assertion
-         * as failed (XSD 1.1: an error is a failure) */
+    /* #2149: compiled when the schema claims 1.1 OR carries
+     * xs:alternative chains — the alternative evidence marks schemas
+     * whose selected types' asserts belong to the CTA semantics
+     * (test4.xsd-style cta corpora are marked version="1.0").
+     * Schemas claiming neither keep the 1.0-lax posture: the
+     * assertions family's PSVI-typed assert expressions
+     * (data(.) instance of xs:date*) cannot be evaluated for them
+     * yet, and evaluating what we cannot support would reject
+     * suite-valid documents. The test compiles under a $value
+     * declaration (§3.13.4.1 2.2/2.3 — the evaluator binds it; the
+     * same wrapper the xs:assertion facet uses). NULL = syntax
+     * error: evaluation reports the assertion as failed (XSD 1.1:
+     * an error is a failure). */
+    if (s->version_11 || s->saw_alternative) {
+        char wrapped[2048];
+        int w = snprintf(wrapped, sizeof(wrapped),
+                         "declare variable $value external; %s", test);
+        if (w > 0 && (size_t)w < sizeof(wrapped))
+            a->compiled = leptris_xquery_parse(wrapped, (size_t)w);
     }
     return a;
 }
@@ -3269,8 +3392,10 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             buri[0] ? xsd_strdup(buri) : NULL;
                     }
                 }
-                /* XSD 1.1: asserts nested under the derivation */
-                if (s->version_11)
+                /* XSD 1.1: asserts nested under the derivation —
+                 * captured when the schema claims 1.1 or carries
+                 * alternatives (#2149) */
+                if (s->version_11 || s->saw_alternative)
                     xsd_capture_assert_children(s, dq, root);
                 if (!any_attr_ns) {
                     if (!any_attr_unit_ns)
@@ -3360,6 +3485,12 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     }
                 }
                 attrs = xsd_capture_attr_rows(s, dq, 0);
+                /* XSD 1.1: asserts nested under the simpleContent
+                 * derivation (test4.xsd: the alternative-selected
+                 * simpleContent type asserts $value mod 2 = 0) —
+                 * same condition as the complexContent branch. */
+                if (s->version_11 || s->saw_alternative)
+                    xsd_capture_assert_children(s, dq, root);
             }
         }
     }
@@ -3430,8 +3561,11 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         root->oc_mode = 2;
     if (root->oc_mode == 2 && !root->open_any && s->default_open)
         root->open_any = s->default_open;
-    /* XSD 1.1: direct xs:assert children of the complexType */
-    if (s->version_11) xsd_capture_assert_children(s, ct, root);
+    /* XSD 1.1: direct xs:assert children of the complexType —
+     * captured when the schema claims 1.1 or carries alternatives
+     * (#2149) */
+    if (s->version_11 || s->saw_alternative)
+        xsd_capture_assert_children(s, ct, root);
     /* the NFA and model walkers consume ONE root particle —
      * a multi-particle model (derivation splices) normalizes
      * under a sequence */
@@ -3516,6 +3650,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
         d->type = xsd_strdup(src->type);
         d->fixed = xsd_strdup(src->fixed);
         d->required = src->required;
+        d->inheritable = src->inheritable;
         d->pending_ref = src->pending_ref;
         if (tail)
             tail->next = d;
@@ -3550,6 +3685,7 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 a->fixed = xsd_strdup(src->fixed);
                 if (!(a->pending_ref & XSD_PENDING_USE))
                     a->required = src->required;
+                if (a->inheritable < 0) a->inheritable = src->inheritable;
                 a->pending_ref &= ~XSD_PENDING_REF;
                 progressed = 1;
             }
@@ -3565,6 +3701,7 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 a->fixed = xsd_strdup(src->fixed);
                 if (!(a->pending_ref & XSD_PENDING_USE))
                     a->required = src->required;
+                if (a->inheritable < 0) a->inheritable = src->inheritable;
                 a->pending_ref &= ~XSD_PENDING_REF;
                 progressed = 1;
             }
@@ -3627,8 +3764,15 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
         if (strcmp(al, "attribute") == 0) {
             const char* an = leptris_element_attribute(ae, "name");
             const char* use = leptris_element_attribute(ae, "use");
+            /* §3.3.5.6: inheritable rides the USE; a use-attribute
+             * value overrides the referenced declaration's own
+             * (cta0012: the non-inheritable use masks the
+             * inheritable decl). calloc zeroes the field — force
+             * the unset tri-state before reading the element. */
+            int inh = xsd_bool_attr(ae, "inheritable", -1);
             XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
             if (!d) continue;
+            d->inheritable = inh;
             if (an) {
                 d->name = xsd_strdup(an);
                 d->type = xsd_strdup(xsd_local_name(
@@ -3669,6 +3813,7 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     d->required = use
                                       ? (strcmp(use, "required") == 0)
                                       : src->required;
+                    if (inh < 0) d->inheritable = src->inheritable;
                 }
             }
             if (tail)

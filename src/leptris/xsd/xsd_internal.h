@@ -116,6 +116,10 @@ typedef enum {
     XSD_CM_GROUP_REF /* name holds the ref; expanded at NFA build */
 } XsdCmKind;
 
+/* forward: defined below the content model — XsdCm particles carry
+ * the alternative chain (#2149) */
+typedef struct xsd_alternative XsdAlternative;
+
 typedef struct xsd_cm {
     XsdCmKind kind;
     char* name;   /* CM_ELEMENT: child element local name */
@@ -167,6 +171,8 @@ typedef struct xsd_cm {
     char* fixed_value;
     char* default_value;
     int mixed;
+    XsdAlternative* alternatives; /* XSD 1.1: the alternative chain on
+                                   * a LOCAL element particle (#2149) */
 } XsdCm;
 
 
@@ -188,13 +194,18 @@ XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
                             const char* name);
 
 /* XSD 1.1 (#1075 tier 2): one xs:alternative on an element
- * declaration — the test plus the type it selects. */
-typedef struct xsd_alternative {
+ * declaration — the test plus the type it selects. test == NULL
+ * marks the test-less DEFAULT alternative: the type table's
+ * {default type definition} (§3.3.2.1), which closes the chain and
+ * replaces the declared type as the no-match fallback. */
+struct xsd_alternative {
     char* test;             /* wire text, for reporting */
     LeptrisXQuery compiled; /* NULL when compilation failed */
     char* type;             /* the selected type name */
+    int xs_error;           /* the selection is xs:error (no valid
+                             * instances — always invalid, §2.2.1.1) */
     struct xsd_alternative* next;
-} XsdAlternative;
+};
 
 /* A top-level xs:element declaration (slice 3: name + type ref). */
 typedef struct xsd_element_decl {
@@ -227,6 +238,12 @@ typedef struct xsd_attr_decl {
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
     char* fixed; /* #FIXED value: present values must string-equal it */
     int required;
+    /* XSD 1.1 §3.3.5.6: the attribute value is inherited by
+     * descendants for their CTA test contexts (#2149). -1 unset
+     * (calloc-zero would conflate unset with an explicit false —
+     * the use-override and the global-decl fallback both need the
+     * distinction), 0 false, 1 true. */
+    int inheritable;
     /* leptris-ruby#569: the row came from <xs:attribute ref=.../>
      * whose global declaration was not yet captured (the #1880
      * attributeGroup pre-pass runs before the import chase). The
