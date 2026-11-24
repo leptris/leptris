@@ -153,6 +153,11 @@ void xpath_context_init(XPathContext* context,
     context->variable_set = NULL;
     context->ns_set = NULL;
 
+    /* the assertion data-model filter is per-eval — stale stack
+     * bytes from a previous (flagged) eval must not suppress
+     * comments for ordinary queries */
+    context->assert_data_model = 0;
+
     context->input = NULL;
     context->input_len = 0;
 

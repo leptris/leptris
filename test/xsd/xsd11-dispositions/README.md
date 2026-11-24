@@ -28,15 +28,25 @@ against over019/over020) — the "instance validity under
 overridden/redefined components" class drops 11 → 8; spec tests:
 test/xsd/test_xsd_ns_qualification.cpp.
 
-By family: assertions 214/296 · cta 97/125 · override 74/87 ·
-openContent 122/205 · core 951/1493 (#2149: cta 83→97, +1 assertions
+Re-measured 2026-11-24 (#2154, branch `xsd11-assertion-facets` —
+xs:assertion facets enforced on simple types across the restriction
+ladder with list-item and union-member chains, the complexType
+assert capture keyed on assert SYNTAX presence, assert inheritance
+down the derivation chain, §3.13.2 namespace bindings +
+xpathDefaultNamespace wrapped into the test prolog, the §3.13.4.1
+assertion data model excluding comments/PIs, typed-temporal
+comparisons against $value): **1521/2206 pass** — 1117 valid /
+386 invalid / 18 schema-error (685 reds, zero regressions).
+
+By family: assertions 269/296 · cta 97/125 · override 74/87 ·
+openContent 122/205 · core 961/1493 (#2149: cta 83→97, +1 assertions
 po_sample, +1 core VC — the cta reds left are all OUTSIDE the
 dispatch class; #679: override 71→74; the tables below carry the
-#679 counts).
+#2154 counts).
 
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1458) is pinned and
+record for every row left in it. The floor (now 1521) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -70,7 +80,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 17 | saxon Id + ibm S3_3_4: multiple ID-typed attributes on one type — legal since 1.1, engine still enforces the 1.0 one-ID-per-element rule | OPEN — the one-ID gate needs an engine version flip (gate exists: "more than one ID-typed attribute (XSD 1.0 one-ID-per-element)") |
 | 14 | saxon/oracle Zone: valid timezone-bearing dateTime/time lexicals (±14:00, explicitTimezone-compliant) rejected as "lexical value does not match its type" | OPEN — 1.1 timezone lexical space (offsets beyond ±13:00) + explicitTimezone-aware lexical checking |
 | 13 | ibm D3_3_4/S2_2_2/S2_2_4/D4_3_6 + saxon PDecimal: valid precisionDecimal / duration-family values rejected | OPEN — xs:precisionDecimal not a recognized builtin; derived lexical validation misfires |
-| 12 | ibm S3_4_1/D4_3_15 + mixed/assertions + saxon Assert: documents whose assertions PASS are rejected (content-model empty / children mismatch around complexContent+assert types) | OPEN — the assert capture rewrites the content model for complexContent extension (base content lost); xs:assertion-facet value paths lose simpleContent (#2149 fixed po_sample via the $value binding; the typing-shape residue remains) |
+| 12 | ibm S3_4_1 (9) + saxon Assert (3): documents whose assertions PASS are rejected — the ibm rows keep the content-model residue around complexContent+assert types ("children do not match the content model"); the saxon rows are assert-simple006 (the union-of-date-and-dateTime lexical gate rejects a valid dateTime before the assertion runs) and assert020/021 (content model again) | OPEN — the assert capture rewrites the content model for complexContent extension (base content lost); the typing-shape residue remains |
 | 9 | ibm S3_10_1/S3_8_6: weakened UPA sequences (`<element minOccurs="0"/><any/>`) and weak-wildcard lax typing | OPEN — the compile-side UPA gate fires where 1.1 relaxed it (see the engine quirk above); weak wildcard (§3.8.6) governing-type compatibility unevaluated |
 | 6 | saxon Simple: fixed/default value semantics incl. defaultAttributes application | OPEN — 1.1 default semantics on attribute uses |
 | 4 | ibm S3_4_2_4/S3_12: redefine/override — instances valid against the redefined/overridden type rejected | OPEN — overridden component not used for instance typing |
@@ -82,7 +92,8 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 
 | rows | class | disposition |
 |---|---|---|
-| 85 | ibm D4_3_15/D4_3_16/S3_3_4 + ibm/saxon assertion sets: simpleType `xs:assertion` facet and complexType `xs:assert` violations accepted (verdict=valid, zero errors) | OPEN — the largest instance-side gap. The XQuery substrate is wired (moxml#556) but the facet is not reached for these shapes: assertion lists on RESTRICTION-derived simple types, D4_3_16 derivation-consistency assertions, assert-on-attributes |
+| 15 | ibm S3_3_4 ii: instance-invalid ID/IDREF rows (fixed on ID-typed elements, ID value-space violations) | OPEN — the one-ID-per-element gate and the ID value-space checks; no assert semantics involved (the #2149-era table miscounted these into the 85-row class) |
+| 9 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6), castable-as-double accepting '10f4' (assert-simple003/004) | OPEN — each names an ENGINE gap (focus semantics, doc loading, arithmetic error semantics, carrier decomposition, castable lexical validators), not a facet-capture gap |
 | 66 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side |
 | 45 | saxon Id + ibm S3_11_2: identity-constraint 1.1 extensions (fields on attributes/paths, xs:unique scoping, keyref targets) not evaluated | OPEN — the 1.0 lane's capture exists but 1.1 field/selector syntax unsupported → constraint silently skipped |
 | 27 | ibm D3_3_4/D3_3_16/D3_3_17/D3_4_26/27/28 + PDecimal: precisionDecimal / yearMonthDuration / dayTimeDuration / dateTimeStamp facet violations accepted | OPEN — same missing-builtin class; facets captured, values unchecked |
@@ -90,7 +101,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 3 | saxon CTA cta0040/41/44: invalid instances accepted — the selected types reference xs:dateTimeStamp (timezone-required) and the builtin is unrecognized, so the text passes unvalidated | OPEN — same missing-builtin class as the zone rows |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |
 | 15 | saxon Open: openContent `mode="strict"` violations accepted | OPEN — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise |
-| 15 | saxon/oracle Zone: explicitTimezone facet violations (missing/forbidden timezone) accepted | OPEN — facet captured (zone sets compile) but not applied to values |
+| 18 | saxon/oracle Zone + ibm D4_3_16 ii: explicitTimezone facet violations (missing/forbidden timezone) accepted | OPEN — facet captured (zone sets compile) but not applied to values |
 | 11 | saxon VC + mixed/VC: invalid-under-version-control documents accepted | OPEN — conditional inclusion: the version test prunes NOTHING (all branches evaluated/none pruned), so vc-invalid instances sail through |
 | 8 | ibm S3_12/S3_4_2_4 + saxon Override: instance validity under overridden/redefined components | OPEN — overridden components captured (compile.c:55) but instance typing uses the pre-override definitions (#679 retired the three Override n02 no-namespace-instance rows via exact root binding) |
 | 3 | ibm S3_2_3: element-decl clause violations (targetNamespace on local declarations) accepted | OPEN |
@@ -137,6 +148,18 @@ families); the engine parses UTF-16 natively, so they are IN lane.
   attributes join the test context, and the selected type's asserts
   evaluate (with $value bound). Spec tests:
   test/xsd/test_xsd11_cta.cpp.
+- assertions family 269/296 (#2154): xs:assertion facets enforced on
+  simple types — captured as an accumulating list (a restriction may
+  carry several), enforced across the restriction ladder, per list
+  ITEM and per union MEMBER; $value binds the typed value (numerics
+  bare, list values itemized, everything else the lexical). The
+  complexType xs:assert capture keys on assert SYNTAX presence
+  (version_11 || saw_alternative || saw_assert), inherits down the
+  derivation chain (§3.13.6), resolves its prefixes through the
+  schema document's §3.13.2 bindings + xpathDefaultNamespace, runs
+  in the §3.13.4.1 assertion data model (comments and PIs invisible),
+  and compares temporally against typed scalars. Spec tests:
+  test/xsd/test_xsd11_assertions.cpp.
 - override family 71/87: the override capture swaps same-named
   components well enough to type the majority of the saxon Override
   instances.

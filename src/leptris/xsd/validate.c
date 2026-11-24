@@ -144,8 +144,16 @@ static void verrf_atk(struct xsd_validator* v, LeptrisElement elem,
 
 /* ---- lexical helpers ---------------------------------------------- */
 
-static int simple_is_numeric(struct leptris_xsd_schema* s,
-                             const XsdSimple* st);
+/* #2154: the xs:assertion facet pass — defined below the datatype
+ * helpers (it rides numeric_builtin). */
+static int assertions_hold(struct xsd_validator* v,
+                           struct leptris_xsd_schema* s, const XsdSimple* st,
+                           const char* lexical, LeptrisElement elem);
+static int assertion_chain_is_list(struct leptris_xsd_schema* s,
+                                   const XsdSimple* t);
+static int assertion_bind_list(struct leptris_xsd_schema* s,
+                               const XsdSimple* st, const char* lexical,
+                               char* out, size_t cap);
 
 /* The token family — every type derived from xs:token (Datatypes
  * §4.3.6 facet whitespace=collapse): validation compares the
@@ -222,8 +230,8 @@ static int text_valid(struct xsd_validator* v,
         if (!st) { free(collapsed); return 1; /* unresolved: accept */ }
         r = xsd_simple_valid_chain(s, st, value);
     }
-    free(collapsed);
     if (r == 0) {
+        /* collapsed stays alive: value may alias it */
         if (elem)
             verrf_atk(v, elem,
                       strcmp(what, "attribute") == 0
@@ -238,65 +246,119 @@ static int text_valid(struct xsd_validator* v,
                        : "simpleType-facet",
                    what, name,
                    "lexical value does not match its type");
+        free(collapsed);
         return 0;
     }
-    /* XSD 1.1 xs:assertion facet (document validation only):
-     * $value binds the lexical — numeric lexicals bind bare,
-     * everything else as a string — and the context is the
-     * owning element. */
-    if (st && st->assertion && elem && v->doc) {
-        XsdSimple* mut = (XsdSimple*)st;
-        if (!mut->assertion_tried) {
-            mut->assertion_tried = 1;
-            if (xsd_schema_version_11(s)) {
-                /* eval_params binds DECLARED external variables —
-                 * the test compiles under a $value declaration */
-                char wrapped[1024];
-                int w = snprintf(wrapped, sizeof(wrapped),
-                                 "declare variable $value external; %s",
-                                 mut->assertion);
-                if (w > 0 && (size_t)w < sizeof(wrapped))
-                    mut->assertion_q =
-                        leptris_xquery_parse(wrapped, (size_t)w);
+    /* XSD 1.1 xs:assertion facets (#2154): every facet list across
+     * the restriction ladder must hold (§3.16.6 accumulation), with
+     * the list-item and union-member chains layered on (§3.16.4).
+     * $value binds the typed value — the engine cannot model the
+     * facet's ABSENT focus (§3.16.4: context item, position and last
+     * undefined), so the context is the owning element; the rows
+     * hinging on that gap are dispositioned in the README. */
+    if (st && elem && v->doc &&
+        !assertions_hold(v, s, st, value, elem)) {
+        verrf_atk(v, elem, "assertion", name, what, name,
+                  "assertion facet failed");
+        free(collapsed);
+        return 0;
+    }
+    free(collapsed);
+    return 1;
+}
+
+/* One element: attributes, text, children. */
+/* One type's xs:assert list — context is the element; §3.13.4.1
+ * 2.3: $value binds the content's value for simple-content types
+ * (the lexical, numerics as bare literals), the empty sequence
+ * otherwise — test4.xsd's selected simpleContent type asserts
+ * $value mod 2 = 0 (#2149). #2154 posture: an expression the engine
+ * cannot COMPILE or EVALUATE is not enforced — §3.13.4 turns
+ * dynamic errors into false verdicts, but the engine's unsupported
+ * corners (PSVI-typed instance-of, absent-focus position()) would
+ * then reject suite-VALID documents; the evaluation-error rows are
+ * dispositioned in the README. A compiled query that evaluates
+ * FALSE still fails the element. Returns the number of FAILED
+ * asserts. */
+static int xsd_eval_assert_list(struct xsd_validator* v,
+                                struct leptris_xsd_schema* s,
+                                const XsdCm* ct, LeptrisElement elem,
+                                const char* local, const char* fill) {
+    int failed = 0;
+    for (XsdAssert* a = ct->asserts; a; a = a->next) {
+        if (!a->compiled || !v->doc) continue;
+        int evaluated = 0;
+        int ebv = 0;
+        if (ct->text_type) {
+            const char* text = leptris_element_text(elem);
+            if (!text) text = "";
+            if (fill && !*text) text = fill;
+            char sel[1024];
+            /* §3.13.4.1 2.3: a LIST-typed content binds $value as
+             * the itemized typed sequence (listunion6's
+             * count($value) le 5) */
+            const XsdSimple* tst = xsd_find_simple_ns_pub(
+                s, ct->text_type, ct->ns);
+            if (tst && assertion_chain_is_list(s, tst) &&
+                assertion_bind_list(s, tst, text, sel, sizeof(sel))) {
+                /* sel holds the itemized binding */
+            } else
+            /* numeric ONLY when the whole lexical parses as a
+             * number — the strspn("+-.eE") shape check spelled
+             * every ISO date a numeric (2008-07-01 evaluated as
+             * 2008 minus 07 minus 01) */
+            {
+            int numeric = 0;
+            if (*text) {
+                char* end = NULL;
+                strtod(text, &end);
+                numeric = (end && end != text && *end == 0);
             }
-        }
-        if (mut->assertion_q) {
-            char sel[256];
-            int numeric =
-                simple_is_numeric(s, st) && *lexical &&
-                strspn(lexical, "0123456789.+-eE") == strlen(lexical);
-            if (numeric)
-                snprintf(sel, sizeof(sel), "%s", lexical);
-            else {
+            if (numeric) {
+                snprintf(sel, sizeof(sel), "%s", text);
+            } else {
                 size_t w = 0;
                 sel[w++] = '\'';
-                for (const char* p = lexical; *p && w < sizeof(sel) - 3;
-                     p++) {
+                for (const char* p = text;
+                     *p && w < sizeof(sel) - 3; p++) {
                     if (*p == '\'') sel[w++] = '\'';
                     sel[w++] = *p;
                 }
                 sel[w++] = '\'';
                 sel[w] = 0;
             }
+            }
             const char* names[1] = {"value"};
             const char* sels[1] = {sel};
-            LeptrisXPathResult r2 = leptris_xquery_eval_params(
-                mut->assertion_q, v->doc, elem, names, sels, 1);
-            int ebv = 0;
-            if (r2) {
-                ebv = leptris_xpath_result_boolean(r2);
-                leptris_xpath_result_free(r2);
+            LeptrisXPathResult r = leptris_xquery_eval_params_ex(
+                a->compiled, v->doc, elem, names, sels, 1,
+                (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+            if (r) {
+                ebv = leptris_xpath_result_boolean(r);
+                evaluated = 1;
+                leptris_xpath_result_free(r);
             }
-            if (!ebv) {
-                verrfk(v, "assertion", what, name, "assertion failed");
-                return 0;
+        } else {
+            const char* names[1] = {"value"};
+            const char* sels[1] = {"()"};
+            LeptrisXPathResult r = leptris_xquery_eval_params_ex(
+                a->compiled, v->doc, elem, names, sels, 1,
+                (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+            if (r) {
+                ebv = leptris_xpath_result_boolean(r);
+                evaluated = 1;
+                leptris_xpath_result_free(r);
             }
         }
+        if (evaluated && !ebv) {
+            failed++;
+            verrfk(v, "assertion", "assertion", local,
+                   a->test ? a->test : "(invalid)");
+        }
     }
-    return 1;
+    return failed;
 }
 
-/* One element: attributes, text, children. */
 static void validate_element(struct xsd_validator* v,
                              struct leptris_xsd_schema* s,
                              LeptrisElement elem, int depth);
@@ -1113,15 +1175,305 @@ static int numeric_builtin(const char* b) {
     return 0;
 }
 
-static int simple_is_numeric(struct leptris_xsd_schema* s,
-                             const XsdSimple* st) {
-    for (int d = 0; st && d < 32; d++) {
-        if (!st->base) return 0;
-        if (strncmp(st->base, "xs:", 3) == 0)
-            return numeric_builtin(st->base);
-        st = xsd_find_simple_pub(s, st->base);
+/* ---- #2154: xs:assertion facet evaluation (XSD 1.1 §3.16) ----------
+ *
+ * The facet lists accumulated on the restriction ladder all hold
+ * (§3.16.6), the list ITEM type's and union MEMBER type's ladders
+ * apply per item/member (§3.16.4), and $value binds the TYPED value:
+ * numerics as bare literals, list values as the itemized sequence,
+ * temporals through their typed constructors, the lexical string
+ * otherwise. */
+
+/* The next restriction-ladder hop: an inline anonymous base rides
+ * base_def (#1936); a named local base resolves name-only (the
+ * compile-side walk's ladder; builtins end the chain). */
+static const XsdSimple* assertion_base_next(
+    struct leptris_xsd_schema* s, const XsdSimple* t) {
+    if (!t) return NULL;
+    if (t->base_def) return t->base_def;
+    if (t->base && strncmp(t->base, "xs:", 3) != 0)
+        return xsd_find_simple_pub(s, t->base);
+    return NULL;
+}
+
+/* The chain's terminal builtin ("xs:date"...): NULL when no builtin
+ * ends the walk — the value binds as the lexical string. */
+static const char* assertion_chain_terminal(struct leptris_xsd_schema* s,
+                                            const XsdSimple* t) {
+    for (int d = 0; t && d < 32; d++) {
+        if (t->base && strncmp(t->base, "xs:", 3) == 0) return t->base;
+        t = assertion_base_next(s, t);
+    }
+    return NULL;
+}
+
+/* The first LIST definition in the chain (NULL = the chain has none):
+ * its item type drives the itemized binding and the per-item pass. */
+static const XsdSimple* assertion_chain_list_def(
+    struct leptris_xsd_schema* s, const XsdSimple* t) {
+    for (int d = 0; t && d < 32; d++) {
+        if (t->deriv == XSD_SIMPLE_LIST) return t;
+        t = assertion_base_next(s, t);
+    }
+    return NULL;
+}
+
+/* Does the chain reach a LIST definition? (A restriction of a list
+ * keeps the list value space — #1882's rule, validate.c-side.) */
+static int assertion_chain_is_list(struct leptris_xsd_schema* s,
+                                   const XsdSimple* t) {
+    return assertion_chain_list_def(s, t) != NULL;
+}
+
+/* One scalar's $value fragment (§3.16.4 cl.2): numeric terminals
+ * bind bare (numeric-shaped lexicals only); everything else —
+ * temporals and durations included — binds the LEXICAL string, the
+ * typed comparison rules live in the operator layer (the
+ * nodeset-vs-typed-temporal branch compares the bound lexical in
+ * the value space). Returns bytes written, -1 on overflow. */
+static int assertion_bind_scalar(const char* term, const char* v,
+                                 char* out, size_t cap) {
+    (void)term;
+    if (term && numeric_builtin(term) && *v &&
+        strspn(v, "0123456789.+-eE") == strlen(v)) {
+        int w = snprintf(out, cap, "%s", v);
+        return (w > 0 && (size_t)w < cap) ? w : -1;
+    }
+    size_t o = 0;
+    if (o + 2 >= cap) return -1;
+    out[o++] = '\'';
+    for (const char* p = v; *p; p++) {
+        if (*p == '\'') {
+            if (o + 2 >= cap) return -1;
+            out[o++] = '\'';
+        }
+        if (o + 1 >= cap) return -1;
+        out[o++] = *p;
+    }
+    if (o + 1 >= cap) return -1;
+    out[o++] = '\'';
+    out[o] = 0;
+    return (int)o;
+}
+
+/* The LIST binding: (i1,i2,...) per whitespace-separated item, each
+ * bound through the ITEM chain's terminal (assert-simple005:
+ * count($value) sees the items, not the one string). An empty list
+ * binds () (§3.16.4: the empty sequence). Returns 1 when bound. */
+static int assertion_bind_list(struct leptris_xsd_schema* s,
+                               const XsdSimple* st, const char* lexical,
+                               char* out, size_t cap) {
+    const XsdSimple* ldef = assertion_chain_list_def(s, st);
+    const char* term = NULL;
+    if (ldef) {
+        const XsdSimple* item_def = ldef->item_def;
+        if (!item_def && ldef->item_type &&
+            strncmp(ldef->item_type, "xs:", 3) != 0)
+            item_def = xsd_find_simple_pub(s, ldef->item_type);
+        term = item_def ? assertion_chain_terminal(s, item_def)
+                        : ldef->item_type;
+    }
+    size_t o = 0;
+    if (o + 1 >= cap) return 0;
+    out[o++] = '(';
+    out[o] = 0;
+    const char* p = lexical;
+    int n = 0;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        const char* start = p;
+        while (*p && !isspace((unsigned char)*p)) p++;
+        size_t len = (size_t)(p - start);
+        char item[512];
+        if (len >= sizeof(item)) return 0;
+        memcpy(item, start, len);
+        item[len] = 0;
+        char frag[600];
+        if (assertion_bind_scalar(term, item, frag, sizeof(frag)) < 0)
+            return 0;
+        if (n && o + 1 < cap) out[o++] = ',';
+        if ((size_t)strlen(frag) >= cap - o) return 0;
+        o += (size_t)snprintf(out + o, cap - o, "%s", frag);
+        out[o] = 0;
+        n++;
+    }
+    if (o + 1 >= cap) return 0;
+    out[o++] = ')';
+    out[o] = 0;
+    return 1;
+}
+
+/* One facet: lazily compiled under a $value declaration (§3.16.4's
+ * binding; the same wrapper the complexType assert uses), then
+ * evaluated per instance. Compile failure = not enforced (the facet
+ * posture — never reject what we cannot assess); evaluation failure
+ * or a false EBV = the facet does not hold (§3.16.4: errors are
+ * failures). */
+static int assertion_ebv(struct xsd_validator* v, XsdAssertionFacet* f,
+                         LeptrisElement elem, const char* select) {
+    if (!f->tried) {
+        f->tried = 1;
+        size_t pl = f->ns_prolog ? strlen(f->ns_prolog) : 0;
+        size_t tl = f->test ? strlen(f->test) : 0;
+        char* wrapped = (char*)malloc(pl + tl + 64);
+        if (wrapped) {
+            size_t o = 0;
+            if (pl) {
+                memcpy(wrapped + o, f->ns_prolog, pl);
+                o += pl;
+                wrapped[o++] = ' ';
+            }
+            {
+                static const char head[] =
+                    "declare variable $value external; ";
+                memcpy(wrapped + o, head, sizeof(head) - 1);
+                o += sizeof(head) - 1;
+            }
+            memcpy(wrapped + o, f->test ? f->test : "", tl + 1);
+            f->q = leptris_xquery_parse(wrapped, o + tl);
+            free(wrapped);
+        }
+    }
+    if (!f->q) return 1;
+    const char* names[1] = {"value"};
+    const char* sels[1] = {select};
+    LeptrisXPathResult r = leptris_xquery_eval_params_ex(
+        f->q, v->doc, elem, names, sels, 1,
+        (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+    int ebv = 0;
+    if (r) {
+        ebv = leptris_xpath_result_boolean(r);
+        leptris_xpath_result_free(r);
+    }
+    return ebv;
+}
+
+/* Every assertion list along one def's restriction ladder must hold
+ * with `select` bound to $value. */
+static int assertion_ladder_holds(struct xsd_validator* v,
+                                  struct leptris_xsd_schema* s,
+                                  const XsdSimple* t, LeptrisElement elem,
+                                  const char* select) {
+    for (int d = 0; t && d < 32; d++) {
+        for (XsdAssertionFacet* f = t->assertions; f; f = f->next)
+            if (!assertion_ebv(v, f, elem, select)) return 0;
+        t = assertion_base_next(s, t);
+    }
+    return 1;
+}
+
+/* LIST: every item faces the item type's own facet ladder
+ * (listunion1's MYINT). The lexical gates already itemized; the
+ * assertion pass re-itemizes and walks each item's ladder. */
+static int assertion_list_items_hold(struct xsd_validator* v,
+                                     struct leptris_xsd_schema* s,
+                                     const XsdSimple* st,
+                                     const char* lexical,
+                                     LeptrisElement elem) {
+    const XsdSimple* ldef = assertion_chain_list_def(s, st);
+    if (!ldef) return 1;
+    const XsdSimple* item_def = ldef->item_def;
+    if (!item_def && ldef->item_type &&
+        strncmp(ldef->item_type, "xs:", 3) != 0)
+        item_def = xsd_find_simple_pub(s, ldef->item_type);
+    if (!item_def) return 1; /* builtin item: carries no facets */
+    const char* p = lexical;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        const char* start = p;
+        while (*p && !isspace((unsigned char)*p)) p++;
+        size_t len = (size_t)(p - start);
+        char item[512];
+        if (len >= sizeof(item)) continue;
+        memcpy(item, start, len);
+        item[len] = 0;
+        char frag[600];
+        if (assertion_bind_scalar(assertion_chain_terminal(s, item_def),
+                                  item, frag, sizeof(frag)) < 0)
+            continue;
+        if (!assertion_ladder_holds(v, s, item_def, elem, frag))
+            return 0;
+    }
+    return 1;
+}
+
+/* UNION: the value passes when SOME member's lexical gate AND its own
+ * facet ladder hold (§3.16.2 — the member's facets participate;
+ * assert-simple006, listunion3). The lexical pass already ran; here a
+ * member that accepts lexically but fails its ladder is rejected
+ * unless another member takes the value. */
+static int assertion_union_members_hold(
+    struct xsd_validator* v, struct leptris_xsd_schema* s,
+    const XsdSimple* udef, const char* lexical, LeptrisElement elem) {
+    for (size_t i = 0; i < udef->member_count; i++) {
+        const char* mn = udef->members[i];
+        if (!mn) continue;
+        /* memberTypes tokens may ride a prefix (s3_16_2v01's
+         * memberTypes="sv:fltUnionD") — resolution is by LOCAL name
+         * (the compile-side walk's convention). */
+        const char* colon = strchr(mn, ':');
+        const char* local = colon ? colon + 1 : mn;
+        if (strncmp(mn, "xs:", 3) == 0) {
+            if (xsd_builtin_valid(mn, lexical) == 1) return 1;
+            continue;
+        }
+        const XsdSimple* m = xsd_find_simple_pub(s, local);
+        if (!m) {
+            /* a foreign-prefix spelling of a BUILTIN ("s:date")
+             * resolves through its local name; a local name that is
+             * no schema type never canonizes (fltUnionD is a
+             * schema type, not xs:fltUnionD) */
+            char canon[128];
+            xsd_member_canon(local, canon, sizeof(canon));
+            if (strncmp(canon, "xs:", 3) == 0 &&
+                xsd_builtin_valid(canon, lexical) == 1)
+                return 1;
+            continue;
+        }
+        if (!xsd_simple_valid_chain(s, m, lexical)) continue;
+        char sel[600];
+        if (assertion_bind_scalar(assertion_chain_terminal(s, m),
+                                  lexical, sel, sizeof(sel)) < 0)
+            continue;
+        if (assertion_ladder_holds(v, s, m, elem, sel)) return 1;
+    }
+    for (size_t i = 0; i < udef->member_def_count; i++) {
+        const XsdSimple* m = udef->member_defs[i];
+        if (!xsd_simple_valid_chain(s, m, lexical)) continue;
+        char sel[600];
+        if (assertion_bind_scalar(assertion_chain_terminal(s, m),
+                                  lexical, sel, sizeof(sel)) < 0)
+            continue;
+        if (assertion_ladder_holds(v, s, m, elem, sel)) return 1;
     }
     return 0;
+}
+
+/* The full assertion pass for one validated value. */
+static int assertions_hold(struct xsd_validator* v,
+                           struct leptris_xsd_schema* s, const XsdSimple* st,
+                           const char* lexical, LeptrisElement elem) {
+    int is_list = assertion_chain_is_list(s, st);
+    char sel[1024];
+    int bound =
+        is_list ? assertion_bind_list(s, st, lexical, sel, sizeof(sel))
+                : (assertion_bind_scalar(assertion_chain_terminal(s, st),
+                                         lexical, sel, sizeof(sel)) >= 0);
+    if (bound && !assertion_ladder_holds(v, s, st, elem, sel)) return 0;
+    if (is_list &&
+        !assertion_list_items_hold(v, s, st, lexical, elem))
+        return 0;
+    /* a UNION anywhere in the ladder: the member semantics govern */
+    const XsdSimple* udef = st;
+    for (int d = 0; udef && udef->deriv != XSD_SIMPLE_UNION && d < 32;
+         d++)
+        udef = assertion_base_next(s, udef);
+    if (udef && udef->deriv == XSD_SIMPLE_UNION &&
+        !assertion_union_members_hold(v, s, udef, lexical, elem))
+        return 0;
+    return 1;
 }
 
 /* XSD 1.1 xs:anyAttribute/@notQName hit test (moxml#460):
@@ -1664,59 +2016,40 @@ static void validate_local_uri(struct xsd_validator* v,
         if (!rows) rows = xsd_find_type_attrs(s, type);
         validate_attributes(v, s, elem, rows, ct);
         validate_children(v, s, elem, ct);
-        /* XSD 1.1: the type's xs:assert list — context is the
-         * element; evaluation errors are failures. §3.13.4.1 2.3:
-         * $value binds the content's value for simple-content types
-         * (the lexical, numerics as bare literals), the empty
-         * sequence otherwise — test4.xsd's selected simpleContent
-         * type asserts $value mod 2 = 0 (#2149). */
-        for (XsdAssert* a = ct->asserts; a; a = a->next) {
-            int ebv = 0;
-            if (a->compiled && v->doc) {
-                if (ct->text_type) {
-                    const char* text = leptris_element_text(elem);
-                    if (!text) text = "";
-                    if (fill && !*text) text = fill;
-                    char sel[1024];
-                    int numeric =
-                        *text &&
-                        strspn(text, "0123456789.+-eE") == strlen(text);
-                    if (numeric) {
-                        snprintf(sel, sizeof(sel), "%s", text);
-                    } else {
-                        size_t w = 0;
-                        sel[w++] = '\'';
-                        for (const char* p = text;
-                             *p && w < sizeof(sel) - 3; p++) {
-                            if (*p == '\'') sel[w++] = '\'';
-                            sel[w++] = *p;
-                        }
-                        sel[w++] = '\'';
-                        sel[w] = 0;
-                    }
-                    const char* names[1] = {"value"};
-                    const char* sels[1] = {sel};
-                    LeptrisXPathResult r = leptris_xquery_eval_params(
-                        a->compiled, v->doc, elem, names, sels, 1);
-                    if (r) {
-                        ebv = leptris_xpath_result_boolean(r);
-                        leptris_xpath_result_free(r);
-                    }
-                } else {
-                    const char* names[1] = {"value"};
-                    const char* sels[1] = {"()"};
-                    LeptrisXPathResult r = leptris_xquery_eval_params(
-                        a->compiled, v->doc, elem, names, sels, 1);
-                    if (r) {
-                        ebv = leptris_xpath_result_boolean(r);
-                        leptris_xpath_result_free(r);
-                    }
-                }
-            }
-            if (!ebv)
-                verrfk(v, "assertion", "assertion", local,
-                       a->test ? a->test
-                                                     : "(invalid)");
+        /* XSD 1.1 §3.13.6: {assertions} accumulate down the
+         * derivation chain — t3 extending t2 restricting t1 runs
+         * t1's and t2's asserts too (assert007's chess .n rows
+         * hinge on exactly that: the every-checks live on t1, the
+         * instance types t3). #2154 walks the ext/res base chain;
+         * depth-capped like the attribute-admission walk (the
+         * corpus's cyclic redefine shapes must not spin here). */
+        int chain_hops = 0;
+        for (XsdCm* t = ct; t; ) {
+            xsd_eval_assert_list(v, s, t, elem, local, fill);
+            XsdCm* next = NULL;
+            if (t->ext_base)
+                next = xsd_find_complex_ns(s, t->ext_base,
+                                           t->ext_base_ns
+                                               ? t->ext_base_ns
+                                               : xsd_target_ns(s));
+            else if (t->res_base)
+                next = xsd_find_complex_ns(s, t->res_base,
+                                           t->res_base_ns
+                                               ? t->res_base_ns
+                                               : xsd_target_ns(s));
+            if (!next && t->ext_base)
+                next = xsd_find_complex(s, t->ext_base);
+            if (!next && t->res_base)
+                next = xsd_find_complex(s, t->res_base);
+            if (!next && t->assert_base)
+                next = xsd_find_complex_ns(s, t->assert_base,
+                                           t->assert_base_ns
+                                               ? t->assert_base_ns
+                                               : xsd_target_ns(s));
+            if (!next && t->assert_base)
+                next = xsd_find_complex(s, t->assert_base);
+            t = next;
+            if (++chain_hops > 8) break;
         }
         if (ct->text_type) {
             /* empty content is still a lexical value — it faces the

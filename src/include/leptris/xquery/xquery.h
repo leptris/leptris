@@ -70,6 +70,21 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* names, const char* const* selects, size_t count);
 
+/* Evaluation-context flags for leptris_xquery_eval_params_ex. */
+typedef enum {
+    /* XSD 1.1 §3.13.4.1/§3.16.4 assertion data model (#2154):
+     * comments and processing instructions are not part of the
+     * tree the query sees. */
+    LEPTRIS_XQUERY_ASSERT_DATA_MODEL = 1
+} LeptrisXQueryEvalFlag;
+
+/* leptris_xquery_eval_params with evaluation-context flags (XSD
+ * 1.1 assertion evaluation, #2154). */
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params_ex(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* names, const char* const* selects, size_t count,
+    unsigned flags);
+
 /* Free a compiled query. */
 LEPTRIS_API void leptris_xquery_free(LeptrisXQuery query);
 

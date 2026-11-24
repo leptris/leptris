@@ -102,6 +102,14 @@ static struct leptris_document* xpath_context_document(
 int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) {
     if (!node || !test) return 1;  /* No test means match all */
 
+    /* XSD 1.1 §3.13.4.1/§3.16.4 (assertion data model, #2154):
+     * comments and processing instructions are NOT part of the tree
+     * an xs:assert / xs:assertion sees — no node test matches them. */
+    if (ctx && ctx->assert_data_model &&
+        (node->type == LEPTRIS_NODE_TYPE_COMMENT ||
+         node->type == LEPTRIS_NODE_TYPE_PI))
+        return 0;
+
     /* Name and wildcard tests only match element nodes (TODO 109). */
     if (node->type != LEPTRIS_NODE_TYPE_ELEMENT) {
         if (test->type == XPATH_AST_NODE_TEST_TYPE && test->value) {

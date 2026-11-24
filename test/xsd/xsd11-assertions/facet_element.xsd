@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- #2154: an xs:assertion facet on an element's inline simpleType
+     restriction must hold at validate time ($value binding, §3.16.4). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:simpleType>
+      <xs:restriction base="xs:integer">
+        <xs:assertion test="$value gt 10"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

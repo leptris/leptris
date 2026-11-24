@@ -3785,7 +3785,7 @@ static struct tm h_ctx_now(XPathContext* ctx) {
     return h_utc_now();
 }
 
-#define CURRENT_FN(NAME, FORM)                                       \
+#define CURRENT_FN(NAME, FORM, ATYPE)                                \
     static struct leptris_xpath_result* fn_##NAME(                   \
             XPathContext* ctx, XPathASTNode** a, size_t n) {         \
         struct leptris_xpath_result* out =                            \
@@ -3795,13 +3795,18 @@ static struct tm h_ctx_now(XPathContext* ctx) {
         char buf[40];                                                \
         strftime(buf, sizeof buf, FORM, &tmv);                       \
         out->value.string_value = leptris_strdup(buf);               \
+        /* the F&O return type rides the result so relational
+         * comparisons classify the value (the assertion-facet
+         * $value channel compares against these temporally,
+         * #2154) */                                                  \
+        out->atomic_type = ATYPE;                                    \
         (void)ctx; (void)a; (void)n;                                 \
         return out;                                                  \
     }
 
-CURRENT_FN(current_dt, "%Y-%m-%dT%H:%M:%SZ")
-CURRENT_FN(current_date, "%Y-%m-%dZ")
-CURRENT_FN(current_time, "%H:%M:%SZ")
+CURRENT_FN(current_dt, "%Y-%m-%dT%H:%M:%SZ", "xs:dateTime")
+CURRENT_FN(current_date, "%Y-%m-%dZ", "xs:date")
+CURRENT_FN(current_time, "%H:%M:%SZ", "xs:time")
 
 static struct leptris_xpath_result* fn_implicit_tz(
         XPathContext* ctx, XPathASTNode** a, size_t n) {

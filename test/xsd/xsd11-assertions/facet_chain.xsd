@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2154: assertion facets accumulate across the RESTRICTION ladder —
+     the base type's facet holds on the derived type too (§3.16.6). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="base_t">
+    <xs:restriction base="xs:integer">
+      <xs:assertion test="$value ge 0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element name="root" type="derived_t"/>
+  <xs:simpleType name="derived_t">
+    <xs:restriction base="base_t">
+      <xs:assertion test="$value le 100"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

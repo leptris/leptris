@@ -56,6 +56,12 @@ struct leptris_xsd_schema {
      * semantics (the selected type's asserts MUST evaluate), so the
      * assert capture keys on version_11 || saw_alternative. */
     int saw_alternative;
+    /* #2154: the schema carries xs:assert / xs:assertion elements —
+     * the assert-keyed-on-syntax-presence posture extended to every
+     * assertion form: schemas marked 1.0 (or unmarked) whose authors
+     * WROTE asserts must have those asserts evaluate, or the facet
+     * is decorative. */
+    int saw_assert;
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth;
     /* xs:override body capture replaces same-named components: the
@@ -135,6 +141,7 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
 static XsdCm* xsd_capture_any(LeptrisElement any_child);
 static char* xsd_capture_unit_tns(LeptrisElement e);
+static char* xsd_capture_ns_prolog(LeptrisElement e);
 static void xsd_resolve_qname(LeptrisElement e, const char* qname,
                               char* uri, size_t urisz, char* local,
                               size_t localsz);
@@ -177,6 +184,7 @@ static XsdAlternative* xsd_capture_alternatives(
     struct leptris_xsd_schema* s, LeptrisElement decl_elem);
 static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt);
 static int xsd_doc_has_alternative(LeptrisElement e, int depth);
+static int xsd_doc_has_assert(LeptrisElement e, int depth);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
 
@@ -197,6 +205,7 @@ static void xsd_cm_free(XsdCm* cm) {
             XsdAssert* an = a->next;
             if (a->compiled) leptris_xquery_free(a->compiled);
             free(a->test);
+            free(a->ns_prolog);
             free(a);
             a = an;
         }
@@ -218,6 +227,8 @@ static void xsd_cm_free(XsdCm* cm) {
     free(cm->res_base_ns);
     free(cm->ext_base);
         free(cm->ext_base_ns);
+        free(cm->assert_base);
+        free(cm->assert_base_ns);
         free(cm->any_ns);
         free(cm->not_qname);
         free(cm->any_unit_tns);
@@ -596,9 +607,31 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                     free(simple->whitespace);
                     simple->whitespace = xsd_strdup(val);
                 } else if (strcmp(fl, "assertion") == 0) {
-                    free(simple->assertion);
-                    simple->assertion = xsd_strdup(
-                        leptris_element_attribute(fe, "test"));
+                    /* #2154: assertion facets ACCUMULATE — a
+                     * restriction may carry several and the validator
+                     * enforces every one (§3.16.6); the old single
+                     * slot silently dropped every facet past the
+                     * last. */
+                    const char* test =
+                        leptris_element_attribute(fe, "test");
+                    if (test && *test) {
+                        XsdAssertionFacet* af =
+                            (XsdAssertionFacet*)calloc(1, sizeof(*af));
+                        if (af) {
+                            af->test = xsd_strdup(test);
+                            /* §3.13.2: the facet's bindings ride
+                             * the schema document too */
+                            af->ns_prolog = xsd_capture_ns_prolog(fe);
+                            if (!simple->assertions) {
+                                simple->assertions = af;
+                            } else {
+                                XsdAssertionFacet* t =
+                                    simple->assertions;
+                                while (t->next) t = t->next;
+                                t->next = af;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2191,6 +2224,10 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
          * version="1.0" (or unmarked); their selected types' asserts
          * must evaluate, so the assert capture keys on this flag. */
         s->saw_alternative = xsd_doc_has_alternative(root, 0);
+        /* #2154: same order-independent evidence walk for assertion
+         * syntax — xs:assert and xs:assertion elements anywhere in
+         * the unit arm the assert capture and the facet evaluator. */
+        s->saw_assert = xsd_doc_has_assert(root, 0);
     }
 
     const char* local = NULL;
@@ -2364,9 +2401,18 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                     }
                 }
             }
-            free(c->ext_base);
+            /* #2154 §3.13.6: the assert chain follows the derivation
+             * base even after the fold — steal the linkage before
+             * the clear (the fold itself already ran; multi-hop
+             * chains keep one link per type) */
+            if (!c->assert_base) {
+                c->assert_base = c->ext_base;
+                c->assert_base_ns = c->ext_base_ns;
+            } else {
+                free(c->ext_base);
+                free(c->ext_base_ns);
+            }
             c->ext_base = NULL;
-            free(c->ext_base_ns);
             c->ext_base_ns = NULL;
             progressed = 1;
         }
@@ -2872,8 +2918,16 @@ static void xsd_free_simple_one(XsdSimple* t) {
     free(t->max_inclusive);
     free(t->max_exclusive);
     free(t->whitespace);
-    if (t->assertion_q) leptris_xquery_free(t->assertion_q);
-    free(t->assertion);
+    /* #2154: the accumulated assertion facet list */
+    XsdAssertionFacet* av = t->assertions;
+    while (av) {
+        XsdAssertionFacet* an = av->next;
+        if (av->q) leptris_xquery_free(av->q);
+        free(av->test);
+        free(av->ns_prolog);
+        free(av);
+        av = an;
+    }
     free(t->item_type);
     xsd_free_simple_one(t->item_def);
     xsd_free_simple_one(t->base_def);
@@ -3182,6 +3236,29 @@ static int xsd_doc_has_alternative(LeptrisElement e, int depth) {
     return 0;
 }
 
+/* #2154: does the document carry an xs:assert / xs:assertion element
+ * at any depth (assertion-syntax evidence for schemas unmarked or
+ * marked 1.0)? */
+static int xsd_doc_has_assert(LeptrisElement e, int depth) {
+    if (depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            (strcmp(cl, "assert") == 0 ||
+             strcmp(cl, "assertion") == 0))
+            return 1;
+        if (xsd_doc_has_assert(c, depth + 1)) return 1;
+    }
+    return 0;
+}
+
 static XsdCm* xsd_capture_any(LeptrisElement any_child) {
     XsdCm* w = xsd_cm_new(XSD_CM_ANY);
     if (!w) return NULL;
@@ -3208,25 +3285,48 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
     XsdAssert* a = (XsdAssert*)calloc(1, sizeof(*a));
     if (!a) return NULL;
     a->test = xsd_strdup(test);
+    /* #2154 (§3.13.2): the bindings the test's prefixes and
+     * unprefixed names resolve under, captured at the assert
+     * element */
+    a->ns_prolog = xsd_capture_ns_prolog(e);
     /* #2149: compiled when the schema claims 1.1 OR carries
      * xs:alternative chains — the alternative evidence marks schemas
      * whose selected types' asserts belong to the CTA semantics
      * (test4.xsd-style cta corpora are marked version="1.0").
-     * Schemas claiming neither keep the 1.0-lax posture: the
-     * assertions family's PSVI-typed assert expressions
-     * (data(.) instance of xs:date*) cannot be evaluated for them
-     * yet, and evaluating what we cannot support would reject
-     * suite-valid documents. The test compiles under a $value
+     * #2154: OR carries assert/assertion SYNTAX — a schema whose
+     * authors wrote asserts must have them evaluate regardless of
+     * the @version spelling. Schemas claiming none of the three keep
+     * the 1.0-lax posture: the assertions family's PSVI-typed assert
+     * expressions (data(.) instance of xs:date*) cannot be evaluated
+     * for them yet, and evaluating what we cannot support would
+     * reject suite-valid documents. The test compiles under a $value
      * declaration (§3.13.4.1 2.2/2.3 — the evaluator binds it; the
      * same wrapper the xs:assertion facet uses). NULL = syntax
      * error: evaluation reports the assertion as failed (XSD 1.1:
      * an error is a failure). */
-    if (s->version_11 || s->saw_alternative) {
-        char wrapped[2048];
-        int w = snprintf(wrapped, sizeof(wrapped),
-                         "declare variable $value external; %s", test);
-        if (w > 0 && (size_t)w < sizeof(wrapped))
-            a->compiled = leptris_xquery_parse(wrapped, (size_t)w);
+    if (s->version_11 || s->saw_alternative || s->saw_assert) {
+        /* prolog first (§3.13.2 bindings), then the $value
+         * declaration, then the test — sized for the whole text */
+        size_t pl = a->ns_prolog ? strlen(a->ns_prolog) : 0;
+        size_t tl = strlen(test);
+        char* wrapped = (char*)malloc(pl + tl + 64);
+        if (wrapped) {
+            size_t o = 0;
+            if (pl) {
+                memcpy(wrapped + o, a->ns_prolog, pl);
+                o += pl;
+                wrapped[o++] = ' ';
+            }
+            {
+                static const char head[] =
+                    "declare variable $value external; ";
+                memcpy(wrapped + o, head, sizeof(head) - 1);
+                o += sizeof(head) - 1;
+            }
+            memcpy(wrapped + o, test, tl + 1);
+            a->compiled = leptris_xquery_parse(wrapped, o + tl);
+            free(wrapped);
+        }
     }
     return a;
 }
@@ -3390,6 +3490,15 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         else
                             attrs = own_attrs;
                     }
+                    /* #2154 §3.13.6: the assert chain follows the
+                     * base — recorded EAGERLY here (the deferred fold
+                     * steals ext_base into assert_base instead) */
+                    if (base && strncmp(base, "xs:", 3) != 0 &&
+                        !root->assert_base) {
+                        root->assert_base = xsd_strdup(base);
+                        root->assert_base_ns =
+                            buri[0] ? xsd_strdup(buri) : NULL;
+                    }
                 } else {
                     /* restriction: the derived model REPLACES.
                      * leptris#1923: the base still rides the type —
@@ -3408,9 +3517,11 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     }
                 }
                 /* XSD 1.1: asserts nested under the derivation —
-                 * captured when the schema claims 1.1 or carries
-                 * alternatives (#2149) */
-                if (s->version_11 || s->saw_alternative)
+                 * captured when the schema claims 1.1, carries
+                 * alternatives (#2149) or carries assert syntax
+                 * (#2154) */
+                if (s->version_11 || s->saw_alternative ||
+                    s->saw_assert)
                     xsd_capture_assert_children(s, dq, root);
                 if (!any_attr_ns) {
                     if (!any_attr_unit_ns)
@@ -3503,8 +3614,10 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 /* XSD 1.1: asserts nested under the simpleContent
                  * derivation (test4.xsd: the alternative-selected
                  * simpleContent type asserts $value mod 2 = 0) —
-                 * same condition as the complexContent branch. */
-                if (s->version_11 || s->saw_alternative)
+                 * same condition as the complexContent branch
+                 * (#2154 adds the assert-syntax key). */
+                if (s->version_11 || s->saw_alternative ||
+                    s->saw_assert)
                     xsd_capture_assert_children(s, dq, root);
             }
         }
@@ -3577,9 +3690,9 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
     if (root->oc_mode == 2 && !root->open_any && s->default_open)
         root->open_any = s->default_open;
     /* XSD 1.1: direct xs:assert children of the complexType —
-     * captured when the schema claims 1.1 or carries alternatives
-     * (#2149) */
-    if (s->version_11 || s->saw_alternative)
+     * captured when the schema claims 1.1, carries alternatives
+     * (#2149) or carries assert syntax (#2154) */
+    if (s->version_11 || s->saw_alternative || s->saw_assert)
         xsd_capture_assert_children(s, ct, root);
     /* the NFA and model walkers consume ONE root particle —
      * a multi-particle model (derivation splices) normalizes
@@ -3943,6 +4056,101 @@ static char* xsd_capture_unit_tns(LeptrisElement e) {
         }
     }
     return NULL;
+}
+
+/* #2154 (§3.13.2): an assert test's {namespace bindings} ride the
+ * in-scope declarations of the SCHEMA document at the assert
+ * element, and {xpathDefaultNamespace} (§3.16.2/§3.13.2 — the local
+ * attribute, else the schema root's) resolves unprefixed names.
+ * Both become XQuery prolog declarations so the test compiles
+ * against the schema's names: `chess:white` binds chess from the
+ * schema (assert007), `y` under xpathDefaultNamespace="#
+ * #targetNamespace" (ns1). Only prefixes the assert element has IN
+ * SCOPE participate — the schema's unrelated declarations never
+ * leak; the xmlns DEFAULT is xpathDefaultNamespace's channel. */
+static char* xsd_capture_ns_prolog(LeptrisElement e) {
+    struct { const char* pfx; const char* uri; } seen[16];
+    int nseen = 0;
+    for (LeptrisElement up = e; up; up = leptris_element_parent(up)) {
+        size_t n = leptris_element_namespace_count(up);
+        for (size_t i = 0; i < n && nseen < 16; i++) {
+            const char* dp =
+                leptris_element_namespace_decl_prefix(up, i);
+            if (!dp || !dp[0]) continue; /* the default decl */
+            int dup = 0;
+            for (int k = 0; k < nseen && !dup; k++)
+                if (strcmp(seen[k].pfx, dp) == 0) dup = 1;
+            if (dup) continue;
+            const char* du = leptris_element_namespace_decl_uri(up, i);
+            if (!du) continue;
+            seen[nseen].pfx = dp;
+            seen[nseen].uri = du;
+            nseen++;
+        }
+    }
+    /* {xpathDefaultNamespace}: the assert element's attribute, else
+     * the schema root's; ##defaultNamespace (absent) declares
+     * nothing */
+    const char* xdn =
+        leptris_element_attribute(e, "xpathDefaultNamespace");
+    char* unit_tns = NULL;
+    if (!xdn || !xdn[0] || strcmp(xdn, "##targetNamespace") == 0) {
+        unit_tns = xsd_capture_unit_tns(e);
+        if (!xdn || !xdn[0]) {
+            for (LeptrisElement up = e; up;
+                 up = leptris_element_parent(up)) {
+                const char* local = NULL;
+                leptris_element_expanded_name(up, &local, NULL, NULL);
+                if (local && strcmp(local, "schema") == 0) {
+                    xdn = leptris_element_attribute(
+                        up, "xpathDefaultNamespace");
+                    break;
+                }
+            }
+        }
+    }
+    const char* defns = NULL;
+    if (xdn && xdn[0] && strcmp(xdn, "##defaultNamespace") != 0 &&
+        strcmp(xdn, "##local") != 0 && strcmp(xdn, "##any") != 0) {
+        /* ##local/##any leave unprefixed names namespace-free (the
+         * XPath default) — no declaration (d4_3_15v27) */
+        if (strcmp(xdn, "##targetNamespace") == 0)
+            defns = (unit_tns && unit_tns[0]) ? unit_tns : NULL;
+        else
+            defns = xdn;
+    }
+    if (nseen == 0 && !defns) {
+        free(unit_tns);
+        return NULL;
+    }
+    size_t cap = 64;
+    for (int k = 0; k < nseen; k++)
+        cap += strlen(seen[k].pfx) + strlen(seen[k].uri) + 32;
+    if (defns) cap += strlen(defns) + 48;
+    char* out = (char*)malloc(cap);
+    if (!out) {
+        free(unit_tns);
+        return NULL;
+    }
+    size_t o = 0;
+    for (int k = 0; k < nseen; k++) {
+        /* the schema vocabulary's own prefix never resolves
+         * instance names — skip it (only other prefixes bind) */
+        if (strcmp(seen[k].uri, XSD_NS) == 0) continue;
+        int w = snprintf(out + o, cap - o,
+                         "declare namespace %s = \"%s\";",
+                         seen[k].pfx, seen[k].uri);
+        if (w > 0 && (size_t)w < cap - o) o += (size_t)w;
+    }
+    if (defns) {
+        int w = snprintf(out + o, cap - o,
+                         "declare default element namespace \"%s\";",
+                         defns);
+        if (w > 0 && (size_t)w < cap - o) o += (size_t)w;
+    }
+    out[o] = 0;
+    free(unit_tns);
+    return o ? out : (free(out), NULL);
 }
 
 /* leptris#1964: the anyAttribute grammar rides attributeGroup

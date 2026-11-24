@@ -920,6 +920,103 @@ static int xq_numeric_lexical(const char* s) {
     return endp == e;
 }
 
+/* #2154 (XSD assertion facets): compare two temporal LEXICALS —
+ * durations by their value spaces (seconds / months, zero-duration
+ * cross-forms equal, mixed nonzero families incomparable), ISO
+ * calendar forms chronologically (times timezone-normalized,
+ * 24:00:00 folded to midnight). Returns the boolean verdict, or -2
+ * when the pair is not a temporal comparison (the caller falls
+ * through to its own rules). Shared by the string-string block and
+ * the nodeset-vs-typed-temporal-scalar branch: the assertion-facet
+ * $value channel binds the typed lexical, so a
+ * `$value lt current-date()`-shaped comparison must see the
+ * value-space order, not the numeric NaN coercion. */
+static int xq_temporal_lex_cmp(int op, const char* lvs, const char* rvs) {
+    if (!lvs || !rvs) return -2;
+    double lsec = 0, rsec = 0, lmo = 0, rmo = 0;
+    int ldt = leptris_dur_try_seconds(lvs, &lsec);
+    int rdt = leptris_dur_try_seconds(rvs, &rsec);
+    int lmo_ok = leptris_dur_try_months(lvs, &lmo);
+    int rmo_ok = leptris_dur_try_months(rvs, &rmo);
+    int eqop = (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL);
+    int lzero = (ldt && lsec == 0) || (lmo_ok && lmo == 0);
+    int rzero = (rdt && rsec == 0) || (rmo_ok && rmo == 0);
+    if (ldt && rdt) {
+        return op == XPATH_OP_EQUAL ? lsec == rsec
+               : op == XPATH_OP_NOT_EQUAL ? lsec != rsec
+               : op == XPATH_OP_LESS ? lsec < rsec
+               : op == XPATH_OP_LESS_EQUAL ? lsec <= rsec
+               : op == XPATH_OP_GREATER ? lsec > rsec
+               : lsec >= rsec;
+    }
+    if (lmo_ok && rmo_ok) {
+        return op == XPATH_OP_EQUAL ? lmo == rmo
+               : op == XPATH_OP_NOT_EQUAL ? lmo != rmo
+               : op == XPATH_OP_LESS ? lmo < rmo
+               : op == XPATH_OP_LESS_EQUAL ? lmo <= rmo
+               : op == XPATH_OP_GREATER ? lmo > rmo
+               : lmo >= rmo;
+    }
+    if (lzero && rzero) {
+        return op == XPATH_OP_EQUAL || op == XPATH_OP_LESS_EQUAL ||
+               op == XPATH_OP_GREATER_EQUAL;
+    }
+    if ((ldt || lmo_ok) && (rdt || rmo_ok)) {
+        /* mixed nonzero duration families: never equal */
+        if (eqop) return (op == XPATH_OP_NOT_EQUAL);
+        return -2;
+    }
+    /* ISO date/time shape: digit-start with a date (dddd-dd-dd) or
+     * time (contains ':') skeleton */
+    int lok = lvs[0] >= '0' && lvs[0] <= '9' &&
+              (strchr(lvs, ':') ||
+               (strlen(lvs) >= 8 && lvs[4] == '-' && lvs[7] == '-'));
+    int rok = rvs[0] >= '0' && rvs[0] <= '9' &&
+              (strchr(rvs, ':') ||
+               (strlen(rvs) >= 8 && rvs[4] == '-' && rvs[7] == '-'));
+    if (lok && rok) {
+        /* time-shaped pairs compare timezone-normalized (mod 24h) —
+         * lexical order is wrong across zones
+         * (01:00:00+12:00 == 13:00:00Z) */
+        if (strchr(lvs, ':') && strchr(rvs, ':')) {
+            double lc, ll, rc, rl;
+            if (leptris_time_norm_seconds(lvs, &lc, &ll) &&
+                leptris_time_norm_seconds(rvs, &rc, &rl)) {
+                int eqop2 = (op == XPATH_OP_EQUAL ||
+                             op == XPATH_OP_NOT_EQUAL);
+                double lv = eqop2 ? lc : ll;
+                double rv = eqop2 ? rc : rl;
+                int c = lv < rv ? -1 : lv > rv ? 1 : 0;
+                return op == XPATH_OP_EQUAL ? c == 0
+                       : op == XPATH_OP_NOT_EQUAL ? c != 0
+                       : op == XPATH_OP_LESS ? c < 0
+                       : op == XPATH_OP_LESS_EQUAL ? c <= 0
+                       : op == XPATH_OP_GREATER ? c > 0
+                       : c >= 0;
+            }
+        }
+        /* time lexical 24:00:00 == 00:00:00 — fold the hour before
+         * comparing (xs:time midnight form) */
+        char lfold[48], rfold[48];
+        if (lvs[2] == ':' && lvs[0] == '2' && lvs[1] == '4') {
+            snprintf(lfold, sizeof lfold, "00%s", lvs + 2);
+            lvs = lfold;
+        }
+        if (rvs[2] == ':' && rvs[0] == '2' && rvs[1] == '4') {
+            snprintf(rfold, sizeof rfold, "00%s", rvs + 2);
+            rvs = rfold;
+        }
+        int c = strcmp(lvs, rvs);
+        return op == XPATH_OP_EQUAL ? c == 0
+               : op == XPATH_OP_NOT_EQUAL ? c != 0
+               : op == XPATH_OP_LESS ? c < 0
+               : op == XPATH_OP_LESS_EQUAL ? c <= 0
+               : op == XPATH_OP_GREATER ? c > 0
+               : c >= 0;
+    }
+    return -2;
+}
+
 struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                               XPathASTNode* ast) {
     if (!ast) return NULL;
@@ -3992,110 +4089,21 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
              */
             int is_equality_op = (op == XPATH_OP_EQUAL || op == XPATH_OP_NOT_EQUAL);
 
-            /* Duration comparisons (F&O value semantics):
-             * dayTime by seconds, yearMonth/plain by months, and a
-             * zero of one family equals a zero of the other
-             * (PT0S eq P0M is true); mixed nonzero families are
-             * never equal. */
+            /* Duration + ISO-calendar comparisons (F&O value
+             * semantics), via xq_temporal_lex_cmp: dayTime by
+             * seconds, yearMonth/plain by months, zero-duration
+             * cross-forms equal (PT0S eq P0M), mixed nonzero
+             * families never equal; ISO calendar lexicals compare
+             * chronologically. The same rules serve the
+             * nodeset-vs-typed-temporal branch below (#2154 — the
+             * assertion-facet $value channel). */
             if (left->type == XPATH_RESULT_STRING &&
                 right->type == XPATH_RESULT_STRING) {
-                double lsec = 0, rsec = 0, lmo = 0, rmo = 0;
-                int ldt = leptris_dur_try_seconds(
-                              left->value.string_value, &lsec);
-                int rdt = leptris_dur_try_seconds(
-                              right->value.string_value, &rsec);
-                int lmo_ok = leptris_dur_try_months(
-                                 left->value.string_value, &lmo);
-                int rmo_ok = leptris_dur_try_months(
-                                 right->value.string_value, &rmo);
-                int lzero = (ldt && lsec == 0) || (lmo_ok && lmo == 0);
-                int rzero = (rdt && rsec == 0) || (rmo_ok && rmo == 0);
-                double lv = 0, rv = 0;
-                int comparable = 0;
-                if (ldt && rdt) { lv = lsec; rv = rsec; comparable = 1; }
-                else if (lmo_ok && rmo_ok) { lv = lmo; rv = rmo; comparable = 1; }
-                else if (lzero && rzero) { lv = rv = 0; comparable = 1; }
-                if (comparable) {
-                    result->value.boolean_value =
-                        op == XPATH_OP_EQUAL ? lv == rv
-                        : op == XPATH_OP_NOT_EQUAL ? lv != rv
-                        : op == XPATH_OP_LESS ? lv < rv
-                        : op == XPATH_OP_LESS_EQUAL ? lv <= rv
-                        : op == XPATH_OP_GREATER ? lv > rv
-                        : lv >= rv;
-                    xpath_result_free(left);
-                    xpath_result_free(right);
-                    return result;
-                }
-                if ((ldt || lmo_ok) && (rdt || rmo_ok) && is_equality_op) {
-                    /* mixed nonzero families: never equal */
-                    result->value.boolean_value =
-                        op == XPATH_OP_NOT_EQUAL;
-                    xpath_result_free(left);
-                    xpath_result_free(right);
-                    return result;
-                }
-            }
-
-            /* ISO date/time-shaped strings compare chronologically
-             * with plain lexical order (zero-padded, same-zone
-             * corpus forms) — the numeric path would NaN them. */
-            if (left->type == XPATH_RESULT_STRING &&
-                right->type == XPATH_RESULT_STRING) {
-                const char* lvs = left->value.string_value;
-                const char* rvs = right->value.string_value;
-                int lok = lvs && lvs[0] >= '0' && lvs[0] <= '9' &&
-                          (strchr(lvs, ':') ||
-                           (strlen(lvs) >= 8 && lvs[4] == '-' &&
-                            lvs[7] == '-'));
-                int rok = rvs && rvs[0] >= '0' && rvs[0] <= '9' &&
-                          (strchr(rvs, ':') ||
-                           (strlen(rvs) >= 8 && rvs[4] == '-' &&
-                            rvs[7] == '-'));
-                if (lok && rok) {
-                    /* time-shaped pairs compare timezone-normalized
-                     * (mod 24h) — lexical order is wrong across
-                     * zones (01:00:00+12:00 == 13:00:00Z) */
-                    if (strchr(lvs, ':') && strchr(rvs, ':')) {
-                        double lc, ll, rc, rl;
-                        if (leptris_time_norm_seconds(lvs, &lc, &ll) &&
-                            leptris_time_norm_seconds(rvs, &rc, &rl)) {
-                            int eqop = op == XPATH_OP_EQUAL ||
-                                       op == XPATH_OP_NOT_EQUAL;
-                            double lv = eqop ? lc : ll;
-                            double rv = eqop ? rc : rl;
-                            int c = lv < rv ? -1 : lv > rv ? 1 : 0;
-                            result->value.boolean_value =
-                                op == XPATH_OP_EQUAL ? c == 0
-                                : op == XPATH_OP_NOT_EQUAL ? c != 0
-                                : op == XPATH_OP_LESS ? c < 0
-                                : op == XPATH_OP_LESS_EQUAL ? c <= 0
-                                : op == XPATH_OP_GREATER ? c > 0
-                                : c >= 0;
-                            xpath_result_free(left);
-                            xpath_result_free(right);
-                            return result;
-                        }
-                    }
-                    /* time lexical 24:00:00 == 00:00:00 — fold the
-                     * hour before comparing (xs:time midnight form) */
-                    char lfold[48], rfold[48];
-                    if (lvs[2] == ':' && lvs[0] == '2' && lvs[1] == '4') {
-                        snprintf(lfold, sizeof lfold, "00%s", lvs + 2);
-                        lvs = lfold;
-                    }
-                    if (rvs[2] == ':' && rvs[0] == '2' && rvs[1] == '4') {
-                        snprintf(rfold, sizeof rfold, "00%s", rvs + 2);
-                        rvs = rfold;
-                    }
-                    int c = strcmp(lvs, rvs);
-                    result->value.boolean_value =
-                        op == XPATH_OP_EQUAL ? c == 0
-                        : op == XPATH_OP_NOT_EQUAL ? c != 0
-                        : op == XPATH_OP_LESS ? c < 0
-                        : op == XPATH_OP_LESS_EQUAL ? c <= 0
-                        : op == XPATH_OP_GREATER ? c > 0
-                        : c >= 0;
+                int tv = xq_temporal_lex_cmp(
+                    op, left->value.string_value,
+                    right->value.string_value);
+                if (tv >= 0) {
+                    result->value.boolean_value = (tv == 1);
                     xpath_result_free(left);
                     xpath_result_free(right);
                     return result;
@@ -4150,6 +4158,25 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                  * ctor spreads) compare under F&O
                                  * promotion, not lexically */
                                 int eq = leptris_atom_seq_eq_n(a, b, 0);
+                                if (!eq && a[0] != '\x03' &&
+                                    b[0] == '\x03' &&
+                                    strchr("NFDO", b[1])) {
+                                    /* a node's atomized value is
+                                     * untypedAtomic — vs a typed
+                                     * numeric item the general
+                                     * comparison runs NUMERICALLY
+                                     * (assert006: `. = (1 to 10,
+                                     * 20, 30)`); the plain side is
+                                     * a node, the marked side a
+                                     * typed carrier */
+                                    char* ea = NULL;
+                                    char* eb = NULL;
+                                    double da = strtod(a, &ea);
+                                    double db = strtod(b + 2, &eb);
+                                    if (ea && *ea == 0 && ea != a &&
+                                        eb && *eb == 0 && eb != b + 2)
+                                        eq = (da == db);
+                                }
                                 matches = negate ? !eq : eq;
                             } else {
                                 matches = op_relational_cmp(
@@ -4169,6 +4196,44 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                         if (!a) continue;
                         matches = negate ? (strcmp(a, scalar) != 0)
                                          : (strcmp(a, scalar) == 0);
+                        LEPTRIS_FREE(a);
+                    }
+                    if (scalar) LEPTRIS_FREE(scalar);
+                    result->value.boolean_value = matches;
+                } else if (!is_equality_op && other->atomic_type &&
+                           (xq_atomic_family_mark(other->atomic_type) ==
+                                'E' ||
+                            xq_atomic_family_mark(other->atomic_type) ==
+                                'T' ||
+                            xq_atomic_family_mark(other->atomic_type) ==
+                                't' ||
+                            xq_atomic_family_mark(other->atomic_type) ==
+                                'd')) {
+                    /* nodeset vs typed temporal scalar: each node's
+                     * lexical compares in the temporal VALUE space
+                     * (#2154 — the assertion-facet $value binding;
+                     * the numeric coercion NaN'd every date
+                     * assertion). Operand order matters (#965). */
+                    char* scalar = xpath_to_string(other);
+                    for (size_t i = 0; !matches && ns && scalar &&
+                             i < ns->count; i++) {
+                        char* a = get_node_text(ns->nodes[i]);
+                        if (!a) continue;
+                        /* operand order (#965): a nodeset on the
+                         * RIGHT compares scalar op node-value */
+                        int tv = ns_is_left
+                            ? xq_temporal_lex_cmp(op, a, scalar)
+                            : xq_temporal_lex_cmp(op, scalar, a);
+                        if (tv >= 0) {
+                            matches = (tv == 1);
+                        } else {
+                            double nv = atof(a);
+                            matches = ns_is_left
+                                ? op_relational_cmp(op, nv,
+                                                    atof(scalar))
+                                : op_relational_cmp(op, atof(scalar),
+                                                    nv);
+                        }
                         LEPTRIS_FREE(a);
                     }
                     if (scalar) LEPTRIS_FREE(scalar);

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2154: an attribute typed with a simpleType carrying an assertion
+     facet — the facet holds on the attribute value. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="gt10">
+    <xs:restriction base="xs:integer">
+      <xs:assertion test="$value gt 10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence/>
+      <xs:attribute name="a" type="gt10"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

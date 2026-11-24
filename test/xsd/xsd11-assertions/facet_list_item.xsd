@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2154: an assertion on the LIST ITEM type applies to each item
+     (listunion1 shape — the item type's facets govern per item). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Example">
+    <xs:simpleType>
+      <xs:list itemType="MYINT"/>
+    </xs:simpleType>
+  </xs:element>
+  <xs:simpleType name="MYINT">
+    <xs:restriction base="xs:int">
+      <xs:assertion test="$value mod 2 = 0"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

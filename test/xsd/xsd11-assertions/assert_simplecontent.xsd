@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2154: an xs:assert on a simpleContent restriction — $value binds
+     the content's typed value (§3.13.4.1 2.3) for schemas keyed on
+     assert syntax alone. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="x">
+    <xs:complexType>
+      <xs:simpleContent>
+        <xs:restriction base="xs:integer">
+          <xs:assert test="$value mod 2 = 0"/>
+        </xs:restriction>
+      </xs:simpleContent>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

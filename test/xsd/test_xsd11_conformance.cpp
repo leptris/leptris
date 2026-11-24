@@ -122,11 +122,17 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * exact (namespaceURI, localName) root binding): 1458/2206,
      * three Override n02 rows (no-namespace instances against
      * tns-carrying overrides now correctly rejected; measured
-     * 2026-11-24). Every red is classified in
+     * 2026-11-24). Raised by #2154 (xs:assertion facets
+     * enforced on simple types across the restriction ladder, with
+     * list-item and union-member chains; the complexType assert
+     * capture keyed on assert syntax presence; assert inheritance
+     * down the derivation chain; §3.13.2 namespace bindings and
+     * xpathDefaultNamespace; the §3.13.4.1 assertion data model
+     * excluding comments/PIs): 1521/2206 — every red classified in
      * test/xsd/xsd11-dispositions/README.md. Monotonically rising. */
-    EXPECT_GE(pass, 1458) << "conformance floor regressed";
+    EXPECT_GE(pass, 1521) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1117);
-    EXPECT_GE(pass_invalid, 323);
+    EXPECT_GE(pass_invalid, 386);
     EXPECT_GE(pass_schema_error, 18);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));

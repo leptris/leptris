@@ -880,6 +880,13 @@ typedef struct xpath_context {
      * a clock re-read straddling a second boundary flaked CI). */
     int now_cached;
     long now_sec;   /* time_t as long (keeps the header self-contained) */
+
+    /* XSD 1.1 §3.13.4.1/§3.16.4 assertion data model (#2154):
+     * comments and processing instructions are NOT part of the tree
+     * assertions see — matches_node_test drops them for the whole
+     * evaluation (assert023: empty(.//comment()) over commented
+     * content is true). Set by the XSD assert/assertion evaluator. */
+    int assert_data_model;
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */

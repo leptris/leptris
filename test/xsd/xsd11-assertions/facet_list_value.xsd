@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- #2154: an assertion on a RESTRICTION OF a list binds $value as the
+     itemized typed sequence (assert-simple005 shape: count() over the
+     items, not over the one string). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="list_of_int">
+    <xs:list itemType="xs:integer"/>
+  </xs:simpleType>
+  <xs:element name="root">
+    <xs:simpleType>
+      <xs:restriction base="list_of_int">
+        <xs:assertion
+             test="count($value) eq count(distinct-values($value))"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>
