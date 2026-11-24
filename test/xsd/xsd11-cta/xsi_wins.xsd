@@ -1,0 +1,32 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  elementFormDefault="qualified">
+
+  <!-- #2149 + §3.3.4.1: the instance-specified type definition
+       (xsi:type) OVERRIDES the conditionally selected one. The
+       alternative would select ext (which REQUIRES the b child);
+       xsi:type=base pulls assessment back to base, under which the
+       bare <a/> content is valid. -->
+  <xs:complexType name="base">
+    <xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ext">
+    <xs:complexContent>
+      <xs:extension base="base">
+        <xs:sequence><xs:element name="b" type="xs:string"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="e" type="base" maxOccurs="unbounded">
+          <xs:alternative test="@k='x'" type="ext"/>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

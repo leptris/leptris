@@ -167,6 +167,10 @@ target_compile_definitions(test_i1957_1958 PRIVATE
 leptris_add_test(test_xsd11_conformance xsd/test_xsd11_conformance.cpp)
 target_compile_definitions(test_xsd11_conformance PRIVATE
     LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
+# #2149: conditional type assignment (xs:alternative) spec tests.
+leptris_add_test(test_xsd11_cta xsd/test_xsd11_cta.cpp)
+target_compile_definitions(test_xsd11_cta PRIVATE
+    LEPTRIS_XSD11_CTA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cta")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)

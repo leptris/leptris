@@ -1,0 +1,31 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified">
+
+  <!-- #2149: the alternative carries an INLINE complexType (the
+       `type` attribute and the inline child are mutually exclusive,
+       §3.12.3). Selection is proven by the extension's required
+       ISBN child, which the base type does not allow. -->
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="pub" type="pubType" maxOccurs="unbounded">
+          <xs:alternative test="@kind='book'">
+            <xs:complexType>
+              <xs:complexContent>
+                <xs:extension base="pubType">
+                  <xs:sequence><xs:element name="ISBN" type="xs:string"/></xs:sequence>
+                </xs:extension>
+              </xs:complexContent>
+            </xs:complexType>
+          </xs:alternative>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="pubType">
+    <xs:sequence><xs:element name="Title" type="xs:string"/></xs:sequence>
+    <xs:attribute name="kind" type="xs:string"/>
+  </xs:complexType>
+
+</xs:schema>

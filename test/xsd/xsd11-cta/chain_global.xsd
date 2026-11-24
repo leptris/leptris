@@ -1,0 +1,32 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified">
+
+  <!-- #2149: global element declaration with a CTA alternative chain.
+       circle restricts shape: radius must be positive. An instance
+       that matches the test MUST be typed circle (r=0 invalid) —
+       fallback to shape would accept it. -->
+  <xs:complexType name="shape">
+    <xs:sequence><xs:element name="r" type="xs:integer"/></xs:sequence>
+    <xs:attribute name="kind" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="circle">
+    <xs:complexContent>
+      <xs:restriction base="shape">
+        <xs:sequence><xs:element name="r" type="xs:positiveInteger"/></xs:sequence>
+        <xs:attribute name="kind" type="xs:string"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:element name="s" type="shape">
+    <xs:alternative test="@kind='circle'" type="circle"/>
+  </xs:element>
+
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence><xs:element ref="s" maxOccurs="unbounded"/></xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

@@ -1,0 +1,24 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified">
+
+  <!-- #2149: a test-less alternative typed xs:error is the default
+       type definition — an element matching NO test is invalid,
+       ALWAYS (xs:error has no valid instances, §2.2.1.1). The de
+       content would satisfy the first alternative's type if the
+       chain reached it; it must not — the chain ends at xs:error. -->
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="c" maxOccurs="unbounded">
+          <xs:alternative test="@lang='de'">
+            <xs:complexType>
+              <xs:sequence><xs:element name="de"/></xs:sequence>
+            </xs:complexType>
+          </xs:alternative>
+          <xs:alternative type="xs:error"/>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
