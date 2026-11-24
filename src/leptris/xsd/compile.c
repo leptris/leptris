@@ -3240,7 +3240,14 @@ static void xsd_capture_assert_children(
         if (!local || strcmp(local, "assert") != 0) continue;
         XsdAssert* a = xsd_capture_assert(s, e);
         if (!a) continue;
-        if (!root->asserts) root->asserts = a;
+        /* LINK the append: with root->asserts already populated,
+         * tail = a alone dropped every assert past the first
+         * (leaked, and the type silently lost its assert list) —
+         * surfaced by #2149's widened capture call sites. */
+        if (!root->asserts)
+            root->asserts = a;
+        else if (tail)
+            tail->next = a;
         tail = a;
     }
 }
