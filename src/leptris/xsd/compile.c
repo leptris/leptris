@@ -542,15 +542,23 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                         simple->enum_values = fv;
                         simple->enum_count++;
                     }
-                } else if (strcmp(fl, "minInclusive") == 0)
+                } else if (strcmp(fl, "minInclusive") == 0) {
+                    /* #2148: the suite ships schemas with the same
+                     * facet repeated in one restriction — overwrite
+                     * must free the previous capture or it leaks
+                     * (LSan on the xsdtests 1.1 lane). */
+                    free(simple->min_inclusive);
                     simple->min_inclusive = xsd_strdup(val);
-                else if (strcmp(fl, "minExclusive") == 0)
+                } else if (strcmp(fl, "minExclusive") == 0) {
+                    free(simple->min_exclusive);
                     simple->min_exclusive = xsd_strdup(val);
-                else if (strcmp(fl, "maxInclusive") == 0)
+                } else if (strcmp(fl, "maxInclusive") == 0) {
+                    free(simple->max_inclusive);
                     simple->max_inclusive = xsd_strdup(val);
-                else if (strcmp(fl, "maxExclusive") == 0)
+                } else if (strcmp(fl, "maxExclusive") == 0) {
+                    free(simple->max_exclusive);
                     simple->max_exclusive = xsd_strdup(val);
-                else if (strcmp(fl, "length") == 0)
+                } else if (strcmp(fl, "length") == 0)
                     simple->length = val ? strtol(val, NULL, 10) : -1;
                 else if (strcmp(fl, "minLength") == 0)
                     simple->min_length = val ? strtol(val, NULL, 10) : -1;
@@ -560,11 +568,14 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                     simple->total_digits = val ? strtol(val, NULL, 10) : -1;
                 else if (strcmp(fl, "fractionDigits") == 0)
                     simple->fraction_digits = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "whiteSpace") == 0)
+                else if (strcmp(fl, "whiteSpace") == 0) {
+                    free(simple->whitespace);
                     simple->whitespace = xsd_strdup(val);
-                else if (strcmp(fl, "assertion") == 0)
+                } else if (strcmp(fl, "assertion") == 0) {
+                    free(simple->assertion);
                     simple->assertion = xsd_strdup(
                         leptris_element_attribute(fe, "test"));
+                }
             }
         }
     }
