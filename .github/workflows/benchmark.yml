@@ -136,3 +136,74 @@ jobs:
           name: benchmark-results-${{ matrix.os }}
           path: benchmarks/results/
           if-no-files-found: warn
+
+  # Dispatch-only: sample the mutation bench on the runner OS and
+  # upload the call graph. #2132 phase 2 needs a quiet-machine macos
+  # profile before the 44B->32B layout cut — local boxes are under
+  # foreign load, so the runner IS the quiet machine.
+  profile:
+    name: Profile mutation bench (${{ matrix.os }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libutf8proc-dev libpugixml-dev libxml2-dev linux-tools-generic
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc pugixml libxml2
+
+      - name: Configure
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DLEPTRIS_BUILD_BENCHMARKS=ON \
+            -DLEPTRIS_ENABLE_LTO=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF
+
+      - name: Build the bench harness
+        run: cmake --build build --target bench_append_attr_pugixml
+
+      - name: Sample (macOS)
+        if: runner.os == 'macOS'
+        working-directory: build/benchmarks
+        run: |
+          sample ./bench_append_attr_pugixml 60 \
+            -file ../../benchmarks/mutcycle.sample.txt -mayDie \
+            > bench.stdout.txt 2>&1 || true
+          tail -5 bench.stdout.txt
+
+      - name: Profile (Linux)
+        if: runner.os == 'Linux'
+        working-directory: build/benchmarks
+        run: |
+          sudo perf record -F 1999 -o ../../benchmarks/perf.data \
+            -- ./bench_append_attr_pugixml \
+            > bench.stdout.txt 2>&1 || true
+          sudo perf report -i ../../benchmarks/perf.data --stdio \
+            > ../../benchmarks/mutcycle.perf.txt 2>/dev/null || true
+          tail -5 bench.stdout.txt
+
+      - name: Upload profiles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-${{ matrix.os }}
+          path: |
+            benchmarks/mutcycle.sample.txt
+            benchmarks/mutcycle.perf.txt
+            benchmarks/perf.data
+            build/benchmarks/bench.stdout.txt
+          if-no-files-found: warn
