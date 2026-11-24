@@ -185,6 +185,57 @@ TEST(SerializeOptions, IndentsWithGivenSpaces) {
     leptris_document_free(doc);
 }
 
+TEST(SerializeOptions, NestedBlockWhitespaceKeepsClosingSeparator) {
+    const char xml[] =
+        "<li>\n  <p>Outer</p>\n  <ul>\n    <li>\n"
+        "      <p>Inner</p>\n    </li>\n  </ul>\n</li>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+
+    LeptrisSerializeOptions opts = {0};
+    opts.indent = 2;
+    char* serialized = leptris_element_serialize(leptris_document_root(doc), &opts);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_STREQ(serialized, xml);
+    leptris_free_string(serialized);
+    leptris_document_free(doc);
+}
+
+TEST(SerializeOptions, NestedMixedContentAddsNoSeparators) {
+    const char* tails[] = {"TAIL", " TAIL ", "\nTAIL\n", "\n", " ", "\t", ""};
+    for (const char* tail : tails) {
+        SCOPED_TRACE(tail);
+        const std::string xml =
+            std::string("<li>HEAD<p>Outer</p>BETWEEN<ul><li><p>Inner</p></li></ul>") +
+            tail + "</li>";
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument doc = leptris_parse_string(xml.c_str(), xml.size(), &st);
+        ASSERT_NE(doc, nullptr);
+
+        LeptrisSerializeOptions opts = {0};
+        opts.indent = 2;
+        char* serialized = leptris_element_serialize(leptris_document_root(doc), &opts);
+        ASSERT_NE(serialized, nullptr);
+        EXPECT_STREQ(serialized, xml.c_str());
+        leptris_free_string(serialized);
+        leptris_document_free(doc);
+    }
+}
+
+TEST(SerializeOptions, CompactNestedBlockPreservesWhitespaceTail) {
+    const char xml[] =
+        "<li><p>Outer</p><ul><li><p>Inner</p></li></ul>\n        </li>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisDocument doc = leptris_parse_string(xml, std::strlen(xml), &st);
+    ASSERT_NE(doc, nullptr);
+    char* serialized = leptris_element_serialize(leptris_document_root(doc), nullptr);
+    ASSERT_NE(serialized, nullptr);
+    EXPECT_STREQ(serialized, xml);
+    leptris_free_string(serialized);
+    leptris_document_free(doc);
+}
+
 // ---- More serialization coverage (TODO 104) -----------------------------
 
 TEST(SerializeOptions, CompactByDefaultHasNoNewline) {
