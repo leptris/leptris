@@ -2,12 +2,14 @@
 
 ## [1.9.442] - 2026-11-24
 
-<!-- Edit this section with the actual release notes. -->
-<!-- See https://keepachangelog.com for format guidance. -->
+### Fixed
 
-### Changed
-
-- (describe changes here)
+- serialize: preserve nested-list formatting and mixed text — the
+  pretty-printer's separator policy around nested block elements
+  dropped or duplicated newlines depending on the nesting shape
+  (contributed by suleman-uzair, #2147). Three new serializer specs
+  pin the shapes: nested-block closing separators, mixed content
+  without added separators, and compact-mode whitespace tails.
 
 
 ## [1.9.441] - 2026-11-24
