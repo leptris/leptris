@@ -180,9 +180,12 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: build/benchmarks
         run: |
-          sample ./bench_append_attr_pugixml 60 \
-            -file ../../benchmarks/mutcycle.sample.txt -mayDie \
-            > bench.stdout.txt 2>&1 || true
+          # sample needs a PID — a ./path argument hits its memgraph
+          # parse and errors out with invalid usage.
+          ./bench_append_attr_pugixml > bench.stdout.txt 2>&1 &
+          PID=$!
+          sample $PID 60 -file ../../benchmarks/mutcycle.sample.txt -mayDie || true
+          wait $PID || true
           tail -5 bench.stdout.txt
 
       - name: Profile (Linux)
@@ -192,7 +195,10 @@ jobs:
           sudo perf record -F 1999 -o ../../benchmarks/perf.data \
             -- ./bench_append_attr_pugixml \
             > bench.stdout.txt 2>&1 || true
-          sudo perf report -i ../../benchmarks/perf.data --stdio \
+          # perf runs under sudo — the data file is root-owned and the
+          # artifact upload (and perf report) run as the runner user.
+          sudo chown runner:runner ../../benchmarks/perf.data || true
+          perf report -i ../../benchmarks/perf.data --stdio \
             > ../../benchmarks/mutcycle.perf.txt 2>/dev/null || true
           tail -5 bench.stdout.txt
 
