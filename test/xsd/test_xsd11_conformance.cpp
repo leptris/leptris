@@ -117,11 +117,16 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * assignment dispatch on global decls and local particles,
      * test-less defaults, xs:error selections, inherited attributes
      * in test contexts, assert capture for alternative-carrying
-     * schemas): 1455/2206. Every red is classified in
+     * schemas): 1455/2206. Raised by leptris-ruby#679
+     * (targetNamespace qualification on validated documents — the
+     * exact (namespaceURI, localName) root binding): 1458/2206,
+     * three Override n02 rows (no-namespace instances against
+     * tns-carrying overrides now correctly rejected; measured
+     * 2026-11-24). Every red is classified in
      * test/xsd/xsd11-dispositions/README.md. Monotonically rising. */
-    EXPECT_GE(pass, 1455) << "conformance floor regressed";
+    EXPECT_GE(pass, 1458) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1117);
-    EXPECT_GE(pass_invalid, 320);
+    EXPECT_GE(pass_invalid, 323);
     EXPECT_GE(pass_schema_error, 18);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));

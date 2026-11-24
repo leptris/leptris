@@ -238,6 +238,13 @@ typedef struct xsd_attr_decl {
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
     char* fixed; /* #FIXED value: present values must string-equal it */
     int required;
+    /* leptris-ruby#679: the row's {target namespace} (XSD 1.0
+     * §3.2.3) — a qualified-form row (attributeFormDefault or the
+     * declaration's own form) carries the declaring unit's
+     * targetNamespace and binds only namespace-QUALIFIED instance
+     * attributes; NULL names a NO-namespace attribute. Top-level
+     * declarations are always qualified with their unit's tns. */
+    char* ns;
     /* XSD 1.1 §3.3.5.6: the attribute value is inherited by
      * descendants for their CTA test contexts (#2149). -1 unset
      * (calloc-zero would conflate unset with an explicit false —

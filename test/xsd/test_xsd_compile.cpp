@@ -3030,9 +3030,13 @@ TEST(XsdImport1626, CrossNamespaceImportRegisters) {
     LeptrisXsdSchema s =
         leptris_xsd_compile_file((dir + "x6main.xsd").c_str(), &st);
     ASSERT_NE(s, (LeptrisXsdSchema)0);
-    /* the imported type resolves: the attribute types */
+    /* the imported type resolves: the attribute types. The root
+     * carries the target namespace — the root-resolution ladder
+     * binds the global declaration whose (ns, name) matches exactly
+     * (leptris-ruby#679). */
     LeptrisDocument d = leptris_parse_string(
-        "<b id=\"1\" bd=\"x\"/>", strlen("<b id=\"1\" bd=\"x\"/>"), &st);
+        "<b xmlns=\"urn:main\" id=\"1\" bd=\"x\"/>",
+        strlen("<b xmlns=\"urn:main\" id=\"1\" bd=\"x\"/>"), &st);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(leptris_xsd_validate(s, d), 1);
     leptris_document_free(d);
@@ -3057,8 +3061,13 @@ TEST(XsdImport1626, PrefixedTypeRefsResolve) {
         "</xs:complexType>"
         "<xs:element name=\"r\" type=\"w:CT_Wrap\"/>"
         "</xs:schema>";
-    EXPECT_EQ(validate_doc(x, "<r><b v=\"1\"/></r>"), 1);
-    EXPECT_EQ(validate_doc(x, "<r><b v=\"z\"/></r>"), 0);
+    /* the root is namespaced: globals require the target namespace
+     * (leptris-ruby#679) */
+    EXPECT_EQ(validate_doc(x, "<r xmlns=\"urn:x\"><b v=\"1\"/></r>"), 1);
+    EXPECT_EQ(validate_doc(x, "<r xmlns=\"urn:x\"><b v=\"z\"/></r>"), 0);
+    EXPECT_EQ(validate_doc(x, "<r><b v=\"1\"/></r>"), 0)
+        << "an unqualified root binds no global declaration when the "
+           "schema declares a targetNamespace";
 }
 
 /* 2. error amplification: one misordered child reports ONCE, with
@@ -3388,11 +3397,17 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * all 206 schema-error fixtures compiling clean (the engine's
      * schema-constraint gate is laxer than the oracle's; see the
      * divergence tracker). Monotonically rising — each fix here
-     * retires oracle divergences wholesale. */
-    EXPECT_GE(pass, 898) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 151);
-    EXPECT_GE(pass_invalid, 618);
-    EXPECT_GE(pass_schema_error, 129);
+     * retires oracle divergences wholesale.
+     * leptris-ruby#679 (targetNamespace qualification on validated
+     * documents: the root-resolution ladder binds the global
+     * declaration whose (namespaceURI, localName) matches exactly,
+     * and form-qualified attribute declarations require the
+     * namespace): 1020/1056 — nine root-mismatch / ns-grid rows
+     * flipped (measured 2026-11-24). */
+    EXPECT_GE(pass, 1020) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 181);
+    EXPECT_GE(pass_invalid, 652);
+    EXPECT_GE(pass_schema_error, 187);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
@@ -3832,11 +3847,17 @@ TEST(XsdWildcardUnitTns1735, ElementTargetNamespaceInImportedUnit) {
         leptris_xsd_compile_file((dir + "x1735main.xsd").c_str(), &st);
     ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
     /* child in the IMPORTED unit's tns: the wildcard's
-     * ##targetNamespace is urn:imp (the declaring unit) */
-    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:imp\"/></r>"), 1)
+     * ##targetNamespace is urn:imp (the declaring unit). The root is
+     * namespaced — globals require the target namespace
+     * (leptris-ruby#679). */
+    EXPECT_EQ(validate_compiled(
+                  s, "<r xmlns=\"urn:main\"><x xmlns=\"urn:imp\"/></r>"),
+              1)
         << "##targetNamespace must resolve against urn:imp";
     /* a third namespace matches neither reading */
-    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:other\"/></r>"), 0);
+    EXPECT_EQ(
+        validate_compiled(s, "<r xmlns=\"urn:main\"><x xmlns=\"urn:other\"/></r>"),
+        0);
     leptris_xsd_free(s);
     remove((dir + "x1735imp.xsd").c_str());
     remove((dir + "x1735main.xsd").c_str());
@@ -3878,9 +3899,11 @@ TEST(XsdWildcardUnitTns1735, ElementOtherInImportedUnit) {
         leptris_xsd_compile_file((dir + "x1735omain.xsd").c_str(), &st);
     ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
     /* the declaring unit's own tns is what ##other excludes */
-    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:imp\"/></r>"), 0);
+    EXPECT_EQ(validate_compiled(s, "<r xmlns=\"urn:main\"><x xmlns=\"urn:imp\"/></r>"),
+              0);
     /* the main unit's tns is OTHER relative to urn:imp */
-    EXPECT_EQ(validate_compiled(s, "<r><x xmlns=\"urn:main\"/></r>"), 1)
+    EXPECT_EQ(validate_compiled(s, "<r xmlns=\"urn:main\"><x xmlns=\"urn:main\"/></r>"),
+              1)
         << "##other is relative to urn:imp, not the main tns";
     leptris_xsd_free(s);
     remove((dir + "x1735oimp.xsd").c_str());
@@ -3923,15 +3946,15 @@ TEST(XsdWildcardUnitTns1735, AnyAttrTargetNamespaceInImportedUnit) {
         leptris_xsd_compile_file((dir + "x1735amain.xsd").c_str(), &st);
     ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
     /* the extra attribute lives in urn:imp = the declaring unit's
-     * ##targetNamespace */
+     * ##targetNamespace (root namespaced per leptris-ruby#679) */
     EXPECT_EQ(validate_compiled(
-                  s, "<r xmlns:x=\"urn:imp\" x:note=\"hi\"><a>x</a></r>"),
+                  s, "<r xmlns=\"urn:main\" xmlns:x=\"urn:imp\" x:note=\"hi\"><a>x</a></r>"),
               1)
         << "anyAttribute ##targetNamespace must resolve against urn:imp";
     /* a foreign-namespace attribute never matches */
     EXPECT_EQ(validate_compiled(
                   s,
-                  "<r xmlns:y=\"urn:other\" y:note=\"hi\"><a>x</a></r>"),
+                  "<r xmlns=\"urn:main\" xmlns:y=\"urn:other\" y:note=\"hi\"><a>x</a></r>"),
               0);
     leptris_xsd_free(s);
     remove((dir + "x1735aimp.xsd").c_str());
@@ -4016,12 +4039,14 @@ TEST(XsdConformanceClauses, XsiTypePrefixedResolvesInScope) {
     ASSERT_NE(s, (LeptrisXsdSchema)0);
     /* The instance binds its own prefix to the target namespace —
      * xsi:type resolves through the INSTANCE's in-scope
-     * declarations (the OOXML shape), not the schema document's. */
+     * declarations (the OOXML shape), not the schema document's.
+     * The root itself is namespaced: globals require the target
+     * namespace (leptris-ruby#679). */
     EXPECT_EQ(validate_compiled(
                   s,
-                  "<doc xmlns:i=\"urn:t\" xmlns:xsi=\"http://www.w3.org/"
+                  "<i:doc xmlns:i=\"urn:t\" xmlns:xsi=\"http://www.w3.org/"
                   "2001/XMLSchema-instance\" xsi:type=\"i:Derived\">"
-                  "<a>x</a><b>y</b></doc>"),
+                  "<a>x</a><b>y</b></i:doc>"),
               1)
         << "prefixed xsi:type resolves through in-scope bindings";
     leptris_xsd_free(s);

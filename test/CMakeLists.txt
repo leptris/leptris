@@ -171,6 +171,11 @@ target_compile_definitions(test_xsd11_conformance PRIVATE
 leptris_add_test(test_xsd11_cta xsd/test_xsd11_cta.cpp)
 target_compile_definitions(test_xsd11_cta PRIVATE
     LEPTRIS_XSD11_CTA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cta")
+# leptris-ruby#679: targetNamespace qualification on validated
+# documents (root resolution + attribute form).
+leptris_add_test(test_xsd_ns_qualification xsd/test_xsd_ns_qualification.cpp)
+target_compile_definitions(test_xsd_ns_qualification PRIVATE
+    LEPTRIS_XSD_NS_QUAL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/ns-qual")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
