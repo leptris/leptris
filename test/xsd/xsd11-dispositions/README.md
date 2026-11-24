@@ -35,10 +35,11 @@ assert capture keyed on assert SYNTAX presence, assert inheritance
 down the derivation chain, §3.13.2 namespace bindings +
 xpathDefaultNamespace wrapped into the test prolog, the §3.13.4.1
 assertion data model excluding comments/PIs, typed-temporal
-comparisons against $value): **1521/2206 pass** — 1117 valid /
-386 invalid / 18 schema-error (685 reds, zero regressions).
+comparisons against $value; re-measured on the #679-qualified
+base): **1524/2206 pass** — 1117 valid / 389 invalid / 18
+schema-error (682 reds, zero regressions).
 
-By family: assertions 269/296 · cta 97/125 · override 74/87 ·
+By family: assertions 269/296 · cta 97/125 · override 75/87 ·
 openContent 122/205 · core 961/1493 (#2149: cta 83→97, +1 assertions
 po_sample, +1 core VC — the cta reds left are all OUTSIDE the
 dispatch class; #679: override 71→74; the tables below carry the
@@ -46,7 +47,7 @@ dispatch class; #679: override 71→74; the tables below carry the
 
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1521) is pinned and
+record for every row left in it. The floor (now 1524) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -88,7 +89,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 3 | ibm S3_12 s3_12v09/s3_12ii04: valid cta schema/instance rows — the mixed complexContent EXTENSION compile-status artifact (the two schema-only rows compile with a non-OK status, see the engine quirk) and the extension content model losing the base's lax wildcard (s3_12v09.xml) | OPEN — alternative DISPATCH itself fires and selects correctly; the blockers are the extension-model classes above |
 | 2 | saxon Subsgroup: member of a substitution group where the head appears | OPEN — same substitution-group gap as the 1.0 lane |
 
-## invalid documents accepted (287)
+## invalid documents accepted (221)
 
 | rows | class | disposition |
 |---|---|---|
