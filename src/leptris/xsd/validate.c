@@ -1243,6 +1243,21 @@ static int attr_fixed_matches(struct leptris_xsd_schema* s,
 static int attr_type_is_id(struct leptris_xsd_schema* s,
                            const char* type);
 
+/* leptris-ruby#679: the strict admission check per row — the name
+ * matches AND the attribute's namespace matches the row's form
+ * (XSD 1.0 §3.2.3): a qualified-form row admits only an attribute IN
+ * its namespace; an unqualified row keeps the pinned #1586 leniency
+ * for the qualified spelling (a prefixed attribute with the row's
+ * local name still declares it — the OOXML wire posture). */
+static int attr_row_admits(const XsdAttrDecl* a, const char* local,
+                           const char* qn, const char* auri) {
+    if (strcmp(a->name, local) != 0 && strcmp(a->name, qn) != 0)
+        return 0;
+    if (a->ns && a->ns[0])
+        return auri && strcmp(auri, a->ns) == 0;
+    return 1;
+}
+
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
@@ -1255,8 +1270,20 @@ static void validate_attributes(struct xsd_validator* v,
     if (!ta) return;
     /* declared rows: present? value typed? */
     for (XsdAttrDecl* a = ta ? ta->attrs : NULL; a; a = a->next) {
-        const char* val = leptris_element_attribute(elem, a->name);
-        if (!val) {
+        /* leptris-ruby#679: the row's {target namespace} decides
+         * which instance attribute can satisfy it (§3.2.3). A
+         * qualified-form row matches only an attribute IN its
+         * namespace (any prefix bound to that URI); an unqualified
+         * row keeps the pinned #1586 leniency — the qualified
+         * spelling may still bind it (the OOXML wire posture:
+         * documents qualify attributes their schemas declare
+         * unqualified). */
+        const char* val = NULL;
+        if (a->ns && a->ns[0])
+            val = leptris_element_attribute_ns(elem, a->ns, a->name);
+        else
+            val = leptris_element_attribute(elem, a->name);
+        if (!val && !(a->ns && a->ns[0])) {
             /* lenient: the qualified spelling (#1586 semantics) */
             for (LeptrisAttribute at =
                      leptris_element_first_attribute(elem);
@@ -1296,12 +1323,13 @@ static void validate_attributes(struct xsd_validator* v,
         if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
         const char* colon = strchr(qn, ':');
         const char* local = colon ? colon + 1 : qn;
+        /* namespace of the attribute: engine-side attributes
+         * carry their uri through the expanded form */
+        const char* auri = leptris_attribute_namespace_uri(at);
         int declared = 0;
         for (XsdAttrDecl* a = ta ? ta->attrs : NULL; a && !declared;
              a = a->next)
-            if (strcmp(a->name, local) == 0 ||
-                strcmp(a->name, qn) == 0)
-                declared = 1;
+            if (attr_row_admits(a, local, qn, auri)) declared = 1;
         /* leptris#1923 (oracle parity with libxml2): the restriction
          * chain's declared attributes stay visible for strict
          * admission — a RESTRICTION that narrows the base's rows
@@ -1319,8 +1347,7 @@ static void validate_attributes(struct xsd_validator* v,
                 for (XsdAttrDecl* a = base_rows ? base_rows->attrs
                                                 : NULL;
                      a && !declared; a = a->next)
-                    if (strcmp(a->name, local) == 0 ||
-                        strcmp(a->name, qn) == 0)
+                    if (attr_row_admits(a, local, qn, auri))
                         declared = 1;
                 if (declared) break;
                 const XsdCm* base_ct = anc->res_base
@@ -1334,9 +1361,6 @@ static void validate_attributes(struct xsd_validator* v,
             }
         }
         if (declared) continue;
-        /* namespace of the attribute: engine-side attributes
-         * carry their uri through the expanded form */
-        const char* auri = leptris_attribute_namespace_uri(at);
         /* XSD 1.0 §3.2.7: xsi:type, xsi:nil, xsi:schemaLocation and
          * xsi:noNamespaceSchemaLocation are processor-honored, not
          * schema-validated — they pass any content model (the
@@ -1387,13 +1411,12 @@ static void validate_attributes(struct xsd_validator* v,
             if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
             const char* colon = strchr(qn, ':');
             const char* local = colon ? colon + 1 : qn;
+            const char* auri = leptris_attribute_namespace_uri(at);
             int declared = 0;
             for (XsdAttrDecl* a = ta->attrs; a && !declared; a = a->next)
-                if (strcmp(a->name, local) == 0 ||
-                    strcmp(a->name, qn) == 0)
+                if (attr_row_admits(a, local, qn, auri))
                     declared = 1;
             if (declared) continue;
-            const char* auri = leptris_attribute_namespace_uri(at);
             if (auri && strcmp(auri,
                                "http://www.w3.org/2001/XMLSchema-instance")
                     == 0)

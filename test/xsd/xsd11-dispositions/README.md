@@ -16,14 +16,27 @@ test contexts, assert capture + $value binding for
 alternative-carrying schemas): **1455/2206 pass** — 1117 valid /
 320 invalid / 18 schema-error (751 reds).
 
-By family: assertions 214/296 · cta 97/125 · override 71/87 ·
+Re-measured 2026-11-24 (leptris-ruby#679, branch
+`fix/xsd-ns-qualification` — targetNamespace qualification on
+validated documents: the root-resolution ladder binds the global
+declaration whose (namespaceURI, localName) pair matches EXACTLY,
+no fallback past a namespace mismatch): **1458/2206 pass** —
+1117 valid / 323 invalid / 18 schema-error (748 reds). The three
+flips are saxon Override n02 rows (no-namespace instances against
+targetNamespace-carrying override schemas, over018.n02 + over019.n02
+against over019/over020) — the "instance validity under
+overridden/redefined components" class drops 11 → 8; spec tests:
+test/xsd/test_xsd_ns_qualification.cpp.
+
+By family: assertions 214/296 · cta 97/125 · override 74/87 ·
 openContent 122/205 · core 951/1493 (#2149: cta 83→97, +1 assertions
 po_sample, +1 core VC — the cta reds left are all OUTSIDE the
-dispatch class; the tables below carry the #2149 counts).
+dispatch class; #679: override 71→74; the tables below carry the
+#679 counts).
 
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1455) is pinned and
+record for every row left in it. The floor (now 1458) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -65,7 +78,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 3 | ibm S3_12 s3_12v09/s3_12ii04: valid cta schema/instance rows — the mixed complexContent EXTENSION compile-status artifact (the two schema-only rows compile with a non-OK status, see the engine quirk) and the extension content model losing the base's lax wildcard (s3_12v09.xml) | OPEN — alternative DISPATCH itself fires and selects correctly; the blockers are the extension-model classes above |
 | 2 | saxon Subsgroup: member of a substitution group where the head appears | OPEN — same substitution-group gap as the 1.0 lane |
 
-## invalid documents accepted (290)
+## invalid documents accepted (287)
 
 | rows | class | disposition |
 |---|---|---|
@@ -79,7 +92,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 15 | saxon Open: openContent `mode="strict"` violations accepted | OPEN — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise |
 | 15 | saxon/oracle Zone: explicitTimezone facet violations (missing/forbidden timezone) accepted | OPEN — facet captured (zone sets compile) but not applied to values |
 | 11 | saxon VC + mixed/VC: invalid-under-version-control documents accepted | OPEN — conditional inclusion: the version test prunes NOTHING (all branches evaluated/none pruned), so vc-invalid instances sail through |
-| 11 | ibm S3_12/S3_4_2_4 + saxon Override: instance validity under overridden/redefined components | OPEN — overridden components captured (compile.c:55) but instance typing uses the pre-override definitions |
+| 8 | ibm S3_12/S3_4_2_4 + saxon Override: instance validity under overridden/redefined components | OPEN — overridden components captured (compile.c:55) but instance typing uses the pre-override definitions (#679 retired the three Override n02 no-namespace-instance rows via exact root binding) |
 | 3 | ibm S3_2_3: element-decl clause violations (targetNamespace on local declarations) accepted | OPEN |
 | 3 | saxon TargetNS: targetNamespace violations accepted | OPEN |
 | 3 | saxon All: xs:all occurrence-limit violations accepted | OPEN — mirror of the valid-side relaxed-occurrence gap: the RELAXED limits are neither enforced nor bounded |

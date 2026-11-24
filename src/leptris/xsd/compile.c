@@ -2792,6 +2792,11 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->inheritable =
                         xsd_bool_attr((LeptrisElement)n, "inheritable",
                                       -1);
+                    /* #679: a TOP-LEVEL attribute declaration is
+                     * always qualified with the unit's
+                     * targetNamespace (§3.2.3) — mirror the global
+                     * element stamp. */
+                    if (s->target_ns) d->ns = xsd_strdup(s->target_ns);
                     d->next = s->top_attrs;
                     s->top_attrs = d;
                 }
@@ -2922,6 +2927,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             free(a->name);
             free(a->type);
             free(a->fixed);
+            free(a->ns);
             free(a);
             a = an;
         }
@@ -2965,6 +2971,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             free(a->name);
             free(a->type);
             free(a->fixed);
+            free(a->ns);
             free(a);
             a = an2;
         }
@@ -2977,6 +2984,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(ta_row->name);
         free(ta_row->type);
         free(ta_row->fixed);
+        free(ta_row->ns);
         free(ta_row);
         ta_row = ta_next;
     }
@@ -3656,6 +3664,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
         d->name = xsd_strdup(src->name);
         d->type = xsd_strdup(src->type);
         d->fixed = xsd_strdup(src->fixed);
+        d->ns = xsd_strdup(src->ns);
         d->required = src->required;
         d->inheritable = src->inheritable;
         d->pending_ref = src->pending_ref;
@@ -3690,6 +3699,8 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 free(a->fixed);
                 a->type = xsd_strdup(src->type);
                 a->fixed = xsd_strdup(src->fixed);
+                free(a->ns);
+                a->ns = xsd_strdup(src->ns);
                 if (!(a->pending_ref & XSD_PENDING_USE))
                     a->required = src->required;
                 if (a->inheritable < 0) a->inheritable = src->inheritable;
@@ -3706,6 +3717,8 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 free(a->fixed);
                 a->type = xsd_strdup(src->type);
                 a->fixed = xsd_strdup(src->fixed);
+                free(a->ns);
+                a->ns = xsd_strdup(src->ns);
                 if (!(a->pending_ref & XSD_PENDING_USE))
                     a->required = src->required;
                 if (a->inheritable < 0) a->inheritable = src->inheritable;
@@ -3790,6 +3803,40 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                 d->fixed = xsd_strdup(
                     leptris_element_attribute(ae, "fixed"));
                 d->required = (use && strcmp(use, "required") == 0);
+                /* leptris-ruby#679: form qualification (§3.2.3) —
+                 * @form wins; otherwise the unit's
+                 * attributeFormDefault decides (the same unit walk
+                 * the elementFormDefault particle capture rides).
+                 * Qualified -> the unit's targetNamespace; the row
+                 * then binds only qualified instance attributes. */
+                {
+                    const char* aform =
+                        leptris_element_attribute(ae, "form");
+                    const char* afd = NULL;
+                    if (!aform) {
+                        for (LeptrisElement up =
+                                 leptris_element_parent(ae);
+                             up; up = leptris_element_parent(up)) {
+                            const char* ul = NULL;
+                            leptris_element_expanded_name(
+                                up, &ul, NULL, NULL);
+                            if (ul && strcmp(ul, "schema") == 0) {
+                                afd = leptris_element_attribute(
+                                    up, "attributeFormDefault");
+                                break;
+                            }
+                        }
+                    }
+                    if (aform ? strcmp(aform, "qualified") == 0
+                              : (afd &&
+                                 strcmp(afd, "qualified") == 0)) {
+                        char* tns = xsd_capture_unit_tns(ae);
+                        if (tns && tns[0])
+                            d->ns = tns;
+                        else
+                            free(tns);
+                    }
+                }
             } else {
                 /* ref to a top-level attribute declaration */
                 const char* ref = xsd_local_name(
@@ -3817,6 +3864,11 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     d->name = xsd_strdup(src->name);
                     d->type = xsd_strdup(src->type);
                     d->fixed = xsd_strdup(src->fixed);
+                    /* #679: a ref binds in the REFERENCED
+                     * declaration's namespace (top-level attribute
+                     * declarations are always qualified with their
+                     * unit's tns) */
+                    d->ns = xsd_strdup(src->ns);
                     d->required = use
                                       ? (strcmp(use, "required") == 0)
                                       : src->required;
@@ -4138,10 +4190,27 @@ const XsdElementDecl* xsd_find_element(struct leptris_xsd_schema* s,
     return NULL;
 }
 
-/* leptris-ruby#440: prefer (ns, name); fall back to any match. */
+/* leptris-ruby#679: the INSTANCE-driven declaration lookup (the root
+ * walk and the inheritable-attribute owner lookup). The binding is
+ * EXACT on (namespaceURI, localName): a stamped declaration
+ * ({target namespace} = the declaring unit's targetNamespace) names
+ * an element IN that namespace; an unstamped declaration names a
+ * NO-namespace element (XSD 1.0 §3.3.4 — global declarations take
+ * the schema's targetNamespace, a no-targetNamespace unit's stay
+ * namespace-free). The old #440 ladder's unstamped and name-only
+ * sweeps bound foreign-namespace roots — ns0_2 accepted a no-ns
+ * root with the tns global, po0/ns1_0 accepted a foreign-ns root —
+ * no fallback past a namespace mismatch. */
 const XsdElementDecl* xsd_find_element_ns(
     struct leptris_xsd_schema* s, const char* name, const char* uri) {
-    return xsd_ladder_element(s, name, uri, 0);
+    if (!s || !name) return NULL;
+    int child_ns = uri && uri[0];
+    for (XsdElementDecl* t = s->elements; t; t = t->next)
+        if (strcmp(t->name, name) == 0 &&
+            (t->ns ? (child_ns && strcmp(t->ns, uri) == 0)
+                   : !child_ns))
+            return t;
+    return NULL;
 }
 
 /* leptris#1958: the CONTENT-MODEL child loop's lookup — a
