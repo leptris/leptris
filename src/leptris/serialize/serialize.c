@@ -1758,14 +1758,14 @@ void serialize_element_internal(LeptrisElement root_elem, SerializeBuffer* buf, 
                             pe, pn, pnl2, html_elem_sem_flags(pe)))
                         buffer_append_newline(buf);
                 } else if (buf->indent_spaces > 0) {
-                    /* Formatter-owned separator between element
-                     * children — suppressed when the next sibling
-                     * is a TEXT node: under a mixed parent its
-                     * verbatim content already carries the layout
-                     * (libxslt bug-98). */
-                    LeptrisNode* nx = leptris_node_get_next_sibling(
-                        (LeptrisNode*)pe);
-                    if (!nx || nx->type != LEPTRIS_NODE_TYPE_TEXT)
+                    /* Only a non-mixed parent owns separators.
+                     * Its whitespace-only text siblings are skipped
+                     * above, so they still need the separator. A
+                     * mixed parent preserves all text and must not
+                     * gain formatter whitespace, with or without a
+                     * following text sibling. */
+                    int parent_mixed = sp > 0 && st[sp - 1].mixed;
+                    if (!parent_mixed)
                         buffer_append_newline(buf);
                 }
             }
