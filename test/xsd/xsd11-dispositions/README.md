@@ -46,7 +46,7 @@ construct class below, not a separate lane.
 The corpus also carries 79 UTF-16 suite files (S3_2_3, S2_2_4, S3_3_4
 families); the engine parses UTF-16 natively, so they are IN lane.
 
-## valid rejected by the engine (180)
+## valid rejected by the engine (176)
 
 | rows | class | disposition |
 |---|---|---|
@@ -65,7 +65,7 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 | 3 | ibm S3_12 s3_12v09/s3_12ii04: valid cta schema/instance rows — the mixed complexContent EXTENSION compile-status artifact (the two schema-only rows compile with a non-OK status, see the engine quirk) and the extension content model losing the base's lax wildcard (s3_12v09.xml) | OPEN — alternative DISPATCH itself fires and selects correctly; the blockers are the extension-model classes above |
 | 2 | saxon Subsgroup: member of a substitution group where the head appears | OPEN — same substitution-group gap as the 1.0 lane |
 
-## invalid documents accepted (302)
+## invalid documents accepted (290)
 
 | rows | class | disposition |
 |---|---|---|
