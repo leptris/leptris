@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+    <xs:notation name="jpeg" public="image/jpeg" system="viewer.exe"/>
+ 
+    <xs:simpleType name="notationList">
+        <xs:list itemType="xs:NOTATION"/>
+    </xs:simpleType>
+    
+    <xs:attribute name="a" type="notationList"/>
+</xs:schema>

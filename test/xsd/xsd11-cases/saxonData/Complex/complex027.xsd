@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  
+  <!-- Test for Saxon bug 6671: which is tricky, because the failure
+    is unpredictable. The scenario is a base type B whose content model
+    references a type D that is derived from B. The bug arises if we choose
+    the wrong order of processing of components, which in Saxon is essentially
+    random (depends on the order of items in a hash table). To make the
+    failure more likely we create several examples of this same pattern.
+      -->
+
+  <xs:complexType name="B1">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="C1" type="D1"/>
+    </xs:sequence>
+  </xs:complexType>
+  
+  <xs:complexType name="D1">
+    <xs:complexContent>
+      <xs:extension base="B1">
+        <xs:attribute name="A1"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  
+  <xs:complexType name="B2">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="C2" type="D2"/>
+    </xs:sequence>
+  </xs:complexType>
+  
+  <xs:complexType name="D2">
+    <xs:complexContent>
+      <xs:extension base="B2">
+        <xs:attribute name="A2"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  
+  <xs:complexType name="B4">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="C4" type="D4"/>
+    </xs:sequence>
+  </xs:complexType>
+  
+  <xs:complexType name="D4">
+    <xs:complexContent>
+      <xs:extension base="B4">
+        <xs:attribute name="A4"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  
+  <xs:complexType name="B5">
+    <xs:sequence minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="C5" type="D5"/>
+    </xs:sequence>
+  </xs:complexType>
+  
+  <xs:complexType name="D5">
+    <xs:complexContent>
+      <xs:extension base="B5">
+        <xs:attribute name="A5"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  
+  
+
+ 
+
+</xs:schema>
