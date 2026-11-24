@@ -4,7 +4,17 @@
 
 ### Performance
 
-- bulk-zero the mut blocks at acquire - the mutcycle row's second cut (#2132) (dom)
+- dom: bulk-zero the mutation-element blocks at acquire — the
+  mutcycle row's second cut (#2142). The per-element memset sat in
+  the create hot path; each freshly acquired mut block is now zeroed
+  once at acquire (one memset per block instead of per element),
+  and the create fast path drops its per-element call. This is not
+  just speed: fresh malloc is NOT guaranteed zeroed, so the
+  block-level memset is load-bearing for the recycled path. Local
+  mutcycle: 17 → 14.8 ns/child (−13%) on top of the fused append
+  cut shipped in 1.9.440. The CI bench verdict on this content
+  records on #2132; the macos row (0.72x) still needs the
+  mutation-element layout campaign (64B→32B, #155 playbook).
 
 
 
