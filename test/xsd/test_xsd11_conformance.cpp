@@ -128,11 +128,12 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * capture keyed on assert syntax presence; assert inheritance
      * down the derivation chain; §3.13.2 namespace bindings and
      * xpathDefaultNamespace; the §3.13.4.1 assertion data model
-     * excluding comments/PIs): 1521/2206 — every red classified in
+     * excluding comments/PIs): 1524/2206 (re-measured on the
+     * #679-qualified base) — every red classified in
      * test/xsd/xsd11-dispositions/README.md. Monotonically rising. */
-    EXPECT_GE(pass, 1521) << "conformance floor regressed";
+    EXPECT_GE(pass, 1524) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1117);
-    EXPECT_GE(pass_invalid, 386);
+    EXPECT_GE(pass_invalid, 389);
     EXPECT_GE(pass_schema_error, 18);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
