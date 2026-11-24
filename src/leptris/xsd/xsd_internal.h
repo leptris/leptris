@@ -21,6 +21,23 @@ typedef struct xsd_facet_value {
     struct xsd_facet_value* next;
 } XsdFacetValue;
 
+/* XSD 1.1 (#2154): one xs:assertion facet bound to a simpleType —
+ * the test plus its lazily-compiled query (§3.16.4). A restriction
+ * may carry SEVERAL (the list accumulates), and the chain walker
+ * enforces every level's list — assertion facets are inherited by
+ * restriction (§3.16.6). Evaluation errors count as failure; an
+ * expression the engine cannot COMPILE is not enforced (the facet
+ * posture — never reject what we cannot assess). */
+typedef struct xsd_assertion_facet {
+    char* test;             /* the wire expression, for reporting */
+    char* ns_prolog;        /* §3.13.2 {namespace bindings} +
+                             * {xpathDefaultNamespace} as XQuery
+                             * prolog declarations (capture-time) */
+    LeptrisXQuery q;        /* compiled lazily at first use */
+    int tried;              /* lazy-compile guard */
+    struct xsd_assertion_facet* next;
+} XsdAssertionFacet;
+
 /* How a user simpleType is derived: restriction of a base (with
  * facets), a whitespace-separated list of an item type, or a
  * union of member types. */
@@ -61,9 +78,9 @@ typedef struct xsd_simple {
     long total_digits;
     long fraction_digits;
     char* whitespace; /* "preserve" | "replace" | "collapse" */
-    char* assertion; /* XSD 1.1: the xs:assertion test text */
-    LeptrisXQuery assertion_q; /* compiled lazily at first use */
-    int assertion_tried;       /* lazy-compile guard */
+    /* XSD 1.1 (#2154): the restriction's xs:assertion facet list —
+     * accumulated, enforced across the chain by the validator. */
+    XsdAssertionFacet* assertions;
     struct xsd_simple* next;
 } XsdSimple;
 
@@ -77,6 +94,7 @@ int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
  * errors count as assertion failure. */
 typedef struct xsd_assert {
     char* test;             /* the wire expression, for reporting */
+    char* ns_prolog;        /* §3.13.2 bindings as XQuery prolog */
     LeptrisXQuery compiled; /* NULL when compilation failed */
     struct xsd_assert* next;
 } XsdAssert;
@@ -173,6 +191,12 @@ typedef struct xsd_cm {
     int mixed;
     XsdAlternative* alternatives; /* XSD 1.1: the alternative chain on
                                    * a LOCAL element particle (#2149) */
+    /* XSD 1.1 §3.13.6 (#2154): the derivation base the ASSERT chain
+     * follows — the post-capture fold clears ext_base after
+     * splicing the base's particles, but the derived type still
+     * runs the base chain's asserts. Stolen pointers (freed here). */
+    char* assert_base;
+    char* assert_base_ns;
 } XsdCm;
 
 

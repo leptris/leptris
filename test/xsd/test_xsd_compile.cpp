@@ -2684,7 +2684,13 @@ TEST(XsdAssert11, VcMinVersionMarksSchema11) {
     EXPECT_EQ(validate_doc(x, "<doc><a>-5</a></doc>"), 0);
 }
 
-TEST(XsdAssert11, Version10IgnoresAssertions) {
+TEST(XsdAssert11, AssertSyntaxArmsEnforcementRegardlessOfVersion) {
+    /* #2154: the assert capture keys on the ASSERT SYNTAX ITSELF —
+     * the suite's 1.1 assertion corpora are marked version="1.0"
+     * (or unmarked), so a schema whose authors wrote asserts gets
+     * them enforced whatever the @version spelling reads. The old
+     * pin (a 1.0-labelled schema ignores the construct) was the
+     * gap the 85-row assertion-facet class measured. */
     const char* x =
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
         " version=\"1.0\">"
@@ -2698,7 +2704,8 @@ TEST(XsdAssert11, Version10IgnoresAssertions) {
         "<xs:element name=\"box\" type=\"boxT\"/>"
         "</xs:schema>";
     EXPECT_EQ(validate_doc(x,
-                           "<box><item>a</item><item>b</item></box>"), 1);
+                           "<box><item>a</item><item>b</item></box>"), 0);
+    EXPECT_EQ(validate_doc(x, "<box><item>a</item></box>"), 1);
 }
 
 }  // namespace

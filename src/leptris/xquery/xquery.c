@@ -1958,19 +1958,28 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
 static LeptrisXPathResult xq_eval_impl(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* param_names, const char* const* param_selects,
-    size_t nparams);
+    size_t nparams, unsigned flags);
 
 LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                                                    LeptrisDocument doc,
                                                    LeptrisElement context_node) {
-    return xq_eval_impl(query, doc, context_node, NULL, NULL, 0);
+    return xq_eval_impl(query, doc, context_node, NULL, NULL, 0, 0);
 }
 
 LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* names, const char* const* selects, size_t count) {
     if (count && (!names || !selects)) return NULL;
-    return xq_eval_impl(query, doc, context_node, names, selects, count);
+    return xq_eval_impl(query, doc, context_node, names, selects, count, 0);
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params_ex(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* names, const char* const* selects, size_t count,
+    unsigned flags) {
+    if (count && (!names || !selects)) return NULL;
+    return xq_eval_impl(query, doc, context_node, names, selects, count,
+                        flags);
 }
 
 LEPTRIS_API void leptris_xquery_free(LeptrisXQuery query) {
@@ -2786,7 +2795,7 @@ static struct leptris_xpath_result* xq_eval_param(
 static LeptrisXPathResult xq_eval_impl(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* param_names, const char* const* param_selects,
-    size_t nparams) {
+    size_t nparams, unsigned flags) {
     struct LeptrisXQueryInternal* q = (struct LeptrisXQueryInternal*)query;
     if (!q || !doc) return NULL;
 
@@ -2797,6 +2806,10 @@ static LeptrisXPathResult xq_eval_impl(
     XPathContext ctx_storage;
     XPathContext* ctx = &ctx_storage;
     xpath_context_init(ctx, (struct leptris_document*)doc, ctx_elem);
+    /* XSD 1.1 assertion data model (#2154): comments and PIs are
+     * not part of the tree the query sees. */
+    ctx->assert_data_model =
+        (flags & (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL) ? 1 : 0;
 
     /* local: functions: merged registry over the standard library.
      * Closure contents live for the eval; the registry itself is
@@ -2862,6 +2875,28 @@ static LeptrisXPathResult xq_eval_impl(
      * declared (each sees the earlier ones). */
     int err = 0;
     ctx->xquery_spelling = 1;
+    /* #2154: the declare-namespace prolog must ALSO reach the
+     * path-test resolver — xpath_expr_prefix_uri reads ctx->ns_set
+     * (the external-bindings channel), not namespace_mappings, so
+     * `chess:white` never resolved its prefix and every
+     * schema-prefix assert test matched nothing. Bridge the set;
+     * freed with the eval's cleanup below. */
+    {
+        size_t nns = 0;
+        for (size_t i = 0; i < q->ndecls; i++)
+            if (q->decls[i].kind == XQ_DECL_NS) nns++;
+        if (nns) {
+            LeptrisXPathNsSet bridge = leptris_xpath_ns_set_new();
+            if (bridge) {
+                for (size_t i = 0; i < q->ndecls; i++)
+                    if (q->decls[i].kind == XQ_DECL_NS)
+                        leptris_xpath_ns_set_add(bridge,
+                                                 q->decls[i].name,
+                                                 q->decls[i].uri);
+                ctx->ns_set = (struct leptris_xpath_ns_map*)bridge;
+            }
+        }
+    }
     for (size_t i = 0; i < q->ndecls && !err; i++) {
         XqDecl* d = &q->decls[i];
         if (d->kind == XQ_DECL_NS) {
@@ -3426,6 +3461,11 @@ static LeptrisXPathResult xq_eval_impl(
     if (scratch_vs) {
         ctx->variable_set = NULL;
         xpath_variable_set_free(scratch_vs);
+    }
+    /* the #2154 declare-namespace bridge is eval-owned */
+    if (ctx->ns_set) {
+        leptris_xpath_ns_set_free((LeptrisXPathNsSet)ctx->ns_set);
+        ctx->ns_set = NULL;
     }
     xpath_context_cleanup(ctx);
     /* Hoisted ctor wrapper (`<tag>{ FLWOR }</tag>`): the element

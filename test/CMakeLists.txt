@@ -176,6 +176,10 @@ target_compile_definitions(test_xsd11_cta PRIVATE
 leptris_add_test(test_xsd_ns_qualification xsd/test_xsd_ns_qualification.cpp)
 target_compile_definitions(test_xsd_ns_qualification PRIVATE
     LEPTRIS_XSD_NS_QUAL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/ns-qual")
+# #2154: xs:assertion facet spec tests.
+leptris_add_test(test_xsd11_assertions xsd/test_xsd11_assertions.cpp)
+target_compile_definitions(test_xsd11_assertions PRIVATE
+    LEPTRIS_XSD11_ASSERTIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assertions")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)

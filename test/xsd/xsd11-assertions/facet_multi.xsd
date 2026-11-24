@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2154: several xs:assertion facets in ONE restriction accumulate —
+     ALL must hold (§3.16.6). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:simpleType>
+      <xs:restriction base="xs:integer">
+        <xs:assertion test="$value gt 0"/>
+        <xs:assertion test="$value lt 100"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

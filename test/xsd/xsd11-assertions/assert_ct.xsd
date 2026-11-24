@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- #2154: a complexType xs:assert on a schema carrying neither
+     @version="1.1" nor xs:alternative chains — the assert capture keys
+     on the ASSERT SYNTAX ITSELF (the #2149 posture applied to
+     asserts). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="temp">
+    <xs:complexType>
+      <xs:sequence/>
+      <xs:attribute name="x" type="xs:integer" use="required"/>
+      <xs:assert test="@x > 300"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
