@@ -162,6 +162,11 @@ target_compile_definitions(test_rs35_regression PRIVATE
 leptris_add_test(test_i1957_1958 xsd/test_i1957_1958.cpp)
 target_compile_definitions(test_i1957_1958 PRIVATE
     LEPTRIS_XSD_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/libxml2-cases")
+# #2148: the XSD 1.1 baseline lane — oracle is the pinned w3c/xsdtests
+# suite metadata (see xsd/xsd11-cases/MANIFEST.tsv header).
+leptris_add_test(test_xsd11_conformance xsd/test_xsd11_conformance.cpp)
+target_compile_definitions(test_xsd11_conformance PRIVATE
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
