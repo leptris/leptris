@@ -77,6 +77,13 @@ struct xsd_validator {
      * the target node set). Borrowed DOM pointers, freed with the
      * document. */
     struct ic_skipped* skipped;
+    /* moxml#579: the attribute names referenced by the test of the
+     * CTA alternative in force for the element being assessed
+     * (§3.12.4) — those names pass the strict attribute-declaration
+     * check undeclared. Borrowed pointers into the schema's
+     * alternatives; saved/restored around each dispatch. */
+    const char** cta_exempt;
+    int cta_exempt_n;
 };
 
 struct ic_skipped {
@@ -733,8 +740,10 @@ static int xsd_cta_ebv(XsdAlternative* alt, LeptrisDocument doc,
 static const char* xsd_cta_select(struct xsd_validator* v,
                                   struct leptris_xsd_schema* s,
                                   LeptrisElement elem,
-                                  XsdAlternative* chain, int* err) {
+                                  XsdAlternative* chain, int* err,
+                                  XsdAlternative** sel_out) {
     *err = 0;
+    if (sel_out) *sel_out = NULL;
     if (!chain) return NULL;
 
     /* Collect the inherited attributes: nearest ancestor first; a
@@ -889,6 +898,16 @@ static const char* xsd_cta_select(struct xsd_validator* v,
         }
         if (xsd_cta_ebv(alt, tdoc ? tdoc : v->doc, ctx)) {
             sel = alt->type;
+            /* moxml#579: the SELECTED test's attribute references
+             * ride the exemption (§3.12.4); a test-less default
+             * references nothing. An xs:error selection invalidates
+             * regardless of which arm named it (§2.2.1.1) — the
+             * propagation used to cover only the test-less default,
+             * which let the strict attribute check against the
+             * attribute-less selection carry the verdict by
+             * accident (s3_12ii05). */
+            if (alt->xs_error) *err = 1;
+            if (sel_out) *sel_out = alt;
             break;
         }
     }
@@ -1158,18 +1177,29 @@ static void validate_children(struct xsd_validator* v,
                  * instance element (§3.12.4); no match falls back to
                  * the particle's declared type. */
                 int cta_err = 0;
+                XsdAlternative* cta_alt = NULL;
                 const char* eff = xsd_cta_select(v, s, ce,
                                                  pmatch ? pmatch->alternatives
                                                         : NULL,
-                                                 &cta_err);
+                                                 &cta_err, &cta_alt);
                 if (cta_err) {
                     verrf_atk(v, ce, "type-resolution", cl, "element",
                               cl,
                               "conditional type assignment selected "
                               "xs:error");
                 } else {
+                    /* moxml#579: the selected test's attribute
+                     * references are exempt for this element. */
+                    const char** prev_exempt = v->cta_exempt;
+                    int prev_n = v->cta_exempt_n;
+                    v->cta_exempt =
+                        cta_alt ? cta_alt->test_attrs : NULL;
+                    v->cta_exempt_n =
+                        cta_alt ? cta_alt->test_attr_n : 0;
                     validate_local(v, s, ce, cl, eff ? eff : ptype,
                                    pfill, ct ? ct->ns : NULL);
+                    v->cta_exempt = prev_exempt;
+                    v->cta_exempt_n = prev_n;
                 }
             }
         } else {
@@ -1779,6 +1809,15 @@ static void validate_attributes(struct xsd_validator* v,
                                   ? ta->any_attr_base_unit_ns
                                   : xsd_target_ns(s))))
             continue;
+        /* moxml#579 (§3.12.4): the attribute references of the CTA
+         * test in force pass undeclared — the alternative's selector
+         * attribute is its own witness, not a declared use. */
+        if (v->cta_exempt_n > 0) {
+            int exempt = 0;
+            for (int i = 0; i < v->cta_exempt_n && !exempt; i++)
+                if (strcmp(v->cta_exempt[i], qn) == 0) exempt = 1;
+            if (exempt) continue;
+        }
         verrf_atk(v, elem, "attribute-use", local, "attribute", local,
                   "not declared (strict)");
     }
@@ -1884,8 +1923,9 @@ static void validate_element_decl(struct xsd_validator* v,
      * default alternative replaces the declared type as the
      * no-match fallback. */
     int cta_err = 0;
+    XsdAlternative* cta_alt = NULL;
     const char* eff_type =
-        xsd_cta_select(v, s, elem, d->alternatives, &cta_err);
+        xsd_cta_select(v, s, elem, d->alternatives, &cta_err, &cta_alt);
     if (!eff_type) eff_type = d->type;
     /* #1936 (stE): the element's fixed VALUE constraint applies
      * regardless of the type resolution — inline anonymous types
@@ -1962,8 +2002,21 @@ static void validate_element_decl(struct xsd_validator* v,
                   "conditional type assignment selected xs:error");
         return;
     }
-    validate_local(v, s, elem, local, eff_type, fill,
-                   d->ns);
+    /* moxml#579: the selected alternative's test-referenced attribute
+     * names pass the strict attribute check undeclared (§3.12.4).
+     * Set only for this element's assessment — the xsi:type path
+     * above replaced the whole chain, so no exemption there. */
+    {
+        const char** prev_exempt = v->cta_exempt;
+        int prev_n = v->cta_exempt_n;
+        v->cta_exempt =
+            cta_alt ? cta_alt->test_attrs : NULL;
+        v->cta_exempt_n = cta_alt ? cta_alt->test_attr_n : 0;
+        validate_local(v, s, elem, local, eff_type, fill,
+                       d->ns);
+        v->cta_exempt = prev_exempt;
+        v->cta_exempt_n = prev_n;
+    }
 }
 
 /* Validate one element against a type name that comes from a

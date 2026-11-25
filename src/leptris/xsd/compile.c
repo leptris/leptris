@@ -248,6 +248,9 @@ static void xsd_cm_free(XsdCm* cm) {
             if (alt->compiled) leptris_xquery_free(alt->compiled);
             free(alt->test);
             free(alt->type);
+            for (int i = 0; i < alt->test_attr_n; i++)
+                free(alt->test_attrs[i]);
+            free(alt->test_attrs);
             free(alt);
             alt = an;
         }
@@ -4337,6 +4340,80 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
     }
 }
 
+/* moxml#579: the attribute names a CTA test references. §C.1 keeps
+ * the test to a restricted XPath — attribute references spell as
+ * @name / @pfx:name or attribute::name. String literals are skipped
+ * (a '@' inside quotes is data, not a reference); the collected
+ * names dedupe and keep their prefix form so the strict check can
+ * strcmp them against the instance's attribute qnames. */
+static void xsd_cta_test_attrs(const char* test, char*** out,
+                               int* out_n) {
+    *out = NULL;
+    *out_n = 0;
+    if (!test) return;
+    int cap = 4;
+    int n = 0;
+    char** arr = (char**)calloc((size_t)cap, sizeof(char*));
+    if (!arr) return;
+    const char* p = test;
+    while (*p) {
+        if (*p == '\'' || *p == '"') {
+            char q = *p++;
+            while (*p && *p != q) p++;
+            if (*p) p++;
+            continue;
+        }
+        int is_attr = 0;
+        if (*p == '@') {
+            p++;
+            is_attr = 1;
+        } else if (strncmp(p, "attribute", 9) == 0 && p[9] == ':' &&
+                   p[10] == ':' &&
+                   (p == test || !isalnum((unsigned char)p[-1]))) {
+            p += 11;
+            is_attr = 1;
+        }
+        if (is_attr) {
+            const char* s0 = p;
+            while (*p && (isalnum((unsigned char)*p) || *p == '_' ||
+                          *p == '-' || *p == '.' || *p == ':' ||
+                          (unsigned char)*p >= 0x80))
+                p++;
+            if (p > s0) {
+                int len = (int)(p - s0);
+                int dup = 0;
+                for (int i = 0; i < n && !dup; i++)
+                    if ((int)strlen(arr[i]) == len &&
+                        strncmp(arr[i], s0, (size_t)len) == 0)
+                        dup = 1;
+                if (!dup) {
+                    if (n == cap) {
+                        int ncap = cap * 2;
+                        char** grown = (char**)realloc(
+                            arr, (size_t)ncap * sizeof(char*));
+                        if (!grown) break;
+                        arr = grown;
+                        cap = ncap;
+                    }
+                    char* name = (char*)malloc((size_t)len + 1);
+                    if (!name) break;
+                    memcpy(name, s0, (size_t)len);
+                    name[len] = '\0';
+                    arr[n++] = name;
+                }
+            }
+            continue;
+        }
+        p++;
+    }
+    if (n == 0) {
+        free(arr);
+        return;
+    }
+    *out = arr;
+    *out_n = n;
+}
+
 /* XSD 1.1: the xs:alternative children of an element declaration
  * (§3.12.2), captured as the ordered type table. Capture is keyed on
  * the alternative ELEMENTS: their presence is 1.1 syntax, so the
@@ -4371,6 +4448,8 @@ static XsdAlternative* xsd_capture_alternatives(
         if (test && test[0]) {
             a->test = xsd_strdup(test);
             a->compiled = leptris_xquery_parse(test, strlen(test));
+            xsd_cta_test_attrs(a->test, &a->test_attrs,
+                               &a->test_attr_n);
         }
         if (type && type[0]) {
             char turi[512], tlocal[256];
@@ -4394,6 +4473,9 @@ static XsdAlternative* xsd_capture_alternatives(
              * — nothing to select, drop the row */
             free(a->test);
             if (a->compiled) leptris_xquery_free(a->compiled);
+            for (int i = 0; i < a->test_attr_n; i++)
+                free(a->test_attrs[i]);
+            free(a->test_attrs);
             free(a);
             continue;
         }

@@ -98,3 +98,24 @@ TEST(Xsd11Cta, TestEvaluationErrorIsFalse) {
     EXPECT_EQ(verdict_of("testerr_fallback.xsd", "testerr_fallback_v.xml"),
               1);
 }
+
+/* moxml#579: the attributes referenced in the SELECTED alternative's
+ * test are exempt from the strict attribute-declaration check — the
+ * alternative's own selector attribute must not be false-rejected
+ * when the test matches. Unreferenced attributes stay strict, and
+ * when no alternative matches nothing is exempt. */
+TEST(Xsd11Cta, SelectedTestReferencesAdmitted) {
+    /* kind is the selector: admitted when @kind='text' matches,
+     * flagged when it does not (base typing applies). */
+    EXPECT_EQ(verdict_of("selector_admitted.xsd", "selector_v.xml"), 1);
+    EXPECT_NE(verdict_of("selector_admitted.xsd", "selector_n.xml"), 1);
+    /* only the referenced attribute is exempt: lang admitted on a
+     * match, kind strict even on a match. */
+    EXPECT_EQ(verdict_of("only_referenced_exempt.xsd", "lang_v.xml"), 1);
+    EXPECT_NE(verdict_of("only_referenced_exempt.xsd",
+                         "unreferenced_n.xml"),
+              1);
+    EXPECT_NE(verdict_of("only_referenced_exempt.xsd",
+                         "lang_plus_kind_n.xml"),
+              1);
+}
