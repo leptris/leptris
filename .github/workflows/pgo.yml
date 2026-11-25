@@ -11,10 +11,15 @@
 # deterministic and the build-twice gate below is meaningful.
 #
 # Entry points:
-#   workflow_dispatch — the proof job (ubuntu-latest only): bench delta
-#       per row USE vs OFF, build-twice byte-identity with PGO, binary
-#       size delta. `run_legs=true` additionally exercises the four
-#       release legs below before the first real train rides them.
+#   pull_request — the proof job runs as a PR check whenever the PGO
+#       workflow/scripts change (a fresh workflow_dispatch file cannot be
+#       dispatched until it exists on the default branch, so the PR that
+#       lands it carries the evidence itself; release version-bump PRs
+#       touch none of these paths and stay proof-free).
+#   workflow_dispatch — the proof job standalone (ubuntu-latest only):
+#       bench delta per row USE vs OFF, build-twice byte-identity with
+#       PGO, binary size delta. `run_legs=true` additionally exercises
+#       the four release legs below before the first real train rides.
 #   workflow_call — what release.yml invokes post-merge: the four legs
 #       (linux x86_64, linux arm64, macos arm64, windows x64) each
 #       GENERATE→train→USE and upload their artifacts; `attach` then
@@ -40,6 +45,11 @@
 name: PGO
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/pgo.yml'
+      - '.github/scripts/pgo_battery.sh'
+      - '.github/scripts/pgo_gate.py'
   workflow_dispatch:
     inputs:
       run_legs:
@@ -74,7 +84,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   proof:
     name: PGO proof — GENERATE → corpus → USE (ubuntu)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 110
     steps:
