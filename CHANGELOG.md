@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.445] - 2026-11-25
+
+### Fixed
+
+- the compile.c call site follows the rename (amalgam)
+
+
+
 ## [1.9.444] - 2026-11-25
 
 <!-- Edit this section with the actual release notes. -->
