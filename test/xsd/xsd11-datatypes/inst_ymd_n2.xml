@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: an interior negative component ("P1Y-2M") is not a
+     yearMonthDuration lexical. -->
+<root xmlns="http://leptris.test/dt/inst_ymd">P1Y-2M</root>

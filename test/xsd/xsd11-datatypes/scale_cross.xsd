@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- #2155: minScale > maxScale in one restriction is a schema
+     error (d3_3_4si26 / pdecimal011.n). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/scale_cross"
+	xmlns:t="http://leptris.test/dt/scale_cross">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<minScale value="4"/>
+		<maxScale value="2"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

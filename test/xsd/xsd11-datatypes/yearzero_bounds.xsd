@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2155: XSD 1.1's dateTime value space includes the year zero —
+     the ordered bounds compare across the era boundary
+     (-0001 < 0000 < 0001). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/yearzero"
+	xmlns:t="http://leptris.test/dt/yearzero">
+<simpleType name="t">
+	<restriction base="dateTime">
+		<minInclusive value="-0001-12-31T23:00:00-01:00"/>
+		<maxInclusive value="0001-01-01T00:00:00Z"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

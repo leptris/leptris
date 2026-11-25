@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!-- #2155: the legal precisionDecimal facet surface — totalDigits,
+     minScale/maxScale and ordered bounds all apply and may
+     narrow. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/legal_pdec"
+	xmlns:t="http://leptris.test/dt/legal_pdec">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<totalDigits value="6"/>
+		<minScale value="1"/>
+		<maxScale value="4"/>
+		<minInclusive value="-100"/>
+		<maxInclusive value="100"/>
+		<pattern value="[+-]?\d*\.\d+"/>
+		<whiteSpace value="collapse"/>
+	</restriction>
+</simpleType>
+<simpleType name="narrow">
+	<restriction base="t:t">
+		<minScale value="2"/>
+		<maxScale value="3"/>
+		<totalDigits value="5"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:narrow"/>
+</schema>

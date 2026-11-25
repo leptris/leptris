@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: the year -0002 precedes the min bound (its instant is
+     before -0001-12-31T23:00:00-01:00 == 0000-01-01T00:00:00Z). -->
+<root xmlns="http://leptris.test/dt/yearzero">-0002-01-01T00:00:00Z</root>

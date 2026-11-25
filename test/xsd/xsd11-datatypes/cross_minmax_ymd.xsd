@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- #2155: minInclusive > maxInclusive and minExclusive >=
+     maxExclusive are schema errors in the duration family
+     (d3_4_26si03). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/cross_minmax_ymd"
+	xmlns:t="http://leptris.test/dt/cross_minmax_ymd">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y10M"/>
+		<maxInclusive value="P1Y1M"/>
+		<minExclusive value="P1Y1M"/>
+		<maxExclusive value="P1Y1M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

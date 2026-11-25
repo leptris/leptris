@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- #2155: totalDigits must narrow — the derived 10 exceeds the
+     base's 5 (d3_3_4si19). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/totaldigits_narrow"
+	xmlns:t="http://leptris.test/dt/totaldigits_narrow">
+<simpleType name="base">
+	<restriction base="precisionDecimal">
+		<totalDigits value="5"/>
+	</restriction>
+</simpleType>
+<simpleType name="derived">
+	<restriction base="t:base">
+		<totalDigits value="10"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derived"/>
+</schema>

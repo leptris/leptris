@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2155: minInclusive and minExclusive (maxInclusive and
+     maxExclusive) cannot both be specified (d3_4_26si04). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/both_forms_ymd"
+	xmlns:t="http://leptris.test/dt/both_forms_ymd">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y1M"/>
+		<minExclusive value="P1Y1M"/>
+		<maxInclusive value="P3Y1M"/>
+		<maxExclusive value="P3Y1M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

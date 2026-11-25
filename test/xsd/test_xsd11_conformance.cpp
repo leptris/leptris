@@ -130,11 +130,28 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * xpathDefaultNamespace; the §3.13.4.1 assertion data model
      * excluding comments/PIs): 1524/2206 (re-measured on the
      * #679-qualified base) — every red classified in
-     * test/xsd/xsd11-dispositions/README.md. Monotonically rising. */
-    EXPECT_GE(pass, 1524) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 1117);
-    EXPECT_GE(pass_invalid, 389);
-    EXPECT_GE(pass_schema_error, 18);
+     * test/xsd/xsd11-dispositions/README.md. Monotonically rising.
+     * Raised by #2155 (facet applicability on the 1.1-only
+     * datatypes: xs:dateTimeStamp/xs:precisionDecimal/
+     * xs:yearMonthDuration/xs:dayTimeDuration registered with their
+     * own lexicals, unprefixed builtin refs canonized at capture,
+     * the compile-time applicability sweep (inapplicable facets,
+     * invalid facet values, cross-facet order clauses, narrowing +
+     * the fixed law on the 1.1 builtins, bounds-on-lists), the
+     * exact decimal comparator, the duration/date-time value-space
+     * bound comparisons with year zero, the precisionDecimal scale
+     * window (spelling-claimed precision) and its NaN-enumeration
+     * rule, numeric/temporal enumeration equality, collapse for
+     * restrictions declaring whiteSpace="collapse", the
+     * precisionDecimal canonical digit counts,
+     * explicitTimezone enforcement, and the pre-existing
+     * fractional-seconds-with-timezone hole in the time tail):
+     * 1676/2206 (measured 2026-11-25) — every red classified in
+     * test/xsd/xsd11-dispositions/README.md. */
+    EXPECT_GE(pass, 1676) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 1140);
+    EXPECT_GE(pass_invalid, 435);
+    EXPECT_GE(pass_schema_error, 101);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

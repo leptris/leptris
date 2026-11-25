@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2155: the legal dateTimeStamp facet surface — ordered bounds
+     and explicitTimezone="required". -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/legal_stamp"
+	xmlns:t="http://leptris.test/dt/legal_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<explicitTimezone value="required"/>
+		<minInclusive value="2001-01-01T00:00:00Z"/>
+		<maxInclusive value="2010-12-31T23:59:59+14:00"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- #2155: the ordered-facet values must be valid
+     yearMonthDuration lexicals — lowercase units ("P1Y1m"), a sign
+     after P ("P-1Y1M") and fractional months ("P1Y1.1M") are not
+     (d3_4_26si02). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/bad_bound_ymd"
+	xmlns:t="http://leptris.test/dt/bad_bound_ymd">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y1m"/>
+		<maxInclusive value="P-1Y1M"/>
+		<minExclusive value="P1y1M"/>
+		<maxExclusive value="P1Y1.1M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- #2155: the EFFECTIVE scale window must stay non-empty — a
+     derived maxScale of 2 under an inherited minScale of 4 leaves
+     no value space (pdecimal014.n). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/scale_empty"
+	xmlns:t="http://leptris.test/dt/scale_empty">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<minScale value="4"/>
+	</restriction>
+</simpleType>
+<simpleType name="u">
+	<restriction base="t:t">
+		<maxScale value="2"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:u"/>
+</schema>

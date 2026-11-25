@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: whiteSpace on dateTimeStamp is fixed at collapse
+     (d3_4_28si14). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/ws_replace_stamp"
+	xmlns:t="http://leptris.test/dt/ws_replace_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<whiteSpace value="replace"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

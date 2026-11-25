@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2155: a LIST value space cannot be bounded — the ordered
+     facets do not apply (d2_4_1_2si01, "lists cannot be bounded"). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/bounds_on_list"
+	xmlns:t="http://leptris.test/dt/bounds_on_list">
+<simpleType name="sizes">
+	<list itemType="decimal"/>
+</simpleType>
+<simpleType name="sizes2">
+	<restriction base="t:sizes">
+		<minInclusive value="1"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:sizes"/>
+</schema>

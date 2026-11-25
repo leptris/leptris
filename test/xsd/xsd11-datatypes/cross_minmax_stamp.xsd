@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2155: minInclusive > maxInclusive (by INSTANT — the values
+     carry explicit timezones) is a schema error (d3_4_28si02). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/cross_minmax_stamp"
+	xmlns:t="http://leptris.test/dt/cross_minmax_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<minInclusive value="2005-01-01T00:00:00Z"/>
+		<maxInclusive value="2002-01-01T00:00:00Z"/>
+		<minExclusive value="2005-01-01T00:00:00Z"/>
+		<maxExclusive value="2002-01-01T00:00:00Z"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

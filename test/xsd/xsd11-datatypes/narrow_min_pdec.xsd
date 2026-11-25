@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- #2155: a derived minInclusive below the base's is a schema
+     error (d3_3_4si14) — restriction may not widen the value space. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/narrow_min_pdec"
+	xmlns:t="http://leptris.test/dt/narrow_min_pdec">
+<simpleType name="base">
+	<restriction base="precisionDecimal">
+		<minInclusive value="20"/>
+	</restriction>
+</simpleType>
+<simpleType name="derived">
+	<restriction base="t:base">
+		<minInclusive value="-30"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derived"/>
+</schema>

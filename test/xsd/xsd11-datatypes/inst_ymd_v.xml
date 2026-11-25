@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: "-P124Y" (leading sign before P) is a legal
+     yearMonthDuration lexical — the mirror-valid instance. -->
+<root xmlns="http://leptris.test/dt/inst_ymd">-P124Y</root>

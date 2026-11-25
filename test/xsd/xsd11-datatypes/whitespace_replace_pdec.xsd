@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: whiteSpace on the non-string builtins is fixed at
+     collapse — replace is a schema error (d3_3_4si22). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/ws_replace_pdec"
+	xmlns:t="http://leptris.test/dt/ws_replace_pdec">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<whiteSpace value="replace"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>
