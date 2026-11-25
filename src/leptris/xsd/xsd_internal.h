@@ -303,14 +303,44 @@ typedef struct xsd_attr_decl {
  * parallel list keyed the same way as complex model roots). */
 /* ---- slice 6: identity constraints -------------------------------- */
 
+/* #2156: one normalized NameTest step of a §3.11.6.2/3 selector or
+ * field path. The namespace is resolved at CAPTURE time against the
+ * schema document's in-scope bindings + xpathDefaultNamespace
+ * (§3.13.2) — instance namespaces never enter the picture. */
+typedef struct xsd_ic_step {
+    char* ns;    /* resolved namespace URI; NULL = no namespace */
+    char* local; /* local name; NULL = wildcard local ('*' / 'p:*') */
+    int any_ns;  /* the '*' form: matches any element namespace */
+    int is_attr; /* '@' name test (field-final only, §3.11.6.3) */
+    int is_self; /* the '.' step */
+} XsdIcStep;
+
+/* One path branch: steps + the leading './/' descendant flag. */
+typedef struct xsd_ic_path {
+    XsdIcStep steps[12];
+    int step_count;
+    int desc; /* leading './/' — branch from every descendant */
+} XsdIcPath;
+
 /* xs:key | xs:unique | xs:keyref captured on an element decl. */
 typedef struct xsd_ic {
     char* name;    /* constraint name */
     int kind;      /* 0 = key, 1 = unique, 2 = keyref */
-    char* selector; /* XPath relative to the scoping element */
-    char* fields[8]; /* XPaths relative to each selected node */
+    char* selector; /* raw text, for reporting */
+    XsdIcPath sel[4]; /* selector branches: Path ( '|' Path )* */
+    int sel_count;
+    char* fields[8]; /* raw field texts, for reporting */
+    XsdIcPath fpaths[8]; /* normalized field paths */
     size_t field_count;
-    char* refer;   /* keyref: the referenced constraint's name */
+    char* refer;   /* keyref: referenced constraint's LOCAL name */
+    char* ref_local; /* @ref form: the referenced constraint's local
+                      * name, resolved post-capture (forward refs
+                      * need the whole schema captured first) */
+    int ref_pending; /* the constraint arrived via @ref: copy the
+                      * target's shape once capture completes */
+    int parse_error; /* selector/field outside the §3.11.6 subset or
+                      * an unbound prefix — schema error (§3.13.2
+                      * XPath Valid) */
     struct xsd_ic* next;
 } XsdIc;
 

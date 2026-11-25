@@ -1,0 +1,11 @@
+<doc xmlns="http://ex.io/ic">
+  <list>
+    <sec nr="1"/>
+    <sec nr="2"/>
+    <ref to="1"/>
+  </list>
+  <other>
+    <sec nr="3"/>
+    <ref to="9"/>
+  </other>
+</doc>

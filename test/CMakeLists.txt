@@ -184,6 +184,12 @@ target_compile_definitions(test_xsd11_assertions PRIVATE
 leptris_add_test(test_xsd11_datatypes xsd/test_xsd11_datatypes.cpp)
 target_compile_definitions(test_xsd11_datatypes PRIVATE
     LEPTRIS_XSD11_DATATYPES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-datatypes")
+# #2156: the identity-constraint 1.1 extensions (subset-restricted
+# selector/field XPaths, schema-side ns resolution, @ref reuse,
+# vacuous tables).
+leptris_add_test(test_xsd11_ic xsd/test_xsd11_ic.cpp)
+target_compile_definitions(test_xsd11_ic PRIVATE
+    LEPTRIS_XSD11_IC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-ic")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)

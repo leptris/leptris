@@ -71,7 +71,28 @@ struct xsd_validator {
     struct xsd_error* errors;
     struct xsd_error* tail;
     size_t count;
+    /* #2156: elements attributed to a processContents="skip"
+     * wildcard (§3.10.4.1) — their subtrees are invisible to
+     * identity constraints (§3.11.4 cl. 1 omits skipped nodes from
+     * the target node set). Borrowed DOM pointers, freed with the
+     * document. */
+    struct ic_skipped* skipped;
 };
+
+struct ic_skipped {
+    LeptrisElement e;
+    struct ic_skipped* next;
+};
+
+/* §3.10.4.1: an element is skipped if it is attributed to a skip
+ * wildcard OR any of its ancestors is. */
+static int ic_is_skipped(const struct xsd_validator* v, LeptrisElement e) {
+    for (const struct ic_skipped* sk = v ? v->skipped : NULL; sk;
+         sk = sk->next)
+        for (LeptrisElement a = e; a; a = leptris_element_parent(a))
+            if (a == sk->e) return 1;
+    return 0;
+}
 
 static void verr_push_full(struct xsd_validator* v, const char* kind,
                            const char* component, int line, int column,
@@ -1039,7 +1060,19 @@ static void validate_children(struct xsd_validator* v,
          * strict demands a declaration when no particle/global
          * types it; lax validates declared children only. */
         int wpc = model_wildcard_pc(model, cu, xsd_target_ns(s));
-        if (wpc == 2) continue;
+        if (wpc == 2) {
+            /* #2156: record the skip attribution (§3.10.4.1) —
+             * identity constraints omit skipped subtrees from their
+             * target node sets (§3.11.4 cl. 1, the wild101 note). */
+            struct ic_skipped* sk =
+                (struct ic_skipped*)malloc(sizeof(*sk));
+            if (sk) {
+                sk->e = ce;
+                sk->next = v->skipped;
+                v->skipped = sk;
+            }
+            continue;
+        }
         const char* ptype = NULL;
         const char* pfill = NULL;
         XsdCm* pmatch = NULL;
@@ -2142,6 +2175,8 @@ typedef struct xsd_key_table {
     struct xsd_key_table* next;
 } XsdKeyTable;
 
+static void tables_free(XsdKeyTable* t);
+
 static XsdKeyTable* table_find(XsdKeyTable* head, const char* name) {
     for (; head; head = head->next)
         if (strcmp(head->name, name) == 0) return head;
@@ -2156,19 +2191,29 @@ static char* xsd_dup_str(const char* s) {
     return out;
 }
 
+/* Ensure the named table exists (possibly empty) — §3.11.5: an
+ * eligible constraint contributes a node table even when its target
+ * node set is empty, so a keyref against it still has a table to
+ * fail in (#2156). */
+static void table_ensure(XsdKeyTable** head, const char* name) {
+    if (table_find(*head, name)) return;    XsdKeyTable* t = (XsdKeyTable*)calloc(1, sizeof(*t));
+    if (!t) return;
+    size_t n = strlen(name) + 1;
+    t->name = (char*)malloc(n);
+    if (!t->name) {
+        free(t);
+        return;
+    }
+    memcpy(t->name, name, n);
+    t->next = *head;
+    *head = t;
+}
+
 static void table_add(XsdKeyTable** head, const char* name,
                       char* const* values, size_t count) {
+    table_ensure(head, name);
     XsdKeyTable* t = table_find(*head, name);
-    if (!t) {
-        t = (XsdKeyTable*)calloc(1, sizeof(*t));
-        if (!t) return;
-        size_t n = strlen(name) + 1;
-        t->name = (char*)malloc(n);
-        if (!t->name) { free(t); return; }
-        memcpy(t->name, name, n);
-        t->next = *head;
-        *head = t;
-    }
+    if (!t) return;
     XsdKeyTuple* tup = (XsdKeyTuple*)calloc(1, sizeof(*tup));
     if (!tup) return;
     for (size_t i = 0; i < count && i < 8; i++)
@@ -2181,49 +2226,212 @@ static void table_add(XsdKeyTable** head, const char* name,
     t->tail = tup;
 }
 
+/* ---- #2156: the §3.11.6 subset walker ---------------------------- */
+
+/* Does one normalized step match element e? The step's namespace was
+ * resolved at capture time against the SCHEMA document — instance
+ * namespaces are only ever compared, never consulted. */
+static int ic_step_elem_match(const XsdIcStep* st, LeptrisElement e) {
+    if (st->any_ns || st->is_self) return 1;
+    const char* local = NULL, *uri = NULL;
+    leptris_element_expanded_name(e, &local, NULL, &uri);
+    if (!st->local) return 0;
+    if (!local || strcmp(local, st->local) != 0) return 0;
+    const char* have = (uri && uri[0]) ? uri : NULL;
+    if (!st->ns) return have == NULL;
+    return have && strcmp(st->ns, have) == 0;
+}
+
+typedef struct ic_nodes {
+    LeptrisElement* v;
+    size_t n;
+    size_t cap;
+} ic_nodes;
+
+static void ic_nodes_push(ic_nodes* l, LeptrisElement e) {
+    if (l->n == l->cap) {
+        size_t nc = l->cap ? l->cap * 2 : 16;
+        LeptrisElement* nv =
+            (LeptrisElement*)realloc(l->v, nc * sizeof(*nv));
+        if (!nv) return;
+        l->v = nv;
+        l->cap = nc;
+    }
+    l->v[l->n++] = e;
+}
+
+/* Walk one path branch from ctx: steps[depth] applies to ctx's
+ * children; a node whose match completes the path is pushed. */
+static void ic_collect(LeptrisElement ctx, const XsdIcPath* p, int depth,
+                       ic_nodes* out) {
+    if (depth == p->step_count) {
+        ic_nodes_push(out, ctx);
+        return;
+    }
+    const XsdIcStep* st = &p->steps[depth];
+    if (st->is_self) {
+        ic_collect(ctx, p, depth + 1, out);
+        return;
+    }
+    if (st->is_attr) return; /* selectors carry no attribute steps */
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(ctx));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement ce = (LeptrisElement)c;
+        if (ic_step_elem_match(st, ce)) ic_collect(ce, p, depth + 1, out);
+    }
+}
+
+/* The leading './/' seed: a descendant that matches the FIRST step
+ * continues the chain through its own children (XPath descendant:: —
+ * the seed node itself is the step-0 match, not a new context). */
+static void ic_collect_seed(LeptrisElement d, const XsdIcPath* p,
+                            ic_nodes* out) {
+    if (!ic_step_elem_match(&p->steps[0], d)) return;
+    if (p->step_count == 1) {
+        ic_nodes_push(out, d);
+        return;
+    }
+    ic_collect(d, p, 1, out);
+}
+
+static void ic_collect_branch(LeptrisElement ctx, const XsdIcPath* p,
+                              ic_nodes* out) {
+    if (!p->desc) {
+        ic_collect(ctx, p, 0, out);
+        return;
+    }
+    /* every descendant (never the context itself), exactly once */
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(ctx));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement ce = (LeptrisElement)c;
+        ic_collect_seed(ce, p, out);
+        ic_collect_branch(ce, p, out);
+    }
+}
+
+/* One field value relative to a selected node; NULL = no node
+ * matched (§3.11.4 cl. 3: the key-sequence is shorter and the node
+ * leaves the qualified set). */
+static char* ic_field_walk(LeptrisElement node, const XsdIcPath* p,
+                           int depth) {
+    for (; depth < p->step_count; depth++) {
+        const XsdIcStep* st = &p->steps[depth];
+        if (st->is_self) continue;
+        if (st->is_attr) {
+            for (LeptrisAttribute a =
+                     leptris_element_first_attribute(node);
+                 a; a = leptris_attribute_next(a)) {
+                const char* raw = leptris_attribute_get_name(a);
+                if (!raw) continue;
+                const char* colon = strchr(raw, ':');
+                const char* al = colon ? colon + 1 : raw;
+                if (st->any_ns)
+                    return xsd_dup_str(
+                        leptris_attribute_get_value(node, a));
+                if (!st->local || strcmp(al, st->local) != 0) continue;
+                if (st->ns) {
+                    const char* au = leptris_attribute_namespace_uri(a);
+                    if (!au || strcmp(au, st->ns) != 0) continue;
+                } else if (colon) {
+                    /* '@x' never matches a prefixed attribute */
+                    continue;
+                }
+                return xsd_dup_str(leptris_attribute_get_value(node, a));
+            }
+            return NULL;
+        }
+        LeptrisElement hit = NULL;
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(node));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement ce = (LeptrisElement)c;
+            if (ic_step_elem_match(st, ce)) {
+                hit = ce;
+                break;
+            }
+        }
+        if (!hit) return NULL;
+        node = hit;
+    }
+    return xsd_dup_str(leptris_element_text(node));
+}
+
+static char* ic_field_value(LeptrisElement node, const XsdIcPath* p) {
+    if (!p->desc) return ic_field_walk(node, p, 0);
+    /* './/' in a field: the first descendant matching the FIRST step
+     * continues the chain (same seed semantics as the selector) */
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(node));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement ce = (LeptrisElement)c;
+        char* got = NULL;
+        if (ic_step_elem_match(&p->steps[0], ce))
+            got = ic_field_walk(ce, p, 1);
+        if (!got) got = ic_field_value(ce, p);
+        if (got) return got;
+    }
+    return NULL;
+}
+
 /* Evaluate one IC against the scoping element. pass1: collect
  * key/unique tuples and enforce uniqueness (key: also non-empty
- * fields). pass2: keyref tuples resolve against collected tables. */
+ * fields). pass2: keyref tuples resolve against collected tables.
+ * The selector/field paths are pre-normalized at capture with
+ * SCHEMA-side namespace resolution (#2156) — the general XPath
+ * engine (whose prefix context is the INSTANCE's) is no longer
+ * consulted, which is what silently skipped every namespaced
+ * constraint before. */
 static void validate_ics(struct xsd_validator* v,
                          struct leptris_xsd_schema* s,
                          LeptrisElement elem, const char* elem_name,
                          XsdKeyTable** tables, int pass) {
-    (void)v;
     const XsdElementIcs* ics = xsd_find_element_ics(s, elem_name);
     if (!ics) return;
-    LeptrisDocument doc = leptris_element_get_document(elem);
+    /* §3.11.4: uniqueness is judged within ONE scoping element
+     * instance's qualified node set — chap{1,2,3,4} + appx{1,2,3,4}
+     * (id040.v01) is legal. The keyref NODE TABLE stays a
+     * document-wide union (§3.11.5's descendant merge). */
+    XsdKeyTable* scope = NULL;
     for (XsdIc* ic = ics->constraints; ic; ic = ic->next) {
         int is_ref = ic->kind == 2;
         if (pass == 1 && is_ref) continue;
         if (pass == 2 && !is_ref) continue;
-        if (!ic->selector || !ic->name) continue;
-        LeptrisXPathResult sel =
-            leptris_xpath_eval(doc, elem, ic->selector);
-        if (!sel) continue;
-        size_t sel_count = leptris_xpath_result_count(sel);
-        for (size_t i = 0; i < sel_count; i++) {
-            LeptrisElement node = leptris_xpath_result_get(sel, i);
+        if (!ic->name || ic->sel_count == 0) continue;
+        if (pass == 1) {
+            /* §3.11.5: the (possibly EMPTY) node table exists for
+             * every key/unique — a keyref against it must fail. */
+            table_ensure(tables, ic->name);
+        }
+        ic_nodes sel = {NULL, 0, 0};
+        for (int b = 0; b < ic->sel_count; b++)
+            ic_collect_branch(elem, &ic->sel[b], &sel);
+        for (size_t i = 0; i < sel.n; i++) {
+            LeptrisElement node = sel.v[i];
             if (!node) continue;
+            /* §3.11.4 cl. 1: skipped nodes leave the target node
+             * set (wild101: the note inside skip content). */
+            if (ic_is_skipped(v, node)) continue;
             /* field values: string of each field expression */
             char* vals[8] = {0};
             size_t nv = 0;
             int missing = 0;
             for (size_t f = 0; f < ic->field_count && f < 8; f++) {
-                LeptrisXPathResult fr =
-                    leptris_xpath_eval(doc, node, ic->fields[f]);
-                if (!fr || leptris_xpath_result_count(fr) == 0) {
+                char* sv = ic_field_value(node, &ic->fpaths[f]);
+                if (!sv) {
                     missing = 1;
-                    if (fr) leptris_xpath_result_free(fr);
                     break;
                 }
-                /* String-value of the first node — attribute nodes
-                 * included (leptris_xpath_result_string handles every
-                 * node kind; #3526 contract). */
-                char* sv = leptris_xpath_result_string(fr);
-                leptris_xpath_result_free(fr);
-                vals[nv] = xsd_dup_str(sv ? sv : "");
-                leptris_free_string(sv);
-                nv++;
+                vals[nv++] = sv;
             }
             for (size_t k = 0; k < nv; k++)
                 if (!vals[k] || !vals[k][0]) missing = 1;
@@ -2235,8 +2443,8 @@ static void validate_ics(struct xsd_validator* v,
                 continue;
             }
             if (pass == 1) {
-                /* uniqueness within this constraint */
-                XsdKeyTable* t = table_find(*tables, ic->name);
+                /* uniqueness within THIS scoping instance */
+                XsdKeyTable* t = table_find(scope, ic->name);
                 int dup = 0;
                 if (t) {
                     for (XsdKeyTuple* tup = t->tuples; tup;
@@ -2245,14 +2453,18 @@ static void validate_ics(struct xsd_validator* v,
                         for (size_t k = 0; eq && k < nv; k++)
                             if (strcmp(tup->values[k], vals[k]) != 0)
                                 eq = 0;
-                        if (eq) { dup = 1; break; }
+                        if (eq) {
+                            dup = 1;
+                            break;
+                        }
                     }
                 }
                 if (dup) {
                     verrfk(v, "identity-constraint",
-                       ic->kind == 0 ? "key" : "unique",
-                          ic->name, "duplicate key tuple");
+                           ic->kind == 0 ? "key" : "unique",
+                           ic->name, "duplicate key tuple");
                 }
+                table_add(&scope, ic->name, vals, nv);
                 table_add(tables, ic->name, vals, nv);
             } else {
                 /* keyref: resolve later (deferred to pass 2 end) —
@@ -2262,8 +2474,9 @@ static void validate_ics(struct xsd_validator* v,
             }
             for (size_t k = 0; k < nv; k++) free(vals[k]);
         }
-        leptris_xpath_result_free(sel);
+        free(sel.v);
     }
+    tables_free(scope);
 }
 
 /* Pass 2 tail: every keyref tuple must appear in the referenced
@@ -2274,7 +2487,15 @@ static void resolve_keyrefs(struct xsd_validator* v,
     (void)s;
     for (XsdKeyTable* rt = refs; rt; rt = rt->next) {
         XsdKeyTable* target = table_find(all, rt->name);
-        if (!target) continue; /* unknown refer: capture-time lax */
+        if (!target) {
+            /* §3.11.4 cl. 4.3: the referenced key's node table must
+             * be associated with the scoping element — a missing
+             * table satisfies nothing (the old lax skip silently
+             * accepted every dangling keyref, #2156). */
+            verrfk(v, "identity-constraint", "keyref", rt->name,
+                   "reference target has no node table");
+            continue;
+        }
         for (XsdKeyTuple* want = rt->tuples; want; want = want->next) {
             int found = 0;
             for (XsdKeyTuple* have = target->tuples; have;
@@ -2333,6 +2554,12 @@ struct xsd_validator* xsd_validator_new(struct leptris_xsd_schema* s) {
 
 void xsd_validator_free(struct xsd_validator* v) {
     if (!v) return;
+    struct ic_skipped* sk = v->skipped;
+    while (sk) {
+        struct ic_skipped* sn = sk->next;
+        free(sk);
+        sk = sn;
+    }
     struct xsd_error* e = v->errors;
     while (e) {
         struct xsd_error* n = e->next;

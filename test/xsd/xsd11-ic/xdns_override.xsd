@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2156: schema-level xpathDefaultNamespace=##local overridden by
+     a selector/field-level literal URI (§3.13.2 — the host element's
+     own attribute wins, the id052 shape). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://ex.io/ic"
+           elementFormDefault="qualified"
+           xpathDefaultNamespace="##local">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="sec" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:attribute name="nr"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:unique name="u1">
+      <xs:selector xpath="sec" xpathDefaultNamespace="http://ex.io/ic"/>
+      <xs:field xpath="@nr"/>
+    </xs:unique>
+  </xs:element>
+</xs:schema>

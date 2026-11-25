@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2156: a multi-step child-chain field (§3.11.6.3 [7]
+     ( Step '/' )* Step). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:s="http://ex.io/ic"
+           targetNamespace="http://ex.io/ic"
+           elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="sec" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="grp" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="k" minOccurs="0"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:unique name="u1">
+      <xs:selector xpath="s:sec"/>
+      <xs:field xpath="s:grp/s:k"/>
+    </xs:unique>
+  </xs:element>
+</xs:schema>
