@@ -4207,6 +4207,9 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             if (a->compiled) leptris_xquery_free(a->compiled);
             free(a->test);
             free(a->type);
+            for (int i = 0; i < a->test_attr_n; i++)
+                free(a->test_attrs[i]);
+            free(a->test_attrs);
             free(a);
             a = an;
         }
