@@ -227,13 +227,21 @@ if(NOT LEPTRIS_ENABLE_PGO STREQUAL "OFF")
     elseif(MSVC)
         if(LEPTRIS_ENABLE_PGO STREQUAL "GENERATE")
             add_compile_options(/GL)
-            add_link_options(/GENPROFILE:${LEPTRIS_PGO_DIR} /LTCG)
+            # /GENPROFILE takes control keywords, not a directory: the
+            # .pgd/.pgc files land beside each instrumented output and
+            # the trainer folds them together (pgomgr /merge) before the
+            # USE link (#2167). A naked path argument here used to be
+            # parsed as keywords, killing every instrumented link.
+            add_link_options(/GENPROFILE /LTCG)
             file(MAKE_DIRECTORY ${LEPTRIS_PGO_DIR})
-            message(STATUS "PGO (MSVC): GENERATE → ${LEPTRIS_PGO_DIR}")
+            message(STATUS "PGO (MSVC): GENERATE → .pgd beside each output")
         elseif(LEPTRIS_ENABLE_PGO STREQUAL "USE")
             add_compile_options(/GL)
-            add_link_options(/USEPROFILE:${LEPTRIS_PGO_DIR} /LTCG)
-            message(STATUS "PGO (MSVC): USE ← ${LEPTRIS_PGO_DIR}")
+            # Plain /USEPROFILE: the linker reads <output>.pgd beside the
+            # output — the trainer consolidates the per-exe profiles into
+            # libleptris.pgd next to the dll before this build runs.
+            add_link_options(/USEPROFILE /LTCG)
+            message(STATUS "PGO (MSVC): USE ← libleptris.pgd beside the output")
         endif()
     else()
         message(WARNING "LEPTRIS_ENABLE_PGO=${LEPTRIS_ENABLE_PGO} not supported for ${CMAKE_C_COMPILER_ID}; ignoring")
