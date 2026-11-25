@@ -77,16 +77,20 @@ expressions and unresolved schema prefixes failing the schema,
 element particles, §3.10.4.1 skipped subtrees omitted from target
 node sets, per-scoping-element uniqueness (§3.11.4), vacuous node
 tables (§3.11.5), strict keyref target tables; re-measured on the
-#2155 base): TBD/2206 pass. The identity-constraint class CLOSES
-and the wild101/wild103 key rows flip with it. Spec tests:
-test/xsd/test_xsd11_ic.cpp. The 1.0 lane rides the same engine and
-gains 3 rows (1020 → 1022, see xsd-dispositions/README.md).
+#2155 base): **1702/2206 pass** — 1140 valid / 459 invalid / 103
+schema-error (504 reds, zero regressions). The identity-constraint
+class CLOSES: 18 invalid instance rows + 2 schema-error rows flip
+green, and 6 wildcard-family key rows (wild101/wild103 — their
+schemas carry an xs:key the old engine never evaluated) flip with
+them. Spec tests: test/xsd/test_xsd11_ic.cpp. The 1.0 lane rides
+the same engine and gains 3 rows (1020 → 1022, see
+xsd-dispositions/README.md).
 
-By family (#2156): TBD.
+By family (#2156): core 1110→1136; the other families unchanged.
 
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1676) is pinned and
+record for every row left in it. The floor (now 1702) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -112,7 +116,9 @@ families); the engine parses UTF-16 natively, so they are IN lane.
 
 Per-row counts below are approximate (the #2148 classifier lineage);
 the authoritative totals are the gate's printed verdict split
-(#2155: 157 valid / 175 invalid / 202 schema-error reds).
+(#2155: 157 valid / 175 invalid / 202 schema-error reds; #2156
+re-sliced the ic class row: 153 valid / 151 invalid / 200
+schema-error reds).
 
 ## valid rejected by the engine (153)
 
@@ -124,7 +130,7 @@ the authoritative totals are the gate's printed verdict split
 | 18 | saxon Complex: `<xs:attribute ref="xsi:type" default="..."/>` — instance-determined type via a DEFAULTED xsi:type attribute | OPEN — xsi:type honoring missing wholesale (same class as the 1.0 lane's complex-type-extension row); the defaulted form is 1.1-only syntax |
 | 17 | saxon Id + ibm S3_3_4: multiple ID-typed attributes on one type — legal since 1.1, engine still enforces the 1.0 one-ID-per-element rule | OPEN — the one-ID gate needs an engine version flip (gate exists: "more than one ID-typed attribute (XSD 1.0 one-ID-per-element)") |
 | 14 | saxon/oracle Zone: valid timezone-bearing dateTime/time lexicals (±14:00, explicitTimezone-compliant) rejected as "lexical value does not match its type" | CLOSED by #2155 — the ±14:00 lexical rows, the timezone-bound d3_3_9..14 rows and zone202's year-zero enumeration flipped (the temporal-key enumeration equality now admits "-0000-02" over the enumerated "0000-02") |
-| 4 | saxon Zone zone206/301/302: time enumerations with instant-equal timezone-distinct values, and the keyref `t` failing to resolve ("keyref 't': reference does not resolve to any key") | OPEN — zone206's enumeration equality is in place; the blocker is the 1.0 lane's identity-constraint capture (the keyref reference does not resolve), same class as the Id rows below |
+| 4 | saxon Zone zone206/301/302: time enumerations with instant-equal timezone-distinct values, and the keyref `t` failing to resolve ("keyref 't': reference does not resolve to any key") | OPEN — zone206's enumeration equality is in place; the remaining blocker for the keyref rows is VALUE-space tuple comparison (§3.11.4: "equal or identical ... on the values") — the constraint now RUNS (#2156 fixed the capture + scoping) but tuple equality is still string-based, so PT29H never equals P1DT5H |
 | 11 | ibm S3_4_1 (9) + saxon Assert (2): documents whose assertions PASS are rejected — the ibm rows keep the content-model residue around complexContent+assert types ("children do not match the content model"); assert020/021 (content model again); assert-simple006 flipped in #2155 | OPEN — the assert capture rewrites the content model for complexContent extension (base content lost); the typing-shape residue remains |
 | 9 | ibm S3_10_1/S3_8_6: weakened UPA sequences (`<element minOccurs="0"/><any/>`) and weak-wildcard lax typing | OPEN — the compile-side UPA gate fires where 1.1 relaxed it (see the engine quirk above); weak wildcard (§3.8.6) governing-type compatibility unevaluated |
 | 5 | saxon Simple: fixed/default value semantics incl. defaultAttributes application | OPEN — 1.1 default semantics on attribute uses |
@@ -133,13 +139,14 @@ the authoritative totals are the gate's printed verdict split
 | 3 | ibm S3_12 s3_12v09/s3_12ii04: valid cta schema/instance rows — the mixed complexContent EXTENSION compile-status artifact (the two schema-only rows compile with a non-OK status, see the engine quirk) and the extension content model losing the base's lax wildcard (s3_12v09.xml) | OPEN — alternative DISPATCH itself fires and selects correctly; the blockers are the extension-model classes above |
 | 4 | substitution groups: saxon Subsgroup (2, member of a substitution group where the head appears) + ibm S2_2_2 (2, valid instances against cyclic subsgroup heads) | OPEN — same substitution-group gap as the 1.0 lane |
 
-## invalid documents accepted (175)
+## invalid documents accepted (151)
 
 | rows | class | disposition |
 |---|---|---|
 | 15 | ibm S3_3_4 ii: instance-invalid ID/IDREF rows (fixed on ID-typed elements, ID value-space violations) | OPEN — the one-ID-per-element gate and the ID value-space checks; no assert semantics involved (the #2149-era table miscounted these into the 85-row class) |
+| 21 | saxon Id id004-id017: instance-invalid ID-family rows accepted (ID list types, ID-typed complexTypes with simple content, ID attribute defaults) | OPEN — re-sliced out of #2155's ic class row (#2156): the one-ID gate engine flip + the ID value-space checks, same class as the ibm S3_3_4 ii row |
 | 11 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6_2), castable-as-double accepting '10f4' (assert-simple003/004) | OPEN — each names an ENGINE gap (focus semantics, doc loading, arithmetic error semantics, carrier decomposition, castable lexical validators), not a facet-capture gap |
-| 66 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side |
+| 60 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side (#2156 retired the six wild101/wild103 key rows whose real blocker was an unevaluated xs:key) |
 | 5 | saxon CTA cta0001/cta0044 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044's residue is the complexContent content-model gap — the selected aType_f requires an `f` child the instance lacks) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |
 | 12 | saxon Open (11) + ibm s3_16_2ii06 (1): openContent `mode="strict"` violations accepted — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise | OPEN |
@@ -159,7 +166,7 @@ scale window and NaN-enumeration rule are enforced, and
 explicitTimezone is applied to values; the 18-row explicitTimezone
 class and the 3-row cta0040/41 stamp class flipped with it.)
 
-## schema-error schemas that compile clean (202)
+## schema-error schemas that compile clean (200)
 
 | rows | class | disposition |
 |---|---|---|
@@ -178,7 +185,7 @@ class and the 3-row cta0040/41 stamp class flipped with it.)
 | 5 | saxon VC/vc901 (4) + ibm S4_2_2 (1): invalid conditional-inclusion combos (vc:minVersion on a 1.0-only schema, invalid vc:type) | OPEN — vc: attribute validity unchecked |
 | 3 | saxon TargetNS `.n`: targetNamespace constraints | OPEN |
 | 4 | saxon Subsgroup (2) + ibm S2_2_2 (2): substitution-group cycles (structures 3.3.6.1.4/5 — circular subsgroup heads, type substitutability) | OPEN — re-dispositioned here from #2148's datatype row (not datatype defects); substitution-group cycle detection |
-| 3 | saxon Id `.bad` (2) + ibm S2_2_4 (1): ic schema constraints (3.11.3.4 — ref excludes non-annotation children and element children) | OPEN — re-dispositioned here from #2148's datatype row; the ic ref allowlist |
+| 1 | ibm S2_2_4 (1): ic schema constraints (3.11.3.4 — ref excludes non-annotation children and element children) | OPEN — re-dispositioned here from #2148's datatype row; the ic ref allowlist (#2156 closed the saxon Id `.bad` pair — missing referent + category mismatch — via the post-capture @ref resolution) |
 | 1 | ibm D3_1: the deprecated `http://www.w3.org/2001/XMLSchema-datatypes` namespace must be rejected | OPEN — trivial prefix-map check |
 
 (#2155 retired the 71-row facet-applicability class: all 68 datatype

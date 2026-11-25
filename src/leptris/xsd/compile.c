@@ -4996,6 +4996,8 @@ static int xsd_ic_parse_path(const char* xp, LeptrisElement host,
     return out->step_count > 0 ? 0 : -1;
 }
 
+static void xsd_ic_path_clear(XsdIcPath* p);
+
 /* Capture one constraint's shape: name/@ref, refer, and the
  * selector/field paths parsed into the §3.11.6 subset with their
  * namespaces resolved against the SCHEMA document (each selector /
@@ -5048,9 +5050,13 @@ static void xsd_ic_capture_shape(LeptrisElement e, XsdIc* ic) {
                 memcpy(branch, b, bl);
                 branch[bl] = 0;
                 if (xsd_ic_parse_path(branch, fe, 0,
-                                      &ic->sel[ic->sel_count]) != 0)
+                                      &ic->sel[ic->sel_count]) != 0) {
+                    /* a failed branch stays uncounted — its step
+                     * strings must be released here or the schema
+                     * free walk never sees them */
+                    xsd_ic_path_clear(&ic->sel[ic->sel_count]);
                     ic->parse_error = 1;
-                else
+                } else
                     ic->sel_count++;
                 free(branch);
                 b = bar ? bar + 1 : NULL;
@@ -5066,6 +5072,17 @@ static void xsd_ic_capture_shape(LeptrisElement e, XsdIc* ic) {
             ic->parse_error = 1; /* beyond the field cap */
         }
     }
+}
+
+/* Release one branch's step strings — a parse FAILURE leaves the
+ * branch uncounted (sel_count is not advanced), so the schema free
+ * walk would never see its allocations (the leaks(1) catch). */
+static void xsd_ic_path_clear(XsdIcPath* p) {
+    for (int i = 0; i < p->step_count; i++) {
+        free(p->steps[i].ns);
+        free(p->steps[i].local);
+    }
+    memset(p, 0, sizeof(*p));
 }
 
 static void xsd_ic_append(XsdIc** head, XsdIc** tail, XsdIc* ic) {

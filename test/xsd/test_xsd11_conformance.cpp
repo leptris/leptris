@@ -156,13 +156,14 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * reaching local element particles, §3.10.4.1 skipped subtrees
      * omitted from target node sets, per-scoping-element
      * uniqueness, vacuous node tables, strict keyref target
-     * tables): TBD/2206 — 18 invalid Id/S3_11_2 rows + 2
+     * tables): 1702/2206 — 18 invalid Id/S3_11_2 rows + 2
      * schema-error rows + 6 wildcard-family key rows flipped, zero
-     * regressions (measured 2026-11-25). Monotonically rising. */
-    EXPECT_GE(pass, 1676) << "conformance floor regressed";
+     * regressions (measured 2026-11-25 on the #2155 base).
+     * Monotonically rising. */
+    EXPECT_GE(pass, 1702) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1140);
-    EXPECT_GE(pass_invalid, 435);
-    EXPECT_GE(pass_schema_error, 101);
+    EXPECT_GE(pass_invalid, 459);
+    EXPECT_GE(pass_schema_error, 103);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
