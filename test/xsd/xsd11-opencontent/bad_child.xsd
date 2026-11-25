@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- openContent admits only an annotation and one xs:any -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="interleave">
+      <xs:element name="nope"/>
+    </xs:openContent>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

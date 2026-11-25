@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- src-ct.3: mode="none" FORBIDS an xs:any child (bug 7069) -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="none">
+      <xs:any namespace="http://open.com/"/>
+    </xs:openContent>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

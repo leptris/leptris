@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- invalid extension: the schema's defaultOpenContent takes
+     precedence over the base's open content, and suffix over
+     interleave widens nothing (cos-ct-extends.1.4.3.2.2.3) -->
+<xs:defaultOpenContent mode="suffix">
+  <xs:any namespace="http://open.com/" processContents="lax"/>
+</xs:defaultOpenContent>
+<xs:complexType name="B">
+  <xs:openContent mode="interleave">
+    <xs:any namespace="http://closed.com/" processContents="lax"/>
+  </xs:openContent>
+  <xs:sequence>
+    <xs:element name="a" maxOccurs="unbounded"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:extension base="B">
+      <xs:sequence>
+        <xs:element name="d" minOccurs="0"/>
+      </xs:sequence>
+    </xs:extension>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

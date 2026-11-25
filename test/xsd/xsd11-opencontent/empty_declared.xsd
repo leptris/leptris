@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- declared open content applies to an empty content model even
+     without appliesToEmpty; the variety upgrades to element-only,
+     so whitespace text stays legal -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="suffix">
+      <xs:any namespace="http://open.com/" processContents="lax"/>
+    </xs:openContent>
+    <xs:sequence/>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

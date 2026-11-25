@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- extension wildcard union: the derived open content admits the
+     union of its own and the base's namespaces (cos-aw-union) -->
+<xs:complexType name="B">
+  <xs:openContent mode="interleave">
+    <xs:any namespace="http://open.com/" processContents="skip"/>
+  </xs:openContent>
+  <xs:sequence>
+    <xs:element name="a" maxOccurs="unbounded"/>
+    <xs:element name="b" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:extension base="B">
+      <xs:openContent mode="interleave">
+        <xs:any namespace="http://closed.com/" processContents="skip"/>
+      </xs:openContent>
+      <xs:sequence>
+        <xs:element name="d" minOccurs="0"/>
+      </xs:sequence>
+    </xs:extension>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

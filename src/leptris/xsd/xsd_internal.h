@@ -193,6 +193,38 @@ typedef struct xsd_cm {
     struct xsd_cm* open_any; /* XSD 1.1: xs:openContent wildcard */
     int oc_mode;        /* 0 none/unset, 1 suffix, 2 interleave */
     int oc_owned;       /* the wildcard node is this model's own */
+    /* #2151 (XSD 1.1 §3.4.2.3.3 clauses 5/6): how the open content
+     * was established — 0 none declared, 1 declared with a wildcard
+     * (mode suffix/interleave), 2 declared mode="none" (blocks the
+     * schema default; an extension keeps the base's open content).
+     * The unit id ties the type to the schema DOCUMENT that captured
+     * it: a defaultOpenContent applies only to the types of its own
+     * document (open040/open041/open042). */
+    int oc_declared;
+    int oc_unit_id;
+    char* not_ns; /* XSD 1.1 xs:any/@notNamespace: whitespace-
+                   * separated namespace exclusions (##targetNamespace
+                   * / ##local resolve like @namespace lists) */
+    /* The derivation base for the OPEN-CONTENT pass (post-capture):
+     * an extension's explicit content type carries the base's open
+     * content; the declared wildcard unions over it; the derivation-
+     * ok ladder (cos-ct-extends.1.4.3.2.2.3/4) and the restriction
+     * subset checks resolve the base here. Borrowed-name strings,
+     * owned copies (freed with the node). */
+    char* oc_ext_base;
+    char* oc_ext_base_ns;
+    int oc_unioned;   /* the base wildcard already joined */
+    int oc_checked;   /* the derivation pass processed this type */
+    int empty_content; /* #2151: explicit content EMPTY (variety
+                        * empty, XSD 1.1 §3.4.2.3.3 cl. 4.1.1/3.1.2):
+                        * no character content at all — not even
+                        * whitespace (open012.n3) */
+    int empty_upgraded; /* #2151: an open content UPGRADED the empty
+                         * variety to element-only (cl. 6.2): the
+                         * element-only text rule applies — non-
+                         * whitespace character content is invalid
+                         * (open010.n2), whitespace stays legal
+                         * (open010.v2) */
     /* leptris-rs#35: particle value constraints + the type's mixed
      * flag. An empty element is satisfied BY its fixed/default value
      * (XSD 1.0 §3.12.2/§4.3.1.2 — isDefault005); mixed="true"

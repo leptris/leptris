@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- src-ct.5: complexType/@mixed and complexContent/@mixed must
+     agree (s3_4_1si09) -->
+<xs:element name="root">
+  <xs:complexType mixed="true">
+    <xs:complexContent mixed="false">
+      <xs:extension base="bele">
+        <xs:sequence>
+          <xs:element name="element2" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:element>
+<xs:complexType name="bele" mixed="true">
+  <xs:sequence>
+    <xs:element name="element1" type="xs:string" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+</xs:schema>

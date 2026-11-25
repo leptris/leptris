@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- invalid restriction: the derived open content widens the mode
+     (suffix -> interleave) over a non-empty model -->
+<xs:complexType name="B">
+  <xs:openContent mode="suffix">
+    <xs:any namespace="http://open.com/" processContents="lax"/>
+  </xs:openContent>
+  <xs:sequence>
+    <xs:element name="a" maxOccurs="unbounded"/>
+    <xs:element name="b" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:restriction base="B">
+      <xs:openContent mode="interleave">
+        <xs:any namespace="http://open.com/" processContents="lax"/>
+      </xs:openContent>
+      <xs:sequence>
+        <xs:element name="a"/>
+      </xs:sequence>
+    </xs:restriction>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

@@ -118,6 +118,57 @@ By family (#2150): override 75→83; the other families unchanged.
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
 record for every row left in it. The floor (now 1710) is pinned and
+
+Re-measured 2026-11-25 (#2151, branch `xsd11-opencontent` — the
+xs:openContent / xs:defaultOpenContent lane: the unmarked-schema
+syntax gate (the whole saxonData/Open corpus carries no version
+marker), the S4SD interleave default for a mode-less openContent,
+the defaultOpenContent precedence chain — declared beats default
+(mode="none" declares nothing AND blocks the default, open031),
+the default beats the base for extensions (open030), per-document
+unit scoping (a document's default applies to its own types:
+redefine bodies ride the includer's default, open042; override
+bodies and included documents do not, open043/open040/open041),
+suffix + interleave absorption over sequence / xs:all / xs:choice
+models (§3.4.4.3 — the wildcard absorbs before ANY model element
+step, and a particle-only trace attributes children greedily so
+declared particles keep governing their instances: open025.n1's
+mis-typed integer is caught, open047.v3's second `<b>` rides the
+skip wildcard untyped), the §3.4.2.3.3 clause 6.2 empty-variety
+rules (variety empty forbids all text — open012.n3; an applied
+wildcard upgrades to element-only, open010), extension
+inheritance + mode="none" inheritance + the §3.10.6.3 wildcard
+union + the cos-ct-extends.1.4.3.2.2.3/4 mode ladder + subset
+check, the restriction subset/no-add/weaker-pc checks with the
+suite's empty-model exemption (open020/021/022), the §3.8.6.4
+element-vs-wildcard UPA relaxation for 1.1-evidence schemas
+(open034's wildcard after a+ is legal competition), the open
+content wildcard's @notNamespace (open047) and prefix-resolved
+@notQName (s3_4_1ii04), and the schema-error class (src-ct.3
+any/none co-occurrence, non-any children, the annotation limit,
+ID form + uniqueness, occurrence attributes on the wildcard,
+ct-props-correct.5 simpleContent carriers, src-ct.5 mixed
+agreement, the mixed-mismatch extension, the defaultOpenContent
+placement rule, si04/05/06 derivation ladders); re-measured on
+the #2156 base): **1787/2206 pass** — 1191 valid / 467 invalid /
+129 schema-error (419 reds, zero regressions — the pinned 1.0
+corpus holds at 175 with its environment-gated skip). The
+openContent family goes 122/205 → **196/205**. Spec tests:
+test/xsd/test_xsd11_opencontent.cpp (27 specs, red-first).
+
+By family (#2151): openContent 122→196; core 1136→1147; valid
+1140→1191; invalid 459→467; schema-error 103→129 (the Open
+`.bad` + ibm S3_4_1 derivation classes close; the ibm S3_16_2
+rows the #2148 classifier lumped into openContent are UNION
+tests that flipped with the wildcard-namespace machinery).
+
+By family: assertions 270/296 · cta 99/125 · override 75/87 ·
+openContent 196/205 · core 1147/1493.
+
+`XsdConformance11.ManifestExpectationsMatch` (test/xsd/
+test_xsd11_conformance.cpp) is the gate; this file is the disposition
+record for every row left in it. The floor (now 1787) is pinned and
+>>>>>>> 39f81619 (xsd11: xs:openContent phase-3 rules (#2151))
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -152,7 +203,7 @@ schema-error reds; #2150 flips 8 override schema-error rows:
 
 | rows | class | disposition |
 |---|---|---|
-| 41 | saxon Open: openContent — allowed extra elements after (and with `mode="interleaved"`, among) the declared particles rejected ("children do not match the content model") | OPEN — `open_any` feeds the NFA as a suffix self-loop (content_model.c:92); suffix openness works for some shapes but the particle-then-any ordering still rejects. Largest single 1.1 gap. |
+| 41 | saxon Open: openContent — allowed extra elements after (and with `mode="interleaved"`, among) the declared particles rejected ("children do not match the content model") | CLOSED by #2151 — suffix + interleave absorption over sequence/all/choice models (§3.4.4.3: the wildcard absorbs before ANY model element step), defaultOpenContent capture with per-document unit scoping, the empty-variety rules, extension inheritance/union; the family's only remaining reds are the defaultAttributes sub-family (new row in the invalid table) |
 | 19 | saxon Wild valid: instances exercising 1.1 wildcard namespace sets (`notNamespace`, `notQName`, `namespace="a b"`) wrongly excluded ("excluded by notQName") | OPEN — the wildcard predicate inverts acceptance for 1.1-only set forms on the INSTANCE side |
 | 19 | saxon All + ibm S3_3_6/S3_4_6: `xs:all` with relaxed occurrences (min/max > 1) and RESTRICTION of xs:all rejected | OPEN — content model for relaxed xs:all (1.1 allows 0..N particles) not built |
 | 18 | saxon Complex: `<xs:attribute ref="xsi:type" default="..."/>` — instance-determined type via a DEFAULTED xsi:type attribute | OPEN — xsi:type honoring missing wholesale (same class as the 1.0 lane's complex-type-extension row); the defaulted form is 1.1-only syntax |
@@ -177,7 +228,7 @@ schema-error reds; #2150 flips 8 override schema-error rows:
 | 60 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side (#2156 retired the six wild101/wild103 key rows whose real blocker was an unevaluated xs:key) |
 | 5 | saxon CTA cta0001/cta0044 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044's residue is the complexContent content-model gap — the selected aType_f requires an `f` child the instance lacks) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |
-| 12 | saxon Open (11) + ibm s3_16_2ii06 (1): openContent `mode="strict"` violations accepted — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise | OPEN |
+| 12 | saxon Open (11) + ibm s3_16_2ii06 (1): openContent `mode="strict"` violations accepted — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise | CLOSED by #2151 — the violations these rows encode are namespace-set violations, and the open content wildcard now enforces its full grammar (@namespace lists, @notNamespace, prefix-resolved @notQName, greedy attribution so a declared particle still type-checks its own instances: open025.n1). Strict processContents on open-content-absorbed children remains tier-1 lax (§3.10.4.1 posture pinned by the moxml corpus); no remaining row depends on it |
 | 5 | saxon VC: invalid-under-version-control documents accepted | OPEN — conditional inclusion: the version test prunes NOTHING (all branches evaluated/none pruned), so vc-invalid instances sail through |
 | 3 | ibm S3_4_2_4 + saxon Override: instance validity under overridden/redefined components | OPEN — overridden components captured (compile.c:55) but instance typing uses the pre-override definitions (#679 retired the three Override n02 no-namespace-instance rows via exact root binding) |
 | 3 | ibm S3_2_3: element-decl clause violations (targetNamespace on local declarations) accepted | OPEN |
@@ -199,11 +250,16 @@ class and the 3-row cta0040/41 stamp class flipped with it.)
 | rows | class | disposition |
 |---|---|---|
 | 57 | ibm S3_3_4 si (11) + saxon Simple `.bad` (46): invalid simpleType derivations (bad facet values, non-numeric restriction of numerics, `final="extension"` misuse...) compile clean | OPEN — §3.3.4/§3.16.2 derivation-ok clause sweep for simple types; single largest schema-side class (#2155's applicability sweep flipped 9 of the ibm rows — si12–si20's inapplicable facets — and 1 saxon Simple row) |
-| 8 | ibm S3_4_1: complexType derivation-ok clauses (cos-st-restricts / derivation-ok-restriction) compile clean | OPEN — the complexType-side derivation sweep (the 1.0 lane holds the capture) |
+| 8 | ibm S3_4_1: complexType derivation-ok clauses (cos-st-restricts / derivation-ok-restriction) compile clean | CLOSED by #2151 — the open-content derivation ladders (cos-ct-extends.1.4.3.2.2.3/4, cos-ns-subset, cos-content-act-restrict approximation), the extension mixed-match (si08), the src-ct.5 mixed-attribute conflict (si09), the defaultOpenContent placement rule (si02), and the src-ct.3 wildcard checks (si01/si03) now reject; the ibm S3_4_1 schema-invalid rows the classifier tagged openContent are all green |
 | 32 | saxon All `.n`: xs:all compile constraints — group refs must be xs:all groups, occurrence/derivation rules | OPEN |
 | 22 | saxon Wild `.bad` (19) + ibm S3_3_6/S3_4_6 (3): wildcard namespace-set exclusivity (namespace= + notNamespace= combined; notQName with processContents=strict in xs:all) must be rejected | OPEN — the 1.1 wildcard ATTRIBUTES are parsed but their mutual-exclusion constraints unchecked |
 | 7 | override/redefine cycles residue: ibm S4_2_4/S4_2_2 (2) + ibm S3_4_2_4 (3) + the s3_12ii04 mixed-extension compile-status artifact (1) + s4_2_4si02c (1 — the mutual-redefine cycle's closing document si02b was never copied into the corpus, so the document graph the oracle sees is not reconstructible) | OPEN — cycle detection on redefine graphs beyond the override lane (#2150 flipped the eight saxon Override rows: over011/014/016/017/021/022/024/026 — src-override.1–4 plus the post-merge circular-derivation check, override-scoped) |
 | 19 | saxon Open `.bad` (14) + ibm S3_16_2 (5): openContent derivation rules (derived adds open content over a non-open base; fixed-slot violations) | OPEN |
+
+| 15 | override/redefine cycles: saxon Override/over011 (9) + ibm S4_2_4/S4_2_2 (2) + ibm S3_4_2_4 (3) + the s3_12ii04 mixed-extension compile-status artifact (1) | OPEN — cycle detection on override/redefine graphs |
+| 19 | saxon Open `.bad` (14) + ibm S3_16_2 (5): openContent derivation rules (derived adds open content over a non-open base; fixed-slot violations) | CLOSED by #2151 — the saxon `.bad` ladder enforces at compile (src-ct.3 any/none co-occurrence, annotation limit, ID form + uniqueness, occurrence attributes on the wildcard, simpleContent carriers, restriction no-add/subset/weaker-pc with the empty-model exemption, extension mode ladder + cos-ns-subset + §3.10.6.3 union); the ibm S3_16_2 rows were misclassified by the #2148 classifier — they are wildcard-UNION tests, not openContent, and flipped with the §3.10.6.3 machinery |
+| 9 | saxon Open defaultAttributes sub-family: open035.n1 (required id from the default attribute group missing must be invalid), open044.n1/n2 + open045.n1/n2 (anyAttribute from the default group mis-admitted / not admitted), open202.n1 (defaultAttributesApply=false must exclude the group's attrs), open205.n1 (foreign-ns default group attrs), open203.bad/204.bad (unresolved + non-imported defaultAttributes refs must fail the schema) | OPEN — re-dispositioned by #2151 from the openContent classes: these nine exercise §3.4.2.5 DEFAULT ATTRIBUTE GROUPS (`xs:schema/@defaultAttributes`, `defaultAttributesApply`, the group's attribute rows + anyAttribute, cross-ns reference resolution) — a separate feature, not openContent |
+>>>>>>> 39f81619 (xsd11: xs:openContent phase-3 rules (#2151))
 | 15 | cta alternative-table SCHEMA constraints (saxon cta9001err/9004-9010err/cta0043 (9) + ibm s3_12si01-06 (6)): §3.3.6.1 cl.7 type-substitutability (every alternative/default type must derive from the declared type or be xs:error), cos-element-consistent type-table equivalence (cta9009/9010err, cta0043's restriction narrowing a table), src-ct.1 (cta9001err mixed+simpleContent), src-element.5 ordering | OPEN — compile-side constraint sweep for type tables; the dispatch validates fine on the legal schemas (#2149 fixed the instance side) |
 | 10 | ibm S3_2_3 (9) + D3_3_15 (1): element-decl clauses (targetNamespace on LOCAL declarations) and gDay timezone-bound facets compile clean | OPEN |
 | 5 | saxon/oracle Zone `.bad` (zone004/005/008 + zone408/409): explicitTimezone derivation (required→optional forbidden) | OPEN — the rest flipped under #2155's facet tables |

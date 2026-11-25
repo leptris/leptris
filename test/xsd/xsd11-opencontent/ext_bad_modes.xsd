@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- invalid extension: base allows interleave, derived only suffix
+     (cos-ct-extends.1.4.3.2.2.3) -->
+<xs:complexType name="B">
+  <xs:openContent mode="interleave">
+    <xs:any namespace="http://open.com/" processContents="lax"/>
+  </xs:openContent>
+  <xs:sequence>
+    <xs:element name="a" maxOccurs="unbounded"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:extension base="B">
+      <xs:openContent mode="suffix">
+        <xs:any namespace="http://open.com/" processContents="lax"/>
+      </xs:openContent>
+      <xs:sequence/>
+    </xs:extension>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

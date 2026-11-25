@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- interleave open content over an xs:choice content model -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="interleave">
+      <xs:any namespace="http://open.com/" processContents="lax"/>
+    </xs:openContent>
+    <xs:choice>
+      <xs:element name="a"/>
+      <xs:element name="b"/>
+    </xs:choice>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

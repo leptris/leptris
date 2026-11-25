@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- invalid restriction: the base has NO open content, the derived
+     type adds one over a non-empty model (cos-content-act-restrict:
+     the extras are not valid against the base) -->
+<xs:complexType name="B">
+  <xs:sequence>
+    <xs:element name="a" maxOccurs="unbounded"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:restriction base="B">
+      <xs:openContent mode="suffix">
+        <xs:any namespace="http://open.com/" processContents="lax"/>
+      </xs:openContent>
+      <xs:sequence>
+        <xs:element name="a"/>
+      </xs:sequence>
+    </xs:restriction>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

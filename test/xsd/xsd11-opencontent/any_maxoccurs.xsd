@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- the openContent wildcard carries NO occurrence attributes
+     (bug 15618) -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="suffix">
+      <xs:any namespace="http://open.com/" maxOccurs="unbounded"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="a"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+</xs:schema>
