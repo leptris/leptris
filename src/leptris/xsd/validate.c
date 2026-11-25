@@ -21,7 +21,8 @@
 extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
-                             const char* const* ns_uris, size_t count);
+                             const char* const* ns_uris, size_t count,
+                             int* oc_from);
 extern int xsd_builtin_valid(const char* type, const char* v);
 extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
@@ -578,10 +579,16 @@ static void validate_local_uri(struct xsd_validator* v,
  * -1 when no wildcard admits the name. XSD 1.0 section 3.9.4.2:
  * skip imposes NO constraint on the matched element (even a
  * declared one); strict requires a declaration; lax validates
- * declared children only. */
+ * declared children only. #2151: the open-content wildcard rides
+ * the same gate, EXCEPT when an element particle in the model
+ * matches the child's name — the validation-path rule (§3.8.4.1)
+ * attributes such a child to the PARTICLE, never to the open
+ * content (open025.n1: a declared <i> must face its type even
+ * though the skip wildcard could absorb it). */
 static int model_wildcard_pc(const XsdCm* model, const char* uri,
-                             const char* tns) {
+                             const char* tns, const char* cname) {
     if (!model) return -1;
+    int particle_match = 0;
     int best = -1;
     const XsdCm* stack[64];
     int sp = 0;
@@ -589,6 +596,9 @@ static int model_wildcard_pc(const XsdCm* model, const char* uri,
     while (sp > 0 && best < 2) {
         const XsdCm* p = stack[--sp];
         for (; p; p = p->next) {
+            if (cname && p->kind == XSD_CM_ELEMENT && p->name &&
+                strcmp(p->name, cname) == 0)
+                particle_match = 1;
             if (p->kind == XSD_CM_ANY) {
                 const char* grammar =
                     p->any_ns ? p->any_ns : "##any";
@@ -601,6 +611,17 @@ static int model_wildcard_pc(const XsdCm* model, const char* uri,
             }
             if (p->first_child && sp < 64)
                 stack[sp++] = p->first_child;
+        }
+    }
+    if (!particle_match && model->open_any) {
+        /* #2151: the open-content wildcard gates its absorbed
+         * children (skip imposes no constraint at all) */
+        const XsdCm* w = model->open_any;
+        const char* grammar = w->any_ns ? w->any_ns : "##any";
+        const char* unit = w->any_unit_tns ? w->any_unit_tns : tns;
+        if (any_attr_matches(grammar, uri, unit)) {
+            int pc = w->pc_level;
+            if (pc > best) best = pc;
         }
     }
     return best;
@@ -905,8 +926,7 @@ static void validate_children(struct xsd_validator* v,
      * and NO character content either — an attributes-only
      * complexType is empty (p2: <elem>abc</elem> [invalid]; the
      * oracle rejects whitespace-only content too, #1691 law) */
-    if (!model) {
-        /* simpleContent types ride text_type with no particle —
+    if (!model) {        /* simpleContent types ride text_type with no particle —
          * their text is validated at the call site. leptris-rs#35
          * (ctA033, idF025's inline c): mixed="true" admits character
          * content even with no particle model. */
@@ -936,6 +956,47 @@ static void validate_children(struct xsd_validator* v,
                       "not allowed: the content model is empty");
         }
         return;
+    }
+    /* #2151: variety EMPTY (§3.4.2.3.3 cl. 4.1.1/3.1.2) — an explicit
+     * empty content model with no open content applied forbids ALL
+     * character content, whitespace included (open012.n3). An
+     * applied open content upgrades the variety to element-only:
+     * non-whitespace character content is invalid (open010.n2),
+     * whitespace-only text stays legal (open010.v2). The walk reads
+     * the element's DIRECT text children — the deep
+     * leptris_element_text would drag the absorbed elements' own
+     * text in. */
+    if (model->empty_content || model->empty_upgraded) {
+        int text_bad = 0;
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(
+                     leptris_element_as_node(elem));
+             c && !text_bad; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_TEXT &&
+                leptris_node_get_type(c) !=
+                    LEPTRIS_NODE_TYPE_CDATA)
+                continue;
+            const char* t = leptris_text_node_get_content(c);
+            if (!t || !*t) continue;
+            if (model->empty_content) {
+                text_bad = 1;
+                break;
+            }
+            int ws_only = 1;
+            for (const char* q = t; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' &&
+                    *q != '\r')
+                    ws_only = 0;
+            if (!ws_only) text_bad = 1;
+        }
+        if (text_bad) {
+            const char* pn = NULL;
+            leptris_element_expanded_name(elem, &pn, NULL, NULL);
+            verrf_atk(v, elem, "content-model", pn ? pn : "",
+                      "element", "#text",
+                      "character content is not allowed: the "
+                      "content model is empty");
+        }
     }
     /* collect child names + uris */
     size_t n = 0;
@@ -972,8 +1033,16 @@ static void validate_children(struct xsd_validator* v,
      * never failed. Zero children still walks: the NFA accepts the
      * empty string only when every particle reaches accept with
      * min == 0. names/uris stay NULL (never dereferenced at n==0). */
+    /* #2151: the greedy-attribution trace — children from `oc_from`
+     * on may be attributed to the open content (the model's particle
+     * path diverged there), so they type by the wildcard's
+     * processContents instead of the name-matched particle
+     * (open047.v3: the second <b> rides the skip wildcard and is
+     * NOT type-checked; open025.n1: the first <i> still faces its
+     * declared type). */
+    int oc_from = -1;
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
-                               n);
+                               n, &oc_from);
     if (ok == -2) {
         /* #1894/#514: pathological occurrence product — the automaton
          * exceeds the compile-time size cap. The cap is a resource
@@ -1046,6 +1115,7 @@ static void validate_children(struct xsd_validator* v,
      * declaration) falls through to the global lookup here.
      * (first-name-match DFS — position-exact particle typing arrives
      * with the NFA trace.) */
+    size_t child_i = 0;
     for (LeptrisNodeRef c =
              leptris_node_first_child(leptris_element_as_node(elem));
          c; c = leptris_node_next_sibling(c)) {
@@ -1055,11 +1125,22 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
+        /* #2151: children from the trace's divergence point on may be
+         * attributed to the open content — their processContents is
+         * the OC wildcard's own, and the name-matched particle does
+         * NOT govern them (the model's particle path already
+         * diverged). */
+        int oc_attributed =
+            oc_from >= 0 && (int)child_i >= oc_from && model->open_any;
+        child_i++;
         /* #1879: wildcard processContents gates the child — skip
          * imposes no constraint at all (even a declared child);
          * strict demands a declaration when no particle/global
          * types it; lax validates declared children only. */
-        int wpc = model_wildcard_pc(model, cu, xsd_target_ns(s));
+        int wpc = oc_attributed ? model->open_any->pc_level
+                                : model_wildcard_pc(model, cu,
+                                                    xsd_target_ns(s),
+                                                    cl);
         if (wpc == 2) {
             /* #2156: record the skip attribution (§3.10.4.1) —
              * identity constraints omit skipped subtrees from their
@@ -1084,7 +1165,7 @@ static void validate_children(struct xsd_validator* v,
          * decides whether it is needed. */
         const char* ltype = NULL;
         const char* lfill = NULL;
-        if (model) {
+        if (model && !oc_attributed) {
             XsdCm* stack[64];
             int sp = 0;
             stack[sp++] = model;

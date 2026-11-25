@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- defaultOpenContent (mode absent = interleave) applies to a
+     non-empty content model -->
+<xs:defaultOpenContent>
+  <xs:any namespace="http://open.com/" processContents="lax"/>
+</xs:defaultOpenContent>
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:sequence>
+      <xs:element name="a"/>
+      <xs:element name="b" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

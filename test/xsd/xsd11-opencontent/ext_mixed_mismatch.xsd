@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- cos-ct-extends.1.4.3.2.2.1: an extension's content type and its
+     base's must both be mixed or both element-only (s3_4_1si08) -->
+<xs:element name="root">
+  <xs:complexType mixed="true">
+    <xs:complexContent>
+      <xs:extension base="bele">
+        <xs:sequence>
+          <xs:element name="element2" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:element>
+<xs:complexType name="bele">
+  <xs:sequence>
+    <xs:element name="element1" type="xs:string" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+</xs:schema>

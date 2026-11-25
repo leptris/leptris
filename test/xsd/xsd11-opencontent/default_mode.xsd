@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- mode attribute ABSENT: the default is interleave (S4SD) -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent>
+      <xs:any namespace="http://open.com/" processContents="lax"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="a"/>
+      <xs:element name="b" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

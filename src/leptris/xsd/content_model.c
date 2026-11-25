@@ -37,6 +37,8 @@ typedef struct {
     struct leptris_xsd_schema* s; /* group-ref resolution */
     int depth;                    /* cyclic-group guard */
     int overflow; /* #1894: crossed XSD_CM_NFA_MAX — abort the build */
+    int no_oc;    /* #2151: particle-only build (open-content loops
+                     suppressed — the greedy-attribution trace) */
 } CmNfa;
 
 /* leptris#1894: a counted particle multiplies the expanded NFA (finite
@@ -89,14 +91,21 @@ static void cm_build_occurrence(CmNfa* n, XsdCm* node,
  * any-namespace elements (per the wildcard's grammar) consume a
  * child without advancing the model. */
 static void oc_loop(CmNfa* n, XsdCm* node, int state) {
-    if (!node->open_any || !node->oc_mode) return;
+    if (!node->open_any || !node->oc_mode || n->no_oc) return;
     nfa_trans(n, state, 0, node->open_any, state);
 }
 
 static void cm_build_children(CmNfa* n, XsdCm* node, int from, int to) {
     XsdCm* c = node->first_child;
     if (!c) {
+        /* an empty model still carries open content (§3.4.2.3.3
+         * cl. 6.2 synthesizes the empty sequence particle and the
+         * wildcard — open010's suffix self-loops must survive) */
+        if (node->open_any && node->oc_mode == 2)
+            oc_loop(n, node, from);
         nfa_trans(n, from, -1, NULL, to);
+        if (node->open_any && node->oc_mode)
+            oc_loop(n, node, to);
         return;
     }
     int interleave =
@@ -142,10 +151,21 @@ static void cm_build(CmNfa* n, XsdCm* node, int from, int to) {
         case XSD_CM_CHOICE: {
             XsdCm* c = node->first_child;
             if (!c) {
+                if (node->open_any && node->oc_mode == 2)
+                    oc_loop(n, node, from);
                 nfa_trans(n, from, -1, NULL, to);
+                if (node->open_any && node->oc_mode)
+                    oc_loop(n, node, to);
                 return;
             }
+            /* open content rides a choice's junctions: interleave
+             * absorbs before and after any branch (ibm S3_4_1 v02's
+             * choice models), suffix only trails */
+            if (node->open_any && node->oc_mode == 2)
+                oc_loop(n, node, from);
             for (; c; c = c->next) cm_build_occurrence(n, c, from, to);
+            if (node->open_any && node->oc_mode)
+                oc_loop(n, node, to);
             return;
         }
     }
@@ -256,6 +276,22 @@ static int cm_not_qname_hits(const char* tokens,
             if (xsd_element_name_defined(s, local, uri)) return 1;
             continue;
         }
+        /* #2151: a PREFIX-RESOLVED token ("{uri}local") — the open
+         * content capture resolved the prefix against the declaring
+         * element's in-scope bindings (s3_4_1ii04). */
+        if (start[0] == '{') {
+            const char* close = memchr(start, '}', len);
+            if (close) {
+                size_t ulen = (size_t)(close - start - 1);
+                size_t llen = len - ulen - 2;
+                if (uri && strlen(uri) == ulen &&
+                    strncmp(start + 1, uri, ulen) == 0 &&
+                    strlen(local) == llen &&
+                    strncmp(close + 1, local, llen) == 0)
+                    return 1;
+            }
+            continue;
+        }
         if (memchr(start, ':', len)) continue; /* prefixed: deferred */
         if (uri == NULL && strlen(local) == len &&
             strncmp(local, start, len) == 0)
@@ -302,6 +338,51 @@ static int any_ns_matches(XsdCm* any, const char* uri,
             return 1;
     }
     return 0;
+}
+
+/* #2151: the @notNamespace exclusion (open047) — a hit excludes the
+ * name regardless of the positive filter. ##targetNamespace resolves
+ * against the wildcard's declaring unit tns. */
+static int cm_not_ns_hits(XsdCm* any, const char* uri,
+                          const char* target_ns) {
+    if (!any->not_ns) return 0;
+    const char* p = any->not_ns;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (strncmp(start, "##local", len) == 0 && len == 7) {
+            if (uri == NULL) return 1;
+            continue;
+        }
+        if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            if (target_ns && uri && strcmp(uri, target_ns) == 0)
+                return 1;
+            continue;
+        }
+        if (uri && strlen(uri) == len && strncmp(start, uri, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* The open-content wildcard's admission for one child (positive
+ * filter + notNamespace + notQName). */
+static int oc_wildcard_admits(struct leptris_xsd_schema* s, XsdCm* w,
+                              const char* uri, const char* names_c,
+                              const char* tns) {
+    if (!any_ns_matches(w, uri, w->any_unit_tns ? w->any_unit_tns
+                                                : tns))
+        return 0;
+    if (cm_not_ns_hits(w, uri,
+                       w->any_unit_tns ? w->any_unit_tns : tns))
+        return 0;
+    if (w->not_qname &&
+        cm_not_qname_hits(w->not_qname, s, names_c, uri))
+        return 0;
+    return 1;
 }
 
 /* ---- simulation --------------------------------------------------- */
@@ -380,12 +461,87 @@ static int all_root_valid(XsdCm* all, const char* target_ns,
     return 1;
 }
 
+/* ---- xs:all with open content (XSD 1.1 §3.4.4.3) ------------------ */
+
+/* Suffix over an all: S = S1 + S2 where S1 is valid against the all
+ * and every S2 element matches the wildcard (open009 — the boundary
+ * is a prefix split). */
+static int all_oc_suffix(XsdCm* all, XsdCm* w,
+                         struct leptris_xsd_schema* s,
+                         const char* target_ns,
+                         const char* const* names,
+                         const char* const* ns_uris, size_t count) {
+    /* the all is order-free, but S1 must be a PREFIX: try every
+     * split (instances are small; cap the quadratic walk) */
+    if (count > 512) return 0;
+    for (size_t k = 0; k <= count; k++) {
+        if (!all_root_valid(all, target_ns, names, ns_uris, k))
+            continue;
+        int ok = 1;
+        for (size_t i = k; i < count && ok; i++) {
+            const char* uri = ns_uris ? ns_uris[i] : NULL;
+            if (!oc_wildcard_admits(s, w, uri, names[i], target_ns))
+                ok = 0;
+        }
+        if (ok) return 1;
+    }
+    return 0;
+}
+
+/* Interleave over an all: S ∈ S1 × S2 — some subset goes to the
+ * wildcard and the REST (order-free) satisfies the all (open008).
+ * Subset enumeration with a size cap. */
+static int all_oc_interleave(XsdCm* all, XsdCm* w,
+                             struct leptris_xsd_schema* s,
+                             const char* target_ns,
+                             const char* const* names,
+                             const char* const* ns_uris, size_t count) {
+    if (count > 24) return 0;
+    /* taken bit i: element i goes to the wildcard */
+    unsigned long long mask = 0;
+    unsigned long long limit = 1ULL << count;
+    for (; mask < limit; mask++) {
+        const char* rn[24];
+        const char* ru[24];
+        size_t m = 0;
+        int ok = 1;
+        for (size_t i = 0; i < count && ok; i++) {
+            const char* uri = ns_uris ? ns_uris[i] : NULL;
+            if ((mask >> i) & 1ULL) {
+                if (!oc_wildcard_admits(s, w, uri, names[i],
+                                        target_ns))
+                    ok = 0;
+            } else {
+                rn[m] = names[i];
+                ru[m] = uri;
+                m++;
+            }
+        }
+        if (!ok || m > 24) continue;
+        if (all_root_valid(all, target_ns, rn, ru, m)) return 1;
+    }
+    return 0;
+}
+
 int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
-                      const char* const* ns_uris, size_t count) {
+                      const char* const* ns_uris, size_t count,
+                      int* oc_from) {
     if (!model) return -1;
-    if (model->kind == XSD_CM_ALL && model->first_child)
+    if (model->kind == XSD_CM_ALL && model->first_child) {
+        /* #2151: an open content over an xs:all model — the all's
+         * counting walk takes the wildcards into account */
+        if (model->open_any && model->oc_mode) {
+            return model->oc_mode == 2
+                       ? all_oc_interleave(model, model->open_any, s,
+                                           target_ns, names, ns_uris,
+                                           count)
+                       : all_oc_suffix(model, model->open_any, s,
+                                       target_ns, names, ns_uris,
+                                       count);
+        }
         return all_root_valid(model, target_ns, names, ns_uris, count);
+    }
     CmNfa n;
     memset(&n, 0, sizeof(n));
     n.s = s;
@@ -403,6 +559,129 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
     if (n.overflow) {
         free(n.trans);
         return -2;
+    }
+    /* XSD 1.1 interleave open content (§3.4.4.3 cl. 3): S is an
+     * interleave of the model-valid subsequence and the wildcard
+     * span — after an absorbed span the model must RESUME wherever
+     * it was, so every state with an outgoing symbol transition
+     * carries a wildcard self-loop (the junction loops in
+     * cm_build_children alone cannot re-enter a half-consumed
+     * particle group: a/x1/b against (a+, b?) must accept). */
+    if (model->open_any && model->oc_mode == 2 && !n.overflow) {
+        size_t base = n.count;
+        for (size_t i = 0; i < base; i++)
+            if (n.trans[i].symbol >= 0)
+                oc_loop(&n, model, n.trans[i].from);
+        if (n.overflow) {
+            free(n.trans);
+            return -2;
+        }
+    }
+
+    /* #2151: the greedy-attribution trace (§3.4.4.3 cl. 2.3/3.3).
+     * Children before `oc_from` are attributed to the model's
+     * particles; children at/after it may be attributed to the open
+     * content — a particle-only re-run (oc loops suppressed) finds
+     * where the model stops matching: the first index its live set
+     * dies. -1 = the model alone accepts everything (no divergence). */
+        if (oc_from) {
+        *oc_from = -1;
+        if (model->open_any && model->oc_mode) {
+            CmNfa p;
+            memset(&p, 0, sizeof(p));
+            p.s = s;
+            p.no_oc = 1;
+            p.start = nfa_state(&p);
+            p.accept = nfa_state(&p);
+            {
+                size_t bound = 0;
+                if (cm_bound_over(s, model, &bound, 0)) {
+                    free(n.trans);
+                    return -2;
+                }
+            }
+            cm_build_occurrence(&p, model, p.start, p.accept);
+            if (p.overflow) {
+                free(n.trans);
+                free(p.trans);
+                return -2;
+            }
+            StateSet plive;
+            memset(&plive, 0, sizeof(plive));
+            ss_add(&plive, p.start);
+            ss_close(&plive, &p);
+            int died = -1;
+            for (size_t c = 0; c < count && died < 0; c++) {
+                StateSet next;
+                memset(&next, 0, sizeof(next));
+                const char* uri = ns_uris ? ns_uris[c] : NULL;
+                for (size_t i = 0; i < plive.count; i++) {
+                    for (size_t t = 0; t < p.count; t++) {
+                        CmTrans* tr = &p.trans[t];
+                        if (tr->from != plive.states[i] ||
+                            tr->symbol == -1)
+                            continue;
+                        XsdCm* q = tr->particle;
+                        int hit = 0;
+                        if (q->kind == XSD_CM_ELEMENT) {
+                            const char* pns = q->ns;
+                            int named =
+                                (strcmp(q->name, names[c]) == 0);
+                            if (!named && s) {
+                                const XsdElementDecl* m =
+                                    xsd_substitute_member(
+                                        s, names[c], q->name);
+                                if (m) {
+                                    named = 1;
+                                    if (m->ns) pns = m->ns;
+                                }
+                            }
+                            int child_ns = uri && uri[0];
+                            /* #2151: mirror the main run's gate —
+                             * the lenient no-global fallback narrows
+                             * when the model carries open content */
+                            int oc_open =
+                                model->open_any && model->oc_mode;
+                            int pns_ok =
+                                pns ? (!child_ns ||
+                                       (uri && strcmp(uri, pns) == 0))
+                                    : (!child_ns ||
+                                       (s && !oc_open &&
+                                        !xsd_find_element_child_ns(
+                                            s, names[c], uri)));
+                            hit = named && pns_ok;
+                        } else if (q->kind == XSD_CM_ANY) {
+                            if (any_ns_matches(q, uri,
+                                               q->any_unit_tns
+                                                   ? q->any_unit_tns
+                                                   : target_ns) &&
+                                !cm_not_ns_hits(q, uri,
+                                                q->any_unit_tns
+                                                    ? q->any_unit_tns
+                                                    : target_ns) &&
+                                !(q->not_qname &&
+                                  cm_not_qname_hits(q->not_qname, s,
+                                                    names[c], uri)))
+                                hit = 1;
+                        }
+                        if (hit) ss_add(&next, tr->to);
+                    }
+                }
+                free(plive.states);
+                plive = next;
+                ss_close(&plive, &p);
+                if (plive.count == 0) died = (int)c;
+            }
+            if (died < 0) {
+                int paccept = 0;
+                for (size_t i = 0; i < plive.count; i++)
+                    if (plive.states[i] == p.accept) paccept = 1;
+                if (!paccept) died = (int)count;
+            }
+            free(plive.states);
+            free(p.trans);
+            if (died >= 0) *oc_from = died;
+        }
     }
 
     StateSet live;
@@ -440,12 +719,21 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                         }
                     }
                     int child_ns = uri && uri[0];
+                    /* #2151: the lenient no-global fallback narrows
+                     * when the model carries an open content
+                     * wildcard — the wildcard's namespace set is the
+                     * openness boundary, and the particle's leniency
+                     * would silently widen past it (open047.n1: the
+                     * unqualified <b> must not swallow the
+                     * disallowed.com <b> the union excludes). */
+                    int oc_open = model->open_any && model->oc_mode;
                     int pns_ok =
                         pns ? (!child_ns ||
                                (uri && strcmp(uri, pns) == 0))
                             : (!child_ns ||
-                               (n.s && !xsd_find_element_child_ns(
-                                          n.s, names[c], uri)));
+                               (n.s && !oc_open &&
+                                !xsd_find_element_child_ns(
+                                    n.s, names[c], uri)));
                     if (named && pns_ok) ss_add(&next, tr->to);
                 } else if (p->kind == XSD_CM_ANY) {
                     /* #1735: ##targetNamespace/##other are relative
@@ -454,6 +742,12 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                                         p->any_unit_tns
                                             ? p->any_unit_tns
                                             : target_ns))
+                        continue;
+                    /* #2151: the @notNamespace exclusion */
+                    if (cm_not_ns_hits(p, uri,
+                                       p->any_unit_tns
+                                           ? p->any_unit_tns
+                                           : target_ns))
                         continue;
                     /* XSD 1.1 notQName (moxml#460): a hit on the
                      * negative list excludes the name regardless of

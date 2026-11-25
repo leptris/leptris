@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- open content requires element-only or mixed content — a
+     simpleContent type cannot carry one (ct-props-correct.5) -->
+<xs:complexType name="T">
+  <xs:simpleContent>
+    <xs:extension base="xs:string">
+      <xs:openContent mode="suffix">
+        <xs:any namespace="http://open.com/"/>
+      </xs:openContent>
+    </xs:extension>
+  </xs:simpleContent>
+</xs:complexType>
+<xs:element name="doc" type="T"/>
+</xs:schema>

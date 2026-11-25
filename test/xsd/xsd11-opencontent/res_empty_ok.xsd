@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- the suite's posture (open020): an EMPTY derived content model
+     makes the wider derived open content harmless — no derivation
+     error -->
+<xs:complexType name="B">
+  <xs:openContent mode="suffix">
+    <xs:any namespace="http://open.com/" processContents="lax"/>
+  </xs:openContent>
+  <xs:sequence>
+    <xs:element name="a" minOccurs="0" maxOccurs="unbounded"/>
+    <xs:element name="b" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+<xs:complexType name="R">
+  <xs:complexContent>
+    <xs:restriction base="B">
+      <xs:openContent mode="interleave">
+        <xs:any namespace="http://open.com/" processContents="lax"/>
+      </xs:openContent>
+      <xs:sequence/>
+    </xs:restriction>
+  </xs:complexContent>
+</xs:complexType>
+<xs:element name="doc" type="R"/>
+</xs:schema>

@@ -34,7 +34,8 @@ extern const char* xsd_validator_error_at(struct xsd_validator* v,
 extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
-                             const char* const* ns_uris, size_t count);
+                             const char* const* ns_uris, size_t count,
+                             int* oc_from);
 
 struct leptris_xsd_schema {
     size_t declaration_count;
@@ -44,6 +45,38 @@ struct leptris_xsd_schema {
     XsdGroupDef* groups;  /* top-level xs:group definitions */
     XsdCm* default_open;  /* xs:defaultOpenContent wildcard */
     int default_oc_empty; /* appliesToEmpty="true" */
+    /* #2151: sub-document defaults are captured during include
+     * processing and must outlive the capture (types borrow the
+     * wildcard) — discarded ones chain here and free with the
+     * schema (the leaks --atExit gate). */
+    XsdCm* oc_default_pool;
+    /* #2151: the default's declared mode (0 unset, 1 suffix,
+     * 2 interleave — the S4SD default) and the unit it belongs to:
+     * a defaultOpenContent applies only to the types of its own
+     * schema document (open040/open041/open042). */
+    int default_oc_mode;
+    int default_oc_unit_id;
+    /* #2151: schema DOCUMENT units — one id per compiled document
+     * (main + includes/imports). Type capture stamps the current
+     * unit; the defaultOpenContent application compares ids. */
+    char** units;
+    size_t unit_count, unit_cap;
+    int current_unit;
+    /* #2151: xs:ID values seen on openContent elements (open038). */
+    char** oc_ids;
+    size_t oc_id_count, oc_id_cap;
+    /* #2151: the schema carries xs:openContent / xs:defaultOpenContent
+     * elements — 1.1 syntax evidence for schemas unmarked or marked
+     * 1.0 (the saxonData/Open corpus carries no version marker). The
+     * openContent capture keys on version_11 || saw_open_content,
+     * the same posture as saw_alternative (#2149) / saw_assert. */
+    int saw_open_content;
+    /* #2151: the open-content pass (capture checks + the derivation
+     * pass) rejected the schema. A dedicated flag — s->error is the
+     * parked-error channel other capture paths write without failing
+     * the compile, and flipping those would reject schemas the gate
+     * pins as clean. */
+    int oc_failed;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -140,6 +173,7 @@ extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 static XsdCm* xsd_cm_copy_list(const XsdCm* head);
 static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s);
+static int xsd_oc_finalize(struct leptris_xsd_schema* s);
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root);
 static char* xsd_read_file(const char* path, size_t* out_len);
@@ -215,6 +249,7 @@ static XsdAlternative* xsd_capture_alternatives(
     struct leptris_xsd_schema* s, LeptrisElement decl_elem);
 static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt);
 static int xsd_doc_has_alternative(LeptrisElement e, int depth);
+static int xsd_doc_has_open_content(LeptrisElement e, int depth);
 static int xsd_doc_has_assert(LeptrisElement e, int depth);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
@@ -262,7 +297,10 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->assert_base_ns);
         free(cm->any_ns);
         free(cm->not_qname);
+        free(cm->not_ns);
         free(cm->any_unit_tns);
+        free(cm->oc_ext_base);
+        free(cm->oc_ext_base_ns);
         free(cm->text_type);
         free(cm->fixed_value);
         free(cm->default_value);
@@ -430,6 +468,8 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                     leptris_element_attribute(e, "namespace"));
                 cm->not_qname = xsd_strdup(
                     leptris_element_attribute(e, "notQName"));
+                cm->not_ns = xsd_strdup(
+                    leptris_element_attribute(e, "notNamespace"));
                 cm->any_unit_tns = xsd_capture_unit_tns(e);
                 const char* pc = leptris_element_attribute(
                     e, "processContents");
@@ -2075,8 +2115,26 @@ static LeptrisElement xsd_find_any_attribute(LeptrisElement e) {
 }
 
 static int xsd_mixed_flag(LeptrisElement ct) {
-    const char* m = leptris_element_attribute(ct, "mixed");
-    return (m && (strcmp(m, "true") == 0 || strcmp(m, "1") == 0));
+    /* #2151: xsd_bool_attr strips whitespace (open013's
+     * mixed=" 1 ") and reads both spellings; the complexContent
+     * spelling is part of the effective mixed (open021's R declares
+     * it there). */
+    if (xsd_bool_attr(ct, "mixed", 0)) return 1;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(ct));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* el = NULL;
+        const char* eu = NULL;
+        leptris_element_expanded_name(e, &el, NULL, &eu);
+        if (el && eu && strcmp(eu, XSD_NS) == 0 &&
+            strcmp(el, "complexContent") == 0 &&
+            leptris_element_attribute(e, "mixed"))
+            return xsd_bool_attr(e, "mixed", 0);
+    }
+    return 0;
 }
 
 /* Global complex type by {uri}local among the root's depth-0
@@ -2264,7 +2322,7 @@ static int xsd_upa_ns_covers(const char* wc, const char* ns,
 
 static int xsd_upa_first_overlap(const struct xsd_upa_first* a,
                                  const struct xsd_upa_first* b,
-                                 const char* tns) {
+                                 const char* tns, int relax_wildcard) {
     if (a->wc[0] && b->wc[0]) {
         /* two wildcards overlap unless their sets are disjoint —
          * conservatively report any pair carrying ##any, or equal
@@ -2275,9 +2333,21 @@ static int xsd_upa_first_overlap(const struct xsd_upa_first* a,
         return 0;
     }
     if (a->wc[0])
-        return b->name ? xsd_upa_ns_covers(a->wc, b->ns, tns) : 0;
+        /* XSD 1.1 (§3.8.6.4) relaxes UPA: an element particle and a
+         * wildcard particle may COMPETE (the element wins the
+         * attribution) — open034's wildcard after a+ is legal 1.1.
+         * The 1.0 posture keeps the strict overlap. */
+        return b->name
+                   ? (relax_wildcard
+                          ? 0
+                          : xsd_upa_ns_covers(a->wc, b->ns, tns))
+                   : 0;
     if (b->wc[0])
-        return a->name ? xsd_upa_ns_covers(b->wc, a->ns, tns) : 0;
+        return a->name
+                   ? (relax_wildcard
+                          ? 0
+                          : xsd_upa_ns_covers(b->wc, a->ns, tns))
+                   : 0;
     if (!a->name || !b->name) return 0;
     if (strcmp(a->name, b->name) != 0) return 0;
     const char* ans = a->ns[0] ? a->ns : (tns ? tns : "");
@@ -2397,7 +2467,7 @@ static int xsd_upa_nullable(LeptrisElement e, int depth) {
 
 static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               LeptrisElement e, const char* tns,
-                              int depth);
+                              int depth, int relax_wildcard);
 
 static int xsd_upa_collect_children(LeptrisElement e, LeptrisElement* kids,
                                     int max) {
@@ -2437,7 +2507,7 @@ static int xsd_upa_particle_can_repeat_or_skip(LeptrisElement c) {
 
 static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               LeptrisElement e, const char* tns,
-                              int depth) {
+                              int depth, int relax_wildcard) {
     if (!e || depth > 24) return 0;
     const char* l = NULL;
     const char* p2 = NULL;
@@ -2463,7 +2533,7 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               depth + 1);
                 for (int a = 0; a < ni; a++)
                     for (int b = 0; b < nj; b++) {
-                        if (xsd_upa_first_overlap(&fi[a], &fj[b], tns)) {
+                        if (xsd_upa_first_overlap(&fi[a], &fj[b], tns, relax_wildcard)) {
                             xsd_set_error(
                                 s,
                                 "upa: the content model is not "
@@ -2490,7 +2560,7 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               depth + 1);
             for (int a = 0; a < ni; a++)
                 for (int b = 0; b < nr; b++) {
-                    if (xsd_upa_first_overlap(&fi[a], &rest[b], tns)) {
+                    if (xsd_upa_first_overlap(&fi[a], &rest[b], tns, relax_wildcard)) {
                         xsd_set_error(
                             s,
                             "upa: the content model is not "
@@ -2502,7 +2572,7 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
         }
     }
     for (int i = 0; i < nk; i++)
-        if (xsd_upa_check_node(s, kids[i], tns, depth + 1) != 0)
+        if (xsd_upa_check_node(s, kids[i], tns, depth + 1, relax_wildcard) != 0)
             return -1;
     return 0;
 }
@@ -2511,12 +2581,17 @@ static int xsd_check_upa(struct leptris_xsd_schema* s,
                          LeptrisElement root) {
     if (!root) return 0;
     const char* tns = s->target_ns;
+    /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
+     * arm the relaxation on any 1.1 evidence (open034 is unmarked).
+     * #2151 */
+    int relax_wildcard = (s->version_11 || s->saw_open_content);
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
             continue;
-        if (xsd_upa_check_node(s, (LeptrisElement)n, tns, 0) != 0)
+        if (xsd_upa_check_node(s, (LeptrisElement)n, tns, 0,
+                               relax_wildcard) != 0)
             return -1;
     }
     return 0;
@@ -3175,6 +3250,18 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         xsd_path_normalize(self_path, canon, sizeof(canon));
         s->self_path = xsd_strdup(canon);
     }
+    /* #2151: unit 0 is the compiled document itself; includes and
+     * imports push their own unit id while their declarations are
+     * captured (the defaultOpenContent application is per-unit). */
+    {
+        const char* unit0 = base_dir ? base_dir : "";
+        s->units = (char**)malloc(sizeof(char*));
+        if (s->units) {
+            s->units[0] = xsd_strdup(unit0);
+            if (s->units[0]) s->unit_count = 1;
+        }
+        s->current_unit = 0;
+    }
 
     /* target namespace (xs:any ##other/##targetNamespace filters) */
     s->target_ns = NULL;
@@ -3221,6 +3308,11 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
          * syntax — xs:assert and xs:assertion elements anywhere in
          * the unit arm the assert capture and the facet evaluator. */
         s->saw_assert = xsd_doc_has_assert(root, 0);
+        /* #2151: open-content syntax evidence (same posture — the
+         * Open corpus is unmarked). Includes re-arm it per unit so
+         * an xs:any occurrence rule inside an included document
+         * (open048) still applies. */
+        s->saw_open_content = xsd_doc_has_open_content(root, 0);
     }
 
     const char* local = NULL;
@@ -3288,6 +3380,16 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
 
     xsd_capture_root(s, root);
     xsd_resolve_extension_bases(s);
+    /* #2151: the open-content derivation pass (inheritance, wildcard
+     * union, the cos-ct-extends ladder, the restriction subset
+     * checks) — after the fold, when every base has landed. The
+     * capture may already have flagged an error (the src-ct class):
+     * surfacing it here is what turns the check into a rejection. */
+    if (s->oc_failed || xsd_oc_finalize(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
     xsd_resolve_pending_attr_refs(s);
     xsd_canon_builtin_refs(s);
 
@@ -3446,6 +3548,416 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
             progressed = 1;
         }
     }
+}
+
+/* ---- #2151: the open-content derivation pass ---------------------- */
+
+/* Is `token` a member of the whitespace-separated grammar list? */
+static int oc_ns_list_has(const char* list, const char* token) {
+    if (!list || !token) return 0;
+    const char* p = list;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (strlen(token) == len && strncmp(start, token, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* The positive filter of a wildcard grammar: 1 when a namespace
+ * `uri` (NULL = absent) is admitted before any notNamespace
+ * exclusion. NULL grammar = ##any. */
+static int oc_ns_admits(const XsdCm* w, const char* uri) {
+    const char* f = w->any_ns;
+    if (!f || strcmp(f, "##any") == 0) return 1;
+    if (strcmp(f, "##local") == 0) return uri == NULL;
+    if (strcmp(f, "##targetNamespace") == 0) return uri != NULL;
+    /* ##other / list forms: token walk (##other = NOT {tns, absent},
+     * but the not-variety is only ever a SUBSET relation's super
+     * side here — enumerating its admission needs the tns, which
+     * rides any_unit_tns on the wildcard itself) */
+    int saw_other = 0;
+    const char* p = f;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (len == 7 && strncmp(start, "##other", 7) == 0) {
+            saw_other = 1;
+            continue;
+        }
+        if (len == 7 && strncmp(start, "##local", 7) == 0) {
+            if (uri == NULL) return 1;
+            continue;
+        }
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (uri) return 1;
+            continue;
+        }
+        if (uri && strlen(uri) == len &&
+            strncmp(start, uri, len) == 0)
+            return 1;
+    }
+    if (saw_other) return uri != NULL; /* not: only the absent ns is
+                                          excluded from admission */
+    return 0;
+}
+
+/* Wildcard Subset (§3.10.6.2) over the engine's grammar strings:
+ * the ns-level variety ladder plus the {disallowed names} clauses
+ * (s3_4_1si06). Approximation: a wildcard's @notNamespace exclusions
+ * participate by literal token containment. */
+static int oc_wildcard_subset(const XsdCm* sub, const XsdCm* super) {
+    const char* sf = sub->any_ns;
+    const char* uf = super->any_ns;
+    int s_any = !sf || strcmp(sf, "##any") == 0;
+    int u_any = !uf || strcmp(uf, "##any") == 0;
+    if (u_any && !super->not_ns) {
+        /* clause 1 */
+    } else if (s_any) {
+        return 0; /* an unrestricted sub is only a subset of any */
+    } else if (!s_any && !u_any &&
+               sf[0] != '#' && uf[0] != '#') {
+        /* enumeration ⊆ enumeration: clause 2 */
+        if (!oc_ns_list_has(uf, "")) { /* non-empty super list */
+            const char* p = sf;
+            int all = 1;
+            while (*p && all) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                       *p == '\r')
+                    p++;
+                const char* start = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                       *p != '\r')
+                    p++;
+                size_t len = (size_t)(p - start);
+                if (len == 0) break;
+                char tok[512];
+                if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+                memcpy(tok, start, len);
+                tok[len] = 0;
+                if (!oc_ns_list_has(uf, tok)) all = 0;
+            }
+            if (!all) return 0;
+        }
+    } else if (!s_any && sf[0] != '#' && u_any) {
+        /* enumeration ⊆ any: clause 1 */
+    } else {
+        /* not-forms (##other) and mixed pairs: conservatively not a
+         * subset unless both sides carry the same spelling */
+        if (!((sf && uf) && strcmp(sf, uf) == 0)) return 0;
+    }
+    /* @notNamespace: the super's exclusions must be excluded by the
+     * sub as well (token containment) */
+    if (super->not_ns) {
+        const char* p = super->not_ns;
+        while (*p) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                p++;
+            const char* start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                   *p != '\r')
+                p++;
+            size_t len = (size_t)(p - start);
+            if (len == 0) break;
+            char tok[512];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = 0;
+            int blocked = oc_ns_list_has(sub->not_ns, tok);
+            if (!blocked && sub->any_ns && sub->any_ns[0] != '#')
+                blocked = !oc_ns_list_has(sub->any_ns, tok);
+            if (!blocked) return 0;
+        }
+    }
+    /* {disallowed names}: each super notQName must be blocked by
+     * the sub (clause 1 of §3.10.6.2 — s3_4_1si06) */
+    if (super->not_qname) {
+        const char* p = super->not_qname;
+        while (*p) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                p++;
+            const char* start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                   *p != '\r')
+                p++;
+            size_t len = (size_t)(p - start);
+            if (len == 0) break;
+            char tok[512];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = 0;
+            int blocked = sub->not_qname &&
+                          oc_ns_list_has(sub->not_qname, tok);
+            if (!blocked) return 0;
+        }
+    }
+    return 1;
+}
+
+/* Attribute Wildcard Union (§3.10.6.3) at the engine's grammar
+ * level: folds the BASE wildcard into the DERIVED wildcard in place
+ * (pc/annotations stay the derived's, §3.4.2.3.3 cl. 6.2). The
+ * derived @notNamespace exclusions lose every token the base
+ * admits (the union is wider); an any-variety base widens the
+ * derived grammar to ##any, keeping only the exclusions the base
+ * itself carries. */
+static void oc_union_filter_not_ns(XsdCm* derived, const XsdCm* base) {
+    if (!derived->not_ns) return;
+    const char* p = derived->not_ns;
+    char kept[1024];
+    size_t o = 0;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        char tok[512];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        /* does the BASE admit the excluded namespace? */
+        int base_admits;
+        if (strcmp(tok, "##local") == 0) {
+            base_admits = oc_ns_admits(base, NULL) &&
+                          !oc_ns_list_has(base->not_ns, "##local");
+        } else if (strcmp(tok, "##targetNamespace") == 0) {
+            base_admits = base->any_unit_tns
+                              ? oc_ns_admits(base, base->any_unit_tns)
+                              : 0;
+        } else {
+            base_admits = oc_ns_admits(base, tok) &&
+                          !oc_ns_list_has(base->not_ns, tok);
+        }
+        if (!base_admits && o + len + 2 < sizeof(kept)) {
+            if (o) kept[o++] = ' ';
+            memcpy(kept + o, tok, len);
+            o += len;
+        }
+    }
+    kept[o] = 0;
+    free(derived->not_ns);
+    derived->not_ns = o ? xsd_strdup(kept) : NULL;
+}
+
+static void oc_wildcard_union(XsdCm* derived, const XsdCm* base) {
+    if (!derived || !base) return;
+    const char* d = derived->any_ns;
+    const char* b = base->any_ns;
+    int d_any = !d || strcmp(d, "##any") == 0;
+    int b_any = !b || strcmp(b, "##any") == 0;
+    if (!d_any && !b_any && d[0] != '#' && b[0] != '#') {
+        /* enumeration ∪ enumeration: concat the lists */
+        size_t dl = strlen(d), bl = strlen(b);
+        char* joined = (char*)malloc(dl + bl + 2);
+        if (joined) {
+            memcpy(joined, d, dl);
+            joined[dl] = ' ';
+            memcpy(joined + dl + 1, b, bl + 1);
+            free(derived->any_ns);
+            derived->any_ns = joined;
+        }
+    } else if (!d_any && b_any) {
+        /* the base admits everything (minus its own exclusions):
+         * the union is ##any, keeping the base's exclusions */
+        free(derived->any_ns);
+        derived->any_ns = xsd_strdup("##any");
+        free(derived->not_ns);
+        derived->not_ns = base->not_ns ? xsd_strdup(base->not_ns)
+                                       : NULL;
+        return;
+    }
+    /* d_any (##any or a notNamespace-only wildcard) and enum /
+     * not-form bases: the union keeps the exclusions only for
+     * namespaces the base does not admit (open047: the base's
+     * enumerated ns re-enters). */
+    oc_union_filter_not_ns(derived, base);
+    /* {disallowed names}: the union keeps what either side excludes
+     * (§3.10.6.3 simplification — concat) */
+    if (base->not_qname) {
+        if (derived->not_qname) {
+            size_t dl = strlen(derived->not_qname);
+            size_t bl = strlen(base->not_qname);
+            char* joined = (char*)malloc(dl + bl + 2);
+            if (joined) {
+                memcpy(joined, derived->not_qname, dl);
+                joined[dl] = ' ';
+                memcpy(joined + dl + 1, base->not_qname, bl + 1);
+                free(derived->not_qname);
+                derived->not_qname = joined;
+            }
+        } else {
+            derived->not_qname = xsd_strdup(base->not_qname);
+        }
+    }
+}
+
+/* The post-capture open-content derivation pass (§3.4.2.3.3 cl. 6.2
+ * + cos-ct-extends.1.4.3.2.2.3/4 + cos-content-act-restrict). Runs
+ * to a fixpoint so extension chains resolve regardless of order.
+ * Returns nonzero when the schema must be rejected. */
+static int xsd_oc_finalize(struct leptris_xsd_schema* s) {
+    /* Runs for every schema: the OC branches self-gate on open
+     * content presence; the derivation-mixed check
+     * (cos-ct-extends.1.4.3.2.2.1, s3_4_1si08) is a plain
+     * extension rule with no 1.1-only syntax to arm on. */
+    int progressed = 1;
+    while (progressed && !s->oc_failed) {        progressed = 0;
+        for (XsdCm* t = s->complex_types; t && !s->oc_failed;
+             t = t->next) {
+            if (t->oc_checked || !t->first_child) {
+                if (!t->oc_checked) t->oc_checked = 1;
+                continue;
+            }
+            XsdCm* model = t->first_child;
+            const char* base_name = t->oc_ext_base
+                                        ? t->oc_ext_base
+                                        : t->res_base;
+            if (!base_name) {
+                t->oc_checked = 1;
+                continue;
+            }
+            int is_ext = t->oc_ext_base != NULL;
+            const char* bns = is_ext
+                                  ? (t->oc_ext_base_ns
+                                         ? t->oc_ext_base_ns
+                                         : t->ns)
+                                  : (t->res_base_ns ? t->res_base_ns
+                                                    : t->ns);
+            XsdCm* base = xsd_find_complex_ns(s, base_name, bns);
+            if (!base) base = xsd_find_complex_ns(s, base_name, t->ns);
+            if (!base || (!base->oc_checked && base->oc_ext_base)) {
+                /* deferred (or chain-pending): retry next round */
+                if (base && !base->oc_checked && base->oc_ext_base)
+                    continue;
+                if (!base) {
+                    t->oc_checked = 1;
+                    progressed = 1;
+                }
+                continue;
+            }
+            t->oc_checked = 1;
+            progressed = 1;
+            XsdCm* bot = base->first_child;
+            XsdCm* bot_any = bot ? bot->open_any : NULL;
+            int bot_mode = bot ? bot->oc_mode : 0;
+            if (is_ext) {
+                if (t->oc_declared == 2) {
+                    /* mode="none": blocks the default and keeps the
+                     * base's open content (open031) */
+                    if (bot_any && !model->open_any) {
+                        model->open_any = xsd_cm_copy_list(bot_any);
+                        if (model->open_any) {
+                            model->oc_owned = 1;
+                            model->oc_mode = bot_mode;
+                        }
+                    }
+                } else if (model->open_any) {
+                    /* declared OR default-applied: the wildcard
+                     * element (§3.4.2.3.3 cl. 5/6) unions over the
+                     * base's and rides the ladder (open030/si04:
+                     * the default takes precedence over the base) */
+                    if (bot_any && !t->oc_unioned) {
+                        oc_wildcard_union(model->open_any, bot_any);
+                        t->oc_unioned = 1;
+                    }
+                    /* the ladder (cos-ct-extends.1.4.3.2.2.3/4) */
+                    if (bot_any && !s->oc_failed) {
+                        if (bot_mode == 2 && model->oc_mode == 1) {
+                            xsd_set_error(s,
+                                          "extension may not narrow "
+                                          "the open content mode "
+                                          "from interleave to "
+                                          "suffix");
+                            s->oc_failed = 1;
+                        } else if (!oc_wildcard_subset(bot_any,
+                                                       model->open_any)) {
+                            xsd_set_error(s,
+                                          "the base open content "
+                                          "wildcard is not a subset "
+                                          "of the derived wildcard");
+                            s->oc_failed = 1;
+                        }
+                    }
+                } else {
+                    /* nothing declared, no default applied:
+                     * inherit (open027) */
+                    if (bot_any && !model->open_any) {
+                        model->open_any = xsd_cm_copy_list(bot_any);
+                        if (model->open_any) {
+                            model->oc_owned = 1;
+                            model->oc_mode = bot_mode;
+                        }
+                    }
+                }
+                /* cos-ct-extends.1.4.3.2.2.1 (s3_4_1si08): the
+                 * content types must both be mixed or both
+                 * element-only */
+                if (!s->oc_failed && bot && bot->first_child &&
+                    bot->mixed != t->mixed) {
+                    xsd_set_error(s,
+                                  "the extension content type and "
+                                  "its base must both be mixed or "
+                                  "both element-only");
+                    s->oc_failed = 1;
+                }
+            } else {
+                /* restriction: the subset checks (suite posture:
+                 * an EMPTY derived model exempts them — open020/021/
+                 * 022; the declared mode="none" spelling means no
+                 * open content at all). Effective OC (declared or
+                 * default-applied) over a NON-empty model. */
+                if (model->open_any && model->oc_mode &&
+                    model->first_child && !s->oc_failed) {
+                    if (!bot_any) {
+                        xsd_set_error(s,
+                                      "a restriction may not add "
+                                      "open content to a base "
+                                      "without any");
+                        s->oc_failed = 1;
+                    } else {
+                        if (bot_mode == 1 && model->oc_mode == 2) {
+                            xsd_set_error(s,
+                                          "restriction may not widen "
+                                          "the open content mode to "
+                                          "interleave");
+                            s->oc_failed = 1;
+                        } else if (!oc_wildcard_subset(
+                                       model->open_any, bot_any)) {
+                            xsd_set_error(s,
+                                          "the restriction open "
+                                          "content wildcard is not "
+                                          "a subset of the base's");
+                            s->oc_failed = 1;
+                        } else if (model->open_any->pc_level >
+                                   bot_any->pc_level) {
+                            xsd_set_error(s,
+                                          "the restriction open "
+                                          "content processContents "
+                                          "is weaker than the "
+                                          "base's");
+                            s->oc_failed = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return s->oc_failed ? -1 : 0;
 }
 
 static void xsd_path_normalize(const char* in, char* out, size_t outsz) {
@@ -3695,6 +4207,68 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
     for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next)
         if (!g->attrs && g->elem)
             g->attrs = xsd_capture_attr_rows(s, g->elem, 0);
+    /* #2151: capture THIS document's defaultOpenContent up front so
+     * declarations that precede it in document order (a redefine
+     * body — open042) still see it; the in-order walk below keeps
+     * the PLACEMENT rule (s3_4_1si02: defaultOpenContent may follow
+     * only include/import/redefine/override/annotation). */
+    int oc_order_idx = -1;
+    int walk_idx = 0;
+    if ((s->version_11 || s->saw_open_content) && !s->default_open) {
+        walk_idx = 0;
+        for (LeptrisNodeRef n =
+                 leptris_node_first_child(
+                     leptris_element_as_node(root));
+             n && !s->default_open;
+             n = leptris_node_next_sibling(n)) {
+            if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement e = (LeptrisElement)n;
+            const char* el = NULL;
+            const char* eu = NULL;
+            leptris_element_expanded_name(e, &el, NULL, &eu);
+            if (!el || !eu || strcmp(eu, XSD_NS) != 0 ||
+                strcmp(el, "defaultOpenContent") != 0) {
+                walk_idx++;
+                continue;
+            }
+            oc_order_idx = walk_idx;
+            s->default_oc_mode = 0;
+            const char* dmode =
+                leptris_element_attribute(e, "mode");
+            if (dmode && strcmp(dmode, "suffix") == 0)
+                s->default_oc_mode = 1;
+            else if (dmode && strcmp(dmode, "interleave") == 0)
+                s->default_oc_mode = 2;
+            else
+                s->default_oc_mode = 2; /* S4SD default */
+            for (LeptrisNodeRef q =
+                     leptris_node_first_child(
+                         leptris_element_as_node(e));
+                 q && !s->default_open;
+                 q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement qe = (LeptrisElement)q;
+                const char* ql = NULL;
+                leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                if (ql && strcmp(ql, "any") == 0)
+                    s->default_open = xsd_capture_any(qe);
+            }
+            if (s->default_open) {
+                const char* ape = leptris_element_attribute(
+                    e, "appliesToEmpty");
+                s->default_oc_empty =
+                    (ape && strcmp(ape, "true") == 0);
+                s->default_oc_unit_id = s->current_unit;
+            } else {
+                s->default_oc_mode = 0;
+            }
+        }
+    }
+    int oc_misplaced = 0;
+    int oc_walk_pos = 0;
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -3705,6 +4279,21 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         const char* uri = NULL;
         leptris_element_expanded_name((LeptrisElement)n, &local, &prefix,
                                       &uri);
+        /* #2151: the defaultOpenContent placement rule — only
+         * include/import/redefine/override/annotation may precede it
+         * (s3_4_1si02). */
+        if (oc_order_idx >= 0 && local) {
+            if (oc_walk_pos == oc_order_idx)
+                ;
+            else if (oc_walk_pos < oc_order_idx &&
+                     strcmp(local, "include") != 0 &&
+                     strcmp(local, "import") != 0 &&
+                     strcmp(local, "redefine") != 0 &&
+                     strcmp(local, "override") != 0 &&
+                     strcmp(local, "annotation") != 0)
+                oc_misplaced = 1;
+        }
+        oc_walk_pos++;
         if (!xsd_is_declaration(local, uri)) continue;
         s->declaration_count++;
 
@@ -3784,9 +4373,67 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             if (sub_ns) s->target_ns = sub_ns;
                             else if (strcmp(local, "import") == 0)
                                 s->target_ns = NULL;
+                            /* #2151: the included unit is its own
+                             * schema document — the includer's
+                             * defaultOpenContent does not apply to
+                             * its types (open040/open041), its own
+                             * does. An override/redefine body (below)
+                             * stays in the INCLUDING document, so it
+                             * keeps the includer's default (open042).
+                             * The unit's evidence re-arms the
+                             * 1.1-syntax gate for open048's included
+                             * openContent rule. */
+                            if (!s->saw_open_content)
+                                s->saw_open_content =
+                                    xsd_doc_has_open_content(subroot,
+                                                             0);
+                            int saved_unit = s->current_unit;
+                            if (s->unit_count < s->unit_cap ||
+                                (s->units = (char**)realloc(
+                                     s->units,
+                                     (s->unit_cap
+                                          ? s->unit_cap * 2
+                                          : 8) *
+                                     sizeof(char*)))) {
+                                if (!s->unit_cap) s->unit_cap = 8;
+                                char* un = xsd_strdup(canon);
+                                if (un) {
+                                    s->units[s->unit_count++] = un;
+                                    s->current_unit =
+                                        (int)s->unit_count - 1;
+                                }
+                            }
+                            XsdCm* saved_def = s->default_open;
+                            int saved_empty = s->default_oc_empty;
+                            int saved_mode = s->default_oc_mode;
+                            int saved_def_unit = s->default_oc_unit_id;
+                            s->default_open = NULL;
+                            s->default_oc_empty = 0;
+                            s->default_oc_mode = 0;
+                            s->default_oc_unit_id = 0;
                             s->include_depth++;
                             xsd_capture_root(s, subroot);
                             s->include_depth--;
+                            /* the sub-document's own default stays
+                             * alive (types borrowed it) — pool it */
+                            XsdCm* sub_default = s->default_open;
+                            s->default_open = saved_def;
+                            if (sub_default) {
+                                /* retain: captured types borrow the
+                                 * wildcard — free with the schema */
+                                if (!s->oc_default_pool)
+                                    s->oc_default_pool = sub_default;
+                                else {
+                                    XsdCm* tail = s->oc_default_pool;
+                                    while (tail->next)
+                                        tail = tail->next;
+                                    tail->next = sub_default;
+                                }
+                            }
+                            s->default_oc_empty = saved_empty;
+                            s->default_oc_mode = saved_mode;
+                            s->default_oc_unit_id = saved_def_unit;
+                            s->current_unit = saved_unit;
                             if (sub_ns) free(sub_ns);
                             s->target_ns = saved_ns;
                         }
@@ -3822,7 +4469,49 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             }
                             s->include_depth++;
                             s->capture_force = 1;
+                            /* #2151: the suite posture (open042 vs
+                             * open043) — a REDEFINE body's types ride
+                             * the including document's
+                             * defaultOpenContent; an OVERRIDE body's
+                             * types do not (the override replaces
+                             * whole components of the OTHER
+                             * document). */
+                            XsdCm* saved_ovr = NULL;
+                            int saved_ovr_e = 0, saved_ovr_m = 0,
+                                saved_ovr_u = 0;
+                            if (strcmp(local, "override") == 0) {
+                                saved_ovr = s->default_open;
+                                saved_ovr_e = s->default_oc_empty;
+                                saved_ovr_m = s->default_oc_mode;
+                                saved_ovr_u = s->default_oc_unit_id;
+                                s->default_open = NULL;
+                                s->default_oc_empty = 0;
+                                s->default_oc_mode = 0;
+                                s->default_oc_unit_id = 0;
+                            }
                             xsd_capture_root(s, (LeptrisElement)n);
+                            if (strcmp(local, "override") == 0) {
+                                /* an override body may declare its
+                                 * own defaultOpenContent — pool it
+                                 * (types borrowed it) */
+                                XsdCm* ovr_default = s->default_open;
+                                s->default_open = saved_ovr;
+                                s->default_oc_empty = saved_ovr_e;
+                                s->default_oc_mode = saved_ovr_m;
+                                s->default_oc_unit_id = saved_ovr_u;
+                                if (ovr_default &&
+                                    ovr_default != saved_ovr) {
+                                    if (!s->oc_default_pool)
+                                        s->oc_default_pool = ovr_default;
+                                    else {
+                                        XsdCm* tail =
+                                            s->oc_default_pool;
+                                        while (tail->next)
+                                            tail = tail->next;
+                                        tail->next = ovr_default;
+                                    }
+                                }
+                            }
                             s->capture_force = 0;
                             s->include_depth--;
                             s->override_active = 0;
@@ -3978,26 +4667,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 xsd_capture_complex_model(s, (LeptrisElement)n, nm);
         } else if (strcmp(local, "defaultOpenContent") == 0 && uri &&
                    !strcmp(uri, XSD_NS)) {
-            if (s->version_11) {
-                const char* ape = leptris_element_attribute(
-                    (LeptrisElement)n, "appliesToEmpty");
-                for (LeptrisNodeRef q = leptris_node_first_child(
-                         leptris_element_as_node((LeptrisElement)n));
-                     q && !s->default_open;
-                     q = leptris_node_next_sibling(q)) {
-                    if (leptris_node_get_type(q) !=
-                        LEPTRIS_NODE_TYPE_ELEMENT)
-                        continue;
-                    LeptrisElement qe = (LeptrisElement)q;
-                    const char* ql = NULL;
-                    leptris_element_expanded_name(qe, &ql, NULL, NULL);
-                    if (ql && strcmp(ql, "any") == 0)
-                        s->default_open = xsd_capture_any(qe);
-                }
-                if (s->default_open)
-                    s->default_oc_empty =
-                        (ape && strcmp(ape, "true") == 0);
-            }
+            /* #2151: captured in the pre-pass above (order-independence
+             * for redefine bodies); this in-order visit only confirms
+             * the placement rule (checked after the loop). */
             continue;
         } else if (strcmp(local, "attribute") == 0 && uri && !strcmp(uri, XSD_NS)) {
             if (xsd_override_gate(s, local, (LeptrisElement)n))
@@ -4079,6 +4751,13 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 s->simple_types = captured;
             }
         }
+    }
+    if (oc_misplaced) {
+        xsd_set_error(s,
+                      "defaultOpenContent must precede all "
+                      "declarations other than include, import, "
+                      "redefine, override and annotation");
+        s->oc_failed = 1;
     }
 }
 
@@ -4251,12 +4930,18 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         g = gn;
     }
     if (s->default_open) xsd_cm_free(s->default_open);
+    if (s->oc_default_pool) xsd_cm_free(s->oc_default_pool);
     for (size_t i = 0; i < s->visited_len; i++) free(s->visited[i]);
     free(s->visited);
     /* #2150: the override correspondence set (fixed-buffer slots)
      * and the compiled file's own normalized path */
     free(s->override_set);
     free(s->self_path);
+    /* #2151: schema-document units + openContent id registry */
+    for (size_t i = 0; i < s->unit_count; i++) free(s->units[i]);
+    free(s->units);
+    for (size_t i = 0; i < s->oc_id_count; i++) free(s->oc_ids[i]);
+    free(s->oc_ids);
     free(s->target_ns);
     free(s->base_dir);
     if (s->validator)
@@ -4284,6 +4969,8 @@ static XsdCm* xsd_cm_copy_list(const XsdCm* head) {
         d->type = xsd_strdup(src->type);
         d->ns = xsd_strdup(src->ns);
         d->any_ns = xsd_strdup(src->any_ns);
+        d->not_ns = xsd_strdup(src->not_ns);
+        d->not_qname = xsd_strdup(src->not_qname);
         d->any_unit_tns = xsd_strdup(src->any_unit_tns);
         d->process_skip = src->process_skip;
         d->pc_level = src->pc_level;
@@ -4414,8 +5101,19 @@ static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt) {
     const char* v = leptris_element_attribute(e, name);
     if (!v) return dflt;
     while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r') v++;
-    if (strcmp(v, "true") == 0 || strcmp(v, "1") == 0) return 1;
-    if (strcmp(v, "false") == 0 || strcmp(v, "0") == 0) return 0;
+    /* trim the trailing whitespace too (" 1 " is legal — the attr
+     * value is CDATA-normalized, not trimmed) */
+    const char* end = v + strlen(v);
+    while (end > v && (end[-1] == ' ' || end[-1] == '\t' ||
+                       end[-1] == '\n' || end[-1] == '\r'))
+        end--;
+    size_t len = (size_t)(end - v);
+    if ((len == 4 && strncmp(v, "true", 4) == 0) ||
+        (len == 1 && v[0] == '1'))
+        return 1;
+    if ((len == 5 && strncmp(v, "false", 5) == 0) ||
+        (len == 1 && v[0] == '0'))
+        return 0;
     return dflt;
 }
 
@@ -4463,11 +5161,132 @@ static int xsd_doc_has_assert(LeptrisElement e, int depth) {
     return 0;
 }
 
+/* #2151: does the document carry an xs:openContent or
+ * xs:defaultOpenContent element at any depth (open-content-syntax
+ * evidence for schemas unmarked or marked 1.0 — the whole
+ * saxonData/Open corpus carries no version marker)? */
+static int xsd_doc_has_open_content(LeptrisElement e, int depth) {
+    if (depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            (strcmp(cl, "openContent") == 0 ||
+             strcmp(cl, "defaultOpenContent") == 0))
+            return 1;
+        if (xsd_doc_has_open_content(c, depth + 1)) return 1;
+    }
+    return 0;
+}
+
+/* #2151: resolve the prefixed QName tokens of an open content
+ * wildcard's notQName against the DECLARING element's in-scope
+ * xmlns bindings, rewriting them "{uri}local" — the instance-side
+ * match compares (uri, local) directly (s3_4_1ii04). Unresolvable
+ * prefixes keep the raw token (the deferred posture). */
+static void xsd_oc_resolve_not_qname(XsdCm* w, LeptrisElement any_el) {
+    if (!w || !w->not_qname || !strchr(w->not_qname, ':')) return;
+    char out[1024];
+    size_t o = 0;
+    const char* p = w->not_qname;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        char tok[512];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        const char* colon = strchr(tok, ':');
+        if (colon && colon != tok && o + 600 < sizeof(out)) {
+            /* resolve through the engine's in-scope binding walk */
+            char buri[256], blocal[256];
+            xsd_resolve_qname(any_el, tok, buri, sizeof(buri), blocal,
+                              sizeof(blocal));
+            if (buri[0] && blocal[0]) {
+                int wn =
+                    snprintf(out + o, sizeof(out) - o, "{%s}%s ", buri,
+                             blocal);
+                if (wn > 0) o += (size_t)wn;
+                continue;
+            }
+        }
+        int wn = snprintf(out + o, sizeof(out) - o, "%s ", tok);
+        if (wn > 0) o += (size_t)wn;
+    }
+    if (o) {
+        if (out[o - 1] == ' ') out[o - 1] = 0;
+        free(w->not_qname);
+        w->not_qname = xsd_strdup(out);
+    }
+}
+
+/* #2151: NCName form check for xs:ID values (open039: "open001/2").
+ * ASCII core grammar; non-ASCII bytes pass as name characters (the
+ * parser's posture elsewhere), ASCII punctuation beyond the NCName
+ * set fails. */
+static int xsd_is_ncname(const char* s) {
+    if (!s || !*s) return 0;
+    for (const char* p = s; *p; p++) {
+        char c = *p;
+        int ok = ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  c == '_' || c == ':' || (unsigned char)c >= 0x80 ||
+                  (p > s && ((c >= '0' && c <= '9') || c == '-' ||
+                             c == '.')));
+        if (!ok) return 0;
+    }
+    return 1;
+}
+
+/* #2151: the whitespace-collapsed xs:ID registry (open038: id=" x1 "
+ * collides with id="x1"). Returns 1 when the value was already
+ * seen. */
+static int xsd_oc_id_seen(struct leptris_xsd_schema* s,
+                          const char* raw) {
+    char norm[256];
+    size_t o = 0;
+    for (const char* p = raw; *p && o + 1 < sizeof(norm); p++) {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            continue;
+        norm[o++] = *p;
+    }
+    norm[o] = 0;
+    for (size_t i = 0; i < s->oc_id_count; i++)
+        if (strcmp(s->oc_ids[i], norm) == 0) return 1;
+    if (s->oc_id_count == s->oc_id_cap) {
+        size_t cap = s->oc_id_cap ? s->oc_id_cap * 2 : 8;
+        char** grown = (char**)realloc(s->oc_ids, cap * sizeof(char*));
+        if (!grown) return 0;
+        s->oc_ids = grown;
+        s->oc_id_cap = cap;
+    }
+    char* dup = xsd_strdup(norm);
+    if (dup) s->oc_ids[s->oc_id_count++] = dup;
+    return 0;
+}
+
 static XsdCm* xsd_capture_any(LeptrisElement any_child) {
     XsdCm* w = xsd_cm_new(XSD_CM_ANY);
     if (!w) return NULL;
     w->any_ns = xsd_strdup(
         leptris_element_attribute(any_child, "namespace"));
+    /* #2151: XSD 1.1 @notNamespace — the exclusion list rides the
+     * wildcard (open047's union side). */
+    w->not_ns = xsd_strdup(
+        leptris_element_attribute(any_child, "notNamespace"));
+    /* #2151: the open-content wildcard's @notQName (s3_4_1ii04) */
+    w->not_qname = xsd_strdup(
+        leptris_element_attribute(any_child, "notQName"));
     w->any_unit_tns = xsd_capture_unit_tns(any_child);
     const char* pc = leptris_element_attribute(any_child,
                                                "processContents");
@@ -4651,6 +5470,15 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     root->ext_base = xsd_strdup(base);
                     free(root->ext_base_ns);
                     root->ext_base_ns =
+                        buri[0] ? xsd_strdup(buri) : NULL;
+                }
+                /* #2151: the open-content pass resolves the base
+                 * regardless of the fold's deferral (inheritance,
+                 * wildcard union, the cos-ct-extends ladder). */
+                if (base && strcmp(dl, "extension") == 0 &&
+                    strncmp(base, "xs:", 3) != 0 && !root->oc_ext_base) {
+                    root->oc_ext_base = xsd_strdup(base);
+                    root->oc_ext_base_ns =
                         buri[0] ? xsd_strdup(buri) : NULL;
                 }
                 if (strcmp(dl, "extension") == 0) {
@@ -4851,48 +5679,277 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         if (!any_attr_not_qname)
             any_attr_not_qname = xsd_capture_any_attr_not_qname(ct);
     }
-    /* XSD 1.1: openContent on the type, else the schema default */
-    if (s->version_11) {
+    /* #2151: XSD 1.1 openContent (§3.4.2.3.3 clauses 5/6). The
+     * declared spelling (direct on the complexType or under the
+     * derivation element) wins over the schema default; the default
+     * applies when no openContent child exists and the content model
+     * is non-empty (or mixed-empty, or the default declares
+     * appliesToEmpty). mode="none" declares NO open content and
+     * blocks the default (open031). Errors are the suite's
+     * schema-error class (src-ct.3, open036-039/048, s3_4_1si01/03,
+     * ct-props-correct.5, src-ct.5). The block arms on any 1.1
+     * evidence: a version marker, open-content syntax, or a
+     * complexContent/@mixed attribute (1.1-only syntax). */
+    int cc_mixed_seen = 0;
+    {
         for (LeptrisNodeRef n =
-                 leptris_node_first_child(leptris_element_as_node(ct));
+                 leptris_node_first_child(
+                     leptris_element_as_node(ct));
+             n && !cc_mixed_seen; n = leptris_node_next_sibling(n)) {
+            if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement e = (LeptrisElement)n;
+            const char* el = NULL;
+            const char* eu = NULL;
+            leptris_element_expanded_name(e, &el, NULL, &eu);
+            if (el && eu && strcmp(eu, XSD_NS) == 0 &&
+                strcmp(el, "complexContent") == 0 &&
+                leptris_element_attribute(e, "mixed"))
+                cc_mixed_seen = 1;
+        }
+    }
+    if (s->version_11 || s->saw_open_content || cc_mixed_seen) {
+        root->oc_unit_id = s->current_unit;
+        /* src-ct.5 (s3_4_1si09): complexType/@mixed and
+         * complexContent/@mixed must agree when both are spelled. */
+        {
+            const char* ct_mixed =
+                leptris_element_attribute(ct, "mixed");
+            for (LeptrisNodeRef n =
+                     leptris_node_first_child(
+                         leptris_element_as_node(ct));
+                 n && ct_mixed; n = leptris_node_next_sibling(n)) {
+                if (leptris_node_get_type(n) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement e = (LeptrisElement)n;
+                const char* el = NULL;
+                const char* eu = NULL;
+                leptris_element_expanded_name(e, &el, NULL, &eu);
+                if (!el || !eu || strcmp(eu, XSD_NS) != 0 ||
+                    strcmp(el, "complexContent") != 0)
+                    continue;
+                const char* cc_mixed =
+                    leptris_element_attribute(e, "mixed");
+                if (cc_mixed) {
+                    int a = xsd_bool_attr(ct, "mixed", -1);
+                    int b = xsd_bool_attr(e, "mixed", -1);
+                    if (a != -1 && b != -1 && a != b) {
+                        xsd_set_error(s,
+                                      "complexType/@mixed and "
+                                      "complexContent/@mixed must "
+                                      "not conflict");
+                        s->oc_failed = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        LeptrisElement oc_elem = NULL;
+        int oc_found = 0;
+        int oc_mode_decl = 2; /* S4SD default: interleave */
+        for (LeptrisNodeRef n =
+                 leptris_node_first_child(
+                     leptris_element_as_node(ct));
              n; n = leptris_node_next_sibling(n)) {
             if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
                 continue;
             LeptrisElement e = (LeptrisElement)n;
-            const char* ocl = NULL;
-            leptris_element_expanded_name(e, &ocl, NULL, NULL);
-            if (!ocl || strcmp(ocl, "openContent") != 0) continue;
-            const char* mode = leptris_element_attribute(e, "mode");
-            for (LeptrisNodeRef q = leptris_node_first_child(
-                     leptris_element_as_node(e));
-                 q && !root->open_any;
-                 q = leptris_node_next_sibling(q)) {
+            const char* el = NULL;
+            const char* eu = NULL;
+            leptris_element_expanded_name(e, &el, NULL, &eu);
+            if (!el || !eu || strcmp(eu, XSD_NS) != 0) continue;
+            if (strcmp(el, "openContent") == 0) {
+                oc_elem = e;
+                oc_found = 1;
+            } else if (strcmp(el, "complexContent") == 0) {
+                for (LeptrisNodeRef q =
+                         leptris_node_first_child(
+                             leptris_element_as_node(e));
+                     q; q = leptris_node_next_sibling(q)) {
+                    if (leptris_node_get_type(q) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement dq = (LeptrisElement)q;
+                    const char* dl = NULL;
+                    leptris_element_expanded_name(dq, &dl, NULL,
+                                                  NULL);
+                    if (!dl || (strcmp(dl, "extension") != 0 &&
+                                strcmp(dl, "restriction") != 0))
+                        continue;
+                    for (LeptrisNodeRef r =
+                             leptris_node_first_child(
+                                 leptris_element_as_node(dq));
+                         r; r = leptris_node_next_sibling(r)) {
+                        if (leptris_node_get_type(r) !=
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            continue;
+                        LeptrisElement re = (LeptrisElement)r;
+                        const char* rl = NULL;
+                        leptris_element_expanded_name(re, &rl, NULL,
+                                                      NULL);
+                        if (rl && strcmp(rl, "openContent") == 0) {
+                            oc_elem = re;
+                            oc_found = 1;
+                        }
+                    }
+                }
+            } else if (strcmp(el, "simpleContent") == 0) {
+                /* an openContent under a simpleContent derivation is
+                 * ILLEGAL grammar (the S4SD's simpleContent
+                 * restriction/extension carry no openContent slot):
+                 * detect it so the ct-props-correct.5 rejection
+                 * fires (the type's text_type guard below). */
+                for (LeptrisNodeRef q =
+                         leptris_node_first_child(
+                             leptris_element_as_node(e));
+                     q; q = leptris_node_next_sibling(q)) {
+                    if (leptris_node_get_type(q) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement dq = (LeptrisElement)q;
+                    const char* dl = NULL;
+                    leptris_element_expanded_name(dq, &dl, NULL,
+                                                  NULL);
+                    if (!dl || (strcmp(dl, "extension") != 0 &&
+                                strcmp(dl, "restriction") != 0))
+                        continue;
+                    for (LeptrisNodeRef r =
+                             leptris_node_first_child(
+                                 leptris_element_as_node(dq));
+                         r; r = leptris_node_next_sibling(r)) {
+                        if (leptris_node_get_type(r) !=
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            continue;
+                        LeptrisElement re = (LeptrisElement)r;
+                        const char* rl = NULL;
+                        leptris_element_expanded_name(re, &rl, NULL,
+                                                      NULL);
+                        if (rl && strcmp(rl, "openContent") == 0) {
+                            oc_elem = re;
+                            oc_found = 1;
+                        }
+                    }
+                }
+            }
+        }
+        if (oc_found) {
+            root->oc_declared = 1;
+            const char* mode =
+                leptris_element_attribute(oc_elem, "mode");
+            if (mode && strcmp(mode, "suffix") == 0)
+                oc_mode_decl = 1;
+            else if (mode && strcmp(mode, "none") == 0)
+                oc_mode_decl = 0;
+            else
+                oc_mode_decl = 2; /* absent = interleave */
+            root->oc_declared = oc_mode_decl ? 1 : 2;
+            int any_count = 0;
+            int anno_count = 0;
+            for (LeptrisNodeRef q =
+                     leptris_node_first_child(
+                         leptris_element_as_node(oc_elem));
+                 q; q = leptris_node_next_sibling(q)) {
                 if (leptris_node_get_type(q) !=
                     LEPTRIS_NODE_TYPE_ELEMENT)
                     continue;
                 LeptrisElement qe = (LeptrisElement)q;
                 const char* ql = NULL;
                 leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                if (ql && strcmp(ql, "annotation") == 0) {
+                    anno_count++;
+                    continue;
+                }
                 if (ql && strcmp(ql, "any") == 0) {
-                    root->open_any = xsd_capture_any(qe);
-                    if (root->open_any) root->oc_owned = 1;
+                    any_count++;
+                    /* bug 15618 (open048): the open content wildcard
+                     * carries no occurrence attributes */
+                    if (leptris_element_attribute(qe, "minOccurs") ||
+                        leptris_element_attribute(qe, "maxOccurs")) {
+                        xsd_set_error(s,
+                                      "the openContent wildcard does "
+                                      "not allow occurrence "
+                                      "attributes");
+                        s->oc_failed = 1;
+                        break;
+                    }
+                    if (!root->open_any) {
+                        root->open_any = xsd_capture_any(qe);
+                        if (root->open_any) {
+                            root->oc_owned = 1;
+                            xsd_oc_resolve_not_qname(root->open_any,
+                                                     qe);
+                        }
+                    }
+                    continue;
+                }
+                /* anything else: s3_4_1si03 */
+                xsd_set_error(s,
+                              "openContent allows only an "
+                              "annotation and one xs:any");
+                s->oc_failed = 1;
+                break;
+            }
+            if (anno_count > 1) {
+                xsd_set_error(s,
+                              "openContent allows at most one "
+                              "annotation");
+                s->oc_failed = 1;
+            } else if (any_count > 1) {
+                xsd_set_error(s,
+                              "openContent allows only one xs:any");
+                s->oc_failed = 1;
+            } else if (oc_mode_decl && any_count == 0) {
+                xsd_set_error(s,
+                              "openContent with a mode other than "
+                              "none requires an xs:any child");
+                s->oc_failed = 1;
+            } else if (!oc_mode_decl && any_count > 0) {
+                xsd_set_error(s,
+                              "openContent mode none forbids an "
+                              "xs:any child");
+                s->oc_failed = 1;
+            }
+            const char* oid =
+                leptris_element_attribute(oc_elem, "id");
+            if (oid && *oid) {
+                if (!xsd_is_ncname(oid)) {
+                    xsd_set_error(s,
+                                  "openContent/@id is not a valid "
+                                  "NCName");
+                    s->oc_failed = 1;
+                } else if (xsd_oc_id_seen(s, oid)) {
+                    xsd_set_error(s,
+                                  "duplicate xs:ID on openContent");
+                    s->oc_failed = 1;
                 }
             }
-            if (mode && strcmp(mode, "suffix") == 0)
-                root->oc_mode = 1;
-            else if (mode && strcmp(mode, "interleave") == 0)
-                root->oc_mode = 2;
-            else
-                root->oc_mode = 0;
+            /* ct-props-correct.5: open content requires
+             * element-only or mixed content — a simpleContent type
+             * cannot carry one. */
+            if (root->text_type) {
+                xsd_set_error(s,
+                              "openContent is not allowed on a "
+                              "simple content type");
+                s->oc_failed = 1;
+            }
+            root->oc_mode = oc_mode_decl;
+        } else if (s->default_open &&
+                   s->default_oc_unit_id == s->current_unit) {
+            /* §3.4.2.3.3 clause 5.2: the schema default applies when
+             * the explicit content is non-empty; mixed-empty keeps
+             * variety mixed (non-empty); appliesToEmpty extends the
+             * default to plain-empty models (open011). */
+            int content_empty = !root->first_child ||
+                                !root->first_child->first_child;
+            if (!content_empty || root->mixed || s->default_oc_empty) {
+                root->oc_mode =
+                    s->default_oc_mode ? s->default_oc_mode : 2;
+                root->open_any = s->default_open; /* borrowed */
+                root->oc_owned = 0;
+            }
         }
     }
-    if (!root->oc_mode && s->default_open && root->first_child)
-        root->oc_mode = 2;
-    if (!root->oc_mode && s->default_open && !root->first_child &&
-        s->default_oc_empty)
-        root->oc_mode = 2;
-    if (root->oc_mode == 2 && !root->open_any && s->default_open)
-        root->open_any = s->default_open;
     /* XSD 1.1: direct xs:assert children of the complexType —
      * captured when the schema claims 1.1, carries alternatives
      * (#2149) or carries assert syntax (#2154) */
@@ -4909,13 +5966,35 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         }
     }
     /* open-content semantics ride the model root (the NFA builds
-     * from ct->first_child, never the name wrapper) */
+     * from ct->first_child, never the name wrapper); an open
+     * content without a particle model still synthesizes an empty
+     * sequence carrier (§3.4.2.3.3 cl. 6.2 synthesizes the empty
+     * sequence particle when the variety upgrades — open010). */
+    if (!root->first_child && root->open_any) {
+        XsdCm* seq = xsd_cm_new(XSD_CM_SEQ);
+        if (seq) root->first_child = seq;
+    }
     if (root->first_child) {
         root->first_child->open_any = root->open_any;
         root->first_child->oc_mode = root->oc_mode;
         root->first_child->oc_owned = root->oc_owned;
+        root->first_child->oc_declared = root->oc_declared;
+        root->first_child->oc_unit_id = root->oc_unit_id;
         root->open_any = NULL;
         root->oc_owned = 0;
+        /* variety EMPTY (§3.4.2.3.3 cl. 4.1.1/3.1.2): explicit
+         * content empty, not mixed, and NO open content applied —
+         * such a type forbids character content entirely
+         * (open012.n3). An applied open content upgrades the
+         * variety to element-only (cl. 6.2): the element-only text
+         * rule holds (non-whitespace text invalid — open010.n2,
+         * whitespace legal — open010.v2). */
+        root->first_child->empty_content =
+            (s->version_11 || s->saw_open_content) && !root->mixed &&
+            !root->first_child->first_child && !root->first_child->oc_mode;
+        root->first_child->empty_upgraded =
+            (s->version_11 || s->saw_open_content) && !root->mixed &&
+            !root->first_child->first_child && root->first_child->oc_mode;
     } else if (root->open_any && root->oc_owned) {
         xsd_cm_free(root->open_any);
         root->open_any = NULL;
@@ -6152,7 +7231,7 @@ LEPTRIS_API int leptris_xsd_content_valid(
     if (!model) return child_count == 0;
 
     int ok = xsd_content_valid(s, model, s->target_ns, child_names,
-                               child_ns, child_count);
+                               child_ns, child_count, NULL);
     /* #1894: -2 = the model crosses the automaton size cap — surface
      * the loud structured row and keep the public contract's -1 for
      * "not evaluable". */

@@ -175,10 +175,42 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * kept component's dangling type reference failing the schema):
      * 1710/2206 — the eight saxon Override schema-error rows
      * (over011/014/016/017/021/022/024/026) flipped, zero
-     * regressions (measured 2026-11-25 on the #2156 base). */
-    EXPECT_GE(pass, 1710) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 1140);
-    EXPECT_GE(pass_invalid, 459);
+     * regressions (measured 2026-11-25 on the #2156 base);
+     * Raised by #2151 (xs:openContent / xs:defaultOpenContent —
+     * the unmarked-schema syntax gate, the S4SD interleave default,
+     * the defaultOpenContent precedence chain with
+     * appliesToEmpty and per-document unit scoping, suffix +
+     * interleave absorption over sequence/all/choice models
+     * (§3.4.4.3 — the wildcard absorbs before ANY model element
+     * step and the particle-only trace attributes children
+     * greedily), the §3.4.2.3.3 clause 6.2 empty-variety rules
+     * (empty forbids all text; an applied wildcard upgrades to
+     * element-only), extension inheritance / mode="none"
+     * inheritance / §3.10.6.3 wildcard union / the
+     * cos-ct-extends.1.4.3.2.2.3/4 ladder, the restriction
+     * subset+no-add checks with the empty-model exemption, the
+     * §3.8.6.4 element-vs-wildcard UPA relaxation, the
+     * openContent wildcard's @notNamespace + prefix-resolved
+     * @notQName, xsd_bool_attr whitespace tolerance, and the
+     * schema-error class (src-ct.3 any/none co-occurrence,
+     * non-any children, annotation limit, ID form + uniqueness,
+     * occurrence attributes on the wildcard, simpleContent
+     * carriers, src-ct.5 mixed agreement, the mixed-mismatch
+     * extension, the defaultOpenContent placement rule,
+     * s3_4_1si04/05/06 derivation ladders; open042's redefine
+     * body rides the includer's default while open043's override
+     * body does not)): 1787/2206 — openContent 122/205 → 196/205,
+     * the nine remaining reds are the saxon defaultAttributes
+     * sub-family (open035/044/045/202-205 — §3.4.2.5 default
+     * attribute groups are not implemented; not openContent),
+     * re-dispositioned in test/xsd/xsd11-dispositions/README.md
+     * (measured 2026-11-25 on the #2156 base). Monotonically
+ * UNION RE-MEASURE (#2150+#2151 together on the rebased base):
+ * floor pinned to the measured union value below.
+ * Monotonically rising. */
+    EXPECT_GE(pass, 1795) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1191);
+    EXPECT_GE(pass_invalid, 467);
     EXPECT_GE(pass_schema_error, 103);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));

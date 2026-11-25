@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- at most one annotation -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="suffix">
+      <xs:annotation/>
+      <xs:annotation/>
+      <xs:any namespace="http://open.com/"/>
+    </xs:openContent>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- xs:ID values must be unique (whitespace-normalized) -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="suffix" id="x1">
+      <xs:any namespace="http://open.com/"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="a"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+<xs:element name="doc2">
+  <xs:complexType>
+    <xs:openContent mode="suffix" id="  x1  ">
+      <xs:any namespace="http://open.com/"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="b"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+</xs:schema>
