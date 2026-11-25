@@ -43,6 +43,7 @@ set(LEPTRIS_SOURCES
     leptris/dom/element_query.c
     leptris/dom/element_modify.c
     leptris/dom/mut_recycle.c
+    leptris/dom/name_intern.c
     leptris/dom/element_index.c
     leptris/dom/text.c
     leptris/dom/comment.c

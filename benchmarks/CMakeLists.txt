@@ -77,6 +77,10 @@ endfunction()
 # DOM benchmarks (leptris vs libxml2)
 # ----------------------------------------------------------------------------
 leptris_add_benchmark(bench_zerocopy_text  dom/bench_zerocopy_text.c)
+# #2132 phase 2 ship-gate: peak-RSS counter for the mutcycle shape
+# (standalone — ru_maxrss is process-monotonic, so it must not share a
+# binary with the other rows).
+leptris_add_benchmark(bench_mutcycle_rss   modification/bench_mutcycle_rss.c)
 if(LIBXML2_AVAILABLE)
     leptris_add_benchmark(bench_dom_leptris      dom/bench_leptris.c)
 leptris_add_benchmark(bench_text_borrowed   dom/bench_text_borrowed.c)

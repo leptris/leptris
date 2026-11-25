@@ -21,6 +21,7 @@
 #include "pi.h"
 #include "entity_ref.h"
 #include "mut_recycle.h"
+#include "name_intern.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -33,9 +34,11 @@
  * contiguous block — replaces leptris_pool_strdup on the create path
  * (call chain + arena slack checks cost ~9ns for a 2-byte name;
  * this is bump + copy). Oversized names (> block size) fall back
- * to the pool. */
-static char* mut_name_carve(struct leptris_document* doc,
-                            const char* name, size_t name_len) {
+ * to the pool.
+ * #2132 phase 2: now the shared leptris_dom_name_slot_carve (the
+ * intern table inserts through the same carve; was static here). */
+char* leptris_dom_name_slot_carve(struct leptris_document* doc,
+                                  const char* name, size_t name_len) {
     /* Slot layout: [8B doc backpointer][name bytes][NUL]. The
      * backpointer + header bit 6 let get_document resolve this
      * element while unattached with zero registration (see
@@ -199,7 +202,54 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
         if (name_len == 8 && name[8]) name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
-            char* name_copy = mut_name_carve(doc, name, name_len);
+            /* #2132 phase 2: per-document name interning — the
+             * default create path for colon-free names. The table
+             * maps name bytes -> one shared mut-block slot (doc-
+             * backpointer layout preserved) + the cached 16-bit
+             * hash, so a repeat create pays one memcmp (the memo)
+             * and skips the per-element name copy + hash compute.
+             * The colon gate keeps #846's carve+split path disjoint:
+             * the split mutates name bytes IN PLACE, so a shared
+             * slot must never be a split candidate. The probe is
+             * split_qname's own law: names < 3 bytes cannot carry a
+             * splittable QName; <= 16 scan inline; beyond, memchr. */
+            const char* shared = NULL;
+            uint16_t shared_hash = 0;
+            struct leptris_name_intern* ix =
+                (name_len >= 1 && name_len <= 254)
+                    ? leptris_name_intern_get(doc)
+                    : NULL;
+            if (ix && !ix->overflow) {
+                int colon_free = (name_len < 3);
+                if (!colon_free && name_len <= 16) {
+                    colon_free = 1;
+                    for (const char* c = name; *c; c++) {
+                        if (*c == ':') { colon_free = 0; break; }
+                    }
+                } else if (!colon_free) {
+                    colon_free =
+                        memchr(name, ':', name_len) == NULL;
+                }
+                if (colon_free) {
+                    shared = leptris_name_intern_intern(
+                        doc, ix, name, name_len, &shared_hash);
+                }
+            }
+            if (shared) {
+                /* mut_elem_carve bulk-zeroed the block at acquire —
+                 * the unassigned fields are zero from that pass. No
+                 * split_qname here: the name is colon-free by the
+                 * gate AND the slot is shared — #846's in-place
+                 * split must never see an interned slot. */
+                elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
+                elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
+                elem_set_name_doc(elem, (char*)shared, doc);
+                elem->name_hash = shared_hash;
+                elem->name_len =
+                    (name_len > 254) ? 0xFF : (uint8_t)name_len;
+                return elem;
+            }
+            char* name_copy = leptris_dom_name_slot_carve(doc, name, name_len);
             if (name_copy) {
                 /* mut_elem_carve bulk-zeroed the block at acquire —
                  * the per-element memset is gone (#2132). The fields
@@ -1064,9 +1114,43 @@ LeptrisStatus leptris_element_set_name(LeptrisElement elem, const char* name) {
      * A replacement name is pool storage with no backpointer: clear
      * the bit and register in the root map instead. */
     struct leptris_document* sn_doc = leptris_element_get_document(elem);
+    /* #2132 phase 2: colon-free renames intern — the shared slot
+     * keeps the backpointer layout, so the element re-points at the
+     * table's storage without a pool strdup. STRICTLY colon-free
+     * here: unlike create's split_qname (which no-ops on a trailing
+     * colon), this path's #817 block splits on ANY colon — those
+     * names must keep today's carve behavior byte-for-byte. */
+    size_t sn_len = leptris_cstr_len16(name);
+    struct leptris_name_intern* sn_ix =
+        (sn_doc && sn_doc->pool && sn_len >= 1 && sn_len <= 254)
+            ? leptris_name_intern_get(sn_doc)
+            : NULL;
+    const char* sn_shared = NULL;
+    uint16_t sn_shared_hash = 0;
+    if (sn_ix && !sn_ix->overflow) {
+        int colon_free = 1;
+        if (sn_len > 16) {
+            colon_free = memchr(name, ':', sn_len) == NULL;
+        } else {
+            for (const char* c = name; *c; c++) {
+                if (*c == ':') { colon_free = 0; break; }
+            }
+        }
+        if (colon_free) {
+            sn_shared = leptris_name_intern_intern(
+                sn_doc, sn_ix, name, sn_len, &sn_shared_hash);
+        }
+    }
     elem->header.flags &= (uint8_t)(~LEPTRIS_NAMEBP_FLAG & 0xFFu);
     char* nm;
-    if (sn_doc && sn_doc->pool) {
+    if (sn_shared) {
+        /* Interned: the slot carries the doc backpointer — namebp
+         * resolves without root-map registration (the create path's
+         * Lane-18 P1 contract). */
+        nm = (char*)sn_shared;
+        elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
+        elem_set_name_doc(elem, nm, sn_doc);
+    } else if (sn_doc && sn_doc->pool) {
         /* Use pool allocation for consistency with parsing */
         nm = leptris_pool_strdup(sn_doc->pool, name);
         elem_set_name_doc(elem, nm, sn_doc);
@@ -1102,9 +1186,15 @@ LeptrisStatus leptris_element_set_name(LeptrisElement elem, const char* name) {
         }
     }
     char* local = elem_name(elem);
-    elem->name_hash = leptris_name_hash_compute(local);
-    elem->name_len = (uint8_t)(strlen(local) > 254
-                                   ? 0xFF : strlen(local));
+    if (sn_shared) {
+        /* Cached hash + length from the table — no recompute. */
+        elem->name_hash = sn_shared_hash;
+        elem->name_len = (uint8_t)sn_len;
+    } else {
+        elem->name_hash = leptris_name_hash_compute(local);
+        elem->name_len = (uint8_t)(strlen(local) > 254
+                                       ? 0xFF : strlen(local));
+    }
 
     /* COW: Increment version */
     leptris_node_increment_version(LEPTRIS_ELEMENT_AS_NODE(elem));
