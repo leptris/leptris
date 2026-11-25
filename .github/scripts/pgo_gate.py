@@ -31,11 +31,15 @@ DEFAULT_RULE = (r"total cpu:\s*([\d.]+)", "sum", "lower")
 RULES = {
     "bench_dom_leptris": DEFAULT_RULE,
     "bench_xpath_leptris": DEFAULT_RULE,
-    "bench_xpath_axes_leptris": DEFAULT_RULE,
-    "bench_xpath_functions_leptris": DEFAULT_RULE,
+    # axes/functions print per-test lines ("cpu  0.84 us") and no
+    # summary block — sum the cpu column of every test line.
+    "bench_xpath_axes_leptris": (r"cpu\s+([\d.]+) us", "sum", "lower"),
+    "bench_xpath_functions_leptris": (r"cpu\s+([\d.]+) us", "sum", "lower"),
     "bench_sax_leptris": DEFAULT_RULE,
-    "bench_serialize": DEFAULT_RULE,
-    "bench_modify_leptris": DEFAULT_RULE,
+    # serialize/modify emit JSON, one operation block each — sum the
+    # total_us fields (the actual measured time per operation).
+    "bench_serialize": (r'"total_us":\s*([\d.]+)', "sum", "lower"),
+    "bench_modify_leptris": (r'"total_us":\s*([\d.]+)', "sum", "lower"),
     # C++ flagship rows have their own line formats. Note benchmark_parse
     # indents its comparison lines — no line-start anchor there.
     "dom_benchmark_v2": (r"Leptris:\s+([\d.]+)", "sum", "lower"),
@@ -66,7 +70,12 @@ def row_value(result_dir, name):
     files = sorted(glob.glob(os.path.join(result_dir, "run*", name + ".txt")))
     if not files:
         return None
-    values = [scalar(open(f, encoding="utf-8").read(), rule) for f in files]
+    values = []
+    for f in files:
+        try:
+            values.append(scalar(open(f, encoding="utf-8").read(), rule))
+        except ValueError:  # output that matches no rule counts as missing
+            return None
     return min(values) if rule[2] == "lower" else max(values)
 
 
