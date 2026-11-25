@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- #2155: minInclusive and minExclusive cannot both be specified
+     in one restriction (d3_3_4si13); likewise maxExclusive and
+     maxInclusive. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/both_min_forms"
+	xmlns:t="http://leptris.test/dt/both_min_forms">
+<simpleType name="decInclusive">
+	<restriction base="precisionDecimal">
+		<minInclusive value="20"/>
+		<minExclusive value="10"/>
+	</restriction>
+</simpleType>
+<simpleType name="decExclusive">
+	<restriction base="precisionDecimal">
+		<maxExclusive value="-20"/>
+		<maxInclusive value="-30"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:decInclusive"/>
+</schema>

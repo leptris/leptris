@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- #2155: a fixed base bound cannot be re-specified with a
+     different value (d3_4_26si11). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/fixed_minmax_ymd"
+	xmlns:t="http://leptris.test/dt/fixed_minmax_ymd">
+<simpleType name="fixedBase">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y1M" fixed="true"/>
+	</restriction>
+</simpleType>
+<simpleType name="derived">
+	<restriction base="t:fixedBase">
+		<minInclusive value="P1Y2M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derived"/>
+</schema>

@@ -444,6 +444,7 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
     simple->name = xsd_strdup(name);
     simple->length = simple->min_length = simple->max_length = -1;
     simple->total_digits = simple->fraction_digits = -1;
+    simple->min_scale = simple->max_scale = -1;
 
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(st));
@@ -560,6 +561,13 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                 if (!fl || (fu && strcmp(fu, XSD_NS) != 0)) continue;
                 const char* val =
                     leptris_element_attribute(fe, "value");
+                /* §4.3: the facet's fixed flag — a fixed base
+                 * facet cannot be re-specified with a different
+                 * value down the ladder (#2155). */
+                const char* fxv =
+                    leptris_element_attribute(fe, "fixed");
+                int is_fixed = fxv && (strcmp(fxv, "true") == 0 ||
+                                       strcmp(fxv, "1") == 0);
                 if (strcmp(fl, "pattern") == 0) {
                     XsdFacetValue* fv =
                         (XsdFacetValue*)calloc(1, sizeof(*fv));
@@ -584,28 +592,55 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                      * (LSan on the xsdtests 1.1 lane). */
                     free(simple->min_inclusive);
                     simple->min_inclusive = xsd_strdup(val);
+                    simple->fixed_min_inclusive = (unsigned char)is_fixed;
                 } else if (strcmp(fl, "minExclusive") == 0) {
                     free(simple->min_exclusive);
                     simple->min_exclusive = xsd_strdup(val);
+                    simple->fixed_min_exclusive = (unsigned char)is_fixed;
                 } else if (strcmp(fl, "maxInclusive") == 0) {
                     free(simple->max_inclusive);
                     simple->max_inclusive = xsd_strdup(val);
+                    simple->fixed_max_inclusive = (unsigned char)is_fixed;
                 } else if (strcmp(fl, "maxExclusive") == 0) {
                     free(simple->max_exclusive);
                     simple->max_exclusive = xsd_strdup(val);
-                } else if (strcmp(fl, "length") == 0)
+                    simple->fixed_max_exclusive = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "length") == 0) {
                     simple->length = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "minLength") == 0)
+                    simple->fixed_length = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "minLength") == 0) {
                     simple->min_length = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "maxLength") == 0)
+                    simple->fixed_min_length = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "maxLength") == 0) {
                     simple->max_length = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "totalDigits") == 0)
-                    simple->total_digits = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "fractionDigits") == 0)
-                    simple->fraction_digits = val ? strtol(val, NULL, 10) : -1;
-                else if (strcmp(fl, "whiteSpace") == 0) {
+                    simple->fixed_max_length = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "totalDigits") == 0) {
+                    simple->total_digits =
+                        val ? strtol(val, NULL, 10) : -1;
+                    simple->fixed_total_digits = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "fractionDigits") == 0) {
+                    simple->fraction_digits =
+                        val ? strtol(val, NULL, 10) : -1;
+                    simple->fixed_fraction_digits =
+                        (unsigned char)is_fixed;
+                } else if (strcmp(fl, "minScale") == 0) {
+                    /* XSD 1.1: the scale pair (decimal family,
+                     * #2155) */
+                    simple->min_scale = val ? strtol(val, NULL, 10) : -1;
+                    simple->fixed_min_scale = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "maxScale") == 0) {
+                    simple->max_scale = val ? strtol(val, NULL, 10) : -1;
+                    simple->fixed_max_scale = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "explicitTimezone") == 0) {
+                    /* XSD 1.1: the timezone facet (date/time
+                     * family, #2155) */
+                    free(simple->explicit_timezone);
+                    simple->explicit_timezone = xsd_strdup(val);
+                    simple->fixed_timezone = (unsigned char)is_fixed;
+                } else if (strcmp(fl, "whiteSpace") == 0) {
                     free(simple->whitespace);
                     simple->whitespace = xsd_strdup(val);
+                    simple->fixed_whitespace = (unsigned char)is_fixed;
                 } else if (strcmp(fl, "assertion") == 0) {
                     /* #2154: assertion facets ACCUMULATE — a
                      * restriction may carry several and the validator
@@ -884,6 +919,523 @@ static void xsd_set_error(struct leptris_xsd_schema* s, const char* msg) {
         if (s->error) memcpy(s->error, msg, n);
     }
 }
+
+/* ---- #2155: the 1.1 facet-applicability sweep ---------------------
+ *
+ * The captured restriction facets are checked against the
+ * datatypes.c applicability table (which facets are legal on which
+ * terminal builtin), the facet VALUES' lexical validity, the
+ * cross-facet order clauses, and — for the 1.1-only builtins — the
+ * narrowing clauses against the base chain (a restriction may not
+ * widen, and a FIXED base facet cannot be re-specified with a
+ * different value). Runs post-capture, like the pattern-regex
+ * sweep; first violation names the rule. */
+
+/* The narrowing chain hop: inline anonymous bases ride base_def,
+ * named local bases resolve name-only, builtins end the walk. */
+static const XsdSimple* facet_base_next(struct leptris_xsd_schema* s,
+                                        const XsdSimple* t) {
+    if (!t) return NULL;
+    if (t->base_def) return t->base_def;
+    if (t->base && strncmp(t->base, "xs:", 3) != 0)
+        return xsd_find_simple(s, t->base);
+    return NULL;
+}
+
+static int xsd_restriction_facets_ok(struct leptris_xsd_schema* s,
+                                     const XsdSimple* t, char* msg,
+                                     size_t cap) {
+    int chain_is_list = xsd_chain_is_list(s, t);
+    const char* term = xsd_chain_terminal(s, t);
+    int tclass = term ? xsd_terminal_class(term) : 7 /* OTHER */;
+    int checkable = chain_is_list || tclass != 7;
+    if (!checkable) return 1; /* unions / anyAtomic chains: posture */
+    int is11 = term && xsd_builtin_is_11(term);
+
+    /* ---- applicability + facet-value validity ------------------- */
+    const char* number_bufs[7];
+    char bufs[7][24];
+    snprintf(bufs[0], sizeof(bufs[0]), "%ld", t->length);
+    number_bufs[0] = bufs[0];
+    snprintf(bufs[1], sizeof(bufs[0]), "%ld", t->min_length);
+    number_bufs[1] = bufs[1];
+    snprintf(bufs[2], sizeof(bufs[0]), "%ld", t->max_length);
+    number_bufs[2] = bufs[2];
+    snprintf(bufs[3], sizeof(bufs[0]), "%ld", t->total_digits);
+    number_bufs[3] = bufs[3];
+    snprintf(bufs[4], sizeof(bufs[0]), "%ld", t->fraction_digits);
+    number_bufs[4] = bufs[4];
+    snprintf(bufs[5], sizeof(bufs[0]), "%ld", t->min_scale);
+    number_bufs[5] = bufs[5];
+    snprintf(bufs[6], sizeof(bufs[0]), "%ld", t->max_scale);
+    number_bufs[6] = bufs[6];
+    struct {
+        const char* facet;
+        const char* value;
+        int present;
+    } slots[13];
+    int nslots = 0;
+    slots[nslots].facet = "length";
+    slots[nslots].value = number_bufs[0];
+    slots[nslots++].present = (t->length != -1);
+    slots[nslots].facet = "minLength";
+    slots[nslots].value = number_bufs[1];
+    slots[nslots++].present = (t->min_length != -1);
+    slots[nslots].facet = "maxLength";
+    slots[nslots].value = number_bufs[2];
+    slots[nslots++].present = (t->max_length != -1);
+    slots[nslots].facet = "totalDigits";
+    slots[nslots].value = number_bufs[3];
+    slots[nslots++].present = (t->total_digits != -1);
+    slots[nslots].facet = "fractionDigits";
+    slots[nslots].value = number_bufs[4];
+    slots[nslots++].present = (t->fraction_digits != -1);
+    slots[nslots].facet = "minScale";
+    slots[nslots].value = number_bufs[5];
+    slots[nslots++].present = (t->min_scale != -1);
+    slots[nslots].facet = "maxScale";
+    slots[nslots].value = number_bufs[6];
+    slots[nslots++].present = (t->max_scale != -1);
+    slots[nslots].facet = "minInclusive";
+    slots[nslots].value = t->min_inclusive;
+    slots[nslots++].present = (t->min_inclusive != NULL);
+    slots[nslots].facet = "minExclusive";
+    slots[nslots].value = t->min_exclusive;
+    slots[nslots++].present = (t->min_exclusive != NULL);
+    slots[nslots].facet = "maxInclusive";
+    slots[nslots].value = t->max_inclusive;
+    slots[nslots++].present = (t->max_inclusive != NULL);
+    slots[nslots].facet = "maxExclusive";
+    slots[nslots].value = t->max_exclusive;
+    slots[nslots++].present = (t->max_exclusive != NULL);
+    slots[nslots].facet = "whiteSpace";
+    slots[nslots].value = t->whitespace;
+    slots[nslots++].present = (t->whitespace != NULL);
+    slots[nslots].facet = "explicitTimezone";
+    slots[nslots].value = t->explicit_timezone;
+    slots[nslots++].present = (t->explicit_timezone != NULL);
+    for (int i = 0; i < nslots; i++) {
+        if (!slots[i].present) continue;
+        if (!xsd_facet_applicable(term, slots[i].facet, chain_is_list)) {
+            snprintf(msg, cap,
+                     "facet-applicability: the %s facet is not "
+                     "applicable to its %s base",
+                     slots[i].facet, term ? term : "list");
+            return 0;
+        }
+        if (!xsd_facet_value_valid(term, slots[i].facet, slots[i].value,
+                                   chain_is_list)) {
+            snprintf(msg, cap,
+                     "facet-value: '%s' is not a valid lexical of %s "
+                     "for the %s facet",
+                     slots[i].value, term, slots[i].facet);
+            return 0;
+        }
+    }
+    /* enumeration entries are typed too — each is a lexical of the
+     * terminal builtin (d3_3_4si21 / d3_4_26si09 / d3_4_28si13) */
+    for (const XsdFacetValue* e = t->enum_values; e; e = e->next) {
+        if (!xsd_facet_value_valid(term, "enumeration", e->text,
+                                   chain_is_list)) {
+            snprintf(msg, cap,
+                     "facet-value: enumeration entry '%s' is not a "
+                     "valid lexical of %s",
+                     e->text, term);
+            return 0;
+        }
+    }
+
+    /* ---- the fixed whiteSpace + the collapse-fixed posture ------ */
+    if (is11 && t->whitespace &&
+        strcmp(t->whitespace, "collapse") != 0) {
+        snprintf(msg, cap,
+                 "facet-value: whiteSpace on %s is fixed at collapse",
+                 term);
+        return 0;
+    }
+    if (is11 && t->explicit_timezone && term &&
+        strcmp(term, "xs:dateTimeStamp") == 0 &&
+        strcmp(t->explicit_timezone, "required") != 0) {
+        snprintf(msg, cap,
+                 "facet-value: explicitTimezone on dateTimeStamp can "
+                 "only be required");
+        return 0;
+    }
+
+    /* ---- cross-facet order clauses ------------------------------- */
+    int c;
+    if (t->min_inclusive && t->min_exclusive) {
+        snprintf(msg, cap,
+                 "cross-facet: minInclusive and minExclusive cannot "
+                 "both be specified");
+        return 0;
+    }
+    if (t->max_inclusive && t->max_exclusive) {
+        snprintf(msg, cap,
+                 "cross-facet: maxInclusive and maxExclusive cannot "
+                 "both be specified");
+        return 0;
+    }
+    if (t->min_inclusive && t->max_inclusive &&
+        (c = xsd_facet_value_compare(term, t->min_inclusive,
+                                     t->max_inclusive)) > 0) {
+        snprintf(msg, cap,
+                 "cross-facet: minInclusive exceeds maxInclusive");
+        return 0;
+    }
+    if (t->min_exclusive && t->max_exclusive &&
+        xsd_facet_value_compare(term, t->min_exclusive,
+                                t->max_exclusive) >= 0) {
+        snprintf(msg, cap,
+                 "cross-facet: minExclusive is not below maxExclusive");
+        return 0;
+    }
+    if (t->min_inclusive && t->max_exclusive &&
+        xsd_facet_value_compare(term, t->min_inclusive,
+                                t->max_exclusive) >= 0) {
+        snprintf(msg, cap,
+                 "cross-facet: minInclusive is not below maxExclusive");
+        return 0;
+    }
+    if (t->min_exclusive && t->max_inclusive &&
+        xsd_facet_value_compare(term, t->min_exclusive,
+                                t->max_inclusive) >= 0) {
+        snprintf(msg, cap,
+                 "cross-facet: minExclusive is not below maxInclusive");
+        return 0;
+    }
+    if (t->min_scale != -1 && t->max_scale != -1 &&
+        t->min_scale > t->max_scale) {
+        snprintf(msg, cap, "cross-facet: minScale exceeds maxScale");
+        return 0;
+    }
+
+    /* ---- narrowing + fixed re-specification (1.1 builtins) ------ */
+    if (!is11) return 1;
+    long b_min_scale = -1, b_max_scale = -1;
+    long b_total = -1, b_frac = -1;
+    long b_min_len = -1, b_max_len = -1, b_len = -1;
+    const char* b_min_incl = NULL;
+    const char* b_min_excl = NULL;
+    const char* b_max_incl = NULL;
+    const char* b_max_excl = NULL;
+    for (const XsdSimple* b = facet_base_next(s, t); b;
+         b = facet_base_next(s, b)) {
+        if (b->min_inclusive) {
+            if (!b_min_incl ||
+                xsd_facet_value_compare(term, b->min_inclusive,
+                                        b_min_incl) > 0)
+                b_min_incl = b->min_inclusive;
+        }
+        if (b->min_exclusive) {
+            if (!b_min_excl ||
+                xsd_facet_value_compare(term, b->min_exclusive,
+                                        b_min_excl) > 0)
+                b_min_excl = b->min_exclusive;
+        }
+        if (b->max_inclusive) {
+            if (!b_max_incl ||
+                xsd_facet_value_compare(term, b->max_inclusive,
+                                        b_max_incl) < 0)
+                b_max_incl = b->max_inclusive;
+        }
+        if (b->max_exclusive) {
+            if (!b_max_excl ||
+                xsd_facet_value_compare(term, b->max_exclusive,
+                                        b_max_excl) < 0)
+                b_max_excl = b->max_exclusive;
+        }
+        if (b->total_digits >= 0 &&
+            (b_total < 0 || b->total_digits < b_total))
+            b_total = b->total_digits;
+        if (b->fraction_digits >= 0 &&
+            (b_frac < 0 || b->fraction_digits < b_frac))
+            b_frac = b->fraction_digits;
+        /* scales are INTEGER (negative legal) — the -1 sentinel is
+         * the only "absent" marker */
+        if (b->min_scale != -1 &&
+            (b_min_scale == -1 || b->min_scale > b_min_scale))
+            b_min_scale = b->min_scale;
+        if (b->max_scale != -1 &&
+            (b_max_scale == -1 || b->max_scale < b_max_scale))
+            b_max_scale = b->max_scale;
+        if (b->min_length >= 0 && b->min_length > b_min_len)
+            b_min_len = b->min_length;
+        if (b->max_length >= 0 &&
+            (b_max_len < 0 || b->max_length < b_max_len))
+            b_max_len = b->max_length;
+        if (b->length >= 0) b_len = b->length;
+        /* the fixed law: the derived re-specification must carry the
+         * same value (§4.3 — checked against EVERY fixed level; an
+         * incomparable pair (-2, NaN) is no violation) */
+        if (b->fixed_min_inclusive && t->min_inclusive &&
+            xsd_facet_value_compare(term, t->min_inclusive,
+                                    b->min_inclusive) == 1) {
+            snprintf(msg, cap,
+                     "fixed: minInclusive is fixed at '%s' in the base",
+                     b->min_inclusive);
+            return 0;
+        }
+        if (b->fixed_min_exclusive && t->min_exclusive &&
+            xsd_facet_value_compare(term, t->min_exclusive,
+                                    b->min_exclusive) == 1) {
+            snprintf(msg, cap,
+                     "fixed: minExclusive is fixed at '%s' in the base",
+                     b->min_exclusive);
+            return 0;
+        }
+        if (b->fixed_max_inclusive && t->max_inclusive &&
+            xsd_facet_value_compare(term, t->max_inclusive,
+                                    b->max_inclusive) == -1) {
+            snprintf(msg, cap,
+                     "fixed: maxInclusive is fixed at '%s' in the base",
+                     b->max_inclusive);
+            return 0;
+        }
+        if (b->fixed_max_exclusive && t->max_exclusive &&
+            xsd_facet_value_compare(term, t->max_exclusive,
+                                    b->max_exclusive) == -1) {
+            snprintf(msg, cap,
+                     "fixed: maxExclusive is fixed at '%s' in the base",
+                     b->max_exclusive);
+            return 0;
+        }
+        if (b->fixed_total_digits && t->total_digits >= 0 &&
+            t->total_digits != b->total_digits) {
+            snprintf(msg, cap,
+                     "fixed: totalDigits is fixed at %ld in the base",
+                     b->total_digits);
+            return 0;
+        }
+        if (b->fixed_fraction_digits && t->fraction_digits >= 0 &&
+            t->fraction_digits != b->fraction_digits) {
+            snprintf(msg, cap,
+                     "fixed: fractionDigits is fixed at %ld in the "
+                     "base",
+                     b->fraction_digits);
+            return 0;
+        }
+        if (b->fixed_min_scale && t->min_scale != -1 &&
+            t->min_scale != b->min_scale) {
+            snprintf(msg, cap,
+                     "fixed: minScale is fixed at %ld in the base",
+                     b->min_scale);
+            return 0;
+        }
+        if (b->fixed_max_scale && t->max_scale != -1 &&
+            t->max_scale != b->max_scale) {
+            snprintf(msg, cap,
+                     "fixed: maxScale is fixed at %ld in the base",
+                     b->max_scale);
+            return 0;
+        }
+        if (b->fixed_length && t->length >= 0 &&
+            t->length != b->length) {
+            snprintf(msg, cap,
+                     "fixed: length is fixed at %ld in the base",
+                     b->length);
+            return 0;
+        }
+    }
+    if (t->total_digits >= 0 && b_total >= 0 &&
+        t->total_digits > b_total) {
+        snprintf(msg, cap,
+                 "narrowing: the derived totalDigits exceeds the "
+                 "base's");
+        return 0;
+    }
+    if (t->fraction_digits >= 0 && b_frac >= 0 &&
+        t->fraction_digits > b_frac) {
+        snprintf(msg, cap,
+                 "narrowing: the derived fractionDigits exceeds the "
+                 "base's");
+        return 0;
+    }
+    if (t->min_scale != -1 && b_min_scale != -1 &&
+        t->min_scale < b_min_scale) {
+        snprintf(msg, cap,
+                 "narrowing: the derived minScale undercuts the "
+                 "base's");
+        return 0;
+    }
+    if (t->max_scale != -1 && b_max_scale != -1 &&
+        t->max_scale > b_max_scale) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxScale exceeds the base's");
+        return 0;
+    }
+    /* the EFFECTIVE scale window must stay non-empty (pdecimal014:
+     * a derived maxScale under an inherited minScale) — the -1
+     * sentinel is "absent", negative scales are real values */
+    long t_min_s = t->min_scale, t_max_s = t->max_scale;
+    long eff_min = (t_min_s != -1 && b_min_scale != -1)
+                       ? (t_min_s > b_min_scale ? t_min_s : b_min_scale)
+                   : (t_min_s != -1 ? t_min_s : b_min_scale);
+    long eff_max = (t_max_s != -1 && b_max_scale != -1)
+                       ? (t_max_s < b_max_scale ? t_max_s : b_max_scale)
+                   : (t_max_s != -1 ? t_max_s : b_max_scale);
+    if (eff_min != -1 && eff_max != -1 && eff_min > eff_max) {
+        snprintf(msg, cap,
+                 "cross-facet: the effective scale window is empty");
+        return 0;
+    }
+    /* the narrowing clauses: -2 (incomparable) is never a violation */
+    if (t->min_inclusive && b_min_incl &&
+        xsd_facet_value_compare(term, t->min_inclusive, b_min_incl) ==
+            -1) {
+        snprintf(msg, cap,
+                 "narrowing: the derived minInclusive undercuts the "
+                 "base's");
+        return 0;
+    }
+    if (t->min_inclusive && b_min_excl) {
+        c = xsd_facet_value_compare(term, t->min_inclusive, b_min_excl);
+        if (c == -1 || c == 0) {
+            snprintf(msg, cap,
+                     "narrowing: the derived minInclusive leaves an "
+                     "empty value space against the base's "
+                     "minExclusive");
+            return 0;
+        }
+    }
+    if (t->min_exclusive && b_min_excl &&
+        xsd_facet_value_compare(term, t->min_exclusive, b_min_excl) ==
+            -1) {
+        snprintf(msg, cap,
+                 "narrowing: the derived minExclusive undercuts the "
+                 "base's");
+        return 0;
+    }
+    if (t->min_exclusive && b_min_incl) {
+        c = xsd_facet_value_compare(term, t->min_exclusive, b_min_incl);
+        if (c == -1 || c == 0) {
+            snprintf(msg, cap,
+                     "narrowing: the derived minExclusive leaves an "
+                     "empty value space against the base's "
+                     "minInclusive");
+            return 0;
+        }
+    }
+    if (t->max_inclusive && b_max_incl &&
+        xsd_facet_value_compare(term, t->max_inclusive, b_max_incl) >
+            0) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxInclusive exceeds the "
+                 "base's");
+        return 0;
+    }
+    if (t->max_inclusive && b_max_excl &&
+        xsd_facet_value_compare(term, t->max_inclusive, b_max_excl) >=
+            0) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxInclusive leaves an empty "
+                 "value space against the base's maxExclusive");
+        return 0;
+    }
+    if (t->max_exclusive && b_max_excl &&
+        xsd_facet_value_compare(term, t->max_exclusive, b_max_excl) >
+            0) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxExclusive exceeds the "
+                 "base's");
+        return 0;
+    }
+    if (t->max_exclusive && b_max_incl &&
+        xsd_facet_value_compare(term, t->max_exclusive, b_max_incl) >=
+            0) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxExclusive leaves an empty "
+                 "value space against the base's maxInclusive");
+        return 0;
+    }
+    if (t->min_length >= 0 && b_min_len >= 0 &&
+        t->min_length < b_min_len) {
+        snprintf(msg, cap,
+                 "narrowing: the derived minLength undercuts the "
+                 "base's");
+        return 0;
+    }
+    if (t->max_length >= 0 && b_max_len >= 0 &&
+        t->max_length > b_max_len) {
+        snprintf(msg, cap,
+                 "narrowing: the derived maxLength exceeds the base's");
+        return 0;
+    }
+    if (t->length >= 0 && b_len >= 0 && t->length != b_len) {
+        snprintf(msg, cap,
+                 "narrowing: the derived length differs from the "
+                 "base's");
+        return 0;
+    }
+    return 1;
+}
+
+static int xsd_simple_facets_ok(struct leptris_xsd_schema* s,
+                                const XsdSimple* t, int depth, char* msg,
+                                size_t cap) {
+    if (!t || depth > 32) return 1;
+    if (t->deriv == XSD_SIMPLE_RESTRICT &&
+        !xsd_restriction_facets_ok(s, t, msg, cap))
+        return 0;
+    if (!xsd_simple_facets_ok(s, t->base_def, depth + 1, msg, cap))
+        return 0;
+    if (!xsd_simple_facets_ok(s, t->item_def, depth + 1, msg, cap))
+        return 0;
+    for (size_t i = 0; i < t->member_def_count; i++)
+        if (!xsd_simple_facets_ok(s, t->member_defs[i], depth + 1, msg,
+                                  cap))
+            return 0;
+    return 1;
+}
+
+static int xsd_datatype_facets_supported(struct leptris_xsd_schema* s) {
+    char msg[256];
+    for (const XsdSimple* t = s->simple_types; t; t = t->next)
+        if (!xsd_simple_facets_ok(s, t, 0, msg, sizeof(msg))) {
+            xsd_set_error(s, msg);
+            return 0;
+        }
+    return 1;
+}
+
+/* #2155: unprefixed builtin references canonize to the "xs:"-spelled
+ * builtin when NO local declaration carries the name — the same
+ * fallback the validate.c element path takes. The suite's ibm
+ * duration/stamp/precisionDecimal fixtures restrict the unprefixed
+ * spellings (base="yearMonthDuration"), and both the applicability
+ * walk and the value chain need the terminal to resolve. */
+static void xsd_canon_builtin_ref(struct leptris_xsd_schema* s,
+                                  char** name) {
+    if (!*name || **name == ':' || strncmp(*name, "xs:", 3) == 0)
+        return;
+    if (strchr(*name, ':')) return; /* prefixed local ref */
+    if (xsd_find_simple(s, *name)) return;
+    char buf[256];
+    if (snprintf(buf, sizeof(buf), "xs:%s", *name) >= (int)sizeof(buf))
+        return;
+    if (!xsd_builtin_known(buf)) return;
+    free(*name);
+    *name = xsd_strdup(buf);
+}
+
+static void xsd_canon_builtin_refs_simple(struct leptris_xsd_schema* s,
+                                          XsdSimple* t, int depth) {
+    if (!t || depth > 32) return;
+    xsd_canon_builtin_ref(s, &t->base);
+    xsd_canon_builtin_ref(s, &t->item_type);
+    for (size_t i = 0; i < t->member_count; i++)
+        xsd_canon_builtin_ref(s, &t->members[i]);
+    xsd_canon_builtin_refs_simple(s, t->base_def, depth + 1);
+    xsd_canon_builtin_refs_simple(s, t->item_def, depth + 1);
+    for (size_t i = 0; i < t->member_def_count; i++)
+        xsd_canon_builtin_refs_simple(s, t->member_defs[i], depth + 1);
+}
+
+static void xsd_canon_builtin_refs(struct leptris_xsd_schema* s) {
+    for (XsdSimple* t = s->simple_types; t; t = t->next)
+        xsd_canon_builtin_refs_simple(s, t, 0);
+}
+
 
 /* XSD Part 2 §4.3.4: every pattern facet value is a regular
  * expression — an unsupported one is a schema error AT COMPILE
@@ -2289,6 +2841,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     xsd_capture_root(s, root);
     xsd_resolve_extension_bases(s);
     xsd_resolve_pending_attr_refs(s);
+    xsd_canon_builtin_refs(s);
 
     for (const XsdSimple* t = s->simple_types; t; t = t->next)
         if (!xsd_patterns_supported(t, 0)) {
@@ -2298,6 +2851,17 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
             leptris_document_free(doc);
             return (LeptrisXsdSchema)s;
         }
+
+    /* #2155: the 1.1 facet-applicability sweep — the schema-error
+     * class where inapplicable facets (length on the duration
+     * family, bounds on lists), invalid facet values, cross-facet
+     * order violations and base-widening restrictions must REJECT
+     * the schema at compile time. */
+    if (!xsd_datatype_facets_supported(s)) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
 
     leptris_document_free(doc);
     return s;
@@ -2917,6 +3481,7 @@ static void xsd_free_simple_one(XsdSimple* t) {
     free(t->min_exclusive);
     free(t->max_inclusive);
     free(t->max_exclusive);
+    free(t->explicit_timezone);
     free(t->whitespace);
     /* #2154: the accumulated assertion facet list */
     XsdAssertionFacet* av = t->assertions;

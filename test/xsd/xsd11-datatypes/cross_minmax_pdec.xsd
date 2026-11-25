@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- #2155: minInclusive > maxInclusive within one restriction is
+     a schema error (d3_3_4si11), as is minExclusive > maxExclusive. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/cross_minmax_pdec"
+	xmlns:t="http://leptris.test/dt/cross_minmax_pdec">
+<simpleType name="decInclusive">
+	<restriction base="precisionDecimal">
+		<minInclusive value="20"/>
+		<maxInclusive value="10"/>
+	</restriction>
+</simpleType>
+<simpleType name="decExclusive">
+	<restriction base="precisionDecimal">
+		<minExclusive value="-20"/>
+		<maxExclusive value="-30"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:decInclusive"/>
+</schema>

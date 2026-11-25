@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- #2155: a fixed dateTimeStamp bound cannot be re-specified with
+     a different value (d3_4_28si12). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/fixed_minmax_stamp"
+	xmlns:t="http://leptris.test/dt/fixed_minmax_stamp">
+<simpleType name="fixedBase">
+	<restriction base="dateTimeStamp">
+		<minInclusive value="2001-11-11T10:00:00Z" fixed="true"/>
+	</restriction>
+</simpleType>
+<simpleType name="derived">
+	<restriction base="t:fixedBase">
+		<minInclusive value="2001-11-10T10:00:00Z"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derived"/>
+</schema>

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: length is not applicable to yearMonthDuration (the
+     duration family carries no length facets, XSD 1.1 3.4.26). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/length_ymd"
+	xmlns:t="http://leptris.test/dt/length_ymd">
+<simpleType name="durMinLength">
+	<restriction base="yearMonthDuration">
+		<length value="5"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:durMinLength"/>
+</schema>

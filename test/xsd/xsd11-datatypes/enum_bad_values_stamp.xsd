@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2155: every enumeration value must be a valid dateTimeStamp
+     lexical — "strings" is not (d3_4_28si13). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/enum_bad_stamp"
+	xmlns:t="http://leptris.test/dt/enum_bad_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<enumeration value="2002-01-01T00:00:00+09:00"/>
+		<enumeration value="strings"/>
+		<enumeration value="2001-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- #2155: the comparison is by instant — 2002-01-01T00:00:00+09:00
+     is LATER than 2001-12-31T15:00:00Z, so minInclusive (2002Z
+     +09:00 spelling) against maxExclusive (2001Z spelling) still
+     crosses (d3_4_28si03, cross-timezone pairings). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/cross_tz_stamp"
+	xmlns:t="http://leptris.test/dt/cross_tz_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<minInclusive value="2002-01-01T00:00:00+09:00"/>
+		<maxExclusive value="2001-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

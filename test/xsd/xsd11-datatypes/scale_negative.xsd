@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- #2155: negative scales are legal values (precisionDecimal's
+     precision extends past the point, pdecimal016), but the
+     EFFECTIVE scale window must stay non-empty — a derived
+     minScale of -2 under an inherited maxScale of -4 leaves no
+     value space (pdecimal015.n). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/scale_negative"
+	xmlns:t="http://leptris.test/dt/scale_negative">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<maxScale value="-4"/>
+	</restriction>
+</simpleType>
+<simpleType name="u">
+	<restriction base="t:t">
+		<minScale value="-2"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:u"/>
+</schema>

@@ -180,6 +180,10 @@ target_compile_definitions(test_xsd_ns_qualification PRIVATE
 leptris_add_test(test_xsd11_assertions xsd/test_xsd11_assertions.cpp)
 target_compile_definitions(test_xsd11_assertions PRIVATE
     LEPTRIS_XSD11_ASSERTIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assertions")
+# #2155: facet applicability on the 1.1-only datatypes.
+leptris_add_test(test_xsd11_datatypes xsd/test_xsd11_datatypes.cpp)
+target_compile_definitions(test_xsd11_datatypes PRIVATE
+    LEPTRIS_XSD11_DATATYPES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-datatypes")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)

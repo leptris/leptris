@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!-- #2155: a derived minInclusive below (or equal to) the base's
+     minExclusive, and a derived maxInclusive at the base's
+     maxExclusive, leave an empty value space — schema errors
+     (d3_4_28si05/si10). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/narrow_stamp"
+	xmlns:t="http://leptris.test/dt/narrow_stamp">
+<simpleType name="baseLo">
+	<restriction base="dateTimeStamp">
+		<minExclusive value="2002-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<simpleType name="derivedLo">
+	<restriction base="t:baseLo">
+		<minInclusive value="2001-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<simpleType name="baseHi">
+	<restriction base="dateTimeStamp">
+		<maxExclusive value="2005-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<simpleType name="derivedHi">
+	<restriction base="t:baseHi">
+		<maxInclusive value="2005-01-01T00:00:00+09:00"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derivedLo"/>
+</schema>

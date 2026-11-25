@@ -19,6 +19,19 @@
 /* rng_regex.c — the XSD pattern dialect (libxml2-compatible). */
 extern int rng_regex_matches(const char* pat, const char* text);
 
+/* The terminal-builtin classes driving applicability. */
+enum {
+    XSD_TC_STRING = 0,  /* string family + anyURI */
+    XSD_TC_BINARY,      /* hexBinary / base64Binary */
+    XSD_TC_NAME,        /* QName / NOTATION */
+    XSD_TC_NUMERIC,     /* decimal, integer derivations, float, double, precisionDecimal */
+    XSD_TC_DATETIME,    /* dateTime, dateTimeStamp, time, date, g* */
+    XSD_TC_DURATION,    /* duration, yearMonthDuration, dayTimeDuration */
+    XSD_TC_BOOLEAN,
+    XSD_TC_OTHER        /* anySimpleType/anyAtomicType/unknown — checks skip */
+};
+
+
 /* ---- character-class helpers ------------------------------------- */
 
 static int xsd_ncname_start(char c) {
@@ -149,6 +162,15 @@ static int two_digits(const char** p) {
     *p += 2;
     return 1;
 }
+/* tz_required: the dateTimeStamp tail — the timezone is part of
+ * the value space, never absent (#2155 §3.3.7). */
+static int tz_required(const char** p) {
+    if (**p != 'Z' && **p != '+' && **p != '-') return 0;
+    if (**p == 'Z') { (*p)++; return **p == 0; }
+    (*p)++;
+    return two_digits(p) && *(*p) == ':' && (*p)++ && two_digits(p) &&
+           **p == 0;
+}
 static int tz_optional(const char** p) {
     /* #1936: the absent timezone is only absent at END of string —
      * "2000-01-01garbage" used to pass the g-regional family. */
@@ -196,7 +218,7 @@ static int ymd(const char** p, int need_month, int need_day) {
     }
     return 1;
 }
-static int time_tail(const char** p) {
+static int time_tail(const char** p, int need_tz) {
     /* #1883: hour 0-23 (24:00:00 is the end-of-day spelling and
      * must carry 00 minutes and 00 seconds), minute 0-59, second
      * 0-60 (60 = leap second). */
@@ -212,14 +234,18 @@ static int time_tail(const char** p) {
         second = ((*p)[-2] - '0') * 10 + ((*p)[-1] - '0');
         if (**p == '.') {
             (*p)++;
-            if (!xsd_digits_only(*p)) return 0;
+            /* at least one fraction digit, then the timezone —
+             * "12:00:00.123Z" (the fraction consumed digits until
+             * the offset; the old whole-remainder check rejected
+             * every fractional-seconds-with-tz spelling) */
+            if (!isdigit((unsigned char)**p)) return 0;
             while (isdigit((unsigned char)**p)) (*p)++;
         }
     }
     if (hour == 24 && (minute != 0 || second != 0)) return 0;
     /* #1883: second 60 is the leap second — only at 23:59 */
     if (second == 60 && (hour != 23 || minute != 59)) return 0;
-    return tz_optional(p);
+    return need_tz ? tz_required(p) : tz_optional(p);
 }
 
 /* ---- the built-in table ------------------------------------------ */
@@ -341,7 +367,13 @@ int xsd_builtin_valid(const char* type, const char* v) {
         if (t->bounded == 2) return ulong_in_range(v);
         return value_in_range(v, t->lo, t->hi);
     }
-    if (strcmp(type, "xs:float") == 0 || strcmp(type, "xs:double") == 0) {
+    if (strcmp(type, "xs:float") == 0 || strcmp(type, "xs:double") == 0 ||
+        strcmp(type, "xs:precisionDecimal") == 0) {
+        /* #2155: precisionDecimal shares the float lexical shape —
+         * decimal literals with the optional exponent plus the IEEE
+         * specials INF/+INF/-INF/NaN (the suite's legal schemas
+         * enumerate 10.01e2 and NaN on precisionDecimal, d3_3_4v14
+         * / pdecimal006). */
         if (strcmp(v, "INF") == 0 || strcmp(v, "-INF") == 0 ||
             strcmp(v, "+INF") == 0 || strcmp(v, "NaN") == 0)
             return 1;
@@ -421,15 +453,66 @@ int xsd_builtin_valid(const char* type, const char* v) {
         if (!ymd(&p, 1, 1)) return 0;
         if (*p != 'T' && *p != ' ') return 0;
         p++;
-        return time_tail(&p);
+        return time_tail(&p, 0);
+    }
+    if (strcmp(type, "xs:dateTimeStamp") == 0) {
+        /* #2155: dateTime with the timezone REQUIRED (§3.3.7) —
+         * "2005-01-01T00:00:00" is a dateTime but not a stamp. */
+        const char* p = v;
+        if (*p == '-') p++;
+        if (!ymd(&p, 1, 1)) return 0;
+        if (*p != 'T' && *p != ' ') return 0;
+        p++;
+        return time_tail(&p, 1);
     }
     if (strcmp(type, "xs:time") == 0) {
         const char* p = v;
-        return time_tail(&p);
+        return time_tail(&p, 0);
     }
-    if (strcmp(type, "xs:duration") == 0 ||
-        strcmp(type, "xs:dayTimeDuration") == 0 ||
-        strcmp(type, "xs:yearMonthDuration") == 0) {
+    if (strcmp(type, "xs:yearMonthDuration") == 0 ||
+        strcmp(type, "xs:dayTimeDuration") == 0) {
+        /* #2155: the 1.1 duration family carries its OWN lexical
+         * spaces (§3.4.26/§3.4.27) — yearMonthDuration admits only
+         * the Y/M components, dayTimeDuration only D/H/M/S, with
+         * at least one component and the single leading sign. */
+        const char* p = v;
+        int months_only = strcmp(type, "xs:yearMonthDuration") == 0;
+        if (*p == '-' || *p == '+') p++;
+        if (*p++ != 'P') return 0;
+        int any = 0;
+        int in_time = 0;
+        for (;;) {
+            if (*p == 'T') {
+                if (in_time) return 0;
+                in_time = 1;
+                p++;
+                continue;
+            }
+            if (!isdigit((unsigned char)*p)) break;
+            while (isdigit((unsigned char)*p)) p++;
+            int saw_fraction = 0;
+            if (*p == '.') {
+                p++;
+                saw_fraction = 1;
+                while (isdigit((unsigned char)*p)) p++;
+            }
+            char unit = *p;
+            if (!unit) return 0;
+            /* fraction only on seconds (P200.5Y / P30.5D invalid) */
+            if (saw_fraction && unit != 'S') return 0;
+            if (in_time && unit == 'Y') return 0;
+            if (!in_time && (unit == 'H' || unit == 'S')) return 0;
+            if (months_only && (in_time || unit == 'D')) return 0;
+            if (!months_only && unit == 'Y') return 0;
+            /* the M unit is MINUTES inside T, MONTHS outside —
+             * dayTimeDuration only forbids the months spelling */
+            if (!months_only && !in_time && unit == 'M') return 0;
+            p++;
+            any = 1;
+        }
+        return any && *p == 0;
+    }
+    if (strcmp(type, "xs:duration") == 0) {
         /* PnYnMnDTnHnMnS, at least one component; optional sign. */
         const char* p = v;
         if (*p == '-' || *p == '+') p++;
@@ -523,13 +606,18 @@ static int facet_check(const XsdSimple* s, const char* v,
     /* #1936 (stG010): a LIST value space is whitespace=collapse —
      * element content arrives as "\n\tCA\n  " and the enumeration
      * /pattern facets must see the collapsed form ("CA"), not the
-     * raw text. */
+     * raw text. #2155 (d4_3_6v01): a restriction declaring
+     * whiteSpace="collapse" collapses its own value space the same
+     * way — whitespace-only content reduces to the empty string
+     * before the facets run. */
     int list_valued = chain_is_list || s->deriv == XSD_SIMPLE_LIST ||
         (terminal_base &&
          (strcmp(terminal_base, "xs:IDREFS") == 0 ||
           strcmp(terminal_base, "xs:NMTOKENS") == 0 ||
           strcmp(terminal_base, "xs:ENTITIES") == 0));
-    if (!list_valued)
+    int collapse_declared = s->whitespace &&
+        strcmp(s->whitespace, "collapse") == 0;
+    if (!list_valued && !collapse_declared)
         return facet_check_body(s, v, terminal_base, chain_is_list);
     while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r') v++;
     size_t n = strlen(v);
@@ -683,6 +771,27 @@ static int xsd_tznormalized_equal(const char* a, const char* b) {
     return strcmp(na, nb) == 0;
 }
 
+/* The value carries an explicit timezone — a trailing Z or a
+ * [+-]hh:mm tail (fractional seconds allowed before it). */
+static int xsd_value_has_tz(const char* v) {
+    size_t n = strlen(v);
+    if (!n) return 0;
+    if (v[n - 1] == 'Z') return 1;
+    if (n >= 6 && (v[n - 6] == '+' || v[n - 6] == '-') &&
+        v[n - 3] == ':' && isdigit((unsigned char)v[n - 5]) &&
+        isdigit((unsigned char)v[n - 4]) &&
+        isdigit((unsigned char)v[n - 2]) &&
+        isdigit((unsigned char)v[n - 1]))
+        return 1;
+    return 0;
+}
+/* precisionDecimal's spelling-claimed scale (mantissa fraction
+ * digits minus the exponent; specials have none) — defined below. */
+static int xsd_precision_scale(const char* v, long* out);
+/* the exact decimal parse (digits/exp/sign/inf) — defined below. */
+static int xsd_decimal_parse_exact(const char* v, char* digits,
+                                   size_t cap, long* exp, int* sign,
+                                   int* inf);
 static int facet_check_body(const XsdSimple* s, const char* v,
                             const char* terminal_base,
                             int chain_is_list) {
@@ -699,7 +808,8 @@ static int facet_check_body(const XsdSimple* s, const char* v,
     if (s->enum_values) {
         int found = 0;
         int is_dt = terminal_base &&
-                    strcmp(terminal_base, "xs:dateTime") == 0;
+                    (strcmp(terminal_base, "xs:dateTime") == 0 ||
+                     strcmp(terminal_base, "xs:dateTimeStamp") == 0);
         int is_tzval = terminal_base &&
                        (strcmp(terminal_base, "xs:time") == 0 ||
                         strcmp(terminal_base, "xs:date") == 0 ||
@@ -707,9 +817,25 @@ static int facet_check_body(const XsdSimple* s, const char* v,
                         strcmp(terminal_base, "xs:gYear") == 0 ||
                         strcmp(terminal_base, "xs:gMonthDay") == 0 ||
                         strcmp(terminal_base, "xs:gDay") == 0 ||
-                        strcmp(terminal_base, "xs:gMonth") == 0);
+                        strcmp(terminal_base, "xs:gMonth") == 0);        int is_dur = terminal_base &&
+                     (xsd_terminal_class(terminal_base) ==
+                      XSD_TC_DURATION);
+        /* precisionDecimal's arithmetic equality: NaN equals
+         * NOTHING, not even itself — an enumerated NaN admits no
+         * value (pdecimal006.n2); float/double keep the identity
+         * reading (simple022). */
+        int nan_never_matches =
+            terminal_base &&
+            strcmp(terminal_base, "xs:precisionDecimal") == 0 &&
+            (strcmp(v, "NaN") == 0);
+        /* numerics compare in the VALUE space — the enumerated
+         * "123456.78" admits "12345678e-2" (d3_3_4v18), "0" admits
+         * "-0.0"/"10e-1" (pdecimal006.v1) */
+        int is_num =
+            terminal_base && xsd_terminal_class(terminal_base) ==
+                                 XSD_TC_NUMERIC;
         for (XsdFacetValue* e = s->enum_values; e; e = e->next) {
-            if (strcmp(e->text, v) == 0) {
+            if (!nan_never_matches && strcmp(e->text, v) == 0) {
                 found = 1;
                 break;
             }
@@ -719,6 +845,30 @@ static int facet_check_body(const XsdSimple* s, const char* v,
                 break;
             }
             if (!found && is_tzval && xsd_tznormalized_equal(e->text, v)) {
+                found = 1;
+                break;
+            }
+            /* the g-family and time enumerations match in the
+             * VALUE space too — "-0000-02" equals the enumerated
+             * "0000-02" (negative-zero year), "02:00:00-05:00"
+             * equals "07:00:00Z" (same instant; zone202/206) */
+            if (!found && (is_dt || is_tzval) &&
+                xsd_facet_value_compare(terminal_base, e->text, v) ==
+                    0) {
+                found = 1;
+                break;
+            }
+            if (!found && is_dur &&
+                xsd_facet_value_compare(terminal_base, e->text, v) ==
+                    0) {
+                found = 1;
+                break;
+            }
+            if (!found && is_num &&
+                !nan_never_matches &&
+                strcmp(e->text, "NaN") != 0 &&
+                xsd_facet_value_compare(terminal_base, e->text, v) ==
+                    0) {
                 found = 1;
                 break;
             }
@@ -776,32 +926,148 @@ static int facet_check_body(const XsdSimple* s, const char* v,
         if (s->max_length >= 0 && (long)n > s->max_length) return 0;
     }
 
-    /* Numeric min/max when the value parses as a double. */
-    char* end = NULL;
-    double d = strtod(v, &end);
-    if (end && *end == 0 && end != v) {
-        if (s->min_inclusive && !(d >= strtod(s->min_inclusive, NULL)))
+    /* #2155: the explicitTimezone facet's value posture — a
+     * required timezone must be present, a prohibited one must be
+     * absent ("optional" imposes nothing). Runs BEFORE the bound
+     * dispatch's early return. */
+    if (s->explicit_timezone) {
+        int has_tz = xsd_value_has_tz(v);
+        if (strcmp(s->explicit_timezone, "required") == 0 && !has_tz)
             return 0;
-        if (s->min_exclusive && !(d > strtod(s->min_exclusive, NULL)))
-            return 0;
-        if (s->max_inclusive && !(d <= strtod(s->max_inclusive, NULL)))
-            return 0;
-        if (s->max_exclusive && !(d < strtod(s->max_exclusive, NULL)))
+        if (strcmp(s->explicit_timezone, "prohibited") == 0 && has_tz)
             return 0;
     }
-    if (s->total_digits >= 0) {
-        long total = 0, frac = 0, seen_frac = 0;
-        for (const char* p = v; *p; p++) {
-            if (isdigit((unsigned char)*p)) {
-                total++;
-                if (seen_frac) frac++;
-            } else if (*p == '.') {
-                seen_frac = 1;
+    /* #2155: the ordered bounds compare in the VALUE space —
+     * family keys for date/time (timezone-normalized, year zero
+     * included), total months/seconds for the duration family,
+     * EXACT arithmetic for the decimal-shaped numerics (strtod
+     * rounds 4.999999999999999999999 into 5). NaN (incomparable)
+     * satisfies no order constraint — it violates every bound
+     * (pdecimal002.n3/003.n1/004.n3/005.n3). */
+    int tclass =
+        terminal_base ? xsd_terminal_class(terminal_base) : XSD_TC_OTHER;
+    int decimal_shaped =
+        tclass == XSD_TC_NUMERIC && terminal_base &&
+        strcmp(terminal_base, "xs:float") != 0 &&
+        strcmp(terminal_base, "xs:double") != 0;
+    if (tclass == XSD_TC_DATETIME || tclass == XSD_TC_DURATION) {
+        int c;
+        /* minInclusive/maxInclusive admit equality; the exclusive
+         * pair does not. NaN (incomparable, -2) satisfies no order
+         * constraint — it violates every bound. */
+        if (s->min_inclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->min_inclusive)) != 1 &&
+            c != 0)
+            return 0;
+        if (s->min_exclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->min_exclusive)) != 1)
+            return 0;
+        if (s->max_inclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->max_inclusive)) != -1 &&
+            c != 0)
+            return 0;
+        if (s->max_exclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->max_exclusive)) != -1)
+            return 0;
+        return 1; /* no digit family on the temporal terminals */
+    }
+    if (decimal_shaped) {
+        int c;
+        if (s->min_inclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->min_inclusive)) != 1 &&
+            c != 0)
+            return 0;
+        if (s->min_exclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->min_exclusive)) != 1)
+            return 0;
+        if (s->max_inclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->max_inclusive)) != -1 &&
+            c != 0)
+            return 0;
+        if (s->max_exclusive &&
+            (c = xsd_facet_value_compare(terminal_base, v,
+                                         s->max_exclusive)) != -1)
+            return 0;
+        /* the scale window rides the SPELLING ("2.0e-3" claims
+         * scale 4, "2e4" claims -4; the specials have none) */
+        if (terminal_base &&
+            (strcmp(terminal_base, "xs:precisionDecimal") == 0 ||
+             strcmp(terminal_base, "xs:decimal") == 0) &&
+            (s->min_scale != -1 || s->max_scale != -1)) {
+            long scale;
+            if (xsd_precision_scale(v, &scale)) {
+                if (s->min_scale != -1 && scale < s->min_scale)
+                    return 0;
+                if (s->max_scale != -1 && scale > s->max_scale) return 0;
             }
         }
-        if (total > s->total_digits) return 0;
-        if (s->fraction_digits >= 0 && frac > s->fraction_digits)
-            return 0;
+        /* the exact path decided; the digit counts still apply */
+    } else if (tclass == XSD_TC_NUMERIC) {
+        /* float/double: the binary approximate space */
+        char* end = NULL;
+        double d = strtod(v, &end);
+        if (end && *end == 0 && end != v) {
+            if (s->min_inclusive &&
+                !(d >= strtod(s->min_inclusive, NULL)))
+                return 0;
+            if (s->min_exclusive &&
+                !(d > strtod(s->min_exclusive, NULL)))
+                return 0;
+            if (s->max_inclusive &&
+                !(d <= strtod(s->max_inclusive, NULL)))
+                return 0;
+            if (s->max_exclusive && !(d < strtod(s->max_exclusive, NULL)))
+                return 0;
+        }
+    }
+    if (s->total_digits >= 0) {
+        if (terminal_base &&
+            strcmp(terminal_base, "xs:precisionDecimal") == 0) {
+            /* precisionDecimal's ARITHMETIC value space counts the
+             * canonical decimal's digits: the mantissa with leading
+             * zeros dropped (zero -> one digit), the "0." prefix
+             * kept when |v| < 1, the fraction read off the exponent
+             * ("12345678e-2" carries 8 total and 2 fraction digits;
+             * "1234.0" carries 5; the specials carry none —
+             * pdecimal008 / d3_3_4v18). Plain xs:decimal keeps the
+             * lexical count below (the 1.0 oracle reads it). */
+            char digits[512];
+            long exp10 = 0;
+            int sign = 1, inf = 0;
+            if (xsd_decimal_parse_exact(v, digits, sizeof(digits),
+                                        &exp10, &sign, &inf) &&
+                !inf) {
+                /* the mantissa's digits carry the precision: leading
+                 * zeros drop, trailing zeros stay ("1234.0" claims
+                 * 5, "0.000000" claims 1, "1.234e-20" claims 4) */
+                long total = (long)strlen(digits);
+                long frac = exp10 < 0 ? -exp10 : 0;
+                if (total > s->total_digits) return 0;
+                if (s->fraction_digits >= 0 &&
+                    frac > s->fraction_digits)
+                    return 0;
+            }
+        } else {
+            long total = 0, frac = 0, seen_frac = 0;
+            for (const char* p = v; *p; p++) {
+                if (isdigit((unsigned char)*p)) {
+                    total++;
+                    if (seen_frac) frac++;
+                } else if (*p == '.') {
+                    seen_frac = 1;
+                }
+            }
+            if (total > s->total_digits) return 0;
+            if (s->fraction_digits >= 0 && frac > s->fraction_digits)
+                return 0;
+        }
     }
     return 1;
 }
@@ -814,6 +1080,619 @@ int xsd_simple_valid(const XsdSimple* simple, const char* v,
     /* base == -1 (local base) delegates to the resolver's chain in
      * the caller; facets still apply here. */
     return facet_check(simple, v, terminal_base, chain_is_list);
+}
+
+/* ---- #2155: the 1.1 facet-applicability and value-space table -----
+ *
+ * XSD 1.1 Part 2 registers four new builtins (dateTimeStamp,
+ * precisionDecimal, yearMonthDuration, dayTimeDuration) and two new
+ * facets (minScale/maxScale, explicitTimezone). The COMPILE-time
+ * facet applicability (which facets are legal on which type) and
+ * the ordered-facet VALUE space (instants, total durations, exact
+ * numerics — year zero included) live here; compile.c orchestrates
+ * the walk and the error reporting. */
+
+static int name_in(const char* t, const char* const* list) {
+    for (int i = 0; list[i]; i++)
+        if (strcmp(t, list[i]) == 0) return 1;
+    return 0;
+}
+
+/* The integer derivations (xs:decimal and precisionDecimal are NOT
+ * integers — their scale is unrestricted/facet-driven). */
+static int xsd_is_integer_family(const char* t) {
+    static const char* ints[] = {
+        "xs:integer", "xs:long", "xs:int", "xs:short", "xs:byte",
+        "xs:nonNegativeInteger", "xs:positiveInteger",
+        "xs:nonPositiveInteger", "xs:negativeInteger", "xs:unsignedLong",
+        "xs:unsignedInt", "xs:unsignedShort", "xs:unsignedByte", NULL};
+    return name_in(t, ints);
+}
+
+int xsd_terminal_class(const char* t) {
+    static const char* strings[] = {
+        "xs:string", "xs:normalizedString", "xs:token", "xs:language",
+        "xs:Name", "xs:NMTOKEN", "xs:NCName", "xs:ID", "xs:IDREF",
+        "xs:ENTITY", "xs:anyURI", NULL};
+    static const char* binaries[] = {"xs:hexBinary", "xs:base64Binary",
+                                     NULL};
+    static const char* numerics[] = {
+        "xs:decimal", "xs:integer", "xs:long", "xs:int", "xs:short",
+        "xs:byte", "xs:nonNegativeInteger", "xs:positiveInteger",
+        "xs:nonPositiveInteger", "xs:negativeInteger", "xs:unsignedLong",
+        "xs:unsignedInt", "xs:unsignedShort", "xs:unsignedByte",
+        "xs:float", "xs:double", "xs:precisionDecimal", NULL};
+    static const char* datetimes[] = {
+        "xs:dateTime", "xs:dateTimeStamp", "xs:time", "xs:date",
+        "xs:gYearMonth", "xs:gYear", "xs:gMonthDay", "xs:gDay",
+        "xs:gMonth", NULL};
+    static const char* durations[] = {
+        "xs:duration", "xs:yearMonthDuration", "xs:dayTimeDuration",
+        NULL};
+    if (!t) return XSD_TC_OTHER;
+    if (name_in(t, strings)) return XSD_TC_STRING;
+    if (name_in(t, binaries)) return XSD_TC_BINARY;
+    if (strcmp(t, "xs:QName") == 0 || strcmp(t, "xs:NOTATION") == 0)
+        return XSD_TC_NAME;
+    if (name_in(t, numerics)) return XSD_TC_NUMERIC;
+    if (name_in(t, datetimes)) return XSD_TC_DATETIME;
+    if (name_in(t, durations)) return XSD_TC_DURATION;
+    if (strcmp(t, "xs:boolean") == 0) return XSD_TC_BOOLEAN;
+    return XSD_TC_OTHER;
+}
+
+/* The 1.1-only builtins: the facet tables these carry are new in
+ * XSD 1.1 — the compile-time applicability/value/narrowing gates
+ * key on them (the 1.0 lane keeps its posture). */
+int xsd_builtin_is_11(const char* t) {
+    return t != NULL &&
+           (strcmp(t, "xs:dateTimeStamp") == 0 ||
+            strcmp(t, "xs:precisionDecimal") == 0 ||
+            strcmp(t, "xs:yearMonthDuration") == 0 ||
+            strcmp(t, "xs:dayTimeDuration") == 0);
+}
+
+/* Is the facet legal on a restriction resolving to `t`? 0 = schema
+ * error (facet-applicability). The universal facets (pattern,
+ * enumeration, whiteSpace, assertion) apply everywhere. */
+int xsd_facet_applicable(const char* t, const char* facet,
+                         int chain_is_list) {
+    int length_fam = strcmp(facet, "length") == 0 ||
+                     strcmp(facet, "minLength") == 0 ||
+                     strcmp(facet, "maxLength") == 0;
+    int ordered = strcmp(facet, "minInclusive") == 0 ||
+                  strcmp(facet, "minExclusive") == 0 ||
+                  strcmp(facet, "maxInclusive") == 0 ||
+                  strcmp(facet, "maxExclusive") == 0;
+    if (strcmp(facet, "pattern") == 0 ||
+        strcmp(facet, "enumeration") == 0 ||
+        strcmp(facet, "whiteSpace") == 0 ||
+        strcmp(facet, "assertion") == 0)
+        return 1;
+    if (strcmp(facet, "totalDigits") == 0) {
+        /* decimal, the integer derivations and precisionDecimal —
+         * not float/double, not the non-numeric families */
+        return xsd_terminal_class(t) == XSD_TC_NUMERIC &&
+               (strncmp(t, "xs:decimal", 11) == 0 ||
+                xsd_is_integer_family(t) ||
+                strcmp(t, "xs:precisionDecimal") == 0);
+    }
+    if (strcmp(facet, "fractionDigits") == 0) {
+        /* decimal + the integer family only — precisionDecimal
+         * spells precision with minScale/maxScale (d3_3_4si20) */
+        return xsd_terminal_class(t) == XSD_TC_NUMERIC &&
+               (strncmp(t, "xs:decimal", 11) == 0 ||
+                xsd_is_integer_family(t));
+    }
+    if (strcmp(facet, "minScale") == 0 || strcmp(facet, "maxScale") == 0) {
+        /* the scale pair is decimal + precisionDecimal only (the
+         * integer scale is fixed at 0) */
+        return xsd_terminal_class(t) == XSD_TC_NUMERIC &&
+               (strncmp(t, "xs:decimal", 11) == 0 ||
+                strcmp(t, "xs:precisionDecimal") == 0);
+    }
+    if (strcmp(facet, "explicitTimezone") == 0)
+        return xsd_terminal_class(t) == XSD_TC_DATETIME;
+    if (chain_is_list) {
+        /* a LIST value space: the length family counts items; the
+         * ordered facets and the digit counts do not apply
+         * (d2_4_1_2si01) */
+        return length_fam;
+    }
+    switch (xsd_terminal_class(t)) {
+        case XSD_TC_STRING:
+        case XSD_TC_BINARY:
+            return length_fam;
+        case XSD_TC_NAME:
+            /* QName/NOTATION carry no length family (#1882) */
+            return 0;
+        case XSD_TC_NUMERIC:
+        case XSD_TC_DATETIME:
+            return ordered; /* no length family on values */
+        case XSD_TC_DURATION:
+            /* the duration family is ordered but carries no length
+             * facets (d3_4_26si01 / d3_4_27si01) */
+            return ordered;
+        case XSD_TC_BOOLEAN:
+            return 0;
+        default:
+            return 1;
+    }
+}
+
+/* The facet VALUE's own lexical validity: ordered bounds and
+ * enumeration entries must be lexicals of the terminal builtin,
+ * the digit/length families are nonNegativeInteger, the scale pair
+ * is INTEGER (negative scales are legal — precisionDecimal's
+ * precision extends past the decimal point, pdecimal016), and the
+ * new-facet domains are closed. */
+int xsd_facet_value_valid(const char* t, const char* facet,
+                          const char* value, int chain_is_list) {
+    if (!value) return 0;
+    if (strcmp(facet, "length") == 0 || strcmp(facet, "minLength") == 0 ||
+        strcmp(facet, "maxLength") == 0 ||
+        strcmp(facet, "totalDigits") == 0 ||
+        strcmp(facet, "fractionDigits") == 0) {
+        if (!*value) return 0;
+        for (const char* p = value; *p; p++)
+            if (!isdigit((unsigned char)*p)) return 0;
+        return 1;
+    }
+    if (strcmp(facet, "minScale") == 0 || strcmp(facet, "maxScale") == 0)
+        return xsd_signed_integer(value);
+    if (strcmp(facet, "whiteSpace") == 0)
+        return strcmp(value, "preserve") == 0 ||
+               strcmp(value, "replace") == 0 ||
+               strcmp(value, "collapse") == 0;
+    if (strcmp(facet, "explicitTimezone") == 0)
+        return strcmp(value, "required") == 0 ||
+               strcmp(value, "optional") == 0 ||
+               strcmp(value, "prohibited") == 0;
+    if (strcmp(facet, "enumeration") == 0) {
+        /* a LIST's enumeration entries are whole-list lexicals —
+         * their item-level typing rides the item type, skip here */
+        if (chain_is_list) return 1;
+        if (xsd_terminal_class(t) == XSD_TC_NAME)
+            return 1; /* QName enums need the in-scope namespaces */
+        return xsd_builtin_valid(t, value);
+    }
+    if (strcmp(facet, "minInclusive") == 0 ||
+        strcmp(facet, "minExclusive") == 0 ||
+        strcmp(facet, "maxInclusive") == 0 ||
+        strcmp(facet, "maxExclusive") == 0) {
+        int cls = xsd_terminal_class(t);
+        if (cls == XSD_TC_NUMERIC || cls == XSD_TC_DATETIME ||
+            cls == XSD_TC_DURATION)
+            return xsd_builtin_valid(t, value);
+        return 1;
+    }
+    return 1;
+}
+
+/* A duration-family lexical as (total months, total seconds) —
+ * 0 unless the spelling is a fully valid duration. */
+static int xsd_duration_value(const char* v, double* months,
+                              double* secs) {
+    const char* p = v;
+    double sign = 1.0;
+    if (*p == '-') {
+        sign = -1.0;
+        p++;
+    } else if (*p == '+') {
+        p++;
+    }
+    if (*p++ != 'P') return 0;
+    double m = 0, s = 0;
+    int any = 0, in_time = 0, t_seen = 0, any_time = 0;
+    for (;;) {
+        if (*p == 'T') {
+            if (in_time) return 0;
+            in_time = 1;
+            t_seen = 1;
+            p++;
+            continue;
+        }
+        if (!isdigit((unsigned char)*p)) break;
+        double val = 0;
+        while (isdigit((unsigned char)*p)) {
+            val = val * 10 + (*p++ - '0');
+        }
+        int frac = 0;
+        if (*p == '.') {
+            p++;
+            frac = 1;
+            double f = 0.1;
+            while (isdigit((unsigned char)*p)) {
+                val += (*p++ - '0') * f;
+                f /= 10.0;
+            }
+        }
+        char unit = *p;
+        if (!unit) return 0;
+        if (frac && unit != 'S') return 0;
+        if (in_time && unit == 'Y') return 0;
+        if (!in_time && (unit == 'H' || unit == 'S')) return 0;
+        switch (unit) {
+            case 'Y': m += val * 12.0; break;
+            case 'M':
+                if (in_time)
+                    s += val * 60.0;
+                else
+                    m += val;
+                break;
+            case 'D': s += val * 86400.0; break;
+            case 'H': s += val * 3600.0; break;
+            case 'S': s += val; break;
+            default: return 0;
+        }
+        if (in_time) any_time = 1;
+        p++;
+        any = 1;
+    }
+    if (t_seen && !any_time) return 0;
+    if (!any || *p) return 0;
+    *months = sign * m;
+    *secs = sign * s;
+    return 1;
+}
+
+/* The date/time family's comparable key (#2155): each member's own
+ * total order, timezone folded and year zero included —
+ * dateTime/date/dateTimeStamp by instant, time by the local
+ * seconds-of-day minus the offset, gYear/gYearMonth by era days,
+ * gMonthDay/gDay/gMonth by their within-year keys. 0 unless `v` is
+ * a fully valid lexical of the family. */
+static int xsd_scan_tz(const char** p, long* tzo) {
+    *tzo = 0;
+    if (**p == 'Z') {
+        (*p)++;
+        return **p == 0;
+    }
+    if (**p == '+' || **p == '-') {
+        int sign = (**p == '+') ? 1 : -1;
+        (*p)++;
+        if (p[0][0] < '0' || p[0][0] > '9' || p[0][1] < '0' ||
+            p[0][1] > '9')
+            return 0;
+        int zh = (p[0][0] - '0') * 10 + (p[0][1] - '0');
+        *p += 2;
+        long zm = 0;
+        if (**p == ':') {
+            (*p)++;
+            if (p[0][0] < '0' || p[0][0] > '9' || p[0][1] < '0' ||
+                p[0][1] > '9')
+                return 0;
+            zm = (p[0][0] - '0') * 10 + (p[0][1] - '0');
+            *p += 2;
+        }
+        if (zh > 14 || zm > 59) return 0;
+        *tzo = sign * (zh * 60 + zm);
+    }
+    return **p == 0;
+}
+
+static int xsd_scan_digits(const char** p, int n, long* out) {
+    long v = 0;
+    for (int i = 0; i < n; i++) {
+        if ((*p)[0] < '0' || (*p)[0] > '9') return 0;
+        v = v * 10 + ((*p)[0] - '0');
+        (*p)++;
+    }
+    *out = v;
+    return 1;
+}
+
+static int xsd_temporal_key(const char* t, const char* v, double* out) {
+    const char* p = v;
+    int neg = 0;
+    long tzo = 0;
+    if (strcmp(t, "xs:time") == 0) {
+        long h, m, s;
+        if (!xsd_scan_digits(&p, 2, &h)) return 0;
+        if (*p++ != ':') return 0;
+        if (!xsd_scan_digits(&p, 2, &m)) return 0;
+        if (*p++ != ':') return 0;
+        if (!xsd_scan_digits(&p, 2, &s)) return 0;
+        double frac = 0;
+        if (*p == '.') {
+            p++;
+            double f = 0.1;
+            while (*p >= '0' && *p <= '9') {
+                frac += (*p++ - '0') * f;
+                f /= 10.0;
+            }
+        }
+        if (h > 24 || m > 59 || s > 60) return 0;
+        if (h == 24 && (m != 0 || s != 0)) return 0;
+        if (!xsd_scan_tz(&p, &tzo)) return 0;
+        *out = h * 3600.0 + m * 60.0 + s + frac - (double)tzo * 60.0;
+        return 1;
+    }
+    if (strcmp(t, "xs:gDay") == 0 || strcmp(t, "xs:gMonth") == 0 ||
+        strcmp(t, "xs:gMonthDay") == 0) {
+        /* the g-regional family: their own within-year order */
+        long mo = 1, da = 1;
+        if (*p++ != '-') return 0;
+        if (*p++ != '-') return 0;
+        if (strcmp(t, "xs:gDay") == 0) {
+            if (*p++ != '-') return 0;
+            if (!xsd_scan_digits(&p, 2, &da) || da < 1 || da > 31)
+                return 0;
+        } else {
+            if (!xsd_scan_digits(&p, 2, &mo) || mo < 1 || mo > 12)
+                return 0;
+            if (strcmp(t, "xs:gMonthDay") == 0) {
+                if (*p++ != '-') return 0;
+                if (!xsd_scan_digits(&p, 2, &da) || da < 1 || da > 31)
+                    return 0;
+            } else if (p[0] == '-' && p[1] == '-') {
+                /* the 1.0 first-edition --MM-- spelling */
+                p += 2;
+            }
+        }
+        if (!xsd_scan_tz(&p, &tzo)) return 0;
+        *out = (mo * 32.0 + da) * 86400.0 - (double)tzo * 60.0;
+        return 1;
+    }
+    /* the year-leading family: dateTime/dateTimeStamp require the
+     * T-tail, date/gYear/gYearMonth end (timezone-optional) */
+    if (*p == '-') {
+        neg = 1;
+        p++;
+    }
+    long y = 0;
+    int got = 0;
+    while (*p >= '0' && *p <= '9') {
+        y = y * 10 + (*p++ - '0');
+        got++;
+    }
+    if (got < 4) return 0;
+    long mo = 1, da = 1;
+    int has_month = 0, has_day = 0;
+    if (*p == '-') {
+        p++;
+        if (!xsd_scan_digits(&p, 2, &mo)) return 0;
+        if (mo < 1 || mo > 12) return 0;
+        has_month = 1;
+        if (*p == '-') {
+            p++;
+            if (!xsd_scan_digits(&p, 2, &da)) return 0;
+            if (da < 1 || da > 31) return 0;
+            has_day = 1;
+        }
+    }
+    double seconds = 0;
+    int full_day = strcmp(t, "xs:dateTime") == 0 ||
+                   strcmp(t, "xs:dateTimeStamp") == 0;
+    if (full_day || *p == 'T' || *p == ' ') {
+        if (*p != 'T' && *p != ' ') return 0;
+        p++;
+        long h, mi, s = 0;
+        if (!xsd_scan_digits(&p, 2, &h)) return 0;
+        if (*p++ != ':') return 0;
+        if (!xsd_scan_digits(&p, 2, &mi)) return 0;
+        if (h > 24 || mi > 59) return 0;
+        if (*p == ':') {
+            p++;
+            if (!xsd_scan_digits(&p, 2, &s)) return 0;
+            if (s > 60) return 0;
+        }
+        double frac = 0;
+        if (*p == '.') {
+            p++;
+            double f = 0.1;
+            while (*p >= '0' && *p <= '9') {
+                frac += (*p++ - '0') * f;
+                f /= 10.0;
+            }
+        }
+        seconds = h * 3600.0 + mi * 60.0 + s + frac;
+        if (s == 60 && h != 23) return 0;
+        if (h == 24 && (mi != 0 || s != 0)) return 0;
+        full_day = 1;
+    }
+    if (!xsd_scan_tz(&p, &tzo)) return 0;
+    if (neg) y = -y;
+    double days = xsd_days_from_civil(y, (unsigned)(has_month ? mo : 1),
+                                      (unsigned)(has_day ? da : 1));
+    *out = days * 86400.0 + seconds - (double)tzo * 60.0;
+    return 1;
+}
+
+/* Exact decimal comparison for the decimal-shaped terminals (the
+ * value space is ARITHMETIC — strtod rounds "4.999999999999999999999"
+ * into 5.0, which wrongly collapses strict bounds). Parses into a
+ * significant-digit string plus a power-of-ten; INF/+INF/-INF order
+ * beyond every finite, NaN is incomparable. -2 = unparseable. */
+static int xsd_decimal_parse_exact(const char* v, char* digits,
+                                   size_t cap, long* exp, int* sign,
+                                   int* inf) {
+    const char* p = v;
+    *sign = 1;
+    *inf = 0;
+    if (*p == '+') p++;
+    else if (*p == '-') {
+        *sign = -1;
+        p++;
+    }
+    if (strcmp(p, "INF") == 0) {
+        *inf = *sign;
+        return 1;
+    }
+    if (strcmp(p, "NaN") == 0) return 0;
+    size_t n = 0;
+    long frac = 0, exp10 = 0;
+    int seen_dot = 0;
+    while (*p) {
+        if (isdigit((unsigned char)*p)) {
+            if (n + 1 >= cap) return 0;
+            digits[n++] = *p;
+            if (seen_dot) frac++;
+            p++;
+        } else if (*p == '.' && !seen_dot) {
+            seen_dot = 1;
+            p++;
+        } else if ((*p == 'e' || *p == 'E') && n) {
+            p++;
+            int esign = 1;
+            if (*p == '+') p++;
+            else if (*p == '-') {
+                esign = -1;
+                p++;
+            }
+            if (!isdigit((unsigned char)*p)) return 0;
+            long ev = 0;
+            while (isdigit((unsigned char)*p)) {
+                ev = ev * 10 + (*p++ - '0');
+                if (ev > 1000000) return 0;
+            }
+            exp10 = esign * ev;
+        } else {
+            return 0;
+        }
+    }
+    if (!n) return 0;
+    digits[n] = 0;
+    char* d = digits;
+    while (*d == '0' && d[1]) {
+        d++;
+        n--;
+    }
+    if (n == 1 && d[0] == '0') {
+        /* arithmetic zero: one spelling, sign dropped */
+        digits[0] = '0';
+        digits[1] = 0;
+        *sign = 1;
+        *exp = 0;
+        return 1;
+    }
+    if (d != digits) memmove(digits, d, n + 1);
+    *exp = exp10 - frac;
+    return 1;
+}
+
+static int xsd_decimal_exact_cmp(const char* a, const char* b) {
+    char da[512], db[512];
+    long ea, eb;
+    int sa, sb, infa, infb;
+    if (!xsd_decimal_parse_exact(a, da, sizeof(da), &ea, &sa, &infa))
+        return -2;
+    if (!xsd_decimal_parse_exact(b, db, sizeof(db), &eb, &sb, &infb))
+        return -2;
+    if (infa || infb) {
+        if (infa && infb)
+            return infa == infb ? 0 : (infa > infb ? 1 : -1);
+        /* one infinity against a finite: the infinity orders beyond
+         * every finite magnitude */
+        return infa ? infa : -infb;
+    }
+    int zero_a = strcmp(da, "0") == 0, zero_b = strcmp(db, "0") == 0;
+    if (zero_a && zero_b) return 0;
+    if (zero_a) return sb > 0 ? -1 : 1;
+    if (zero_b) return sa > 0 ? 1 : -1;
+    if (sa != sb) return sa < sb ? -1 : 1;
+    /* same sign: magnitudes order by (high-digit position, digits) */
+    long ha = ea + (long)strlen(da);
+    long hb = eb + (long)strlen(db);
+    int mag;
+    if (ha != hb) {
+        mag = ha > hb ? 1 : -1;
+    } else {
+        size_t la = strlen(da), lb = strlen(db);
+        size_t m = la > lb ? la : lb;
+        mag = 0;
+        for (size_t i = 0; i < m && !mag; i++) {
+            char ca = i < la ? da[i] : '0';
+            char cb = i < lb ? db[i] : '0';
+            if (ca != cb) mag = ca > cb ? 1 : -1;
+        }
+        if (!mag) return 0;
+    }
+    return sa > 0 ? mag : -mag;
+}
+
+/* precisionDecimal's scale (#2155): the number of fractional
+ * digits the SPELLING claims — mantissa fraction digits minus the
+ * exponent ("2.0e-3" has scale 4, "2e4" has scale -4; pdecimal010
+ * /016/019/020). The specials have no scale. 0 unless v parses. */
+static int xsd_precision_scale(const char* v, long* out) {
+    const char* p = v;
+    if (*p == '+' || *p == '-') p++;
+    if (strcmp(p, "INF") == 0 || strcmp(p, "NaN") == 0) return 0;
+    long frac = 0, exp10 = 0;
+    int seen_dot = 0, seen_digit = 0;
+    while (*p) {
+        if (isdigit((unsigned char)*p)) {
+            seen_digit = 1;
+            if (seen_dot) frac++;
+            p++;
+        } else if (*p == '.' && !seen_dot) {
+            seen_dot = 1;
+            p++;
+        } else if ((*p == 'e' || *p == 'E') && seen_digit) {
+            p++;
+            int esign = 1;
+            if (*p == '+') p++;
+            else if (*p == '-') {
+                esign = -1;
+                p++;
+            }
+            if (!isdigit((unsigned char)*p)) return 0;
+            long ev = 0;
+            while (isdigit((unsigned char)*p)) {
+                ev = ev * 10 + (*p++ - '0');
+                if (ev > 1000000) return 0;
+            }
+            exp10 = esign * ev;
+        } else {
+            return 0;
+        }
+    }
+    if (!seen_digit) return 0;
+    *out = frac - exp10;
+    return 1;
+}
+
+/* The ordered-facet VALUE-space comparison (#2155 work item 2):
+ * durations by total months/seconds, the date/time family by their
+ * family keys (timezone-normalized, year zero included), numerics
+ * exactly. Returns -1/0/1, or -2 when the pair is incomparable
+ * (NaN, unparseable, or a non-ordered terminal) — callers MUST
+ * treat -2 as "no violation". */
+int xsd_facet_value_compare(const char* t, const char* a, const char* b) {
+    int cls = xsd_terminal_class(t);
+    if (cls == XSD_TC_DURATION) {
+        double ma, sa, mb, sb;
+        if (!xsd_duration_value(a, &ma, &sa)) return -2;
+        if (!xsd_duration_value(b, &mb, &sb)) return -2;
+        /* month first: the (months, seconds) pair orders
+         * lexicographically through the fixed months->seconds
+         * scaling, monotone over both components */
+        double va = ma * 2592000.0 + sa;
+        double vb = mb * 2592000.0 + sb;
+        return (va < vb) ? -1 : (va > vb) ? 1 : 0;
+    }
+    if (cls == XSD_TC_DATETIME) {
+        double ia, ib;
+        if (!xsd_temporal_key(t, a, &ia)) return -2;
+        if (!xsd_temporal_key(t, b, &ib)) return -2;
+        return (ia < ib) ? -1 : (ia > ib) ? 1 : 0;
+    }
+    if (cls == XSD_TC_NUMERIC) {
+        /* the decimal-shaped terminals are ARITHMETIC — compare
+         * exactly; float/double keep the binary approximate space */
+        if (strcmp(t, "xs:float") != 0 && strcmp(t, "xs:double") != 0)
+            return xsd_decimal_exact_cmp(a, b);
+        char* e = NULL;
+        double da = strtod(a, &e);
+        if (!e || *e || e == a) return -2;
+        e = NULL;
+        double db = strtod(b, &e);
+        if (!e || *e || e == b) return -2;
+        if (da != da || db != db) return -2; /* NaN is unordered */
+        return (da < db) ? -1 : (da > db) ? 1 : 0;
+    }
+    return -2;
 }
 
 /* Pattern/enumeration defaults for whitespace — slice 3 grows the

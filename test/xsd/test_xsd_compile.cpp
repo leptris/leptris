@@ -1719,10 +1719,11 @@ TEST(XsdDatatypes, TemporalEnumerationComparesByValue) {
     /* a different instant stays out */
     EXPECT_EQ(leptris_xsd_simple_valid(
                   s, "dt", "2002-01-01T12:01:02Z"), 0);
-    /* time: the zero-timezone spellings are the same value; a
-     * different tz is a different value (the tz is part of it) */
+    /* time compares by INSTANT too (zone206: the enumerated
+     * 07:00:00Z admits 02:00:00-05:00) — the tz is normalized
+     * before the value comparison */
     EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "12:01:01+00:00"), 1);
-    EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "13:01:01+01:00"), 0);
+    EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "13:01:01+01:00"), 1);
     EXPECT_EQ(leptris_xsd_simple_valid(s, "tm", "12:01:02+00:00"), 0);
     leptris_xsd_free(s);
 }

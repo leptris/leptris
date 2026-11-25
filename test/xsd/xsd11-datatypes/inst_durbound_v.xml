@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: "P12M" equals "P1Y" in the value space — within the
+     bound. -->
+<root xmlns="http://leptris.test/dt/inst_durbound">P12M</root>

@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- #2155: every enumeration value must be a valid
+     yearMonthDuration lexical (d3_4_26si09) — double signs, two
+     year components, a day/time tail and a fractional month are
+     not. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/enum_bad_ymd"
+	xmlns:t="http://leptris.test/dt/enum_bad_ymd">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<enumeration value="P1Y"/>
+		<enumeration value="++P1Y"/>
+		<enumeration value="-+P1Y2M"/>
+		<enumeration value="P1Y2Y3MT2H"/>
+		<enumeration value="-P120D"/>
+		<enumeration value="P1Y2.5M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

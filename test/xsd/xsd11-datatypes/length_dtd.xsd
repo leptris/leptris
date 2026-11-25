@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- #2155: length is not applicable to dayTimeDuration (3.4.27). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/length_dtd"
+	xmlns:t="http://leptris.test/dt/length_dtd">
+<simpleType name="durMinLength">
+	<restriction base="dayTimeDuration">
+		<length value="5"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:durMinLength"/>
+</schema>

@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: minScale/maxScale apply to decimal and precisionDecimal
+     only — on a string-family base they are inapplicable facets. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/scale_on_string"
+	xmlns:t="http://leptris.test/dt/scale_on_string">
+<simpleType name="t">
+	<restriction base="xs:string">
+		<minScale value="2"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

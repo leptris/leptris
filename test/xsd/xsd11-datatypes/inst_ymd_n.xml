@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: a day/time component is not a yearMonthDuration
+     lexical. -->
+<root xmlns="http://leptris.test/dt/inst_ymd">P3Y348M1D</root>

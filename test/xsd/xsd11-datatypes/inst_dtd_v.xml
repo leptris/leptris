@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<!-- #2155: a legal dayTimeDuration (fractional SECONDS allowed;
+     the other units are integral). -->
+<root xmlns="http://leptris.test/dt/inst_dtd">PT2M2.5S</root>

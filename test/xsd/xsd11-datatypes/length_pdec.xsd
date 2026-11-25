@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- #2155: length is not applicable to precisionDecimal (3.3.4)
+     and fractionDigits is not applicable either (its scale facet
+     pair is minScale/maxScale). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/length_pdec"
+	xmlns:t="http://leptris.test/dt/length_pdec">
+<simpleType name="decLength">
+	<restriction base="precisionDecimal">
+		<length value="2"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:decLength"/>
+</schema>

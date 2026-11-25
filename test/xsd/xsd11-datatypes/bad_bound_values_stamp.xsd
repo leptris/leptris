@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- #2155: the ordered-facet values must be valid dateTimeStamp
+     lexicals — "20010101T00:00:00+09:00" (no date dashes) and
+     "2005-01-01T00:00:00" (no timezone) are not (d3_4_28si01). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/bad_bound_stamp"
+	xmlns:t="http://leptris.test/dt/bad_bound_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<minInclusive value="20010101T00:00:00+09:00"/>
+		<maxInclusive value="2005-01-01T00:00:00Z"/>
+	</restriction>
+</simpleType>
+<simpleType name="u">
+	<restriction base="dateTimeStamp">
+		<minExclusive value="2001-01-01T00:00:00+09:00"/>
+		<maxExclusive value="2005-01-01T00:00:00"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

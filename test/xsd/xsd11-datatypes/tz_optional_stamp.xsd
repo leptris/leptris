@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: explicitTimezone on dateTimeStamp admits only
+     value="required" (d3_4_28si11). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/tz_optional_stamp"
+	xmlns:t="http://leptris.test/dt/tz_optional_stamp">
+<simpleType name="t">
+	<restriction base="dateTimeStamp">
+		<explicitTimezone value="optional"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

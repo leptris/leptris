@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- #2155: duration bounds compare in the VALUE space —
+     "P12M" instant-equals "P1Y" (d3_4_26ii-style equality). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/inst_durbound"
+	xmlns:t="http://leptris.test/dt/inst_durbound">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

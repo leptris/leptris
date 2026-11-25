@@ -77,7 +77,19 @@ typedef struct xsd_simple {
     long max_length; /* -1 = absent */
     long total_digits;
     long fraction_digits;
+    /* XSD 1.1 (#2155): the scale pair (decimal/precisionDecimal)
+     * and the timezone facet (date/time family). -1/NULL = absent. */
+    long min_scale;
+    long max_scale;
+    char* explicit_timezone; /* "required"|"optional"|"prohibited" */
     char* whitespace; /* "preserve" | "replace" | "collapse" */
+    /* §4.3: the fixed flag per facet — a fixed base facet cannot be
+     * re-specified with a different value down the ladder (#2155). */
+    unsigned char fixed_min_inclusive, fixed_min_exclusive,
+        fixed_max_inclusive, fixed_max_exclusive, fixed_total_digits,
+        fixed_fraction_digits, fixed_length, fixed_min_length,
+        fixed_max_length, fixed_min_scale, fixed_max_scale,
+        fixed_whitespace, fixed_timezone;
     /* XSD 1.1 (#2154): the restriction's xs:assertion facet list —
      * accumulated, enforced across the chain by the validator. */
     XsdAssertionFacet* assertions;
@@ -348,5 +360,19 @@ int xsd_builtin_valid(const char* type, const char* v);
 /* Is `type` ("xs:"-spelled) in the tier-1 builtin table? The
  * unprefixed-reference fallback needs existence, not validity. */
 int xsd_builtin_known(const char* type);
+
+/* #2155: the 1.1 facet table — terminal-builtin class, the
+ * 1.1-only builtin marker, facet applicability, facet-value
+ * lexical validity, and the ordered-facet VALUE-space comparison
+ * (instants, durations, numerics; -2 = incomparable). datatypes.c
+ * owns the knowledge; compile.c orchestrates the walk. */
+int xsd_terminal_class(const char* type);
+int xsd_builtin_is_11(const char* type);
+int xsd_facet_applicable(const char* type, const char* facet,
+                         int chain_is_list);
+int xsd_facet_value_valid(const char* type, const char* facet,
+                          const char* value, int chain_is_list);
+int xsd_facet_value_compare(const char* type, const char* a,
+                            const char* b);
 
 #endif /* LEPTRIS_XSD_INTERNAL_H */

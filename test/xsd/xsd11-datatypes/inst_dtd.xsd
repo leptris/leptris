@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!-- #2155: the strict dayTimeDuration lexical — only signed
+     PnDTnHnMnS forms. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/inst_dtd"
+	xmlns:t="http://leptris.test/dt/inst_dtd">
+<simpleType name="t">
+	<restriction base="dayTimeDuration"/>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

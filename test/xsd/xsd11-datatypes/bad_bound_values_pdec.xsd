@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2155: the ordered-facet VALUES must be valid lexicals of the
+     base type — "--2" and "2e13" are not precisionDecimal values
+     (d3_3_4si10). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/bad_bound_values_pdec"
+	xmlns:t="http://leptris.test/dt/bad_bound_values_pdec">
+<simpleType name="decInclusive">
+	<restriction base="precisionDecimal">
+		<minInclusive value="--2"/>
+		<maxInclusive value="2e13"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:decInclusive"/>
+</schema>

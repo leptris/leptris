@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- #2155: the length family applies to LIST types (counting
+     items) — legal where the ordered bounds are not. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/legal_list"
+	xmlns:t="http://leptris.test/dt/legal_list">
+<simpleType name="sizes">
+	<list itemType="decimal"/>
+</simpleType>
+<simpleType name="sizes2">
+	<restriction base="t:sizes">
+		<length value="2"/>
+		<minLength value="1"/>
+		<maxLength value="3"/>
+		<pattern value="[0-9. ]+"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:sizes2"/>
+</schema>

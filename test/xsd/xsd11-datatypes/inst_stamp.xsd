@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!-- #2155: dateTimeStamp requires the timezone on every instance
+     value (cta0040/41/44 class). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/inst_stamp"
+	xmlns:t="http://leptris.test/dt/inst_stamp">
+<element name="root" type="dateTimeStamp"/>
+</schema>

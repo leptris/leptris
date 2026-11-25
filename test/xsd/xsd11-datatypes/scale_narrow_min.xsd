@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- #2155: a derived minScale below the base's widens the value
+     space — schema error (d3_3_4si27 / pdecimal012.n). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/scale_narrow_min"
+	xmlns:t="http://leptris.test/dt/scale_narrow_min">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<minScale value="4"/>
+		<maxScale value="8"/>
+	</restriction>
+</simpleType>
+<simpleType name="u">
+	<restriction base="t:t">
+		<minScale value="3"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:u"/>
+</schema>

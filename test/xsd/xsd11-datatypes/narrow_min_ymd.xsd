@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- #2155: a derived bound below the base's minInclusive (or above
+     the base's maxInclusive) widens the value space — schema error
+     (d3_4_26si05/si07). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/narrow_ymd"
+	xmlns:t="http://leptris.test/dt/narrow_ymd">
+<simpleType name="base">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="P1Y1M"/>
+		<maxInclusive value="P3Y1M"/>
+	</restriction>
+</simpleType>
+<simpleType name="derivedLo">
+	<restriction base="t:base">
+		<minInclusive value="P1Y0M"/>
+	</restriction>
+</simpleType>
+<simpleType name="derivedHi">
+	<restriction base="t:base">
+		<maxInclusive value="P4Y1M"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:derivedLo"/>
+</schema>

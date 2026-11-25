@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- #2155: the legal duration-family facet surface — ordered
+     bounds apply (no length facets); negative bounds legal. -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/legal_ymd"
+	xmlns:t="http://leptris.test/dt/legal_ymd">
+<simpleType name="t">
+	<restriction base="yearMonthDuration">
+		<minInclusive value="-P10Y10M"/>
+		<maxInclusive value="P140M"/>
+		<enumeration value="P1Y"/>
+		<enumeration value="-P12M"/>
+	</restriction>
+</simpleType>
+<simpleType name="d">
+	<restriction base="dayTimeDuration">
+		<minInclusive value="-P140D"/>
+		<maxExclusive value="P5DT4H"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>

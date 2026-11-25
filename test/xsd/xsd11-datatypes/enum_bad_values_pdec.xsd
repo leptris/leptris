@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2155: every enumeration value must be a valid lexical of the
+     base type — "strings" is not a precisionDecimal (d3_3_4si21). -->
+<schema xmlns="http://www.w3.org/2001/XMLSchema"
+	targetNamespace="http://leptris.test/dt/enum_bad_pdec"
+	xmlns:t="http://leptris.test/dt/enum_bad_pdec">
+<simpleType name="t">
+	<restriction base="precisionDecimal">
+		<enumeration value="5"/>
+		<enumeration value="strings"/>
+		<enumeration value="10.99"/>
+	</restriction>
+</simpleType>
+<element name="root" type="t:t"/>
+</schema>
