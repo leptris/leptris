@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over021): the same component name twice inside ONE
+ * override body — the overriding set is not unique: schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="F_base.xsd">
+    <xs:element name="doc" type="xs:date"/>
+    <xs:element name="doc" type="xs:time"/>
+  </xs:override>
+</xs:schema>

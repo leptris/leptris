@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over007 shape): the overridden document declares
+ * doc (group ref g) and group g. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:group ref="g"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:group name="g">
+    <xs:sequence>
+      <xs:element name="a"/>
+    </xs:sequence>
+  </xs:group>
+</xs:schema>

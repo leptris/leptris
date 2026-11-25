@@ -159,8 +159,24 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * tables): 1702/2206 — 18 invalid Id/S3_11_2 rows + 2
      * schema-error rows + 6 wildcard-family key rows flipped, zero
      * regressions (measured 2026-11-25 on the #2155 base).
-     * Monotonically rising. */
-    EXPECT_GE(pass, 1702) << "conformance floor regressed";
+     * Monotonically rising. Raised by #2150 (xs:override, §4.3
+     * component replacement: the overridden document's merged
+     * component set collected recursively (its own top level, its
+     * includes, and the components its own override/redefine
+     * bodies contribute) so an overriding component that overrides
+     * nothing is IGNORED and dropped; overriding references
+     * re-resolve against the POST-merge set, so a replacement
+     * deriving from its own former name is a circular derivation
+     * (the redefine hook keeps the original-naming semantics);
+     * targetNamespace alignment (equal, or the overridden document
+     * has none); overriding-set uniqueness across bodies; the
+     * mutual-override conflict (the inner override must replace
+     * nothing — the empty-body mutual form stays legal); and a
+     * kept component's dangling type reference failing the schema):
+     * 1710/2206 — the eight saxon Override schema-error rows
+     * (over011/014/016/017/021/022/024/026) flipped, zero
+     * regressions (measured 2026-11-25 on the #2156 base). */
+    EXPECT_GE(pass, 1710) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1140);
     EXPECT_GE(pass_invalid, 459);
     EXPECT_GE(pass_schema_error, 103);

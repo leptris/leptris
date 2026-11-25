@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over007): group g is replaced; group h overrides
+ * nothing and is IGNORED — legal because nothing references it. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="K_base.xsd">
+    <xs:group name="g">
+      <xs:sequence>
+        <xs:element name="b"/>
+      </xs:sequence>
+    </xs:group>
+    <xs:group name="h">
+      <xs:sequence>
+        <xs:element name="hhh" type="xs:string"/>
+      </xs:sequence>
+    </xs:group>
+  </xs:override>
+</xs:schema>

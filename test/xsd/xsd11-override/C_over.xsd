@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over014): the overriding complexType RESTRICTS its
+ * own (replaced) name — circular derivation: schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="C_base.xsd">
+    <xs:complexType name="cyc">
+      <xs:complexContent>
+        <xs:restriction base="cyc">
+          <xs:sequence>
+            <xs:element name="b"/>
+          </xs:sequence>
+        </xs:restriction>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:override>
+</xs:schema>

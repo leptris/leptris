@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over024a shape): the overridden document itself
+ * contains an override of the OVERRIDING document, replacing st. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="para" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:override schemaLocation="H_over.xsd">
+    <xs:simpleType name="st">
+      <xs:restriction base="xs:time"/>
+    </xs:simpleType>
+  </xs:override>
+</xs:schema>

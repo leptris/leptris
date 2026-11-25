@@ -88,9 +88,36 @@ xsd-dispositions/README.md).
 
 By family (#2156): core 1110→1136; the other families unchanged.
 
+Re-measured 2026-11-25 (#2150, branch `xsd11-override` — xs:override
+(§4.3 component replacement): the overridden document's MERGED
+component set collected recursively (its own named top level, the
+documents it includes, and the components its own override/redefine
+bodies contribute — the over009 shape, where a document that is
+itself an overriding document still declares the component), an
+overriding component outside that set overrides nothing and is
+IGNORED — dropped from the merged schema (§4.3.2), overriding
+references re-resolve against the POST-merge set (a replacement
+deriving from its own former name is a circular derivation —
+override does NOT get the 1.0 redefine hook's original-naming
+semantics, and the #1958 alias re-point is redefine-only now),
+targetNamespace alignment (src-override.1: equal, or the overridden
+document declares none), overriding-set uniqueness (src-override.2:
+one (kind, name) pair twice within a body or across bodies), the
+mutual-override conflict (src-override.3: an inner override of the
+overriding document is an error exactly when it would REPLACE one
+of its components — the empty-body mutual form stays legal,
+over023), and src-override.4: a kept component's dangling type
+reference fails the schema; re-measured on the #2156 base):
+**1710/2206 pass** — 1140 valid / 459 invalid / 111 schema-error
+(496 reds, zero regressions). The eight saxon Override schema-error
+rows flip (over011/014/016/017/021/022/024/026). Spec tests:
+test/xsd/test_xsd11_override.cpp.
+
+By family (#2150): override 75→83; the other families unchanged.
+
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1702) is pinned and
+record for every row left in it. The floor (now 1710) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -118,7 +145,8 @@ Per-row counts below are approximate (the #2148 classifier lineage);
 the authoritative totals are the gate's printed verdict split
 (#2155: 157 valid / 175 invalid / 202 schema-error reds; #2156
 re-sliced the ic class row: 153 valid / 151 invalid / 200
-schema-error reds).
+schema-error reds; #2150 flips 8 override schema-error rows:
+153 valid / 151 invalid / 192 schema-error reds).
 
 ## valid rejected by the engine (153)
 
@@ -174,7 +202,7 @@ class and the 3-row cta0040/41 stamp class flipped with it.)
 | 8 | ibm S3_4_1: complexType derivation-ok clauses (cos-st-restricts / derivation-ok-restriction) compile clean | OPEN — the complexType-side derivation sweep (the 1.0 lane holds the capture) |
 | 32 | saxon All `.n`: xs:all compile constraints — group refs must be xs:all groups, occurrence/derivation rules | OPEN |
 | 22 | saxon Wild `.bad` (19) + ibm S3_3_6/S3_4_6 (3): wildcard namespace-set exclusivity (namespace= + notNamespace= combined; notQName with processContents=strict in xs:all) must be rejected | OPEN — the 1.1 wildcard ATTRIBUTES are parsed but their mutual-exclusion constraints unchecked |
-| 15 | override/redefine cycles: saxon Override/over011 (9) + ibm S4_2_4/S4_2_2 (2) + ibm S3_4_2_4 (3) + the s3_12ii04 mixed-extension compile-status artifact (1) | OPEN — cycle detection on override/redefine graphs |
+| 7 | override/redefine cycles residue: ibm S4_2_4/S4_2_2 (2) + ibm S3_4_2_4 (3) + the s3_12ii04 mixed-extension compile-status artifact (1) + s4_2_4si02c (1 — the mutual-redefine cycle's closing document si02b was never copied into the corpus, so the document graph the oracle sees is not reconstructible) | OPEN — cycle detection on redefine graphs beyond the override lane (#2150 flipped the eight saxon Override rows: over011/014/016/017/021/022/024/026 — src-override.1–4 plus the post-merge circular-derivation check, override-scoped) |
 | 19 | saxon Open `.bad` (14) + ibm S3_16_2 (5): openContent derivation rules (derived adds open content over a non-open base; fixed-slot violations) | OPEN |
 | 15 | cta alternative-table SCHEMA constraints (saxon cta9001err/9004-9010err/cta0043 (9) + ibm s3_12si01-06 (6)): §3.3.6.1 cl.7 type-substitutability (every alternative/default type must derive from the declared type or be xs:error), cos-element-consistent type-table equivalence (cta9009/9010err, cta0043's restriction narrowing a table), src-ct.1 (cta9001err mixed+simpleContent), src-element.5 ordering | OPEN — compile-side constraint sweep for type tables; the dispatch validates fine on the legal schemas (#2149 fixed the instance side) |
 | 10 | ibm S3_2_3 (9) + D3_3_15 (1): element-decl clauses (targetNamespace on LOCAL declarations) and gDay timezone-bound facets compile clean | OPEN |
@@ -230,9 +258,16 @@ dateTimeStamp — now REJECT the schema at compile time.)
   in the §3.13.4.1 assertion data model (comments and PIs invisible),
   and compares temporally against typed scalars. Spec tests:
   test/xsd/test_xsd11_assertions.cpp.
-- override family 71/87: the override capture swaps same-named
-  components well enough to type the majority of the saxon Override
-  instances.
+- override family 83/87 (#2150): the override capture merges by the
+  §4.3.2 semantics — the overridden document's merged component set
+  (recursive through includes and its own override bodies),
+  non-corresponding overriding components dropped, references
+  re-resolved post-merge, tns alignment, set uniqueness, the
+  mutual-override conflict and dangling-ref laws enforced at
+  compile; the four remaining reds are adjacent classes
+  (over008.n01's ID uniqueness, the over027 NOTATION pair,
+  s4_2_4si02c's missing cycle document — classified above).
+  Spec tests: test/xsd/test_xsd11_override.cpp.
 - datatypes family (#2155): the four 1.1 builtins carry their own
   lexicals (dateTimeStamp's required timezone, precisionDecimal's
   arithmetic space with exponent spellings and INF/NaN, the strict

@@ -68,6 +68,24 @@ struct leptris_xsd_schema {
      * attributeGroup pre-pass must re-register defs the base
      * already captured (leptris#1913). */
     int capture_force; /* include/import recursion guard */
+    /* #2150 §4.3: while an override BODY captures, the (kind, name)
+     * pairs of the overridden document's merged component set — body
+     * components outside the set override nothing and are IGNORED
+     * (§4.3.2): they are dropped from the merged schema. */
+    struct xsd_ovr_name* override_set;
+    size_t override_set_len, override_set_cap;
+    int override_active;
+    /* #2150: how many override bodies this schema captured — the
+     * post-capture derivation-cycle check is OVERRIDE-scoped (the
+     * redefine hook legitimately re-derives its own name from the
+     * original, so a base==own-name derivation is only circular
+     * under override's post-merge re-resolution). */
+    int override_bodies;
+    /* #2150 §4.3.2: the compiled file's normalized path — the
+     * mutual-override conflict check matches an inner override's
+     * target against it. NULL for string-compiled schemas (no file
+     * identity). */
+    char* self_path;
     /* leptris#1644: already-captured schema units (canonical
      * location per entry) — the include/import DAG is dense and
      * cyclic; without this set every DAG path re-parses and
@@ -150,6 +168,18 @@ static char* xsd_capture_any_attr_ns_deep(
     struct leptris_xsd_schema* s, LeptrisElement container, int depth,
     char** out_unit);
 static char* xsd_capture_any_attr_not_qname(LeptrisElement container);
+static void xsd_path_normalize(const char* in, char* out, size_t outsz);
+
+/* #2150 §4.3: the override lane. */
+struct xsd_ovr_name {
+    char kind[16];
+    char name[128];
+};
+static int xsd_check_override_docs(struct leptris_xsd_schema* s,
+                                   LeptrisElement root);
+static int xsd_check_override_refs(struct leptris_xsd_schema* s,
+                                   LeptrisElement root);
+static int xsd_check_derivation_cycles(struct leptris_xsd_schema* s);
 
 /* #1626: prefixed QName refs (type="w:CT_Border") resolve by local
  * name — the engine's tables key on local names; the prefix maps
@@ -1499,12 +1529,13 @@ static char* xsd_read_file(const char* path, size_t* out_len) {
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                                          size_t len,
                                          const char* base_dir,
+                                         const char* self_path,
                                          LeptrisStatus* status);
 
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile(const char* xsd_text,
                                                  size_t len,
                                                  LeptrisStatus* status) {
-    return xsd_compile_impl(xsd_text, len, NULL, status);
+    return xsd_compile_impl(xsd_text, len, NULL, NULL, status);
 }
 
 LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(
@@ -1537,7 +1568,8 @@ LEPTRIS_API LeptrisXsdSchema leptris_xsd_compile_file(
     } else {
         base_dir = xsd_strdup(".");
     }
-    LeptrisXsdSchema s = xsd_compile_impl(text, len, base_dir, status);
+    LeptrisXsdSchema s = xsd_compile_impl(text, len, base_dir,
+                                          path, status);
     free(base_dir);
     free(text);
     return s;
@@ -2718,9 +2750,408 @@ static int xsd_check_refs(struct leptris_xsd_schema* s,
     return xsd_check_refs_walk(root, s, decls, ndecls);
 }
 
+/* ---- #2150 §4.3: xs:override -------------------------------------
+ *
+ * The document-level override checks, run pre-capture like the
+ * include-tns and ref walks so failures propagate as schema errors:
+ *
+ * - src-override.1 (over016/over017): the overridden document's
+ *   target namespace must EQUAL the overriding document's — the
+ *   target-namespace-ABSENT overridden document is the only legal
+ *   exception (the chameleon form; over019).
+ * - src-override.2 (over021/over022): the overriding component set
+ *   is not unique — one (kind, name) pair twice within a body, or
+ *   across two bodies targeting the same document.
+ * - src-override.3 (over024): mutual override is an error exactly
+ *   when the inner override would REPLACE a component of the
+ *   overriding document; the empty-body mutual form (over023) is
+ *   legal. Requires the compiled file's own normalized path. */
+
+static int xsd_ovr_comp_has(const struct xsd_ovr_name* set, size_t n,
+                            const char* kind, const char* name) {
+    if (!name || !name[0]) return 0;
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(set[i].kind, kind) == 0 &&
+            strcmp(set[i].name, name) == 0)
+            return 1;
+    return 0;
+}
+
+static void xsd_ovr_comp_add(struct xsd_ovr_name* set, size_t* n,
+                             size_t max, const char* kind,
+                             const char* name) {
+    if (!name || !name[0] || *n >= max) return;
+    if (xsd_ovr_comp_has(set, *n, kind, name)) return;
+    snprintf(set[*n].kind, sizeof(set[*n].kind), "%s", kind);
+    snprintf(set[*n].name, sizeof(set[*n].name), "%s", name);
+    (*n)++;
+}
+
+/* A top-level component-kind declaration (the kinds override
+ * replaces by name). */
+static int xsd_ovr_is_component(const char* local) {
+    return local && (strcmp(local, "element") == 0 ||
+                     strcmp(local, "attribute") == 0 ||
+                     strcmp(local, "simpleType") == 0 ||
+                     strcmp(local, "complexType") == 0 ||
+                     strcmp(local, "group") == 0 ||
+                     strcmp(local, "attributeGroup") == 0 ||
+                     strcmp(local, "notation") == 0);
+}
+
+/* The (kind, name) pairs one xs:override BODY declares. */
+static void xsd_ovr_collect_body(LeptrisElement ovr,
+                                 struct xsd_ovr_name* set, size_t* n,
+                                 size_t max) {
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(ovr));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)c, &l, NULL, &u);
+        if (!l || (u && strcmp(u, XSD_NS) != 0)) continue;
+        if (!xsd_ovr_is_component(l)) continue;
+        const char* nm =
+            leptris_element_attribute((LeptrisElement)c, "name");
+        xsd_ovr_comp_add(set, n, max, l, nm);
+    }
+}
+
+/* The inner override targets THIS compiled file: an error when its
+ * body would replace any of the overriding document's top-level
+ * components (the empty body replaces nothing and stays legal). */
+static int xsd_check_override_mutual(struct leptris_xsd_schema* s,
+                                     LeptrisElement subroot,
+                                     const char* sub_base_dir,
+                                     const struct xsd_ovr_name* top,
+                                     size_t ntop) {
+    if (!s->self_path) return 0;
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(subroot));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)c, &l, NULL, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0 ||
+            strcmp(l, "override") != 0)
+            continue;
+        const char* loc = leptris_element_attribute((LeptrisElement)c,
+                                                    "schemaLocation");
+        if (!loc || !sub_base_dir) continue;
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", sub_base_dir, loc);
+        char canon[4096];
+        xsd_path_normalize(path, canon, sizeof(canon));
+        if (strcmp(canon, s->self_path) != 0) continue;
+        struct xsd_ovr_name inner[64];
+        size_t ninner = 0;
+        xsd_ovr_collect_body((LeptrisElement)c, inner, &ninner, 64);
+        for (size_t i = 0; i < ninner; i++) {
+            if (!xsd_ovr_comp_has(top, ntop, inner[i].kind,
+                                  inner[i].name))
+                continue;
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-override.3: mutual override — the overridden "
+                     "schema's override would replace the overriding "
+                     "schema's %s '%s'",
+                     inner[i].kind, inner[i].name);
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int xsd_check_override_docs(struct leptris_xsd_schema* s,
+                                   LeptrisElement root) {
+    if (!root) return 0;
+    struct xsd_ovr_name top[128];
+    size_t ntop = 0;
+    struct xsd_ovr_name seen[128];
+    size_t nseen = 0;
+    /* the overriding document's own top-level components (the
+     * mutual-conflict intersection set) */
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, NULL, &u);
+        if (!l || (u && strcmp(u, XSD_NS) != 0)) continue;
+        if (!xsd_ovr_is_component(l)) continue;
+        xsd_ovr_comp_add(
+            top, &ntop, 128, l,
+            leptris_element_attribute((LeptrisElement)n, "name"));
+    }
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, NULL, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0 ||
+            strcmp(l, "override") != 0)
+            continue;
+        /* src-override.2: the overriding set must be unique across
+         * every root-level override body of this document. The walk
+         * is RAW (no dedup): two same-named children in ONE body
+         * are already the violation (over021). */
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(n));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            const char* cl = NULL;
+            const char* cu = NULL;
+            leptris_element_expanded_name((LeptrisElement)c, &cl, NULL,
+                                          &cu);
+            if (!cl || (cu && strcmp(cu, XSD_NS) != 0)) continue;
+            if (!xsd_ovr_is_component(cl)) continue;
+            const char* cnm = leptris_element_attribute(
+                (LeptrisElement)c, "name");
+            if (!cnm || !cnm[0]) continue;
+            if (xsd_ovr_comp_has(seen, nseen, cl, cnm)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "src-override.2: the component %s '%s' is "
+                         "overridden more than once",
+                         cl, cnm);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            xsd_ovr_comp_add(seen, &nseen, 128, cl, cnm);
+        }
+        const char* loc = leptris_element_attribute((LeptrisElement)n,
+                                                    "schemaLocation");
+        if (!loc || !s->base_dir) continue;
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", s->base_dir, loc);
+        char canon[4096];
+        xsd_path_normalize(path, canon, sizeof(canon));
+        size_t flen = 0;
+        char* text = xsd_read_file(path, &flen);
+        if (!text) continue;
+        LeptrisDocument sub = leptris_parse_string(text, flen, NULL);
+        free(text);
+        if (!sub) continue;
+        LeptrisElement subroot = leptris_document_root(sub);
+        if (!subroot) {
+            leptris_document_free(sub);
+            continue;
+        }
+        /* src-override.1: tns alignment */
+        const char* sub_tns =
+            leptris_element_attribute(subroot, "targetNamespace");
+        if (sub_tns && (!s->target_ns ||
+                        strcmp(sub_tns, s->target_ns) != 0)) {
+            char msg[512];
+            if (s->target_ns)
+                snprintf(msg, sizeof(msg),
+                         "src-override.1: the overridden schema declares "
+                         "target namespace '%s' but the overriding "
+                         "schema's target namespace is '%s'",
+                         sub_tns, s->target_ns);
+            else
+                snprintf(msg, sizeof(msg),
+                         "src-override.1: the overridden schema declares "
+                         "target namespace '%s' but the overriding "
+                         "schema declares none",
+                         sub_tns);
+            xsd_set_error(s, msg);
+            leptris_document_free(sub);
+            return -1;
+        }
+        /* src-override.3: the mutual-override conflict */
+        char sub_base[4096];
+        xsd_dirname_into(canon, sub_base, sizeof(sub_base));
+        int rc = xsd_check_override_mutual(s, subroot, sub_base, top,
+                                           ntop);
+        leptris_document_free(sub);
+        if (rc != 0) return -1;
+    }
+    return 0;
+}
+
+/* ---- #2150 §4.3.2: post-capture override semantics ---------------
+ *
+ * Overriding references re-resolve against the POST-merge set: a
+ * kept component's type reference to a component that is absent
+ * from the merged schema — including one the merge IGNORED because
+ * it overrides nothing (over026) — is a schema error. Only the
+ * overriding document's root-level bodies walk: the direct type
+ * references of the replaced declarations (element/attribute @type,
+ * the derivation @base of the body's own types). */
+
+static int xsd_ovr_type_resolves(struct leptris_xsd_schema* s,
+                                 LeptrisElement e, const char* qname) {
+    if (!qname || !qname[0]) return 1; /* absent = anySimpleType */
+    const char* ln = xsd_local_name(qname);
+    /* builtin EXISTENCE under any spelling (xsd: canonized,
+     * unprefixed canonized at capture since #2155) */
+    if (strncmp(ln, "xs:", 3) == 0) {
+        if (xsd_builtin_exists(ln)) return 1;
+        /* xs:-prefixed but unknown: fall through to the local
+         * ladders (an unprefixed local type named like the builtin
+         * keeps its resolution) */
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "xs:%s", ln);
+        if (xsd_builtin_exists(buf)) return 1;
+    }
+    char ruri[256], rlocal[128];
+    xsd_resolve_qname(e, qname, ruri, sizeof(ruri), rlocal,
+                      sizeof(rlocal));
+    if (xsd_find_complex_ns(s, ln, ruri)) return 1;
+    if (xsd_find_complex(s, ln)) return 1;
+    if (xsd_find_simple_ns_pub(s, ln, ruri)) return 1;
+    if (xsd_find_simple(s, ln)) return 1;
+    return 0;
+}
+
+static int xsd_check_override_refs_body(struct leptris_xsd_schema* s,
+                                        LeptrisElement ovr) {
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(ovr));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement d = (LeptrisElement)c;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(d, &l, NULL, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0) continue;
+        const char* ty = NULL;
+        if (strcmp(l, "element") == 0 || strcmp(l, "attribute") == 0) {
+            ty = leptris_element_attribute(d, "type");
+        } else if (strcmp(l, "simpleType") == 0 ||
+                   strcmp(l, "complexType") == 0) {
+            /* the body's own derivation base (one hop) */
+            for (LeptrisNodeRef q = leptris_node_first_child(
+                     leptris_element_as_node(d));
+                 q && !ty; q = leptris_node_next_sibling(q)) {
+                if (leptris_node_get_type(q) !=
+                    LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                LeptrisElement qe = (LeptrisElement)q;
+                const char* ql = NULL;
+                leptris_element_expanded_name(qe, &ql, NULL, NULL);
+                if (!ql) continue;
+                if (strcmp(ql, "restriction") == 0 ||
+                    strcmp(ql, "extension") == 0 ||
+                    strcmp(ql, "list") == 0) {
+                    ty = leptris_element_attribute(
+                        qe, strcmp(ql, "list") == 0 ? "itemType"
+                                                    : "base");
+                } else if (strcmp(ql, "complexContent") == 0 ||
+                           strcmp(ql, "simpleContent") == 0) {
+                    for (LeptrisNodeRef r = leptris_node_first_child(
+                             leptris_element_as_node(qe));
+                         r && !ty; r = leptris_node_next_sibling(r)) {
+                        if (leptris_node_get_type(r) !=
+                            LEPTRIS_NODE_TYPE_ELEMENT)
+                            continue;
+                        LeptrisElement re = (LeptrisElement)r;
+                        const char* rl = NULL;
+                        leptris_element_expanded_name(
+                            re, &rl, NULL, NULL);
+                        if (rl && (strcmp(rl, "restriction") == 0 ||
+                                   strcmp(rl, "extension") == 0))
+                            ty = leptris_element_attribute(re, "base");
+                    }
+                }
+            }
+        }
+        if (ty && ty[0] && !xsd_ovr_type_resolves(s, d, ty)) {
+            char ruri[256], rlocal[128];
+            xsd_resolve_qname(d, ty, ruri, sizeof(ruri), rlocal,
+                              sizeof(rlocal));
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-override.4: the QName value '{%s}%s' does "
+                     "not resolve in the merged schema (a component "
+                     "that overrides nothing is ignored)",
+                     ruri, rlocal);
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int xsd_check_override_refs(struct leptris_xsd_schema* s,
+                                   LeptrisElement root) {
+    if (!root) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, NULL, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0 ||
+            strcmp(l, "override") != 0)
+            continue;
+        if (xsd_check_override_refs_body(s, (LeptrisElement)n) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/* §4.3.2 (over011/over014): an override's references resolve
+ * against the POST-merge set, so a replacement whose derivation
+ * base names its own (replaced) name restricts ITSELF — circular.
+ * OVERRIDE-SCOPED: the 1.0 redefine hook legitimately re-derives a
+ * type from its own original (the open042/044 shapes) and plain
+ * self-named restrictions are the derivation lanes' pre-existing
+ * classes — only schemas that captured an override body check. */
+static int xsd_check_derivation_cycles(struct leptris_xsd_schema* s) {
+    if (!s->override_bodies) return 0;
+    for (XsdSimple* t = s->simple_types; t; t = t->next) {
+        if (!t->name || !t->base) continue;
+        if (strncmp(t->base, "xs:", 3) == 0) continue;
+        if (strcmp(t->base, t->name) != 0) continue;
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                 "circular derivation: the restriction base of "
+                 "'%s' names its own definition",
+                 t->name);
+        xsd_set_error(s, msg);
+        return -1;
+    }
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        if (!c->name) continue;
+        const char* rb = c->ext_base ? c->ext_base : c->res_base;
+        if (!rb || strcmp(rb, c->name) != 0) continue;
+        const char* bns =
+            c->ext_base_ns ? c->ext_base_ns : c->res_base_ns;
+        /* a same-LOCAL-name base in another namespace is another
+         * component, not a self-reference */
+        if (bns && c->ns && strcmp(bns, c->ns) != 0) continue;
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                 "circular derivation: the %s base of '%s' names its "
+                 "own definition",
+                 c->ext_base ? "extension" : "restriction", c->name);
+        xsd_set_error(s, msg);
+        return -1;
+    }
+    return 0;
+}
+
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                                          size_t len,
                                          const char* base_dir,
+                                         const char* self_path,
                                          LeptrisStatus* status) {
     if (status) *status = LEPTRIS_OK;
     if (!xsd_text || len == 0) {
@@ -2735,6 +3166,14 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return NULL;
     }
     s->base_dir = xsd_strdup(base_dir);
+    /* #2150 §4.3.2: the compiled file's own normalized path — the
+     * mutual-override conflict check matches inner override targets
+     * against it (lexical normalization only; no filesystem id). */
+    if (self_path) {
+        char canon[4096];
+        xsd_path_normalize(self_path, canon, sizeof(canon));
+        s->self_path = xsd_strdup(canon);
+    }
 
     /* target namespace (xs:any ##other/##targetNamespace filters) */
     s->target_ns = NULL;
@@ -2839,10 +3278,25 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     if (xsd_check_include_tns(s, root) != 0)
         goto fail;
 
+    /* #2150 §4.3: the override document checks — targetNamespace
+     * alignment (src-override.1), overriding-set uniqueness
+     * (src-override.2), and the mutual-override conflict
+     * (src-override.3). */
+    if (xsd_check_override_docs(s, root) != 0)
+        goto fail;
+
     xsd_capture_root(s, root);
     xsd_resolve_extension_bases(s);
     xsd_resolve_pending_attr_refs(s);
     xsd_canon_builtin_refs(s);
+
+    /* #2150 §4.3.2: overriding references resolve against the
+     * POST-merge set (src-override.4), and a self-named derivation
+     * base is circular. */
+    if (xsd_check_override_refs(s, root) != 0)
+        goto fail;
+    if (xsd_check_derivation_cycles(s) != 0)
+        goto fail;
 
     /* #2156: identity-constraint @ref forms resolve and the
      * §3.11.6 subset checks run once the whole capture has landed
@@ -3091,6 +3545,124 @@ static void xsd_register_attr_group_def(struct leptris_xsd_schema* s,
     s->attr_groups = g;
 }
 
+/* ---- #2150 §4.3.2: the overridden document's merged component set
+ *
+ * The set the override BODY is checked against: the overridden
+ * document's own named top-level components, plus — recursively —
+ * the sets of the documents it includes, plus the named components
+ * of its own override/redefine bodies and those bodies' targets'
+ * sets (a schema document that is itself an overriding document
+ * contributes its overrides' results to its component set — the
+ * over009 shape: its para IS a component even though it was
+ * captured through its own override element). Namespace-blind: the
+ * capture stamps both sides with the same effective target
+ * namespace, and the misaligned forms were rejected pre-capture
+ * (src-override.1). */
+
+static int xsd_override_set_add(struct leptris_xsd_schema* s,
+                                const char* kind, const char* name) {
+    if (!name || !name[0]) return 0;
+    if (s->override_set_len == s->override_set_cap) {
+        size_t nc = s->override_set_cap ? s->override_set_cap * 2
+                                        : 32;
+        struct xsd_ovr_name* nv = (struct xsd_ovr_name*)realloc(
+            s->override_set, nc * sizeof(*nv));
+        if (!nv) return 0;
+        s->override_set = nv;
+        s->override_set_cap = nc;
+    }
+    struct xsd_ovr_name* slot =
+        &s->override_set[s->override_set_len++];
+    snprintf(slot->kind, sizeof(slot->kind), "%s", kind);
+    snprintf(slot->name, sizeof(slot->name), "%s", name);
+    return 1;
+}
+
+static int xsd_override_corresponds(struct leptris_xsd_schema* s,
+                                    const char* kind,
+                                    const char* name) {
+    return xsd_ovr_comp_has(s->override_set, s->override_set_len,
+                            kind, name);
+}
+
+/* The (kind, name) pairs an override/redefine BODY declares ride the
+ * set too (see above). */
+static void xsd_override_set_add_body(struct leptris_xsd_schema* s,
+                                      LeptrisElement ovr) {
+    struct xsd_ovr_name body[64];
+    size_t nbody = 0;
+    xsd_ovr_collect_body(ovr, body, &nbody, 64);
+    for (size_t i = 0; i < nbody; i++)
+        xsd_override_set_add(s, body[i].kind, body[i].name);
+}
+
+static void xsd_override_set_collect(struct leptris_xsd_schema* s,
+                                     LeptrisElement root,
+                                     const char* base_dir, int depth,
+                                     char (*visited)[4096],
+                                     int* nvisited) {
+    if (!root || depth > 6) return;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &l, NULL, &u);
+        if (!l || (u && strcmp(u, XSD_NS) != 0)) continue;
+        if (xsd_ovr_is_component(l)) {
+            xsd_override_set_add(
+                s, l,
+                leptris_element_attribute((LeptrisElement)n, "name"));
+            continue;
+        }
+        int is_ref = (strcmp(l, "include") == 0 ||
+                      strcmp(l, "redefine") == 0 ||
+                      strcmp(l, "override") == 0);
+        if (!is_ref) continue;
+        /* the body's declared components ride the set */
+        xsd_override_set_add_body(s, (LeptrisElement)n);
+        const char* loc = leptris_element_attribute(
+            (LeptrisElement)n, "schemaLocation");
+        if (!loc || !base_dir) continue;
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/%s", base_dir, loc);
+        char canon[4096];
+        xsd_path_normalize(path, canon, sizeof(canon));
+        int seen = 0;
+        for (int i = 0; i < *nvisited; i++)
+            if (strcmp(visited[i], canon) == 0) seen = 1;
+        if (seen) continue;
+        if (*nvisited < 8)
+            snprintf(visited[(*nvisited)++], 4096, "%s", canon);
+        size_t flen = 0;
+        char* text = xsd_read_file(path, &flen);
+        if (!text) continue;
+        LeptrisDocument sub = leptris_parse_string(text, flen, NULL);
+        free(text);
+        if (!sub) continue;
+        LeptrisElement subroot = leptris_document_root(sub);
+        if (subroot) {
+            char sub_base[4096];
+            xsd_dirname_into(canon, sub_base, sizeof(sub_base));
+            xsd_override_set_collect(s, subroot, sub_base, depth + 1,
+                                     visited, nvisited);
+        }
+        leptris_document_free(sub);
+    }
+}
+
+/* The capture gate: an overriding body component that overrides
+ * nothing is IGNORED (§4.3.2) — dropped from the merged schema. */
+static int xsd_override_gate(struct leptris_xsd_schema* s,
+                             const char* local, LeptrisElement n) {
+    if (!s->override_active) return 0;
+    const char* nm = leptris_element_attribute(n, "name");
+    if (!nm) return 0;
+    return !xsd_override_corresponds(s, local, nm);
+}
+
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
     /* pre-pass phase 1: register every top-level attributeGroup def
@@ -3114,6 +3686,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         const char* nm = leptris_element_attribute((LeptrisElement)n,
                                                    "name");
         if (!nm) continue;
+        /* #2150 §4.3.2: an overriding body group that overrides
+         * nothing is ignored — not registered, not captured. */
+        if (xsd_override_gate(s, local, (LeptrisElement)n)) continue;
         xsd_register_attr_group_def(s, (LeptrisElement)n, nm);
     }
     for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next)
@@ -3228,12 +3803,29 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                         if (subroot && same_ns &&
                             (strcmp(local, "override") == 0 ||
                              strcmp(local, "redefine") == 0)) {
+                            /* #2150 §4.3.2: build the overridden
+                             * document's merged component set — the
+                             * body's components outside it are
+                             * ignored. The sub-documents' locations
+                             * resolve against the sub directory
+                             * (s->base_dir is already swapped). */
+                            if (strcmp(local, "override") == 0) {
+                                s->override_active = 1;
+                                s->override_bodies++;
+                                s->override_set_len = 0;
+                                char ovisited[8][4096];
+                                int nvisited = 0;
+                                xsd_override_set_collect(
+                                    s, subroot, s->base_dir, 0,
+                                    ovisited, &nvisited);
+                            }
                             s->include_depth++;
                             s->capture_force = 1;
                             xsd_capture_root(s, (LeptrisElement)n);
                             s->capture_force = 0;
                             s->include_depth--;
-                            /* leptris#1958 (schP2): a redefined
+                            s->override_active = 0;
+                            /* leptris#1958 (schP2): a REDEFINED
                              * simpleType's restriction base names the
                              * ORIGINAL definition — both share the
                              * name, and the name-only chain lookup
@@ -3242,7 +3834,13 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                              * hidden alias and repoint the
                              * replacement's base at it; every OTHER
                              * reference keeps resolving to the
-                             * replacement (head-first). */
+                             * replacement (head-first). OVERRIDE does
+                             * NOT get this: its references re-resolve
+                             * against the POST-merge set, so a
+                             * self-named base is a circular
+                             * derivation (#2150) — caught by
+                             * xsd_check_derivation_cycles. */
+                            if (strcmp(local, "redefine") == 0) {
                             for (XsdSimple* t = s->simple_types; t;
                                  t = t->next) {
                                 if (!t->base || strcmp(t->base, t->name) != 0)
@@ -3269,6 +3867,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                 free(t->base);
                                 t->base = xsd_strdup(alias);
                             }
+                            }
                         }
                         /* leptris#1957: retained — attributeGroup
                          * defs hold elements from this unit for the
@@ -3291,6 +3890,10 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
         }
 
         if (strcmp(local, "element") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            /* #2150 §4.3.2: an overriding body component that
+             * overrides nothing is ignored (dropped) */
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             const char* nm = leptris_element_attribute((LeptrisElement)n,
                                                        "name");
             const char* ty = leptris_element_attribute((LeptrisElement)n,
@@ -3366,6 +3969,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
             }
         } else if (strcmp(local, "complexType") == 0 && uri &&
                    !strcmp(uri, XSD_NS)) {
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
             if (nm)
@@ -3394,6 +3999,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
             }
             continue;
         } else if (strcmp(local, "attribute") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
             if (nm) {
@@ -3422,6 +4029,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 }
             }
         } else if (strcmp(local, "attributeGroup") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
             /* the #1880 pre-pass already captured it — a second
@@ -3442,6 +4051,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 }
             }
         } else if (strcmp(local, "group") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             const char* nm =
                 leptris_element_attribute((LeptrisElement)n, "name");
             if (nm) {
@@ -3454,6 +4065,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 }
             }
         } else if (strcmp(local, "simpleType") == 0 && uri && !strcmp(uri, XSD_NS)) {
+            if (xsd_override_gate(s, local, (LeptrisElement)n))
+                continue;
             XsdSimple* captured = xsd_capture_simple((LeptrisElement)n);
             if (captured) {
                 /* leptris-ruby#440: stamp the declaring unit's
@@ -3639,6 +4252,10 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     if (s->default_open) xsd_cm_free(s->default_open);
     for (size_t i = 0; i < s->visited_len; i++) free(s->visited[i]);
     free(s->visited);
+    /* #2150: the override correspondence set (fixed-buffer slots)
+     * and the compiled file's own normalized path */
+    free(s->override_set);
+    free(s->self_path);
     free(s->target_ns);
     free(s->base_dir);
     if (s->validator)

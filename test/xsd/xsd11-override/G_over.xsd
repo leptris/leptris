@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over022): TWO override elements designate the same
+ * document and both override doc, conflicting — schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="G_base.xsd">
+    <xs:element name="doc" type="xs:date"/>
+  </xs:override>
+  <xs:override schemaLocation="G_base.xsd">
+    <xs:element name="doc" type="xs:time"/>
+  </xs:override>
+</xs:schema>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over017): the overriding document's target
+ * namespace DIFFERS from the overridden document's: schema error
+ * (only the tns-absent overridden form is the legal exception). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="urn:xsd11-override:e-over" elementFormDefault="qualified">
+  <xs:override schemaLocation="E_base.xsd">
+    <xs:element name="doc" type="xs:date"/>
+  </xs:override>
+</xs:schema>

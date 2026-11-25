@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over024): mutual override with CONFLICT — the
+ * overridden document's override would replace a component of the
+ * overriding document (st): schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="H_base.xsd">
+    <xs:element name="doc" type="st"/>
+  </xs:override>
+  <xs:simpleType name="st">
+    <xs:restriction base="xs:date">
+      <xs:pattern value=".*Z"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
