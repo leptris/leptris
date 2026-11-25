@@ -162,6 +162,9 @@ jobs:
         env:
           TOL: ${{ inputs.gate_tolerance_pct || '5' }}
         run: |
+          # GHA's default shell lacks pipefail: without it, a failing
+          # gate's exit status is masked by tee and the step goes green.
+          set -euo pipefail
           python3 .github/scripts/pgo_gate.py results-off results-use \
             --tolerance "${TOL}" | tee gate.md
           cat gate.md >> "$GITHUB_STEP_SUMMARY"
