@@ -36,9 +36,10 @@ RULES = {
     "bench_sax_leptris": DEFAULT_RULE,
     "bench_serialize": DEFAULT_RULE,
     "bench_modify_leptris": DEFAULT_RULE,
-    # C++ flagship rows have their own line formats.
-    "dom_benchmark_v2": (r"^Leptris:\s+([\d.]+)", "sum", "lower"),
-    "benchmark_parse": (r"^Leptris:\s+([\d.]+)", "sum", "lower"),
+    # C++ flagship rows have their own line formats. Note benchmark_parse
+    # indents its comparison lines — no line-start anchor there.
+    "dom_benchmark_v2": (r"Leptris:\s+([\d.]+)", "sum", "lower"),
+    "benchmark_parse": (r"Leptris:\s+([\d.]+)", "sum", "lower"),
     "bench_pipeline_shapes": (r"engine=leptris median_us=([\d.]+)",
                               "sum", "lower"),
     "bench_append_attr_pugixml": (r"leptris[^:]*:\s*([\d.]+)",
