@@ -256,6 +256,22 @@ int xsd_builtin_known(const char* type) {
     return type && xsd_builtin_valid(type, "x") != -1;
 }
 
+/* #2150: builtin EXISTENCE (not validity) — the tier-1 table plus
+ * the names that carry no lexical validator of their own
+ * (QName/NOTATION), the list builtins, and the ur-types. */
+int xsd_builtin_exists(const char* type) {
+    if (!type) return 0;
+    if (xsd_builtin_known(type)) return 1;
+    return strcmp(type, "xs:QName") == 0 ||
+           strcmp(type, "xs:NOTATION") == 0 ||
+           strcmp(type, "xs:anySimpleType") == 0 ||
+           strcmp(type, "xs:anyType") == 0 ||
+           strcmp(type, "xs:anyAtomicType") == 0 ||
+           strcmp(type, "xs:IDREFS") == 0 ||
+           strcmp(type, "xs:NMTOKENS") == 0 ||
+           strcmp(type, "xs:ENTITIES") == 0;
+}
+
 int xsd_builtin_valid(const char* type, const char* v) {
     if (!type || !v) return 0;
     if (strcmp(type, "xs:string") == 0) return 1;

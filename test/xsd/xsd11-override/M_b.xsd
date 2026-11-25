@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150: the redefined document declares t with its own content. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="urn:xsd11-override:m" elementFormDefault="qualified">
+  <xs:complexType name="t">
+    <xs:sequence>
+      <xs:element name="own"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

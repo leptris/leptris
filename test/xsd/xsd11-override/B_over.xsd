@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over011): the overriding simpleType restricts its
+ * own (replaced) name — override references re-resolve against the
+ * POST-merge set, so this is a circular restriction: schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="B_base.xsd">
+    <xs:simpleType name="cyc">
+      <xs:restriction base="cyc">
+        <xs:minInclusive value="1"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:override>
+</xs:schema>

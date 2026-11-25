@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over016): an override whose document carries NO
+ * target namespace cannot override a tns-carrying document:
+ * schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="D_base.xsd">
+    <xs:element name="doc" type="xs:date"/>
+  </xs:override>
+</xs:schema>

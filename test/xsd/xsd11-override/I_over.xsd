@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150 (saxon over023): the overriding document replaces doc;
+ * the overridden document's empty-body override makes no conflict —
+ * LEGAL. The merged doc is xs:date. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:override schemaLocation="I_base.xsd">
+    <xs:element name="doc" type="xs:date"/>
+  </xs:override>
+</xs:schema>

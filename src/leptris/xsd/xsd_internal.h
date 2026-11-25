@@ -391,6 +391,11 @@ int xsd_builtin_valid(const char* type, const char* v);
  * unprefixed-reference fallback needs existence, not validity. */
 int xsd_builtin_known(const char* type);
 
+/* #2150: builtin EXISTENCE — xsd_builtin_known plus the names that
+ * carry no lexical validator of their own (QName/NOTATION), the
+ * list builtins, and the ur-types. */
+int xsd_builtin_exists(const char* type);
+
 /* #2155: the 1.1 facet table — terminal-builtin class, the
  * 1.1-only builtin marker, facet applicability, facet-value
  * lexical validity, and the ordered-facet VALUE-space comparison

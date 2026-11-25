@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2150: LEGAL single redefinition (1.0 §4.2.2 semantics): the
+ * redefinition's base refers to the ORIGINAL definition. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="urn:xsd11-override:m" xmlns:m="urn:xsd11-override:m"
+    elementFormDefault="qualified">
+  <xs:redefine schemaLocation="M_b.xsd">
+    <xs:complexType name="t">
+      <xs:complexContent>
+        <xs:extension base="m:t">
+          <xs:sequence>
+            <xs:element name="ext"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:redefine>
+  <xs:element name="r" type="m:t"/>
+</xs:schema>
