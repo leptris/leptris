@@ -1,0 +1,11 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" vc:minVersion="1.1"
+  xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning">
+
+  <!-- moxml#579 scope check: only the attributes the SELECTED test
+       references are exempt; every other undeclared attribute stays
+       strict. lang is referenced (admitted on a match), kind is not. -->
+  <xs:element name="doc" type="xs:int">
+    <xs:alternative test="@lang='en'" type="xs:string"/>
+  </xs:element>
+
+</xs:schema>

@@ -1,0 +1,12 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" vc:minVersion="1.1"
+  xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning">
+
+  <!-- moxml#579: the attributes referenced in the SELECTED
+       alternative's test are exempt from strict attribute assessment
+       (§3.12.4). kind names the alternative's own selector: an
+       undeclared kind must be admitted when the test matches. -->
+  <xs:element name="doc" type="xs:int">
+    <xs:alternative test="@kind='text'" type="xs:string"/>
+  </xs:element>
+
+</xs:schema>

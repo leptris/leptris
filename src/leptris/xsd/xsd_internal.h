@@ -272,6 +272,12 @@ struct xsd_alternative {
     char* type;             /* the selected type name */
     int xs_error;           /* the selection is xs:error (no valid
                              * instances — always invalid, §2.2.1.1) */
+    /* moxml#579: the attribute names the test references (@kind /
+     * attribute::kind forms, string literals skipped) — the SELECTED
+     * alternative's set is exempt from strict attribute assessment
+     * (§3.12.4). Owned; freed with the alternative. */
+    char** test_attrs;
+    int test_attr_n;
     struct xsd_alternative* next;
 };
 
