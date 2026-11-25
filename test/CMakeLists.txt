@@ -152,6 +152,7 @@ leptris_add_test(test_node_surface_parity dom/test_node_surface_parity.cpp)
 leptris_add_test(test_text_borrowed dom/test_text_borrowed.cpp)
 leptris_add_test(test_compact    dom/test_compact.cpp)
 leptris_add_test(test_digest     dom/test_digest.cpp)
+leptris_add_test(test_intern_names dom/test_intern_names.cpp)
 leptris_add_test(test_rng        rng/test_rng.cpp)
 leptris_add_test(test_xsd_compile xsd/test_xsd_compile.cpp)
 target_compile_definitions(test_xsd_compile PRIVATE

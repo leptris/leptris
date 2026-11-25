@@ -1130,6 +1130,11 @@ LEPTRIS_API void leptris_document_free(struct leptris_document* doc) {
         doc->attr_index = NULL;
     }
 
+    /* #2132 phase 2: the name-intern table is POOL-CARVED (#1124
+     * pattern) — the pool destroy below reclaims its storage; this
+     * only clears the document's pointer. */
+    leptris_name_intern_doc_release(doc);
+
     /* Cache the pool-allocated flag BEFORE destroying the pool —
      * pool-allocated docs are freed by leptris_pool_destroy, so
      * reading doc->doc_pool_allocated AFTER destroy is UAF. TODO 154. */

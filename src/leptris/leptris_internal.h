@@ -299,6 +299,15 @@ struct leptris_document {
      * detach. remove_attribute tombstones its entry. NULL = unused
      * (never-mutated documents pay nothing). */
     struct leptris_attr_index* attr_index;
+    /* Per-document element-name intern table (#2132 phase 2; SSOT
+     * dom/name_intern.h). Built lazily on the first
+     * element_create/set_name — the table and its slot arrays are
+     * POOL-CARVED (#1124 journal pattern), so parse-only documents
+     * never allocate anything and doc-cycles pay no heap traffic.
+     * document_free clears the pointer via
+     * leptris_name_intern_doc_release; the pool destroy reclaims the
+     * storage. */
+    struct leptris_name_intern* name_intern;
     /* Mutation attr-tail cache (the 195a child-tail twin): elements
      * carry no last-attribute edge (64-byte layout law), so appends
      * would otherwise walk the list — O(N^2) for programmatic attr
@@ -467,6 +476,12 @@ struct leptris_attr_index {
     size_t cap;   /* power of two */
     size_t used;
 };
+
+/* Per-document element-name intern table (#2132 phase 2). Struct and
+ * logic live in dom/name_intern.h/.c; document_free clears the
+ * pointer (pool destroy reclaims the pool-carved storage). */
+struct leptris_name_intern;
+void leptris_name_intern_doc_release(struct leptris_document* doc);
 
 /* Parse options structure */
 typedef struct {

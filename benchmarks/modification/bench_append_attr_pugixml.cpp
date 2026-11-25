@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 static double now_ns() {
     return (double)std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -60,6 +61,60 @@ int main(void) {
         double t1 = now_ns();
         printf("append pugixml  : %8.1f ns/child\n",
                (t1 - t0) / N_APPEND);
+    }
+
+    /* ---- append-distinct (#2132 phase 2 ship-gate): 200k children
+     * each with a UNIQUE name — the pathological shape for the
+     * per-document name intern. The intern table must cost at most
+     * ~2 ns/child above the repeat-name append row above (hash +
+     * probe + insert on the memo/table miss; past the 8192 cap the
+     * rest is permanent carve fallback). Names are pre-built before
+     * the timed region so only the engine's create/append path is
+     * measured; the leptris warmup uses a DIFFERENT unique set so the
+     * timed names are never pre-interned. */
+    {
+        std::vector<std::string> names;
+        std::vector<std::string> warm_names;
+        names.reserve(N_APPEND);
+        warm_names.reserve(N_APPEND);
+        for (int i = 0; i < N_APPEND; i++) {
+            names.push_back("n" + std::to_string(i));
+            warm_names.push_back("w" + std::to_string(i));
+        }
+        auto uniq_run = [&](const std::vector<std::string>& nm) {
+            LeptrisDocument d = leptris_document_create();
+            LeptrisElement root = leptris_element_create(d, "root");
+            leptris_document_set_root(d, root);
+            for (int i = 0; i < N_APPEND; i++) {
+                LeptrisElement c =
+                    leptris_element_create(d, nm[i].c_str());
+                leptris_element_append_child(root, c);
+            }
+            leptris_document_free(d);
+        };
+        uniq_run(warm_names);
+        double best = 1e18;
+        for (int rep = 0; rep < 3; rep++) {
+            double t0 = now_ns();
+            uniq_run(names);
+            double t1 = now_ns();
+            double v = (t1 - t0) / N_APPEND;
+            if (v < best) best = v;
+        }
+        printf("append-uniq leptris: %7.1f ns/child (min of 3)\n", best);
+        double best_pugi = 1e18;
+        for (int rep = 0; rep < 3; rep++) {
+            double t0 = now_ns();
+            pugi::xml_document d;
+            pugi::xml_node root = d.append_child("root");
+            for (int i = 0; i < N_APPEND; i++)
+                root.append_child(names[i].c_str());
+            double t1 = now_ns();
+            double v = (t1 - t0) / N_APPEND;
+            if (v < best_pugi) best_pugi = v;
+        }
+        printf("append-uniq pugixml: %7.1f ns/child (min of 3)\n",
+               best_pugi);
     }
 
     /* ---- mut-doc-cycle: 20k create/build/free cycles, 1024
