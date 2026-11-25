@@ -1,0 +1,516 @@
+# Two-phase PGO on the release trains (#2167).
+#
+#   GENERATE build → train on the published-row battery → USE build →
+#   publish the USE artifacts.
+#
+# The training set IS the promise set: .github/scripts/pgo_battery.sh
+# runs exactly the row binaries the Benchmark workflow publishes (parse,
+# xpath, axes, functions, SAX, serialize, mutate, walk+read, append/attr,
+# pipeline shapes), every one of them a FIXED workload — no binary in the
+# battery scales iterations by wall time, so the emitted profile is
+# deterministic and the build-twice gate below is meaningful.
+#
+# Entry points:
+#   workflow_dispatch — the proof job (ubuntu-latest only): bench delta
+#       per row USE vs OFF, build-twice byte-identity with PGO, binary
+#       size delta. `run_legs=true` additionally exercises the four
+#       release legs below before the first real train rides them.
+#   workflow_call — what release.yml invokes post-merge: the four legs
+#       (linux x86_64, linux arm64, macos arm64, windows x64) each
+#       GENERATE→train→USE and upload their artifacts; `attach` then
+#       uploads them to the GitHub Release for the tag.
+#
+# Untouched by design — PGO stays OFF there: the amalgamated single-TU
+# leg, the manifest legs, and every ASAN/TSan/fuzz lane. None of them
+# set LEPTRIS_ENABLE_PGO; instrumented counters inside a sanitizer
+# build is a combination nobody should have to debug.
+#
+# Toolchain notes:
+#   gcc    — .gcda files land in build/pgo-data at process exit; the
+#            USE build reconfigures the SAME build dir (the ruby
+#            s390x leg's proven shape). No merge step.
+#   clang  — every process writes its own %p.profraw (LLVM_PROFILE_FILE
+#            overrides CMake's hardcoded default.profraw path), merged
+#            with llvm-profdata before USE (xcrun on darwin).
+#   msvc   — /GENPROFILE drops <exe>.pgd/<exe>!N.pgc beside each
+#            instrumented output; pgomgr merges them and consolidates
+#            one libleptris.pgd next to the dll, which the plain
+#            /USEPROFILE link then reads. Exercised on the first train.
+
+name: PGO
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_legs:
+        description: 'Also run the 4-platform USE legs (release-shape proof)'
+        type: boolean
+        default: false
+      gate_tolerance_pct:
+        description: 'Proof gate: max allowed row regression % (USE vs OFF)'
+        type: string
+        default: '5'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag the USE artifacts attach to'
+        type: string
+        default: ''
+      attach:
+        description: 'Attach USE artifacts to the GitHub Release'
+        type: boolean
+        default: true
+      run_legs:
+        description: 'Run the 4-platform USE legs'
+        type: boolean
+        default: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Dispatch-only proof (#2167 gate 3): one platform, end to end.
+  # (a) row delta table USE vs OFF  (b) build-twice byte-identity with PGO
+  # (c) binary size delta. A PR branch cannot run a real release, so this
+  # job is the CI-visible evidence the release wiring rides.
+  # ─────────────────────────────────────────────────────────────────────────
+  proof:
+    name: PGO proof — GENERATE → corpus → USE (ubuntu)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libutf8proc-dev libpugixml-dev libxml2-dev
+
+      # -frandom-seed pins GCC's path-derived local-symbol suffix (the
+      # C3 reproducibility smoke's lesson) so the two PGO trees are
+      # byte-comparable. LTO stays at its Release default (ON): the USE
+      # build must carry exactly the release shape plus PGO.
+      - name: Configure + build (OFF baseline)
+        env:
+          CONFIG: >-
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
+            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DCMAKE_C_FLAGS=-frandom-seed=leptris
+        run: |
+          cmake -B build-off -S . ${CONFIG}
+          cmake --build build-off -j 4
+
+      - name: Row battery — OFF (3 runs)
+        run: |
+          for k in 1 2 3; do
+            bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-off" \
+              rows gcc "results-off/run$k"
+          done
+
+      - name: GENERATE build + train (tree a)
+        env:
+          CONFIG: >-
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
+            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DCMAKE_C_FLAGS=-frandom-seed=leptris
+        run: |
+          cmake -B build-a -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=GENERATE
+          cmake --build build-a -j 4
+          bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-a" \
+            train gcc /tmp/train-a-log
+
+      # GCC: .gcda written at process exit, no merge. The USE build
+      # reconfigures the SAME dir so the object paths in the profile
+      # line up (the s390x ruby leg's shape).
+      - name: USE build + smoke (tree a)
+        env:
+          CONFIG: >-
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
+            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DCMAKE_C_FLAGS=-frandom-seed=leptris
+        run: |
+          cmake -B build-a -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=USE
+          cmake --build build-a -j 4
+          ./build-a/cli/leptris parse benchmarks/data/small.xml > /dev/null
+          echo "USE build parses: ok"
+
+      - name: Row battery — USE (3 runs)
+        run: |
+          for k in 1 2 3; do
+            bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-a" \
+              rows gcc "results-use/run$k"
+          done
+
+      - name: Gate — row delta USE vs OFF
+        env:
+          TOL: ${{ inputs.gate_tolerance_pct || '5' }}
+        run: |
+          python3 .github/scripts/pgo_gate.py results-off results-use \
+            --tolerance "${TOL}" | tee gate.md
+          cat gate.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Determinism (the PGO-side C3 gate): a second full
+      # GENERATE→train→USE cycle in a fresh tree must produce
+      # byte-identical library artifacts — fixed training input, fixed
+      # counters, fixed codegen.
+      - name: Determinism — second PGO tree, compare bytes (tree b)
+        env:
+          CONFIG: >-
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
+            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DCMAKE_C_FLAGS=-frandom-seed=leptris
+        run: |
+          set -euo pipefail
+          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=GENERATE
+          cmake --build build-b -j 4
+          bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-b" \
+            train gcc /tmp/train-b-log
+          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=USE
+          cmake --build build-b -j 4
+          cmp_artifacts() {
+            local A="$1" B="$2" what="$3"
+            sha256sum "$A" "$B"
+            if ! cmp "$A" "$B"; then
+              echo "::error::PGO USE builds differ — $what not byte-identical"
+              cmp -l "$A" "$B" | head -10 || true
+              exit 1
+            fi
+            echo "$what: byte-identical"
+          }
+          A_LIB=$(find build-a -name 'libleptris.a' -type f | head -1)
+          B_LIB=$(find build-b -name 'libleptris.a' -type f | head -1)
+          [ -n "$A_LIB" ] && [ -n "$B_LIB" ]
+          cmp_artifacts "$A_LIB" "$B_LIB" "static lib"
+          A_SO=$(find build-a -name 'libleptris.so.*' -type f | head -1)
+          B_SO=$(find build-b -name 'libleptris.so.*' -type f | head -1)
+          [ -n "$A_SO" ] && [ -n "$B_SO" ]
+          cmp_artifacts "$A_SO" "$B_SO" "shared lib"
+          {
+            echo "### Determinism (PGO build-twice, tree a vs tree b)"
+            echo "- static lib: byte-identical"
+            echo "- shared lib: byte-identical"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Binary size delta — OFF vs USE
+        run: |
+          set -euo pipefail
+          row() {
+            local label="$1" off="$2" use="$3" delta
+            delta=$(awk -v o="$off" -v u="$use" 'BEGIN{printf "%+.1f%%", (u-o)/o*100}')
+            echo "| $label | $off | $use | $delta |"
+          }
+          {
+            echo "### Binary size — OFF vs USE"
+            echo ""
+            echo "| artifact | OFF bytes | USE bytes | delta |"
+            echo "|---|---|---|---|"
+            row "static lib" \
+              "$(wc -c < "$(find build-off -name 'libleptris.a' -type f | head -1)")" \
+              "$(wc -c < "$(find build-a -name 'libleptris.a' -type f | head -1)")"
+            row "shared lib" \
+              "$(wc -c < "$(find build-off -name 'libleptris.so.*' -type f | head -1)")" \
+              "$(wc -c < "$(find build-a -name 'libleptris.so.*' -type f | head -1)")"
+            row "cli binary" \
+              "$(wc -c < build-off/cli/leptris)" \
+              "$(wc -c < build-a/cli/leptris)"
+          } | tee size.md
+          cat size.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgo-proof-results
+          path: |
+            gate.md
+            size.md
+            results-off/
+            results-use/
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # The release legs: GENERATE → train on the promise-set battery → USE,
+  # per platform, uploading the USE artifacts. workflow_call from
+  # release.yml rides this on the release tag; dispatch can preview it.
+  # ─────────────────────────────────────────────────────────────────────────
+  legs:
+    name: USE leg — ${{ matrix.platform }}
+    if: github.event_name == 'workflow_call' || inputs.run_legs == true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    platform: linux-amd64,   toolchain: gcc   }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64,   toolchain: gcc   }
+          - { os: macos-latest,     platform: macos-arm64,   toolchain: clang }
+          - { os: windows-latest,   platform: windows-amd64, toolchain: msvc  }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libutf8proc-dev libpugixml-dev libxml2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja utf8proc pugixml libxml2
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      # ── GENERATE ────────────────────────────────────────────────────────
+      - name: Configure GENERATE (non-Windows)
+        if: runner.os != 'Windows'
+        env:
+          SEED: ${{ matrix.toolchain == 'gcc' && '-DCMAKE_C_FLAGS=-frandom-seed=leptris' || '' }}
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DLEPTRIS_BUILD_BENCHMARKS=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            -DLEPTRIS_BUILD_STATIC=ON \
+            -DLEPTRIS_BUILD_SHARED=ON \
+            ${SEED} \
+            -DLEPTRIS_ENABLE_PGO=GENERATE
+
+      - name: Configure GENERATE (Windows / MSVC)
+        if: runner.os == 'Windows'
+        run: |
+          # Same shape as build.yml's 1577 flags, plus benchmarks for the
+          # training battery (leptris-only subset — no pugixml/libxml2 here).
+          cmake -B build -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_TESTING=OFF `
+            -DLEPTRIS_BUILD_CLI=ON `
+            -DLEPTRIS_BUILD_BENCHMARKS=ON `
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF `
+            -DLEPTRIS_BUILD_STATIC=ON `
+            -DLEPTRIS_BUILD_SHARED=ON `
+            -DLEPTRIS_ENABLE_PGO=GENERATE `
+            -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
+
+      - name: Build GENERATE
+        run: cmake --build build --config Release -j 4
+
+      # ── TRAIN ───────────────────────────────────────────────────────────
+      - name: Train on the promise-set battery (non-Windows)
+        if: runner.os != 'Windows'
+        run: |
+          bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build" \
+            train ${{ matrix.toolchain }} /tmp/train-log
+          # clang: one profraw per PID → merge into the profdata CMake's
+          # USE phase reads (LEPTRIS_PGO_DIR/default.profdata).
+          if [ "${{ matrix.toolchain }}" = "clang" ]; then
+            ls build/pgo-data/*.profraw > /dev/null
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              xcrun llvm-profdata merge \
+                -output=build/pgo-data/default.profdata \
+                build/pgo-data/*.profraw
+            else
+              llvm-profdata merge \
+                -output=build/pgo-data/default.profdata \
+                build/pgo-data/*.profraw
+            fi
+          fi
+
+      # Windows has no pugixml/libxml2 (the promise battery builds its
+      # leptris-only subset) — top up with the CLI over the corpus, the
+      # s390x ruby leg's trainer shape, then merge every pgd.
+      - name: Train (Windows / MSVC)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path -replace '\\','/'
+          bash .github/scripts/pgo_battery.sh "$root" "$root/build" `
+            train msvc "$root/train-log" --allow-missing
+          $cli = (Get-ChildItem -Recurse -Filter leptris.exe |
+                  Select-Object -First 1).FullName
+          if (-not $cli) { throw "trainer CLI not found" }
+          foreach ($xml in Get-ChildItem benchmarks/data/*.xml) {
+            & $cli parse $xml > $null 2>&1
+          }
+          # pgomgr folds each exe's .pgc into its .pgd.
+          foreach ($pgd in Get-ChildItem -Recurse -Filter *.pgd) {
+            pgomgr /merge $pgd.FullName
+          }
+          # Consolidate one profile next to the dll: plain /USEPROFILE
+          # looks for <output>.pgd beside the output. The seed pgd's own
+          # data is already inside the copy — the loop below must not
+          # fold it in a second time.
+          $dllDir = Split-Path (Get-ChildItem -Recurse -Filter leptris.dll |
+                               Select-Object -First 1).FullName
+          $target = Join-Path $dllDir 'libleptris.pgd'
+          $first = (Get-ChildItem -Recurse -Filter *.pgd |
+                    Select-Object -First 1).FullName
+          Copy-Item $first $target -Force
+          foreach ($pgd in Get-ChildItem -Recurse -Filter *.pgd) {
+            if ($pgd.FullName -notin @($first, $target)) {
+              pgomgr /merge $pgd.FullName $target
+            }
+          }
+
+      # ── USE ─────────────────────────────────────────────────────────────
+      - name: Configure USE (non-Windows)
+        if: runner.os != 'Windows'
+        env:
+          SEED: ${{ matrix.toolchain == 'gcc' && '-DCMAKE_C_FLAGS=-frandom-seed=leptris' || '' }}
+        run: |
+          cmake -B build -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DLEPTRIS_BUILD_CLI=ON \
+            -DLEPTRIS_BUILD_BENCHMARKS=ON \
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            -DLEPTRIS_BUILD_STATIC=ON \
+            -DLEPTRIS_BUILD_SHARED=ON \
+            ${SEED} \
+            -DLEPTRIS_ENABLE_PGO=USE
+
+      - name: Configure USE (Windows / MSVC)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -S . `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_TESTING=OFF `
+            -DLEPTRIS_BUILD_CLI=ON `
+            -DLEPTRIS_BUILD_BENCHMARKS=ON `
+            -DLEPTRIS_ENABLE_UTF8PROC=OFF `
+            -DLEPTRIS_ENABLE_ICONV=OFF `
+            -DLEPTRIS_BUILD_STATIC=ON `
+            -DLEPTRIS_BUILD_SHARED=ON `
+            -DLEPTRIS_ENABLE_PGO=USE `
+            -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
+            -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
+
+      - name: Build USE
+        run: cmake --build build --config Release -j 4
+
+      - name: USE smoke
+        shell: bash
+        run: |
+          # The PGO'd library must still parse — the profile is data,
+          # but only a working binary proves the phase dance. Windows
+          # (VS generator) puts the exe under build/cli/Release/.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            exe=$(find build/cli -name 'leptris.exe' -type f | head -1)
+          else
+            exe=build/cli/leptris
+          fi
+          "$exe" parse benchmarks/data/small.xml > /dev/null
+          echo "USE build parses: ok"
+
+      # ── PACKAGE ─────────────────────────────────────────────────────────
+      - name: Package USE artifacts (non-Windows)
+        if: runner.os != 'Windows'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Real files only (the manifest job's rule: symlinks are
+          # deterministic pointers, the versioned file carries content).
+          libs=$(find build \( -name 'libleptris.a' -o -name 'libleptris.so.*' \) \
+                 -type f | sort)
+          echo "$libs"
+          tar czf "dist/leptris-pgo-${PLATFORM}.tar.gz" $libs build/cli/leptris
+          { sha256sum $libs; sha256sum build/cli/leptris; } \
+            > "dist/SHA256SUMS-${PLATFORM}"
+          wc -c $libs build/cli/leptris > "dist/SIZES-${PLATFORM}.txt"
+          cat "dist/SIZES-${PLATFORM}.txt"
+
+      - name: Package USE artifacts (Windows / MSVC)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          # One file per basename: the static lib and the dll import lib
+          # share `leptris.lib` under the VS generator (pre-existing
+          # multi-config quirk — see the manifest legs' artifact regex).
+          $files = Get-ChildItem -Recurse -File -Path build |
+                   Where-Object { $_.Name -in 'leptris.dll','leptris.lib','leptris.exe' } |
+                   Sort-Object FullName -Unique |
+                   Group-Object Name | ForEach-Object { $_.Group[0] }
+          $files | ForEach-Object { $_.FullName }
+          Push-Location build
+          $rel = $files | ForEach-Object { (Resolve-Path -Relative $_.FullName) }
+          tar czf "..\dist\leptris-pgo-$env:PLATFORM.tar.gz" @rel
+          Pop-Location
+          ($files | Where-Object { $_.Extension -in '.dll','.lib' } | ForEach-Object {
+             $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+             "$h  $($_.Name)"
+           }) | Set-Content "dist/SHA256SUMS-$env:PLATFORM"
+          ($files | ForEach-Object { "{0}  {1}" -f $_.Length, $_.FullName }) |
+            Set-Content "dist/SIZES-$env:PLATFORM.txt"
+          Get-Content "dist/SIZES-$env:PLATFORM.txt"
+
+      - name: Upload USE artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgo-use-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Attach the USE artifacts to the GitHub Release (workflow_call only).
+  # The bindings keep compiling their own binaries; these tarballs are the
+  # engine-side PGO'd reference builds the release page now carries.
+  # ─────────────────────────────────────────────────────────────────────────
+  attach:
+    name: Attach USE artifacts to release
+    if: github.event_name == 'workflow_call' && inputs.attach
+    needs: legs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download leg artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pgo-use-*
+          path: dist
+
+      - name: Summary
+        run: |
+          {
+            echo "### PGO USE artifacts (#2167)"
+            echo ""
+            echo '```'
+            find dist -type f | sort
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach to release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release upload "$TAG" \
+            dist/*/leptris-pgo-*.tar.gz dist/*/SHA256SUMS-* --clobber
+          echo "::notice::PGO USE artifacts attached to $TAG"

@@ -277,3 +277,19 @@ jobs:
     uses: ./.github/workflows/build-manifests.yml
     with:
       tag: ${{ needs.tag-and-release.outputs.tag }}
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PGO'd binaries (#2167): per platform, GENERATE build → train on the
+  # published-row battery (the promise set IS the training set) → USE
+  # build → attach the USE artifacts to this release. The dispatch-only
+  # proof job in pgo.yml carries the CI evidence (row deltas USE vs OFF,
+  # PGO build-twice byte-identity, binary size delta). PGO stays OFF for
+  # the amalgamated/ASAN/TSan lanes and for the manifest hashes above —
+  # those artifacts keep building unprofiled.
+  # ─────────────────────────────────────────────────────────────────────────
+  pgo:
+    name: PGO builds (#2167)
+    needs: tag-and-release
+    uses: ./.github/workflows/pgo.yml
+    with:
+      tag: ${{ needs.tag-and-release.outputs.tag }}
