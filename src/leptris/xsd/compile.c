@@ -5235,7 +5235,7 @@ static void xsd_oc_resolve_not_qname(XsdCm* w, LeptrisElement any_el) {
  * ASCII core grammar; non-ASCII bytes pass as name characters (the
  * parser's posture elsewhere), ASCII punctuation beyond the NCName
  * set fails. */
-static int xsd_is_ncname(const char* s) {
+static int xsd_is_ncname_compile(const char* s) {
     if (!s || !*s) return 0;
     for (const char* p = s; *p; p++) {
         char c = *p;
@@ -5913,7 +5913,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
             const char* oid =
                 leptris_element_attribute(oc_elem, "id");
             if (oid && *oid) {
-                if (!xsd_is_ncname(oid)) {
+                if (!xsd_is_ncname_compile(oid)) {
                     xsd_set_error(s,
                                   "openContent/@id is not a valid "
                                   "NCName");
