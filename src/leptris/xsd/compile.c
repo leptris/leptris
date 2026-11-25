@@ -2906,7 +2906,8 @@ static int xsd_check_override_docs(struct leptris_xsd_schema* s,
          * is RAW (no dedup): two same-named children in ONE body
          * are already the violation (over021). */
         for (LeptrisNodeRef c =
-                 leptris_node_first_child(leptris_element_as_node(n));
+                 leptris_node_first_child(
+                     leptris_element_as_node((LeptrisElement)n));
              c; c = leptris_node_next_sibling(c)) {
             if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
                 continue;
