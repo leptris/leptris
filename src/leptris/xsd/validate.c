@@ -81,8 +81,11 @@ struct xsd_validator {
      * CTA alternative in force for the element being assessed
      * (§3.12.4) — those names pass the strict attribute-declaration
      * check undeclared. Borrowed pointers into the schema's
-     * alternatives; saved/restored around each dispatch. */
-    const char** cta_exempt;
+     * alternatives; saved/restored around each dispatch. The row
+     * type is char** (the alternative owns the names) — the const
+     * view triggers -Wincompatible-pointer-types as an error on
+     * GCC. */
+    char** cta_exempt;
     int cta_exempt_n;
 };
 
@@ -1190,7 +1193,7 @@ static void validate_children(struct xsd_validator* v,
                 } else {
                     /* moxml#579: the selected test's attribute
                      * references are exempt for this element. */
-                    const char** prev_exempt = v->cta_exempt;
+                    char** prev_exempt = v->cta_exempt;
                     int prev_n = v->cta_exempt_n;
                     v->cta_exempt =
                         cta_alt ? cta_alt->test_attrs : NULL;
@@ -2007,7 +2010,7 @@ static void validate_element_decl(struct xsd_validator* v,
      * Set only for this element's assessment — the xsi:type path
      * above replaced the whole chain, so no exemption there. */
     {
-        const char** prev_exempt = v->cta_exempt;
+        char** prev_exempt = v->cta_exempt;
         int prev_n = v->cta_exempt_n;
         v->cta_exempt =
             cta_alt ? cta_alt->test_attrs : NULL;
