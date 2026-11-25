@@ -37,6 +37,11 @@ case "$mode" in train|rows) ;; *) echo "pgo_battery: mode must be train|rows" >&
 
 bench_dir="$build/benchmarks"
 mkdir -p "$bench_dir/results" "$out"
+# Canonicalize $out BEFORE the run loop: the row-mode redirect evaluates
+# $out INSIDE the subshell that already cd'd into build/benchmarks, so a
+# relative path would resolve against the wrong tree (the first proof
+# run lost every row to exactly that).
+out="$(cd "$out" && pwd)"
 if [ ! -d "$bench_dir/fixtures" ]; then
   cp -r "$repo/benchmarks/fixtures" "$bench_dir/fixtures"
 fi
