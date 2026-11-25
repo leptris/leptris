@@ -29,15 +29,6 @@
  * macOS allocator (measured 2026-11-25); pool carving is flat vs
  * main. Rehash abandons the old array to the bump (geometric waste
  * <= 2x the final array; only cap-scale documents pay it). */
-static uint32_t dom_intern_fnv1a(const char* s, size_t len) {
-    uint32_t h = 2166136261u;
-    for (size_t i = 0; i < len; i++) {
-        h ^= (unsigned char)s[i];
-        h *= 16777619u;
-    }
-    return h;
-}
-
 /* Slot index from the 32-bit hash. Raw FNV truncation maps digit-
  * differing names onto arithmetic progressions (the attr_index
  * round-20 law — exactly the distinct-heavy bench shape), so a
@@ -47,6 +38,34 @@ static size_t dom_intern_slot(uint32_t h) {
     h *= 0x7FEB352Du;
     h ^= h >> 15;
     return h;
+}
+
+/* ONE pass over the bytes derives both hashes: the table's 32-bit
+ * probe key and the element's canonical 16-bit name_hash (the engine
+ * variant — consumers pre-filter on it; it must equal
+ * leptris_name_hash_compute byte-for-byte). The distinct-heavy miss
+ * path pays a single scan, not two. */
+static void dom_intern_hashes(const char* s, size_t len,
+                              uint32_t* h32_out, uint16_t* h16_out) {
+    uint32_t h32 = 2166136261u;
+    uint16_t h16 = 0x811C;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        h32 ^= c;
+        h32 *= 16777619u;
+        h16 ^= (uint16_t)c;
+        h16 = (uint16_t)(h16 * 0x0193);
+    }
+    *h32_out = h32;
+    *h16_out = h16;
+}
+
+/* Byte compare without the libc call (the S9 law — a memcmp dispatch
+ * costs more than the scan for element-sized names); long names fall
+ * back to memcmp. */
+static int dom_intern_bytes_eq(const char* a, const char* b, size_t len) {
+    if (len <= 16) return leptris_memeq_short(a, b, len);
+    return memcmp(a, b, len) == 0;
 }
 
 /* Pool-carved replacement for `ix->slots` at `ncap` entries (zeroed),
@@ -117,18 +136,21 @@ const char* leptris_name_intern_intern(struct leptris_document* doc,
         name_len > 254)
         return NULL;
 
-    /* 1. Last-name memo: ONE memcmp over bytes + NUL decides both
-     * length and content — the sequential same-name create (the
-     * mutcycle shape) never hashes and never probes. */
+    /* 1. Last-name memo (set_name reaches here without the caller's
+     * inline check): bytes + NUL in one inline scan — length and
+     * content with no libc call. */
     if (ix->memo_name && ix->memo_len == (uint16_t)name_len &&
-        memcmp(name, ix->memo_name, name_len + 1) == 0) {
+        leptris_memeq_short(name, ix->memo_name, name_len) &&
+        name[name_len] == '\0') {
         *hash16_out = ix->memo_hash;
         return ix->memo_name;
     }
 
-    /* 2. Table probe (open addressing, linear step). */
-    uint32_t h32 = dom_intern_fnv1a(name, name_len);
-    uint16_t h16 = leptris_name_hash_compute(name);
+    /* 2. Table probe (open addressing, linear step). ONE pass
+     * derives both hashes (dom_intern_hashes). */
+    uint32_t h32;
+    uint16_t h16;
+    dom_intern_hashes(name, name_len, &h32, &h16);
     size_t mask = ix->cap - 1;
     size_t i = dom_intern_slot(h32) & mask;
     size_t probe;
@@ -136,7 +158,7 @@ const char* leptris_name_intern_intern(struct leptris_document* doc,
         struct leptris_intern_entry* e = &ix->slots[i];
         if (!e->name) break; /* empty: insert here */
         if (e->probe_hash == h32 && e->len == (uint16_t)name_len &&
-            memcmp(e->name, name, name_len) == 0) {
+            dom_intern_bytes_eq(e->name, name, name_len)) {
             /* Hit: refresh the memo and share the slot. */
             ix->memo_name = e->name;
             ix->memo_hash = e->hash16;

@@ -206,33 +206,54 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
              * default create path for colon-free names. The table
              * maps name bytes -> one shared mut-block slot (doc-
              * backpointer layout preserved) + the cached 16-bit
-             * hash, so a repeat create pays one memcmp (the memo)
-             * and skips the per-element name copy + hash compute.
-             * The colon gate keeps #846's carve+split path disjoint:
-             * the split mutates name bytes IN PLACE, so a shared
-             * slot must never be a split candidate. The probe is
-             * split_qname's own law: names < 3 bytes cannot carry a
-             * splittable QName; <= 16 scan inline; beyond, memchr. */
+             * hash, so a repeat create skips the per-element name
+             * copy + hash compute entirely. The colon gate keeps
+             * #846's carve+split path disjoint: the split mutates
+             * name bytes IN PLACE, so a shared slot must never be a
+             * split candidate. The probe is split_qname's own law:
+             * names < 3 bytes cannot carry a splittable QName;
+             * <= 16 scan inline; beyond, memchr.
+             *
+             * Hot-path law (CI 45592059216): the repeated-name shape
+             * — the mutcycle row — pays NO call here. doc->name_intern
+             * is a plain load (get() only on the very first create of
+             * the document), overflow exits FIRST (post-cap documents
+             * cost two loads over the carve path), and the last-name
+             * memo compares INLINE via leptris_memeq_short — a libc
+             * memcmp call costs more than the tiny scan it replaces
+             * (the S9 law). Only the memo MISS crosses into
+             * name_intern.c (table probe / insert). */
             const char* shared = NULL;
             uint16_t shared_hash = 0;
-            struct leptris_name_intern* ix =
-                (name_len >= 1 && name_len <= 254)
-                    ? leptris_name_intern_get(doc)
-                    : NULL;
-            if (ix && !ix->overflow) {
-                int colon_free = (name_len < 3);
-                if (!colon_free && name_len <= 16) {
-                    colon_free = 1;
-                    for (const char* c = name; *c; c++) {
-                        if (*c == ':') { colon_free = 0; break; }
+            if (name_len >= 1 && name_len <= 254) {
+                struct leptris_name_intern* ix = doc->name_intern;
+                if (!ix) ix = leptris_name_intern_get(doc);
+                if (ix && !ix->overflow) {
+                    int colon_free = (name_len < 3);
+                    if (!colon_free && name_len <= 16) {
+                        colon_free = 1;
+                        for (const char* c = name; *c; c++) {
+                            if (*c == ':') { colon_free = 0; break; }
+                        }
+                    } else if (!colon_free) {
+                        colon_free =
+                            memchr(name, ':', name_len) == NULL;
                     }
-                } else if (!colon_free) {
-                    colon_free =
-                        memchr(name, ':', name_len) == NULL;
-                }
-                if (colon_free) {
-                    shared = leptris_name_intern_intern(
-                        doc, ix, name, name_len, &shared_hash);
+                    if (colon_free) {
+                        if (ix->memo_len == (uint16_t)name_len &&
+                            ix->memo_name &&
+                            leptris_memeq_short(name, ix->memo_name,
+                                                name_len) &&
+                            name[name_len] == '\0') {
+                            /* Sequential same-name create: the memo
+                             * answers inline — no hash, no probe. */
+                            shared = ix->memo_name;
+                            shared_hash = ix->memo_hash;
+                        } else {
+                            shared = leptris_name_intern_intern(
+                                doc, ix, name, name_len, &shared_hash);
+                        }
+                    }
                 }
             }
             if (shared) {
