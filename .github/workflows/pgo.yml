@@ -169,11 +169,16 @@ jobs:
             --tolerance "${TOL}" | tee gate.md
           cat gate.md >> "$GITHUB_STEP_SUMMARY"
 
-      # Determinism (the PGO-side C3 gate): a second full
-      # GENERATE→train→USE cycle in a fresh tree must produce
-      # byte-identical library artifacts — fixed training input, fixed
-      # counters, fixed codegen.
-      - name: Determinism — second PGO tree, compare bytes (tree b)
+      # Determinism (the PGO-side C3 gate): two full GENERATE→train→USE
+      # cycles must produce byte-identical library artifacts. The profile
+      # dir path is embedded in every object's LTO command-line record
+      # (-fprofile-use=<dir> — the first proof run failed exactly this:
+      # per-tree default dirs leaked 'a'/'b' into the .a), so both trees
+      # MUST share one absolute profile dir, wiped between cycles so tree
+      # b re-trains from scratch rather than merging into tree a's
+      # counters. Output paths do NOT leak (verified: found profile +
+      # identical flags → byte-identical objects across tree names).
+      - name: Determinism — two PGO trees, shared profile path
         env:
           CONFIG: >-
             -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
@@ -183,12 +188,21 @@ jobs:
             -DCMAKE_C_FLAGS=-frandom-seed=leptris
         run: |
           set -euo pipefail
-          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=GENERATE
-          cmake --build build-b -j 4
-          bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-b" \
-            train gcc /tmp/train-b-log
-          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=USE
-          cmake --build build-b -j 4
+          PGO_DET="$PWD/pgo-det"
+          cycle() {
+            local tree="$1"
+            rm -rf "${PGO_DET}" "build-${tree}"
+            cmake -B "build-${tree}" -S . ${CONFIG} \
+              -DLEPTRIS_PGO_DIR="${PGO_DET}" -DLEPTRIS_ENABLE_PGO=GENERATE
+            cmake --build "build-${tree}" -j 4
+            bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-${tree}" \
+              train gcc /tmp/train-det
+            cmake -B "build-${tree}" -S . ${CONFIG} \
+              -DLEPTRIS_PGO_DIR="${PGO_DET}" -DLEPTRIS_ENABLE_PGO=USE
+            cmake --build "build-${tree}" -j 4
+          }
+          cycle det-a
+          cycle det-b
           cmp_artifacts() {
             local A="$1" B="$2" what="$3"
             sha256sum "$A" "$B"
@@ -199,16 +213,16 @@ jobs:
             fi
             echo "$what: byte-identical"
           }
-          A_LIB=$(find build-a -name 'libleptris.a' -type f | head -1)
-          B_LIB=$(find build-b -name 'libleptris.a' -type f | head -1)
+          A_LIB=$(find build-det-a -name 'libleptris.a' -type f | head -1)
+          B_LIB=$(find build-det-b -name 'libleptris.a' -type f | head -1)
           [ -n "$A_LIB" ] && [ -n "$B_LIB" ]
           cmp_artifacts "$A_LIB" "$B_LIB" "static lib"
-          A_SO=$(find build-a -name 'libleptris.so.*' -type f | head -1)
-          B_SO=$(find build-b -name 'libleptris.so.*' -type f | head -1)
+          A_SO=$(find build-det-a -name 'libleptris.so.*' -type f | head -1)
+          B_SO=$(find build-det-b -name 'libleptris.so.*' -type f | head -1)
           [ -n "$A_SO" ] && [ -n "$B_SO" ]
           cmp_artifacts "$A_SO" "$B_SO" "shared lib"
           {
-            echo "### Determinism (PGO build-twice, tree a vs tree b)"
+            echo "### Determinism (PGO build-twice, shared profile path)"
             echo "- static lib: byte-identical"
             echo "- shared lib: byte-identical"
           } >> "$GITHUB_STEP_SUMMARY"
