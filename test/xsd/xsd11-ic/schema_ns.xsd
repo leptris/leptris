@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2156: prefixed selector and attribute fields resolved against the
+     SCHEMA document's namespace bindings (§3.13.2 {namespace
+     bindings}) — the instance binds the same namespace as the
+     DEFAULT, never with the s: prefix. key + keyref share one
+     declaration (dependency order). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:s="http://ex.io/ic"
+           targetNamespace="http://ex.io/ic"
+           elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="sec" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:attribute name="nr"/>
+            <xs:attribute name="id"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="ref" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:attribute name="nr"/>
+            <xs:attribute name="id"/>
+            <xs:attribute name="to"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:key name="k1">
+      <xs:selector xpath="s:sec"/>
+      <xs:field xpath="@nr"/>
+    </xs:key>
+    <xs:keyref name="r1" refer="k1">
+      <xs:selector xpath="s:ref"/>
+      <xs:field xpath="@to"/>
+    </xs:keyref>
+  </xs:element>
+</xs:schema>

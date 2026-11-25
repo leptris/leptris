@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- #2156 / §3.11.6.3: the union bar is selector-only — a field path
+     may not carry alternatives. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:s="http://ex.io/ic"
+           targetNamespace="http://ex.io/ic"
+           elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="sec" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:attribute name="nr"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:unique name="u1">
+      <xs:selector xpath="s:sec"/>
+      <xs:field xpath="@nr|@id"/>
+    </xs:unique>
+  </xs:element>
+</xs:schema>

@@ -68,6 +68,22 @@ schema rows (facets the applicability sweep now rejects at
 compile: si12–si20) and 1 saxon Simple row flipped as a side
 effect; the tables below carry the #2155 counts).
 
+Re-measured 2026-11-25 (#2156, branch `xsd11-ic-extensions` — the
+identity-constraint 1.1 extensions: selector/field XPaths parsed
+into the §3.11.6 subset at COMPILE time with SCHEMA-side namespace
+resolution + xpathDefaultNamespace (§3.13.2), out-of-subset
+expressions and unresolved schema prefixes failing the schema,
+@ref reuse with the §3.11.3 category match, capture reaching local
+element particles, §3.10.4.1 skipped subtrees omitted from target
+node sets, per-scoping-element uniqueness (§3.11.4), vacuous node
+tables (§3.11.5), strict keyref target tables; re-measured on the
+#2155 base): TBD/2206 pass. The identity-constraint class CLOSES
+and the wild101/wild103 key rows flip with it. Spec tests:
+test/xsd/test_xsd11_ic.cpp. The 1.0 lane rides the same engine and
+gains 3 rows (1020 → 1022, see xsd-dispositions/README.md).
+
+By family (#2156): TBD.
+
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
 record for every row left in it. The floor (now 1676) is pinned and
@@ -124,7 +140,6 @@ the authoritative totals are the gate's printed verdict split
 | 15 | ibm S3_3_4 ii: instance-invalid ID/IDREF rows (fixed on ID-typed elements, ID value-space violations) | OPEN — the one-ID-per-element gate and the ID value-space checks; no assert semantics involved (the #2149-era table miscounted these into the 85-row class) |
 | 11 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6_2), castable-as-double accepting '10f4' (assert-simple003/004) | OPEN — each names an ENGINE gap (focus semantics, doc loading, arithmetic error semantics, carrier decomposition, castable lexical validators), not a facet-capture gap |
 | 66 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side |
-| 45 | saxon Id (38) + ibm S3_11_2 (7): identity-constraint 1.1 extensions (fields on attributes/paths, xs:unique scoping, keyref targets) not evaluated | OPEN — the 1.0 lane's capture exists but 1.1 field/selector syntax unsupported → constraint silently skipped |
 | 5 | saxon CTA cta0001/cta0044 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044's residue is the complexContent content-model gap — the selected aType_f requires an `f` child the instance lacks) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |
 | 12 | saxon Open (11) + ibm s3_16_2ii06 (1): openContent `mode="strict"` violations accepted — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise | OPEN |
@@ -224,3 +239,19 @@ dateTimeStamp — now REJECT the schema at compile time.)
   scale rides the spelling and its enumerated NaN matches nothing.
   Spec tests: test/xsd/test_xsd11_datatypes.cpp (fixtures:
   test/xsd/xsd11-datatypes/).
+- identity constraints 1.1 (#2156): the saxon Id + ibm S3_11_2
+  class is closed end to end — selector/field XPaths are parsed at
+  compile time into the §3.11.6 selector/field subset (child
+  chains, leading `.//`, `.`-steps, a final `@`-step, selector
+  unions; explicit axes, predicates, absolute paths, mid-path
+  `//`, non-final `@`, field unions, and unbound schema prefixes
+  are compile-time schema errors) with every name test resolved
+  against the SCHEMA document's in-scope bindings + the four
+  xpathDefaultNamespace forms (§3.13.2); `@ref` reuse copies the
+  target's shape with the §3.11.3 category match (id041/id042);
+  capture reaches local element particles; §3.10.4.1 skipped
+  subtrees leave the target node sets; uniqueness is judged per
+  scoping element instance; every key/unique contributes its
+  (possibly EMPTY) §3.11.5 node table so keyrefs against it fail;
+  keyref target tables must exist. Spec tests:
+  test/xsd/test_xsd11_ic.cpp.

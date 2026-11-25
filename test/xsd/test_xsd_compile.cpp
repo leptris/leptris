@@ -3411,8 +3411,17 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * declaration whose (namespaceURI, localName) matches exactly,
      * and form-qualified attribute declarations require the
      * namespace): 1020/1056 — nine root-mismatch / ns-grid rows
-     * flipped (measured 2026-11-24). */
-    EXPECT_GE(pass, 1020) << "conformance floor regressed";
+     * flipped (measured 2026-11-24). Raised by #2156 (the 1.1
+     * identity-constraint work rides the shared engine:
+     * schema-side selector/field namespace resolution,
+     * per-scoping-element uniqueness, vacuous key tables, strict
+     * keyref target tables): 1022/1056 — bug322411_0 (per-scope
+     * uniqueness makes the engine agree with the oracle),
+     * idc-keyref-err1 and changelog093 (the prefixed selectors now
+     * match); bug322411_1 flips red on a stale pinned expectation
+     * its own cited oracle no longer holds (see
+     * xsd-dispositions/README.md). Measured 2026-11-24. */
+    EXPECT_GE(pass, 1022) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 181);
     EXPECT_GE(pass_invalid, 652);
     EXPECT_GE(pass_schema_error, 187);

@@ -147,7 +147,18 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * explicitTimezone enforcement, and the pre-existing
      * fractional-seconds-with-timezone hole in the time tail):
      * 1676/2206 (measured 2026-11-25) — every red classified in
-     * test/xsd/xsd11-dispositions/README.md. */
+     * test/xsd/xsd11-dispositions/README.md. Raised by #2156
+     * (the identity-constraint 1.1 extensions: selector/field
+     * XPaths parsed into the §3.11.6 subset at compile time with
+     * SCHEMA-side namespace resolution + xpathDefaultNamespace,
+     * out-of-subset expressions and unresolved prefixes failing the
+     * schema, @ref reuse with the §3.11.3 category match, capture
+     * reaching local element particles, §3.10.4.1 skipped subtrees
+     * omitted from target node sets, per-scoping-element
+     * uniqueness, vacuous node tables, strict keyref target
+     * tables): TBD/2206 — 18 invalid Id/S3_11_2 rows + 2
+     * schema-error rows + 6 wildcard-family key rows flipped, zero
+     * regressions (measured 2026-11-25). Monotonically rising. */
     EXPECT_GE(pass, 1676) << "conformance floor regressed";
     EXPECT_GE(pass_valid, 1140);
     EXPECT_GE(pass_invalid, 435);
