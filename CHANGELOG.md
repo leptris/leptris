@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.447] - 2026-11-26
+
+### Performance
+
+- attr-loop interior diet for the arm attrparse gap (#2132) (parse)
+
+
+
 ## [1.9.446] - 2026-11-26
 
 ### Performance
