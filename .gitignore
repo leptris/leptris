@@ -191,3 +191,11 @@ benchmarks/fixtures/pugixml_repo/
 
 # Benchmark runs write here; artifacts upload from it (never committed)
 benchmarks/results/
+
+# ============================================================================
+# Local scratch and generated output (parked in ~/src/leptris/attic/ 2026-11-26)
+# ============================================================================
+__pycache__/
+builddocs/
+docs/api-generated/
+wt/
