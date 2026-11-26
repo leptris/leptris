@@ -241,6 +241,15 @@ typedef struct xsd_cm {
      * runs the base chain's asserts. Stolen pointers (freed here). */
     char* assert_base;
     char* assert_base_ns;
+    /* #2182 §3.4.2.5: the complexType's defaultAttributesApply
+     * tri-state (-1 absent = apply, 0 false, 1 true) and the unit
+     * whose xs:schema/@defaultAttributes list applies to it — the
+     * declaring document's own list only (a sub-document's types
+     * ride their own document's list). -1 unit = none (override
+     * bodies capture suppressed: §4.2.5 — the body rides the
+     * OVERRIDDEN document's defaults). */
+    int defattr_apply;
+    int defattr_unit;
 } XsdCm;
 
 
@@ -334,6 +343,14 @@ typedef struct xsd_attr_decl {
      * bit 1 = the ref carried its own use= (it overrides the
      * declaration's). */
     int pending_ref;
+    /* #2182 §3.4.2.5: the row arrived as a copy of the DERIVATION
+     * BASE's uses (the extension fold, at capture or in the
+     * deferred resolver) — the default-attributes application
+     * treats a same-(ns,name) collision with such a row as the
+     * cos-st-extends merge (skip), while a collision with an
+     * unmarked row is the type's own use and fails the schema
+     * (c-props-correct.4 — the ibm si02/si03 shapes). */
+    unsigned char from_base;
     struct xsd_attr_decl* next;
 } XsdAttrDecl;
 
@@ -401,6 +418,29 @@ typedef struct xsd_attrgroup_def {
     LeptrisElement elem;
     struct xsd_attrgroup_def* next;
 } XsdAttrGroupDef;
+
+/* #2182 §3.4.2.5: one resolved QName of an xs:schema
+ * @defaultAttributes list (document order). ns == NULL marks an
+ * UNRESOLVABLE QName (a prefixed name whose prefix is not in
+ * scope) — the post-capture check fails the schema; ns == "" is
+ * the legitimate no-namespace form (an unprefixed QName in a
+ * document with no default namespace / no targetNamespace). */
+typedef struct xsd_defattr_ref {
+    char* local;
+    char* ns;
+    struct xsd_defattr_ref* next;
+} XsdDefAttrRef;
+
+/* Per schema-DOCUMENT unit: the unit's own @defaultAttributes list.
+ * Types stamp the unit they were captured in and look up exactly
+ * that unit's list — an included document's types never ride the
+ * includer's defaults (open040/open041 posture), while redefine
+ * bodies stay in the including unit and do (open044). */
+typedef struct xsd_unit_defattrs {
+    int unit;
+    XsdDefAttrRef* refs;
+    struct xsd_unit_defattrs* next;
+} XsdUnitDefAttrs;
 
 typedef struct xsd_type_attrs {
     char* type_name;

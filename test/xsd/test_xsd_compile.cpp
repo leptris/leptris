@@ -2851,9 +2851,17 @@ TEST(XsdAlternative11, FirstMatchingAlternativeTypes) {
                            "<shape kind=\"square\"><s>hi</s></shape>"), 1);
     EXPECT_EQ(validate_doc(k_alt_schema,
                            "<shape kind=\"square\"><r>2</r></shape>"), 0);
-    /* no alternative matches: the declared fallback type applies */
+    /* no alternative matches: the declared fallback type applies —
+     * its content typing governs (u ok, r not). #2182: the
+     * fallback's assessment is STRICT (no alternative matched, so
+     * nothing is exempt — the moxml#579 posture), and an
+     * attribute-less type rejects the undeclared selector. */
     EXPECT_EQ(validate_doc(k_alt_schema,
-                           "<shape kind=\"blob\"><u>t</u></shape>"), 1);
+                           "<shape><u>t</u></shape>"), 1);
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape><r>2</r></shape>"), 0);
+    EXPECT_EQ(validate_doc(k_alt_schema,
+                           "<shape kind=\"blob\"><u>t</u></shape>"), 0);
     EXPECT_EQ(validate_doc(k_alt_schema,
                            "<shape kind=\"blob\"><r>2</r></shape>"), 0);
 }

@@ -199,6 +199,12 @@ target_compile_definitions(test_xsd11_override PRIVATE
 leptris_add_test(test_xsd11_opencontent xsd/test_xsd11_opencontent.cpp)
 target_compile_definitions(test_xsd11_opencontent PRIVATE
     LEPTRIS_XSD11_OPENCONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-opencontent")
+# #2182: default attribute groups (XSD 1.1 §3.4.2.5) — the suite
+# fixtures for the family ride the pinned xsd11-cases corpus.
+leptris_add_test(test_xsd11_defattr xsd/test_xsd11_defattr.cpp)
+target_compile_definitions(test_xsd11_defattr PRIVATE
+    LEPTRIS_XSD11_DEFATTR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-defattr"
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
