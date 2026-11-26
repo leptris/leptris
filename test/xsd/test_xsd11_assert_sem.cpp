@@ -136,3 +136,15 @@ TEST(Xsd11AssertSem, AbsolutePathsSeeNothing) {
     EXPECT_EQ(verdict_of("absfloor.xsd", "absfloor_v.xml"), 1);
     EXPECT_NE(verdict_of("absfail.xsd", "absfail_n.xml"), 1);
 }
+
+/* Leak-shape regression (LSan run 45836902979): a FACET test that
+ * is an absolute location path enters evaluate_location_path under
+ * absent focus — the seed nodeset must be released on the XPDY0002
+ * error path, and the rooted-lane short-circuit must adopt it
+ * (absfloor/absfail above walk that return). Every value is
+ * invalid: there is no context item to anchor the path (§3.16.4,
+ * the d4_3_15ii22/ii24 shape). */
+TEST(Xsd11AssertSem, FacetLocationPathErrorReleasesNodeset) {
+    EXPECT_NE(verdict_of("absfacet.xsd", "absfacet_n.xml"), 1);
+    EXPECT_NE(verdict_of("absfacet.xsd", "absfacet_n.xml"), 1);
+}
