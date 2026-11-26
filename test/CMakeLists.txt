@@ -181,6 +181,12 @@ target_compile_definitions(test_xsd_ns_qualification PRIVATE
 leptris_add_test(test_xsd11_assertions xsd/test_xsd11_assertions.cpp)
 target_compile_definitions(test_xsd11_assertions PRIVATE
     LEPTRIS_XSD11_ASSERTIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assertions")
+# #2183: the assertion-facet XQuery-semantics residue (absent focus,
+# fn:doc base resolution, error mapping, subtree rooting, carriers,
+# castable-as).
+leptris_add_test(test_xsd11_assert_sem xsd/test_xsd11_assert_sem.cpp)
+target_compile_definitions(test_xsd11_assert_sem PRIVATE
+    LEPTRIS_XSD11_ASSERT_SEM_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assert-sem")
 # #2155: facet applicability on the 1.1-only datatypes.
 leptris_add_test(test_xsd11_datatypes xsd/test_xsd11_datatypes.cpp)
 target_compile_definitions(test_xsd11_datatypes PRIVATE

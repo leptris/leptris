@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+   <!-- #2183 carrier decomposition (listunion6): the assert on a
+        simpleContent complexType whose content is a LIST binds
+        $value as the itemized typed sequence (§3.16.4 cl.2); every
+        $x in data($value) walks the items. -->
+
+   <xs:element name="list">
+      <xs:complexType>
+         <xs:simpleContent>
+            <xs:extension base="INTLIST">
+               <xs:assert test="count($value) le 5"/>
+               <xs:assert test="every $x in data($value) satisfies ($x mod 2 = 0)"/>
+            </xs:extension>
+         </xs:simpleContent>
+      </xs:complexType>
+   </xs:element>
+
+   <xs:simpleType name="INTLIST">
+      <xs:list itemType="xs:integer"/>
+   </xs:simpleType>
+
+</xs:schema>

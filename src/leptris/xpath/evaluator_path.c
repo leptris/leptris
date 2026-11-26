@@ -11,6 +11,7 @@
 #include "../leptris_internal.h"
 #include "../dom/element.h"  /* For LeptrisElement structure */
 #include <string.h>
+#include <stdio.h>   /* snprintf (absent-focus diagnostics, #2183) */
 #include <stdlib.h>  /* qsort (document-order merge, issue #485) */
 
 /* Debug logging - Set to 0 to disable */
@@ -1267,11 +1268,43 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
 
     /* Starting nodeset */
     if (path->type == XPATH_AST_ABSOLUTE_PATH) {
+        /* XSD 1.1 §3.16.4 absent focus (#2183): no context item —
+         * there is no tree to navigate either (XPDY0002). */
+        if (ctx->context_size == 0) {
+            snprintf(ctx->error_code, sizeof(ctx->error_code),
+                     "XPDY0002");
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "path '/': no context item");
+            return NULL;
+        }
         /* An absolute path roots at the CONTEXT NODE'S document
          * (libxslt semantics): a context inside document() output or
          * an RTF fragment must not see the transform source tree
          * (bug-65). */
         struct leptris_document* ctx_doc = xpath_context_document(ctx);
+        /* XSD 1.1 §3.13.4.1 cl.1.3 subtree scoping (#2183): the
+         * assertion data model contains ONLY the validated element
+         * and its subtree — "attempts to refer ... to any part of
+         * the input document outside of E ... will be
+         * unsuccessful". An absolute path reaches for the document
+         * root, which the model does not contain, so in the assert
+         * lane '/' and '//' select NOTHING (d4_3_15ii14/ii31 pin
+         * both directions: count(//ele1) must see neither the 2
+         * document ele1s nor the 1 subtree ele1). Not an error —
+         * the empty sequence (§3.13.4.1's "not in themselves
+         * errors"). */
+        LeptrisElement assert_root = ctx->xquery_assert_root;
+        if (assert_root) {
+            struct leptris_xpath_result* empty =
+                xpath_result_new(XPATH_RESULT_NODESET);
+            if (!empty) return NULL;
+            empty->value.nodeset_value = xpath_nodeset_new();
+            if (!empty->value.nodeset_value) {
+                xpath_result_free(empty);
+                return NULL;
+            }
+            return empty;
+        }
         /* Special case: Absolute path with element name as first step
          * XPath "/root" means "child of document node named root"
          * Since we don't have a document node, check if root matches and use it */
@@ -1438,7 +1471,8 @@ normal_absolute_path:
                                 /* This is / * - just return root element (space so the
                                  * slash-star sequence doesn't look like a nested comment). */
                                 DEBUG_LOG("  Special case: /* returns document root element");
-                                xpath_nodeset_add(current, (LeptrisElement)ctx->document->new_dom_root);
+                                xpath_nodeset_add(current,
+                                    (LeptrisElement)ctx->document->new_dom_root);
                                 goto done_evaluating;
                             }
                         }
@@ -1450,7 +1484,10 @@ normal_absolute_path:
              * an absolute path's first step runs against the document
              * — child:: yields the root element, descendant(-or-self)
              * must offer the root element itself. The doc-branch in
-             * apply_axis handles every axis from this node type. */
+             * apply_axis handles every axis from this node type.
+             * (#2183: the assert lane never reaches here — the
+             * assert_root short-circuit above returns the empty
+             * sequence first.) */
             xpath_nodeset_add(current,
                 (LeptrisElement)leptris_document_get_node(ctx_doc));
             DEBUG_LOG("  Nodeset count after adding document node: %zu",
@@ -1500,6 +1537,17 @@ normal_absolute_path:
         }
     }  /* End of if (path->type == XPATH_AST_ABSOLUTE_PATH) */
     else {
+        /* XSD 1.1 §3.16.4 absent focus (#2183): a relative path —
+         * `.` included — dereferences the context item, which the
+         * facet lane does not provide (XPDY0002). */
+        if (ctx->context_size == 0) {
+            snprintf(ctx->error_code, sizeof(ctx->error_code),
+                     "XPDY0002");
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "relative path: no context item");
+            xpath_nodeset_free(current);
+            return NULL;
+        }
         /* Relative path - start from context node */
         xpath_nodeset_add(current, ctx->context_node);
 

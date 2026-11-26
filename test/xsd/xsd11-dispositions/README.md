@@ -252,7 +252,10 @@ the authoritative totals are the gate's printed verdict split
 (#2155: 157 valid / 175 invalid / 202 schema-error reds; #2156
 re-sliced the ic class row: 153 valid / 151 invalid / 200
 schema-error reds; #2150 flips 8 override schema-error rows:
-153 valid / 151 invalid / 192 schema-error reds).
+153 valid / 151 invalid / 192 schema-error reds; #2183 flips 11
+assertion-facet rows invalid-side — the gate split moves
+102 valid / 143 invalid / 166 schema-error reds → 102 valid /
+132 invalid / 166 schema-error reds).
 
 ## valid rejected by the engine (153)
 
@@ -273,13 +276,13 @@ schema-error reds; #2150 flips 8 override schema-error rows:
 | 3 | ibm S3_12 s3_12v09/s3_12ii04: valid cta schema/instance rows — the mixed complexContent EXTENSION compile-status artifact (the two schema-only rows compile with a non-OK status, see the engine quirk) and the extension content model losing the base's lax wildcard (s3_12v09.xml) | OPEN — alternative DISPATCH itself fires and selects correctly; the blockers are the extension-model classes above |
 | 4 | substitution groups: saxon Subsgroup (2, member of a substitution group where the head appears) + ibm S2_2_2 (2, valid instances against cyclic subsgroup heads) | OPEN — same substitution-group gap as the 1.0 lane |
 
-## invalid documents accepted (151)
+## invalid documents accepted (140)
 
 | rows | class | disposition |
 |---|---|---|
 | 15 | ibm S3_3_4 ii: instance-invalid ID/IDREF rows (fixed on ID-typed elements, ID value-space violations) | OPEN — the one-ID-per-element gate and the ID value-space checks; no assert semantics involved (the #2149-era table miscounted these into the 85-row class) |
 | 21 | saxon Id id004-id017: instance-invalid ID-family rows accepted (ID list types, ID-typed complexTypes with simple content, ID attribute defaults) | OPEN — re-sliced out of #2155's ic class row (#2156): the one-ID gate engine flip + the ID value-space checks, same class as the ibm S3_3_4 ii row |
-| 11 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6_2), castable-as-double accepting '10f4' (assert-simple003/004) | OPEN — each names an ENGINE gap (focus semantics, doc loading, arithmetic error semantics, carrier decomposition, castable lexical validators), not a facet-capture gap |
+| 11 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6_2), castable-as-double accepting '10f4' (assert-simple003/004) | CLOSED by #2183 — the XQuery semantics landed: §3.16.4 ABSENT FOCUS on the facet lane (position()/last()/. raise XPDY0002 → the facet does not hold; the $value-only positive controls stay green), fn:doc() resolving against the SCHEMA's compile-captured base URI (the `declare base-uri` XQuery channel), xs:integer/divisor-zero raising FOAR0001 under the XQuery spelling, §3.13.4.1 cl. 1.3 subtree scoping (relative descent roots at the validated element; '/' and '//' select NOTHING — ii14/ii31 pin both directions), fn:data over the itemized $value binding (listunion6_2's every-decomposition), and `castable as` resolving unprefixed builtin names through xpathDefaultNamespace (003.n1 ×2). Eleven rows flipped, zero regressions; the remaining saxon Assert reds (assert020/021) are the content-model class in the valid-rejected table |
 | 60 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side (#2156 retired the six wild101/wild103 key rows whose real blocker was an unevaluated xs:key) |
 | 4 | saxon CTA cta0001 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044.n01 flipped in #2185 — the selected aType_f's use="prohibited" @r row rejects the instance's attribute) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |

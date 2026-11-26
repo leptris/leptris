@@ -204,7 +204,7 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
 static XsdCm* xsd_capture_any(LeptrisElement any_child);
 static char* xsd_capture_unit_tns(LeptrisElement e);
-static char* xsd_capture_ns_prolog(LeptrisElement e);
+static char* xsd_capture_ns_prolog(LeptrisElement e, const char* base_dir);
 static void xsd_resolve_qname(LeptrisElement e, const char* qname,
                               char* uri, size_t urisz, char* local,
                               size_t localsz);
@@ -750,8 +750,10 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                         if (af) {
                             af->test = xsd_strdup(test);
                             /* §3.13.2: the facet's bindings ride
-                             * the schema document too */
-                            af->ns_prolog = xsd_capture_ns_prolog(fe);
+                             * the schema document too — the base
+                             * URI rides the validator-side wrap
+                             * (this capture has no schema) */
+                            af->ns_prolog = xsd_capture_ns_prolog(fe, NULL);
                             if (!simple->assertions) {
                                 simple->assertions = af;
                             } else {
@@ -5651,7 +5653,7 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
     /* #2154 (§3.13.2): the bindings the test's prefixes and
      * unprefixed names resolve under, captured at the assert
      * element */
-    a->ns_prolog = xsd_capture_ns_prolog(e);
+    a->ns_prolog = xsd_capture_ns_prolog(e, s->base_dir);
     /* #2149: compiled when the schema claims 1.1 OR carries
      * xs:alternative chains — the alternative evidence marks schemas
      * whose selected types' asserts belong to the CTA semantics
@@ -5957,8 +5959,16 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             const char* fl = NULL;
                             leptris_element_expanded_name(
                                 (LeptrisElement)f, &fl, NULL, NULL);
+                            /* #2183: xs:assert is the complexType
+                             * assertion (§3.13), not a simple-type
+                             * facet — its presence must not arm the
+                             * synthesized-simple path, which cuts
+                             * the base's list chain (listunion6's
+                             * INTLIST died and $value bound as one
+                             * string) */
                             if (fl && strcmp(fl, "facet") != 0 &&
-                                strcmp(fl, "simpleType") != 0)
+                                strcmp(fl, "simpleType") != 0 &&
+                                strcmp(fl, "assert") != 0)
                                 has_facets = 1;
                         }
                         XsdSimple* captured =
@@ -6977,7 +6987,8 @@ static char* xsd_capture_unit_tns(LeptrisElement e) {
  * #targetNamespace" (ns1). Only prefixes the assert element has IN
  * SCOPE participate — the schema's unrelated declarations never
  * leak; the xmlns DEFAULT is xpathDefaultNamespace's channel. */
-static char* xsd_capture_ns_prolog(LeptrisElement e) {
+static char* xsd_capture_ns_prolog(LeptrisElement e,
+                                   const char* base_dir) {
     struct { const char* pfx; const char* uri; } seen[16];
     int nseen = 0;
     for (LeptrisElement up = e; up; up = leptris_element_parent(up)) {
@@ -7028,7 +7039,14 @@ static char* xsd_capture_ns_prolog(LeptrisElement e) {
         else
             defns = xdn;
     }
-    if (nseen == 0 && !defns) {
+    /* #2183: the test's static base URI — fn:doc inside an assert
+     * test resolves its relative URIs against the SCHEMA
+     * document's directory (assert011), delivered as
+     * `declare base-uri`. A path carrying a double quote is
+     * skipped (no escaping channel in the prolog). */
+    int have_base = base_dir && base_dir[0] &&
+                    !strchr(base_dir, '"');
+    if (nseen == 0 && !defns && !have_base) {
         free(unit_tns);
         return NULL;
     }
@@ -7036,6 +7054,7 @@ static char* xsd_capture_ns_prolog(LeptrisElement e) {
     for (int k = 0; k < nseen; k++)
         cap += strlen(seen[k].pfx) + strlen(seen[k].uri) + 32;
     if (defns) cap += strlen(defns) + 48;
+    if (have_base) cap += strlen(base_dir) + 48;
     char* out = (char*)malloc(cap);
     if (!out) {
         free(unit_tns);
@@ -7055,6 +7074,11 @@ static char* xsd_capture_ns_prolog(LeptrisElement e) {
         int w = snprintf(out + o, cap - o,
                          "declare default element namespace \"%s\";",
                          defns);
+        if (w > 0 && (size_t)w < cap - o) o += (size_t)w;
+    }
+    if (have_base) {
+        int w = snprintf(out + o, cap - o,
+                         "declare base-uri \"%s/\";", base_dir);
         if (w > 0 && (size_t)w < cap - o) o += (size_t)w;
     }
     out[o] = 0;
@@ -7719,6 +7743,12 @@ const XsdSimple* xsd_find_simple_pub(struct leptris_xsd_schema* s,
 
 const char* xsd_target_ns(struct leptris_xsd_schema* s) {
     return s ? s->target_ns : NULL;
+}
+
+/* #2183: the schema document's directory (file compile) — the
+ * assertion lane anchors fn:doc's relative-URI resolution here. */
+const char* xsd_schema_base_dir(struct leptris_xsd_schema* s) {
+    return s ? s->base_dir : NULL;
 }
 
 const XsdTypeAttrs* xsd_find_type_attrs(struct leptris_xsd_schema* s,

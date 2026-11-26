@@ -391,6 +391,16 @@ static struct leptris_xpath_result* xpath_func_last(XPathContext* context,
         return NULL;
     }
 
+    /* XSD 1.1 §3.16.4 absent focus (#2183): context_size 0 is the
+     * absent-focus sentinel — last() is undefined (XPDY0002). */
+    if (context->context_size == 0) {
+        snprintf(context->error_code, sizeof(context->error_code),
+                 "XPDY0002");
+        snprintf(context->error_msg, sizeof(context->error_msg),
+                 "last(): focus is undefined");
+        return NULL;
+    }
+
     struct leptris_xpath_result* result = xpath_result_new(XPATH_RESULT_NUMBER);
     if (!result) return NULL;
 
@@ -408,6 +418,16 @@ static struct leptris_xpath_result* xpath_func_position(XPathContext* context,
     if (arg_count != 0) {
         snprintf(context->error_msg, sizeof(context->error_msg),
                 "position() takes no arguments");
+        return NULL;
+    }
+
+    /* XSD 1.1 §3.16.4 absent focus (#2183): position() is
+     * undefined without a focus (XPDY0002). */
+    if (context->context_size == 0) {
+        snprintf(context->error_code, sizeof(context->error_code),
+                 "XPDY0002");
+        snprintf(context->error_msg, sizeof(context->error_msg),
+                 "position(): focus is undefined");
         return NULL;
     }
 

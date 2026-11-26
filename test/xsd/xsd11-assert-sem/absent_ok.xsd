@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified" attributeFormDefault="unqualified">
+
+  <!-- #2183 positive control: a $value-only assertion keeps working
+       while the focus is absent (§3.16.4 -- assertions operate on
+       the typed value alone). -->
+
+  <xs:element name="date">
+    <xs:simpleType>
+      <xs:restriction base="xs:date">
+        <xs:assertion test="$value castable as xs:date"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+
+  <xs:element name="outer">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="date" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

@@ -207,14 +207,29 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * (measured 2026-11-25 on the #2156 base). Monotonically
  * UNION RE-MEASURE (#2150+#2151 together on the rebased base):
  * floor pinned to the measured union value below.
- * Monotonically rising.
- * Raised by #2185 (the derivation-ok attribute-use clauses ride the
- * shared engine: duplicate attribute use on the extension-folded
- * table, restriction derived-vs-base consistency with the 2.2
- * wildcard arm, the row-level @targetNamespace capture, and the
- * prohibited instance-side enforcement): 1813/2206 — cta0044.n01,
- * target003.n1/n2, s3_2_3ii01 flip, zero regressions (measured
- * 2026-11-26 on the #2193 base). */
+ * UNION RE-MEASURE (#2150+#2151 together on the rebased base):
+ * floor pinned to the measured union value below.
+ * Monotonically rising. Raised by #2183 (assertion-facet XQuery
+ * semantics: §3.16.4 ABSENT FOCUS on the simple-type facet lane —
+ * position()/last()/context dereference raise XPDY0002 and the
+ * facet does not hold; fn:doc() inside assert tests resolving
+ * against the SCHEMA's compile-captured base URI via the XQuery
+ * `declare base-uri` channel; xs:integer/divisor-zero raising
+ * FOAR0001 under the XQuery spelling (XPath 1.0 keeps INF); the
+ * §3.13.4.1 cl. 1.3 subtree scoping — relative descent roots at
+ * the validated element, absolute paths select NOTHING
+ * (d4_3_15ii14/ii31 pin both directions); the list-of-items
+ * carrier decomposition riding fn:data over the itemized $value
+ * binding; `castable as` resolving unprefixed builtin names
+ * through xpathDefaultNamespace): 1806/2206 on the #2151 base —
+ * assertions family 270/296 → 281/296, eleven invalid-expected
+ * rows flipped. Raised by #2185 (the derivation-ok attribute-use
+ * clauses ride the shared engine: duplicate attribute use on the
+ * extension-folded table, restriction derived-vs-base consistency
+ * with the 2.2 wildcard arm, the row-level @targetNamespace
+ * capture, and the prohibited instance-side enforcement):
+ * 1813/2206 — cta0044.n01, target003.n1/n2, s3_2_3ii01 flip
+ * (measured 2026-11-26 on the #2193 base). */
     EXPECT_GE(pass, 1813) << "conformance floor regressed - re-measure the union";
     EXPECT_GE(pass_valid, 1192);
     EXPECT_GE(pass_invalid, 479);

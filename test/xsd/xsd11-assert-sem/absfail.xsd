@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+	<!-- #2183 (d4_3_15ii14/ii31 pair): the assert must fail under
+	     the subtree-only data model — //ele1 counts zero, never the
+	     document's 2 (doc-rooting) nor the subtree's 1 (subtree
+	     rooting). The instance has 2 ele1 in the whole document and
+	     1 inside the validated ele2's subtree, so EITHER wrong
+	     rooting makes one of these asserts hold; the pinned oracle
+	     says the instance is INVALID. -->
+	<xs:element name="root" type="rootType"/>
+	<xs:complexType name="rootType">
+		<xs:sequence>
+			<xs:element name="ele1" type="elementType1" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="ele2" type="elementType2" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+
+	<xs:complexType name="elementType1">
+		<xs:sequence>
+			<xs:element name="subElement1" type="rootType" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+
+	<xs:complexType name="elementType2">
+		<xs:sequence>
+			<xs:element name="subElement2" type="rootType" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+		<xs:assert test="count(//ele1) eq 2"/>
+		<xs:assert test="count(//ele1) eq 1"/>
+	</xs:complexType>
+
+</xs:schema>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+	<!-- #2183 subtree rooting (d4_3_15ii14): recursive descent in an
+	     assert test is rooted at the VALIDATED element's subtree --
+	     it cannot count ele1 elements outside it. The nested
+	     rootType recursion drives the assert at depth. -->
+	<xs:element name="root" type="rootType"/>
+	<xs:complexType name="rootType">
+		<xs:sequence>
+			<xs:element name="ele1" type="elementType1" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="ele2" type="elementType2" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+
+	<xs:complexType name="elementType1">
+		<xs:sequence>
+			<xs:element name="subElement1" type="rootType" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+
+	<xs:complexType name="elementType2">
+		<xs:sequence>
+			<xs:element name="subElement2" type="rootType" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+		<xs:assert test="count(.//ele1) eq 2"/>
+	</xs:complexType>
+
+</xs:schema>
