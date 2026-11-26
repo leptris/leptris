@@ -18,8 +18,8 @@
 #include <algorithm>
 #include <string>
 #include <vector>
-#include <sys/time.h>
 
+#include "../common/bench_time.h"
 #include <leptris.h>
 
 #ifdef HAVE_PUGIXML
@@ -38,9 +38,7 @@ namespace {
 // ------------------------------------------------------------------
 
 double now_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec * 1e6 + (double)tv.tv_usec;
+    return bench_wall_real_us();
 }
 
 double median_of(std::vector<double>& v) {

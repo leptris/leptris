@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include "../common/bench_time.h"
 #include "leptris.h"
 #ifdef HAVE_PUGIXML
 #include "pugixml.hpp"
@@ -24,9 +24,7 @@ using namespace pugi;
 #endif
 
 static double now_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+    return bench_wall_us();
 }
 
 static int file_mode(const char* path) {

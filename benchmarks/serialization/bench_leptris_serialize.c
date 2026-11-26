@@ -3,17 +3,10 @@
  */
 
 #include "leptris.h"
+#include "../common/bench_time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
-
-// Timing utilities
-static double get_time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000.0 + tv.tv_usec;
-}
 
 // Load file into memory
 static char* load_file(const char* path, size_t* size) {
@@ -45,14 +38,14 @@ static void bench_serialize_small(void) {
     free(xml);
 
     const int iterations = 1000;
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < iterations; i++) {
         char* result = leptris_document_serialize(doc, NULL);
         leptris_free_string(result);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf("  \"serialize_small_compact\": {\n");
@@ -78,14 +71,14 @@ static void bench_serialize_medium(void) {
     free(xml);
 
     const int iterations = 100;
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < iterations; i++) {
         char* result = leptris_document_serialize(doc, NULL);
         leptris_free_string(result);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"serialize_medium_compact\": {\n");
@@ -111,14 +104,14 @@ static void bench_serialize_large(void) {
     free(xml);
 
     const int iterations = 10;
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < iterations; i++) {
         char* result = leptris_document_serialize(doc, NULL);
         leptris_free_string(result);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"serialize_large_compact\": {\n");
@@ -148,21 +141,21 @@ static void bench_format_comparison(void) {
     const int iterations = 1000;
 
     // Compact
-    double start_compact = get_time_us();
+    double start_compact = bench_wall_real_us();
     for (int i = 0; i < iterations; i++) {
         char* result = leptris_document_serialize(doc, NULL);
         leptris_free_string(result);
     }
-    double end_compact = get_time_us();
+    double end_compact = bench_wall_real_us();
     double total_compact = end_compact - start_compact;
 
     // Pretty-print
-    double start_pretty = get_time_us();
+    double start_pretty = bench_wall_real_us();
     for (int i = 0; i < iterations; i++) {
         char* result = leptris_document_serialize(doc, &pretty_opts);
         leptris_free_string(result);
     }
-    double end_pretty = get_time_us();
+    double end_pretty = bench_wall_real_us();
     double total_pretty = end_pretty - start_pretty;
 
     printf(",\n  \"format_compact\": {\n");

@@ -1,10 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <sys/time.h>
 #include <math.h>
 #include "../../lib/include/leptris.h"
+#include "../common/bench_time.h"
 
 /* ============================================================================
  * Benchmark Context
@@ -23,14 +22,8 @@ typedef struct {
 } BenchContext;
 
 /* ============================================================================
- * Timing Utilities
+ * Timing comes from the portable seam (bench_time.h).
  * ============================================================================ */
-
-static double get_time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec * 1000000.0 + (double)tv.tv_usec;
-}
 
 /* ============================================================================
  * Warm-up Phase (Eliminate Cold Cache Effects)
@@ -120,13 +113,13 @@ static void benchmark_parse_only(BenchContext* ctx) {
         memcpy(xml_copy, ctx->xml, ctx->xml_len);
         xml_copy[ctx->xml_len] = '\0';
 
-        double start = get_time_us();
+        double start = bench_wall_real_us();
 
         LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
         leptris_document_free(doc);
         /* Note: xml_copy freed by leptris_document_free */
 
-        double elapsed = get_time_us() - start;
+        double elapsed = bench_wall_real_us() - start;
         ctx->samples_us[i] = elapsed;
     }
 
@@ -152,7 +145,7 @@ static void benchmark_parse_query(BenchContext* ctx) {
         memcpy(xml_copy, ctx->xml, ctx->xml_len);
         xml_copy[ctx->xml_len] = '\0';
 
-        double start = get_time_us();
+        double start = bench_wall_real_us();
 
         LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
 
@@ -162,7 +155,7 @@ static void benchmark_parse_query(BenchContext* ctx) {
 
         leptris_document_free(doc);
 
-        double elapsed = get_time_us() - start;
+        double elapsed = bench_wall_real_us() - start;
         ctx->samples_us[i] = elapsed;
     }
 
@@ -188,7 +181,7 @@ static void benchmark_parse_modify_serialize(BenchContext* ctx) {
         memcpy(xml_copy, ctx->xml, ctx->xml_len);
         xml_copy[ctx->xml_len] = '\0';
 
-        double start = get_time_us();
+        double start = bench_wall_real_us();
 
         /* 1. Parse */
         LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
@@ -210,7 +203,7 @@ static void benchmark_parse_modify_serialize(BenchContext* ctx) {
         /* 4. Cleanup */
         leptris_document_free(doc);
 
-        double elapsed = get_time_us() - start;
+        double elapsed = bench_wall_real_us() - start;
         ctx->samples_us[i] = elapsed;
     }
 
@@ -236,7 +229,7 @@ static void benchmark_complex_modification(BenchContext* ctx) {
         memcpy(xml_copy, ctx->xml, ctx->xml_len);
         xml_copy[ctx->xml_len] = '\0';
 
-        double start = get_time_us();
+        double start = bench_wall_real_us();
 
         LeptrisDocument doc = leptris_parse_string_inplace(xml_copy, ctx->xml_len, NULL);
         LeptrisElement root = leptris_document_root(doc);
@@ -260,7 +253,7 @@ static void benchmark_complex_modification(BenchContext* ctx) {
         leptris_free_string(xml);
         leptris_document_free(doc);
 
-        double elapsed = get_time_us() - start;
+        double elapsed = bench_wall_real_us() - start;
         ctx->samples_us[i] = elapsed;
     }
 
