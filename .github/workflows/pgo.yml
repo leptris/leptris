@@ -403,7 +403,11 @@ jobs:
           # the benchmark sources are POSIX-timing-only (sys/time.h,
           # getrusage) and cannot compile under MSVC — the portable
           # sweep to restore the full battery on Windows is tracked
-          # separately. Training tops up with the CLI over the corpus.
+          # separately. SHARED-ONLY: the CLI must run against the
+          # INSTRUMENTED dll for the dll to receive training data —
+          # static-linked training leaves the dll's pgd empty and a
+          # copied EXE profile fails the USE link (LNK1268, option
+          # mismatch). Training tops up with the CLI over the corpus.
           cmake -B build -S . `
             -DCMAKE_BUILD_TYPE=Release `
             -DBUILD_TESTING=OFF `
@@ -411,7 +415,7 @@ jobs:
             -DLEPTRIS_BUILD_BENCHMARKS=OFF `
             -DLEPTRIS_ENABLE_UTF8PROC=OFF `
             -DLEPTRIS_ENABLE_ICONV=OFF `
-            -DLEPTRIS_BUILD_STATIC=ON `
+            -DLEPTRIS_BUILD_STATIC=OFF `
             -DLEPTRIS_BUILD_SHARED=ON `
             -DLEPTRIS_ENABLE_LTO=OFF `
             -DLEPTRIS_ENABLE_PGO=GENERATE `
@@ -469,37 +473,25 @@ jobs:
           $cli = (Get-ChildItem -Recurse -Filter leptris.exe |
                   Select-Object -First 1).FullName
           if (-not $cli) { throw "trainer CLI not found" }
+          # SHARED-only build: the CLI runs against the instrumented
+          # dll — make it discoverable (the VS generator scatters exe
+          # and dll across build/cli/Release and build/src/Release).
+          $dll = Get-ChildItem -Recurse -Filter libleptris.dll |
+                 Select-Object -First 1
+          if (-not $dll) { throw "instrumented libleptris.dll not found" }
+          $env:PATH = "$(Split-Path $dll.FullName);$env:PATH"
           foreach ($xml in Get-ChildItem benchmarks/data/*.xml) {
             & $cli parse $xml > $null 2>&1
           }
-          # pgomgr folds each exe's .pgc into its .pgd.
+          # pgomgr folds each exe's .pgc into its .pgd — and, with the
+          # CLI exercising the instrumented dll, the dll's pgc into its
+          # own pgd. Each pgd then carries its own training data; no
+          # cross-binary consolidation (a copied EXE profile fails the
+          # USE dll link with LNK1268, option mismatch).
           foreach ($pgd in $pgds) {
             pgomgr /merge $pgd.FullName
             if ($LASTEXITCODE -ne 0) {
               throw "pgomgr /merge failed for $($pgd.FullName) (exit $LASTEXITCODE)"
-            }
-          }
-          # Consolidate one profile next to the dll: plain /USEPROFILE
-          # looks for <output>.pgd beside the output. The seed pgd's own
-          # data is already inside the copy — the loop below must not
-          # fold it in a second time. The DLL is libleptris.dll on
-          # Windows (TODO.concurrency/05 rename) — filter for that;
-          # the CLI links the static lib, so the dll never writes its
-          # own pgc (PG0188 below is expected) and the CLI-trained
-          # profile IS the payload.
-          $dll = Get-ChildItem -Recurse -Filter libleptris.dll |
-                 Select-Object -First 1
-          if (-not $dll) { $dll = Get-ChildItem -Recurse -Filter leptris.dll |
-                 Select-Object -First 1 }
-          if (-not $dll) { throw "leptris dll not found in build tree" }
-          $dllDir = Split-Path $dll.FullName
-          $target = Join-Path $dllDir 'libleptris.pgd'
-          $first = (Get-ChildItem -Recurse -Filter *.pgd |
-                    Select-Object -First 1).FullName
-          Copy-Item $first $target -Force
-          foreach ($pgd in Get-ChildItem -Recurse -Filter *.pgd) {
-            if ($pgd.FullName -notin @($first, $target)) {
-              pgomgr /merge $pgd.FullName $target
             }
           }
 
@@ -535,6 +527,8 @@ jobs:
             -DLEPTRIS_ENABLE_LTO=OFF `
             -DLEPTRIS_ENABLE_PGO=USE `
             -DLEPTRIS_BUILD_BENCHMARKS=OFF `
+            -DLEPTRIS_BUILD_STATIC=OFF `
+            -DLEPTRIS_BUILD_SHARED=ON `
             -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
             -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
 
@@ -546,9 +540,12 @@ jobs:
         run: |
           # The PGO'd library must still parse — the profile is data,
           # but only a working binary proves the phase dance. Windows
-          # (VS generator) puts the exe under build/cli/Release/.
+          # (VS generator) puts the exe under build/cli/Release/ and,
+          # in the shared-only shape, the dll under build/src/Release/
+          # — the dll dir rides PATH so the exe can load it.
           if [ "$RUNNER_OS" = "Windows" ]; then
             exe=$(find build/cli -name 'leptris.exe' -type f | head -1)
+            export PATH="$(dirname "$(find build/src -name 'libleptris.dll' -type f | head -1)"):$PATH"
           else
             exe=build/cli/leptris
           fi
