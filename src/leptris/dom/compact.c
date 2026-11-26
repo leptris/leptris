@@ -304,6 +304,61 @@ static struct leptris_document* get_current_document(void) {
 
 #define LEPTRIS_INT32_OVERFLOW_SENTINEL INT32_MIN
 
+/* Round-12 pattern, ENCODE side (#2132): the TLS reads sat in the
+ * encoders' cold branches and LTO hoisted their address
+ * computations (a tlv_get_addr triple on Mach-O — g_overflow_table,
+ * g_overflow_table_refcount, g_current_document — plus
+ * __tls_get_addr traffic on ELF GD-model) into every inlined
+ * caller's prologue: the attrparse profile pinned three descriptor
+ * calls at dp_parse_attrs entry. A call in the cold branch cannot
+ * be speculated, so the reads stay cold and the hot encode path
+ * (a compare and a subtract) is untouched. */
+static LEPTRIS_NOINLINE int32_t int32_encode_overflow(
+    const int32_t* field_addr, void* target) {
+    LeptrisCompactOverflowTable* table = get_overflow_table();
+    struct leptris_document* doc = get_current_document();
+    if (table && leptris_compact_overflow_set(table, field_addr,
+                                              target, doc) == 0) {
+        return LEPTRIS_INT32_OVERFLOW_SENTINEL;
+    }
+    return 0;
+}
+
+static LEPTRIS_NOINLINE int8_t ptr8_encode_overflow(
+    const int8_t* field_addr, const void* target) {
+    LeptrisCompactOverflowTable* table = get_overflow_table();
+    struct leptris_document* doc = get_current_document();
+    if (table && leptris_compact_overflow_set(table, field_addr,
+                                              (void*)target,
+                                              doc) == 0) {
+        return LEPTRIS_COMPACT_PTR8_OVERFLOW;
+    }
+    return 0;
+}
+
+static LEPTRIS_NOINLINE int16_t ptr16_encode_overflow(
+    const int16_t* field_addr, const void* target) {
+    LeptrisCompactOverflowTable* table = get_overflow_table();
+    struct leptris_document* doc = get_current_document();
+    if (table && leptris_compact_overflow_set(table, field_addr,
+                                              (void*)target,
+                                              doc) == 0) {
+        return LEPTRIS_COMPACT_PTR16_OVERFLOW;
+    }
+    return 0;
+}
+
+static LEPTRIS_NOINLINE int32_t int32_encode_doc_overflow(
+    const int32_t* field_addr, void* target,
+    struct leptris_document* doc) {
+    LeptrisCompactOverflowTable* table = get_overflow_table();
+    if (table && leptris_compact_overflow_set(table, field_addr,
+                                              target, doc) == 0) {
+        return LEPTRIS_INT32_OVERFLOW_SENTINEL;
+    }
+    return 0;
+}
+
 int32_t leptris_compact_int32_encode(void* base, void* target,
                                      const int32_t* field_addr) {
     if (!target) return 0;
@@ -311,13 +366,7 @@ int32_t leptris_compact_int32_encode(void* base, void* target,
     /* INT32_MAX is the EMPTY sentinel (compact.h) — spill exact
      * deltas there too so raw offsets never collide with it. */
     if (d < INT32_MIN || d >= INT32_MAX) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        struct leptris_document* doc = get_current_document();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  target, doc) == 0) {
-            return LEPTRIS_INT32_OVERFLOW_SENTINEL;
-        }
-        return 0;
+        return int32_encode_overflow(field_addr, target);
     }
     return (int32_t)d;
 }
@@ -328,12 +377,7 @@ int32_t leptris_compact_int32_encode_doc(void* base, void* target,
     if (!target) return 0;
     ptrdiff_t d = (char*)target - (char*)base;
     if (d < INT32_MIN || d > INT32_MAX) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  target, doc) == 0) {
-            return LEPTRIS_INT32_OVERFLOW_SENTINEL;
-        }
-        return 0;
+        return int32_encode_doc_overflow(field_addr, target, doc);
     }
     return (int32_t)d;
 }
@@ -363,23 +407,11 @@ int8_t leptris_compact_ptr8_encode(const void* base, const void* target,
     ptrdiff_t align_mask = ((ptrdiff_t)1 << align_log2) - 1;
     if (d & align_mask) {
         /* Misaligned — can't represent, fall through to overflow. */
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        struct leptris_document* doc = get_current_document();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  (void*)target, doc) == 0) {
-            return LEPTRIS_COMPACT_PTR8_OVERFLOW;
-        }
-        return 0;
+        return ptr8_encode_overflow(field_addr, target);
     }
     ptrdiff_t scaled = d >> align_log2;
     if (scaled <= INT8_MIN || scaled > INT8_MAX) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        struct leptris_document* doc = get_current_document();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  (void*)target, doc) == 0) {
-            return LEPTRIS_COMPACT_PTR8_OVERFLOW;
-        }
-        return 0;
+        return ptr8_encode_overflow(field_addr, target);
     }
     return (int8_t)scaled;
 }
@@ -388,11 +420,8 @@ void* leptris_compact_ptr8_decode(const void* base, int8_t off,
                                   int align_log2,
                                   const int8_t* field_addr) {
     if (off == 0) return NULL;
-    if (off == LEPTRIS_COMPACT_PTR8_OVERFLOW) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        if (table) return leptris_compact_overflow_get(table, field_addr);
-        return NULL;
-    }
+    if (off == LEPTRIS_COMPACT_PTR8_OVERFLOW)
+        return overflow_lookup(field_addr, sizeof(int8_t));
     return (char*)base + ((ptrdiff_t)off << align_log2);
 }
 
@@ -403,23 +432,11 @@ int16_t leptris_compact_ptr16_encode(const void* base, const void* target,
     ptrdiff_t d = (const char*)target - (const char*)base;
     ptrdiff_t align_mask = ((ptrdiff_t)1 << align_log2) - 1;
     if (d & align_mask) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        struct leptris_document* doc = get_current_document();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  (void*)target, doc) == 0) {
-            return LEPTRIS_COMPACT_PTR16_OVERFLOW;
-        }
-        return 0;
+        return ptr16_encode_overflow(field_addr, target);
     }
     ptrdiff_t scaled = d >> align_log2;
     if (scaled <= INT16_MIN || scaled > INT16_MAX) {
-        LeptrisCompactOverflowTable* table = get_overflow_table();
-        struct leptris_document* doc = get_current_document();
-        if (table && leptris_compact_overflow_set(table, field_addr,
-                                                  (void*)target, doc) == 0) {
-            return LEPTRIS_COMPACT_PTR16_OVERFLOW;
-        }
-        return 0;
+        return ptr16_encode_overflow(field_addr, target);
     }
     return (int16_t)scaled;
 }

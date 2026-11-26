@@ -328,15 +328,28 @@ static LEPTRIS_ALWAYS_INLINE unsigned dp_class_after_ws(DParser* p) {
 /* Round 6: value-scan stop tables. One table load + one test per
  * byte replaces the three-compare chain - pugixml's ct_parse_attr
  * loop shape. 0 = boring, 1 = this value's quote, 2 = '&', 3 = ws.
- * Two tables because the closing quote matches the OPENING one;
- * NUL classifies boring exactly as the compare chain did (the
- * probe endgame bounds the scan). */
+ * Two tables because the closing quote matches the OPENING one.
+ *
+ * #2132: NUL is now stop class 4 — the slack probe drops its
+ * per-byte window bound and runs the bare
+ * `while (!vtab[(unsigned char)*q]) q++` (4-5 instructions per byte
+ * instead of 6-7; the bound compare/branch leave the hottest loop
+ * on the attrparse row). The sentinel gives NUL stops the SAME
+ * verdicts the bound did: a stop at scratch[len] (== p->end) is the
+ * unterminated error; a stop at an earlier NUL (embedded-NUL
+ * input) hands off to the same memchr tail the window exhaustion
+ * did, and the tail's fused flag rescan starts at the probe's stop
+ * point, so '&' / ws flag coverage over [q0, val_end) is unchanged.
+ * Reading past the 48-byte window to the sentinel is safe on the
+ * slack path (the scratch allocation extends to len+1 and the
+ * sentinel byte stops the scan); the no-slack path keeps its
+ * explicit bound. */
 static const unsigned char dp_val_stop_dq[256] = {
-    ['"'] = 1, ['&'] = 2,
+    [0] = 4, ['"'] = 1, ['&'] = 2,
     ['\t'] = 3, ['\n'] = 3, ['\r'] = 3,
 };
 static const unsigned char dp_val_stop_sq[256] = {
-    ['\''] = 1, ['&'] = 2,
+    [0] = 4, ['\''] = 1, ['&'] = 2,
     ['\t'] = 3, ['\n'] = 3, ['\r'] = 3,
 };
 
@@ -1154,26 +1167,32 @@ static LEPTRIS_NOINLINE int dp_parse_attrs(DParser* p,
         p->pos++;
         /* Class of the byte that ended the name — captured from the
          * scan's own table loads (single-pass scan: the byte after
-         * the name IS the delimiter, whitespace or '='). */
+         * the name IS the delimiter, whitespace or '=').
+         *
+         * #2132: the FNV-1a hash left the scan loop. The in-loop
+         * form made the hash a 3-cycle dependent-multiply chain on
+         * the scan's critical path (worse on aarch64, where the
+         * attrparse row trails); the post-scan loop below runs the
+         * identical byte range — name_start[0] via the seed,
+         * name_start[1..name_len-1] via the fold — and the OOO
+         * window overlaps it with the '=' dispatch instead of
+         * serializing on it. The dup-hash VERDICT is unchanged: the
+         * same bytes, the same fold order, the same final value. */
         unsigned delim;
         {
             char* s = p->pos;
             unsigned k = leptris_chartype_table[(unsigned char)s[0]];
             for (;;) {
                 if (DP_UNLIKELY(!(k & DP_CT_NAME_CHAR))) break;
-                if (need_dup_hash) { dh ^= (unsigned char)s[0]; dh *= 16777619u; }
                 if (s[0] == ':') attr_colon = s;
                 unsigned k1 = leptris_chartype_table[(unsigned char)s[1]];
                 if (DP_UNLIKELY(!(k1 & DP_CT_NAME_CHAR))) { s += 1; k = k1; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)s[1]; dh *= 16777619u; }
                 if (s[1] == ':') attr_colon = s + 1;
                 unsigned k2 = leptris_chartype_table[(unsigned char)s[2]];
                 if (DP_UNLIKELY(!(k2 & DP_CT_NAME_CHAR))) { s += 2; k = k2; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)s[2]; dh *= 16777619u; }
                 if (s[2] == ':') attr_colon = s + 2;
                 unsigned k3 = leptris_chartype_table[(unsigned char)s[3]];
                 if (DP_UNLIKELY(!(k3 & DP_CT_NAME_CHAR))) { s += 3; k = k3; break; }
-                if (need_dup_hash) { dh ^= (unsigned char)s[3]; dh *= 16777619u; }
                 if (s[3] == ':') attr_colon = s + 3;
                 s += 4;
                 k = leptris_chartype_table[(unsigned char)s[0]];
@@ -1183,6 +1202,14 @@ static LEPTRIS_NOINLINE int dp_parse_attrs(DParser* p,
         }
         char* name_end = p->pos;
         size_t name_len = name_end - name_start;
+        if (need_dup_hash) {
+            dh = 2166136261u ^ (unsigned char)name_start[0];
+            dh *= 16777619u;
+            for (const char* h = name_start + 1; h < name_end; h++) {
+                dh ^= (unsigned char)*h;
+                dh *= 16777619u;
+            }
+        }
 
         /* Defer NUL-termination until after '=' is consumed — the
          * delimiter byte (whitespace or '=') is needed for the scan. */
@@ -1226,12 +1253,37 @@ static LEPTRIS_NOINLINE int dp_parse_attrs(DParser* p,
         int has_ws = 0;   /* literal \t/\n/\r — §3.3.3 (#576) */
         char* val_end = NULL;
         {
+            /* #2132: probe_slack is written once at parse setup and
+             * never mid-parse — hoist the per-attribute reload out
+             * of the loop (the load sat on the attr loop's dep
+             * chain). */
+            const int probe_slack = p->probe_slack;
             const char* q = p->pos;
-            const char* probe_end = p->probe_slack
+            const char* probe_end = probe_slack
                 ? q + 48
                 : ((p->end - q > 48) ? q + 48 : p->end);
             const unsigned char* vtab =
                 (quote == '"') ? dp_val_stop_dq : dp_val_stop_sq;
+            if (probe_slack) {
+                /* Sentinel-bounded probe (#2132): no window compare
+                 * per byte — the scratch NUL (class 4) ends the run
+                 * with the same verdicts the q < probe_end bound
+                 * produced. See the table comment. */
+                for (;;) {
+                    while (!vtab[(unsigned char)*q]) q++;
+                    unsigned char vch = (unsigned char)*q;
+                    if (vch == (unsigned char)quote) {
+                        val_end = (char*)q;
+                        goto value_done;
+                    }
+                    if (vch == '&') has_amp = 1;
+                    else if (vch != '\0') has_ws = 1;
+                    else break; /* NUL = the sentinel bound */
+                    q++;
+                }
+                if (q >= p->end) return -1; /* unterminated */
+                goto memchr_tail;
+            }
             while (q < probe_end) {
                 if (DP_UNLIKELY(vtab[(unsigned char)*q])) {
                     char vch = *q;
@@ -1240,11 +1292,12 @@ static LEPTRIS_NOINLINE int dp_parse_attrs(DParser* p,
                         goto value_done;
                     }
                     if (vch == '&') has_amp = 1;
-                    else has_ws = 1;
+                    else if (vch != '\0') has_ws = 1;
                 }
                 q++;
             }
             if (q >= p->end) return -1; /* unterminated */
+        memchr_tail:
             val_end = (char*)memchr(q, quote, p->end - q);
             if (!val_end) return -1;
             if (q < val_end && (!has_amp || !has_ws)) {
