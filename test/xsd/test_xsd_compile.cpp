@@ -161,8 +161,13 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     // src-attribute declaration clauses: use=required+default,
     // @ref with type/form/inline-child, @type with inline child)
     // -> 135 (an xs:-prefixed type reference must resolve:
-    // length3's xs:non-positive-integer is a 1999-draft name).
-    EXPECT_GE(ok, 135u) << "compile-success floor regressed";
+    // length3's xs:non-positive-integer is a 1999-draft name)
+    // -> 132 (#2185: the three oracle-invalid derivation-ok
+    // fixtures — derivation-ok-extension-err_0 (duplicate
+    // attribute use), derivation-ok-restriction-2-1-1_0 and
+    // restriction-attr1_0 (weakened base uses) — now fail
+    // compile).
+    EXPECT_GE(ok, 132u) << "compile-success floor regressed";
 }
 
 }  // namespace
@@ -3280,6 +3285,95 @@ TEST(XsdConformanceClauses, DeterministicRepeatStillLoads) {
     leptris_xsd_free(s2);
 }
 
+TEST(XsdConformanceClauses, DerivationOkExtensionDuplicateAttrUseRejected) {
+    /* #2185 (derivation-ok-extension-err): an extension re-declaring
+     * a base attribute use by expanded name is a duplicate attribute
+     * use — the schema fails. The twin derivation-ok-extension_0
+     * spells the same re-declaration use="prohibited", which REMOVES
+     * the base use instead of duplicating it: that schema stays
+     * legal (its manifest row is a valid instance row). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) +
+                    "/derivation-ok-extension-err_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "an extension re-declaring a base attribute use must be "
+           "rejected";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+    LeptrisStatus st2 = (LeptrisStatus)0;
+    std::string p2 = std::string(LEPTRIS_XSD_CASES_DIR) +
+                     "/derivation-ok-extension_0.xsd";
+    LeptrisXsdSchema s2 = leptris_xsd_compile_file(p2.c_str(), &st2);
+    EXPECT_EQ(st2, LEPTRIS_OK) << leptris_xsd_error(s2);
+    leptris_xsd_free(s2);
+}
+
+TEST(XsdConformanceClauses, DerivationOkRestrictionAttrUseGridRejected) {
+    /* #2185 (derivation-ok-restriction-2-1-1 + 2.2): the derived
+     * grid against base typeA — barB_1 optional and barB_3
+     * prohibited weaken a REQUIRED base use (2.1.1); barC_1/barC_2
+     * and barD_1/barD_2 carry optional/required uses with NO
+     * matching base use (2.2 — the base's prohibited rows are not
+     * in its {attribute uses}). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) +
+                    "/derivation-ok-restriction-2-1-1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "the restriction attribute-use grid must be rejected";
+    EXPECT_NE(leptris_xsd_error(s), nullptr);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdConformanceClauses, RestrictionWeakenedRequiredUseRejected) {
+    /* #2185 (restriction-attr1): a derived use="optional" against a
+     * base use="required". The sibling grids keep compiling — their
+     * manifest rows are instance-invalid, not schema-error
+     * (restriction-enum-1_1 restricts a simpleType; restriction0_0
+     * restricts particle content with no attribute rows). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string p = std::string(LEPTRIS_XSD_CASES_DIR) +
+                    "/restriction-attr1_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(st, LEPTRIS_OK)
+        << "a derived optional use against a required base use must "
+           "be rejected";
+    leptris_xsd_free(s);
+    const char* keeps[] = {"restriction-enum-1_1.xsd",
+                           "restriction0_0.xsd"};
+    for (const char* n : keeps) {
+        LeptrisStatus st2 = (LeptrisStatus)0;
+        std::string p2 = std::string(LEPTRIS_XSD_CASES_DIR) + "/" + n;
+        LeptrisXsdSchema s2 = leptris_xsd_compile_file(p2.c_str(), &st2);
+        EXPECT_EQ(st2, LEPTRIS_OK) << n << " must keep compiling";
+        leptris_xsd_free(s2);
+    }
+}
+
+TEST(XsdConformanceClauses, ProhibitedAttrUsePresentRejected) {
+    /* #2185 (attruse): barC's attr is use="prohibited" — present in
+     * attruse_0_2 (invalid), absent in attruse_0_0 (valid);
+     * attruse_0_1 drops barA's required attr (invalid). */
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string sp = std::string(LEPTRIS_XSD_CASES_DIR) + "/attruse_0_0.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    const std::pair<const char*, int> cases[] = {
+        {"attruse_0_0.xml", 1}, {"attruse_0_1.xml", 0},
+        {"attruse_0_2.xml", 0}};
+    for (const auto& c : cases) {
+        std::string ip =
+            std::string(LEPTRIS_XSD_CASES_DIR) + "/" + c.first;
+        LeptrisStatus vst = (LeptrisStatus)0;
+        LeptrisDocument d = leptris_parse_file(ip.c_str(), &vst);
+        ASSERT_NE(d, nullptr) << c.first;
+        EXPECT_EQ(leptris_xsd_validate(s, d), c.second) << c.first;
+        leptris_document_free(d);
+    }
+    leptris_xsd_free(s);
+}
+
 TEST(XsdConformanceClauses, UnresolvableRefQNameRejected) {
     /* import1_0 (src-element.2): an xs:element/@ref whose QName
      * resolves to no declaration (the import target file is
@@ -3428,11 +3522,18 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * idc-keyref-err1 and changelog093 (the prefixed selectors now
      * match); bug322411_1 flips red on a stale pinned expectation
      * its own cited oracle no longer holds (see
-     * xsd-dispositions/README.md). Measured 2026-11-24. */
-    EXPECT_GE(pass, 1022) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 181);
-    EXPECT_GE(pass_invalid, 652);
-    EXPECT_GE(pass_schema_error, 187);
+     * xsd-dispositions/README.md). Measured 2026-11-24.
+     * Raised by #2185 (the derivation-ok attribute-use clauses:
+     * duplicate attribute use on the extension-folded table,
+     * restriction derived-vs-base consistency with the
+     * prohibited-row capture, and the prohibited instance-side
+     * enforcement): 1041/1056 — the derivation-ok grid rows and
+     * attruse_0_2 flip to their oracle verdicts (measured
+     * 2026-11-26). */
+    EXPECT_GE(pass, 1041) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 182);
+    EXPECT_GE(pass_invalid, 657);
+    EXPECT_GE(pass_schema_error, 202);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

@@ -207,11 +207,18 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
      * (measured 2026-11-25 on the #2156 base). Monotonically
  * UNION RE-MEASURE (#2150+#2151 together on the rebased base):
  * floor pinned to the measured union value below.
- * Monotonically rising. */
-    EXPECT_GE(pass, 1795) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1191);
-    EXPECT_GE(pass_invalid, 467);
-    EXPECT_GE(pass_schema_error, 103);
+ * Monotonically rising.
+ * Raised by #2185 (the derivation-ok attribute-use clauses ride the
+ * shared engine: duplicate attribute use on the extension-folded
+ * table, restriction derived-vs-base consistency with the 2.2
+ * wildcard arm, the row-level @targetNamespace capture, and the
+ * prohibited instance-side enforcement): 1813/2206 — cta0044.n01,
+ * target003.n1/n2, s3_2_3ii01 flip, zero regressions (measured
+ * 2026-11-26 on the #2193 base). */
+    EXPECT_GE(pass, 1813) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1192);
+    EXPECT_GE(pass_invalid, 479);
+    EXPECT_GE(pass_schema_error, 142);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

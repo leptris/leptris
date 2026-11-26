@@ -58,8 +58,8 @@ extern const XsdTypeAttrs* xsd_find_type_attrs(
     struct leptris_xsd_schema* s, const char* type_name);
 extern const XsdElementIcs* xsd_find_element_ics(
     struct leptris_xsd_schema* s, const char* element_name);
-static int any_attr_matches(const char* grammar, const char* uri,
-                            const char* target_ns);
+extern int xsd_any_attr_matches(const char* grammar, const char* uri,
+                                const char* target_ns);
 extern void xsd_resolve_qname_inst(LeptrisElement e, const char* qname,
                                    char* uri, size_t urisz, char* local,
                                    size_t localsz);
@@ -614,7 +614,7 @@ static int model_wildcard_pc(const XsdCm* model, const char* uri,
                     p->any_ns ? p->any_ns : "##any";
                 const char* unit =
                     p->any_unit_tns ? p->any_unit_tns : tns;
-                if (any_attr_matches(grammar, uri, unit)) {
+                if (xsd_any_attr_matches(grammar, uri, unit)) {
                     int pc = p->pc_level;
                     if (pc > best) best = pc;
                 }
@@ -629,7 +629,7 @@ static int model_wildcard_pc(const XsdCm* model, const char* uri,
         const XsdCm* w = model->open_any;
         const char* grammar = w->any_ns ? w->any_ns : "##any";
         const char* unit = w->any_unit_tns ? w->any_unit_tns : tns;
-        if (any_attr_matches(grammar, uri, unit)) {
+        if (xsd_any_attr_matches(grammar, uri, unit)) {
             int pc = w->pc_level;
             if (pc > best) best = pc;
         }
@@ -1657,8 +1657,8 @@ static int attr_not_qname_hits(const char* tokens,
  * list. target_ns may be NULL or "" — an ABSENT unit tns: ##other
  * then matches every attribute that HAS a namespace (it excludes
  * only ##local), ##targetNamespace matches nothing. */
-static int any_attr_matches(const char* grammar, const char* uri,
-                            const char* target_ns) {
+int xsd_any_attr_matches(const char* grammar, const char* uri,
+                         const char* target_ns) {
     int has_tns = target_ns && target_ns[0];
     if (!grammar || strcmp(grammar, "##any") == 0) return 1;
     if (strcmp(grammar, "##other") == 0)
@@ -1805,6 +1805,31 @@ static void validate_attributes(struct xsd_validator* v,
                           a->name, "required but absent");
             continue;
         }
+        /* #2185: use="prohibited" removes the attribute from the
+         * type's {attribute uses} (XSD 1.0 §3.4.2) — an instance
+         * attribute the row names is rejected (attruse_0_2). In an
+         * EXTENSION the prohibited row contributes nothing: the
+         * folded base use with the same expanded name governs (the
+         * derivation-ok-extension_0 twin — its instance carries the
+         * attribute and stays valid), so a same-name co-row makes
+         * this row inert. */
+        if (a->prohibited) {
+            int inert = 0;
+            for (const XsdAttrDecl* b = ta->attrs; b && !inert;
+                 b = b->next) {
+                if (b == a || !b->name || !a->name) continue;
+                int bn = b->ns && b->ns[0];
+                int an = a->ns && a->ns[0];
+                if (strcmp(b->name, a->name) != 0 || bn != an) continue;
+                if (bn && strcmp(b->ns, a->ns) != 0) continue;
+                inert = 1;
+            }
+            if (!inert) {
+                verrf_atk(v, elem, "attribute-use", a->name,
+                          "attribute", a->name, "prohibited but present");
+                continue;
+            }
+        }
         text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
                    a->name, elem);
         if (a->fixed && strcmp(val, a->fixed) != 0 &&
@@ -1883,12 +1908,12 @@ static void validate_attributes(struct xsd_validator* v,
         /* moxml#460: a notQName-only wildcard (no @namespace) is
          * still a live wildcard — absent @namespace means ##any. */
         if ((ta && (ta->any_attr_ns || ta->any_attr_not_qname) &&
-             any_attr_matches(ta->any_attr_ns, auri,
+             xsd_any_attr_matches(ta->any_attr_ns, auri,
                               ta->any_attr_unit_ns
                                   ? ta->any_attr_unit_ns
                                   : xsd_target_ns(s))) ||
             (ta && ta->any_attr_base_ns &&
-             any_attr_matches(ta->any_attr_base_ns, auri,
+             xsd_any_attr_matches(ta->any_attr_base_ns, auri,
                               ta->any_attr_base_unit_ns
                                   ? ta->any_attr_base_unit_ns
                                   : xsd_target_ns(s))))
@@ -1934,12 +1959,12 @@ static void validate_attributes(struct xsd_validator* v,
                 continue;
             int admitted =
                 ((ta->any_attr_ns || ta->any_attr_not_qname) &&
-                 any_attr_matches(ta->any_attr_ns, auri,
+                 xsd_any_attr_matches(ta->any_attr_ns, auri,
                                   ta->any_attr_unit_ns
                                       ? ta->any_attr_unit_ns
                                       : xsd_target_ns(s))) ||
                 (ta->any_attr_base_ns &&
-                 any_attr_matches(ta->any_attr_base_ns, auri,
+                 xsd_any_attr_matches(ta->any_attr_base_ns, auri,
                                   ta->any_attr_base_unit_ns
                                       ? ta->any_attr_base_unit_ns
                                       : xsd_target_ns(s)));
