@@ -457,7 +457,12 @@ jobs:
             -Directory | Select-Object -First 1 -ExpandProperty FullName
           if (-not $msvcBin) { throw "MSVC Hostx64/x64 bin dir not found" }
           $env:PATH = "$msvcBin;$env:PATH"
-          pgomgr /help | Out-Null
+          # Diagnostics for the merge chain below; pgomgr's own exit
+          # codes decide pass/fail.
+          Write-Host "pgomgr: $msvcBin/pgomgr.exe"
+          $pgds = @(Get-ChildItem -Recurse -Filter *.pgd)
+          Write-Host "seed pgds: $($pgds.Count)"
+          $pgds | ForEach-Object { Write-Host "  $($_.FullName)" }
           $root = (Get-Location).Path -replace '\\','/'
           bash .github/scripts/pgo_battery.sh "$root" "$root/build" `
             train msvc "$root/train-log" --allow-missing
@@ -468,8 +473,11 @@ jobs:
             & $cli parse $xml > $null 2>&1
           }
           # pgomgr folds each exe's .pgc into its .pgd.
-          foreach ($pgd in Get-ChildItem -Recurse -Filter *.pgd) {
+          foreach ($pgd in $pgds) {
             pgomgr /merge $pgd.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "pgomgr /merge failed for $($pgd.FullName) (exit $LASTEXITCODE)"
+            }
           }
           # Consolidate one profile next to the dll: plain /USEPROFILE
           # looks for <output>.pgd beside the output. The seed pgd's own
