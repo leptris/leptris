@@ -41,6 +41,15 @@
 #            instrumented output; pgomgr merges them and consolidates
 #            one libleptris.pgd next to the dll, which the plain
 #            /USEPROFILE link then reads. Exercised on the first train.
+#
+# LTO is OFF on every PGO build here: GCC's LTO×PGO output proved
+# nondeterministic — with identical flags and identical training input,
+# one profile counter riding the LTO IR stream still differed between
+# two training runs, so build-twice byte-identity never held. PGO
+# carries the optimization load, and PGO-without-LTO builds
+# byte-identical. (MSVC PGO keeps its inherent /LTCG — required by
+# /GENPROFILE and /USEPROFILE; that is linker-side, not the CMake IPO
+# layer this flag turns off.)
 
 name: PGO
 
@@ -99,8 +108,10 @@ jobs:
 
       # -frandom-seed pins GCC's path-derived local-symbol suffix (the
       # C3 reproducibility smoke's lesson) so the two PGO trees are
-      # byte-comparable. LTO stays at its Release default (ON): the USE
-      # build must carry exactly the release shape plus PGO.
+      # byte-comparable. LTO is OFF everywhere in this workflow (see the
+      # header: GCC's LTO×PGO output is nondeterministic; PGO carries
+      # the optimization load) — and the OFF baseline carries the SAME
+      # flag set, so the row deltas isolate exactly the PGO effect.
       - name: Configure + build (OFF baseline)
         env:
           CONFIG: >-
@@ -108,6 +119,7 @@ jobs:
             -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
             -DLEPTRIS_ENABLE_ICONV=OFF
             -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DLEPTRIS_ENABLE_LTO=OFF
             -DCMAKE_C_FLAGS=-frandom-seed=leptris
         run: |
           cmake -B build-off -S . ${CONFIG}
@@ -127,6 +139,7 @@ jobs:
             -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
             -DLEPTRIS_ENABLE_ICONV=OFF
             -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DLEPTRIS_ENABLE_LTO=OFF
             -DCMAKE_C_FLAGS=-frandom-seed=leptris
         run: |
           cmake -B build-a -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=GENERATE
@@ -144,6 +157,7 @@ jobs:
             -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
             -DLEPTRIS_ENABLE_ICONV=OFF
             -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DLEPTRIS_ENABLE_LTO=OFF
             -DCMAKE_C_FLAGS=-frandom-seed=leptris
         run: |
           cmake -B build-a -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=USE
@@ -185,6 +199,7 @@ jobs:
             -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
             -DLEPTRIS_ENABLE_ICONV=OFF
             -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DLEPTRIS_ENABLE_LTO=OFF
             -DCMAKE_C_FLAGS=-frandom-seed=leptris
         run: |
           set -euo pipefail
@@ -317,7 +332,7 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF \
             -DLEPTRIS_BUILD_STATIC=ON \
             -DLEPTRIS_BUILD_SHARED=ON \
-            ${SEED} \
+            ${SEED} -DLEPTRIS_ENABLE_LTO=OFF \
             -DLEPTRIS_ENABLE_PGO=GENERATE
 
       - name: Configure GENERATE (Windows / MSVC)
@@ -334,6 +349,7 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF `
             -DLEPTRIS_BUILD_STATIC=ON `
             -DLEPTRIS_BUILD_SHARED=ON `
+            -DLEPTRIS_ENABLE_LTO=OFF `
             -DLEPTRIS_ENABLE_PGO=GENERATE `
             -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
             -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
@@ -412,7 +428,7 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF \
             -DLEPTRIS_BUILD_STATIC=ON \
             -DLEPTRIS_BUILD_SHARED=ON \
-            ${SEED} \
+            ${SEED} -DLEPTRIS_ENABLE_LTO=OFF \
             -DLEPTRIS_ENABLE_PGO=USE
 
       - name: Configure USE (Windows / MSVC)
@@ -427,6 +443,7 @@ jobs:
             -DLEPTRIS_ENABLE_ICONV=OFF `
             -DLEPTRIS_BUILD_STATIC=ON `
             -DLEPTRIS_BUILD_SHARED=ON `
+            -DLEPTRIS_ENABLE_LTO=OFF `
             -DLEPTRIS_ENABLE_PGO=USE `
             -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `
             -DCMAKE_EXE_LINKER_FLAGS="/DEBUG"
