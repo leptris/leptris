@@ -449,6 +449,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # pgomgr ships inside the MSVC bin dir; the VS generator finds
+          # the compiler for cmake, but nothing puts the profiler tools
+          # on PATH. Discover it the way vswhere would.
+          $msvcBin = Get-ChildItem `
+            "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\x64" `
+            -Directory | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $msvcBin) { throw "MSVC Hostx64/x64 bin dir not found" }
+          $env:PATH = "$msvcBin;$env:PATH"
+          pgomgr /help | Out-Null
           $root = (Get-Location).Path -replace '\\','/'
           bash .github/scripts/pgo_battery.sh "$root" "$root/build" `
             train msvc "$root/train-log" --allow-missing
