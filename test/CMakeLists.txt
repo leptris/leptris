@@ -172,6 +172,13 @@ target_compile_definitions(test_xsd11_conformance PRIVATE
 leptris_add_test(test_xsd11_cta xsd/test_xsd11_cta.cpp)
 target_compile_definitions(test_xsd11_cta PRIVATE
     LEPTRIS_XSD11_CTA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cta")
+# #2184: the alternative-table compile constraints (type
+# substitutability, XPath-valid tests, table equality, src-ct.1,
+# {inheritable}) — the cta schema-error class; fixtures ride the
+# pinned xsd11-cases corpus.
+leptris_add_test(test_xsd11_ctatable xsd/test_xsd11_ctatable.cpp)
+target_compile_definitions(test_xsd11_ctatable PRIVATE
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 # leptris-ruby#679: targetNamespace qualification on validated
 # documents (root resolution + attribute form).
 leptris_add_test(test_xsd_ns_qualification xsd/test_xsd_ns_qualification.cpp)

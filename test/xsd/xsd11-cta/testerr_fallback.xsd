@@ -1,9 +1,12 @@
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
   elementFormDefault="qualified">
 
-  <!-- #2149 (§3.12.4): a dynamic/compile error in a test evaluates
-       the alternative as FALSE — the declared type stands. The
-       malformed test must not reject the document. -->
+  <!-- #2149 (§3.12.4): a DYNAMIC error in a test evaluates the
+       alternative as FALSE — the declared type stands. The malformed
+       SYNTAX case is a schema error (test_xsd11_ctatable.cpp /
+       Xsd11Cta.MalformedTestSyntaxIsSchemaError); this fixture pins
+       the evaluation-error channel with an expression that parses
+       but raises at evaluation time (FOAR0001). -->
   <xs:complexType name="base">
     <xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence>
   </xs:complexType>
@@ -12,7 +15,7 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element name="e" type="base" maxOccurs="unbounded">
-          <xs:alternative test="@k === 'broken'" type="xs:error"/>
+          <xs:alternative test="1 div 0 eq 1" type="xs:error"/>
         </xs:element>
       </xs:sequence>
     </xs:complexType>

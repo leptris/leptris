@@ -1,0 +1,23 @@
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified">
+
+  <!-- #2184 (§3.12.2 XPath valid): a test whose EXPRESSION does not
+       parse fails the SCHEMA — "errors in XPath evaluation are
+       treated as false" (§3.12.4) covers evaluation, not syntax.
+       The evaluation-error channel has its own fixture
+       (testerr_fallback.xsd). -->
+  <xs:complexType name="base">
+    <xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="e" type="base" maxOccurs="unbounded">
+          <xs:alternative test="@k === 'broken'" type="xs:error"/>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

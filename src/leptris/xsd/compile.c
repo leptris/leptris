@@ -77,6 +77,11 @@ struct leptris_xsd_schema {
      * the compile, and flipping those would reject schemas the gate
      * pins as clean. */
     int oc_failed;
+    /* #2184: the alternative-table capture rejected the schema —
+     * src-element.5 (a test-less xs:alternative mid-table; the
+     * capture truncates the chain there, so only the element walk can
+     * see it). Surfaced post-capture like oc_failed. */
+    int ct_failed;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -3353,9 +3358,519 @@ static int xsd_check_derivation_ok_attrs(struct leptris_xsd_schema* s) {
                 xsd_set_error(s, msg);
                 return -1;
             }
+            /* #2184 §3.2.7.1 / cos-st-restricts 1.1: the derived
+             * use's {inheritable} must EQUAL the base use's — a
+             * restriction may not flip it (cta9004: true→false,
+             * cta9005: unset→true). An unset flag reads as false
+             * (the property's default). 1.1-only: the property does
+             * not exist in 1.0, so the check rides the 1.1-evidence
+             * posture. */
+            if ((s->version_11 || s->saw_alternative || s->saw_assert) &&
+                (d->inheritable >= 0 ? d->inheritable : 0) !=
+                    (m->inheritable >= 0 ? m->inheritable : 0)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-st-restricts: attribute '%s' of '%s' "
+                         "changes the base use's inheritable in '%s'",
+                         d->name, c->name, c->res_base);
+                xsd_set_error(s, msg);
+                return -1;
+            }
         }
     }
     return 0;
+}
+
+/* ---- #2184: the alternative-table compile constraints -------------
+ *
+ * §3.12.4's dispatch assumes a table the compile side never checked.
+ * The sweep runs post-capture (the type-table captures and the
+ * derivation folds have landed) and enforces:
+ *
+ *   - §3.12.2 XPath valid: an alternative test that does not parse
+ *     fails the SCHEMA. Evaluation errors stay the §3.12.4 "false"
+ *     channel (Xsd11Cta.TestEvaluationErrorIsFalse) — the s3_12si04/
+ *     si05/si06 shapes.
+ *
+ *   - §3.3.6.1 cl.7 / cos-ct-type-substitutable: every alternative's
+ *     type derives from the element's declared type (by extension or
+ *     restriction — through the simpleContent text type for simple
+ *     bases), or is xs:error, or the declared type is the ur-type.
+ *     The s3_12si02/si03 + cta9008err shapes.
+ *
+ *   - cos-element-consistent (§3.8.6): two same-name particles in
+ *     one content model must carry EQUAL type tables — cta9009err's
+ *     third row and cta9010err's table-vs-no-table pair. The
+ *     comparison skips chains with inline alternative types (their
+ *     synthesized slot names are node addresses; a structural
+ *     comparison is out of scope here and the legal corpus does not
+ *     restate inline tables).
+ *
+ *   - particle restriction: a complexContent restriction's same-name
+ *     particle must preserve the base particle's type table —
+ *     cta0043's narrowed stamp table.
+ *
+ * The src-element.5 mid-table test-less form is flagged at capture
+ * (the chain truncates there) and surfaced here via ct_failed. */
+
+/* Builtin derivation edges (derived ← base). The atomic root and
+ * anySimpleType are handled analytically below; the list builtins
+ * derive through their item types. */
+static const struct { const char* d; const char* b; } k_builtin_base[] = {
+    {"xs:anyAtomicType", "xs:anySimpleType"},
+    {"xs:normalizedString", "xs:string"},
+    {"xs:token", "xs:normalizedString"},
+    {"xs:language", "xs:token"},
+    {"xs:Name", "xs:token"},
+    {"xs:NCName", "xs:Name"},
+    {"xs:ID", "xs:NCName"},
+    {"xs:IDREF", "xs:NCName"},
+    {"xs:ENTITY", "xs:NCName"},
+    {"xs:NMTOKEN", "xs:token"},
+    {"xs:IDREFS", "xs:IDREF"},
+    {"xs:NMTOKENS", "xs:NMTOKEN"},
+    {"xs:ENTITIES", "xs:ENTITY"},
+    {"xs:integer", "xs:decimal"},
+    {"xs:nonPositiveInteger", "xs:integer"},
+    {"xs:negativeInteger", "xs:nonPositiveInteger"},
+    {"xs:long", "xs:integer"},
+    {"xs:int", "xs:long"},
+    {"xs:short", "xs:int"},
+    {"xs:byte", "xs:short"},
+    {"xs:nonNegativeInteger", "xs:integer"},
+    {"xs:positiveInteger", "xs:nonNegativeInteger"},
+    {"xs:unsignedLong", "xs:nonNegativeInteger"},
+    {"xs:unsignedInt", "xs:unsignedLong"},
+    {"xs:unsignedShort", "xs:unsignedInt"},
+    {"xs:unsignedByte", "xs:unsignedShort"},
+    {"xs:dateTimeStamp", "xs:dateTime"},
+    {"xs:yearMonthDuration", "xs:duration"},
+    {"xs:dayTimeDuration", "xs:duration"},
+};
+
+/* The three list builtins do not derive from anyAtomicType. */
+static int xsd_builtin_is_list_form(const char* t) {
+    return strcmp(t, "xs:IDREFS") == 0 || strcmp(t, "xs:NMTOKENS") == 0 ||
+           strcmp(t, "xs:ENTITIES") == 0;
+}
+
+static int xsd_builtin_derives_from(const char* d, const char* b) {
+    if (strcmp(d, b) == 0) return 1;
+    if (strcmp(b, "xs:anyType") == 0) return 1;
+    /* every builtin (but the root and the list forms) is simple and
+     * derives from xs:anySimpleType; atomics additionally derive
+     * from xs:anyAtomicType */
+    if (strcmp(b, "xs:anySimpleType") == 0 && !xsd_builtin_is_list_form(d))
+        return 1;
+    if (strcmp(b, "xs:anyAtomicType") == 0 && !xsd_builtin_is_list_form(d) &&
+        strcmp(d, "xs:anySimpleType") != 0)
+        return 1;
+    for (int hop = 0; hop < 24; hop++) {
+        const char* next = NULL;
+        for (size_t i = 0; i < sizeof(k_builtin_base) / sizeof(k_builtin_base[0]);
+             i++)
+            if (strcmp(k_builtin_base[i].d, d) == 0) {
+                next = k_builtin_base[i].b;
+                break;
+            }
+        if (!next) return 0;
+        if (strcmp(next, b) == 0) return 1;
+        d = next;
+    }
+    return 0;
+}
+
+/* A simple type name (builtin "xs:-" or local) derives from target. */
+static int xsd_simple_name_derives_from(struct leptris_xsd_schema* s,
+                                        const char* name, const char* target) {
+    if (!name || !target) return 0;
+    if (strcmp(name, target) == 0) return 1;
+    /* every simple type derives from the simple/ur roots */
+    if (strcmp(target, "xs:anyType") == 0 ||
+        strcmp(target, "xs:anySimpleType") == 0)
+        return 1;
+    if (strncmp(name, "xs:", 3) == 0)
+        return xsd_builtin_derives_from(name, target);
+    if (strncmp(target, "xs:", 3) == 0 &&
+        strcmp(target, "xs:anyAtomicType") == 0)
+        return 0; /* a local type of unknown variety: posture */
+    const XsdSimple* t = xsd_find_simple(s, name);
+    for (int hop = 0; t && hop < 16; hop++) {
+        if (t->base) {
+            if (strcmp(t->base, target) == 0) return 1;
+            if (strncmp(t->base, "xs:", 3) == 0)
+                return xsd_builtin_derives_from(t->base, target);
+        }
+        const XsdSimple* next =
+            t->base_def ? t->base_def
+                        : (t->base ? xsd_find_simple(s, t->base) : NULL);
+        if (!next) return 0;
+        t = next;
+    }
+    return 0;
+}
+
+/* The complex derivation chain: restriction (res_base) and extension
+ * (assert_base — set eagerly at capture or stolen by the deferred
+ * fold; ext_base kept as the belt), with the simpleContent text type
+ * carrying the chain through a simple base. */
+static int xsd_cm_derives_from(struct leptris_xsd_schema* s, XsdCm* cm,
+                               const char* target, int hops) {
+    if (!cm || hops > 16) return 0;
+    if (cm->name && strcmp(cm->name, target) == 0) return 1;
+    if (cm->text_type &&
+        xsd_simple_name_derives_from(s, cm->text_type, target))
+        return 1;
+    const char* tns = xsd_target_ns(s);
+    XsdCm* next = NULL;
+    if (cm->res_base) {
+        next = xsd_find_complex_ns(s, cm->res_base,
+                                   cm->res_base_ns ? cm->res_base_ns : tns);
+        if (!next) next = xsd_find_complex(s, cm->res_base);
+    }
+    if (!next && cm->assert_base) {
+        next = xsd_find_complex_ns(
+            s, cm->assert_base, cm->assert_base_ns ? cm->assert_base_ns : tns);
+        if (!next) next = xsd_find_complex(s, cm->assert_base);
+    }
+    if (!next && cm->ext_base) {
+        next = xsd_find_complex_ns(s, cm->ext_base,
+                                   cm->ext_base_ns ? cm->ext_base_ns : tns);
+        if (!next) next = xsd_find_complex(s, cm->ext_base);
+    }
+    return xsd_cm_derives_from(s, next, target, hops + 1);
+}
+
+/* One resolved type reference. kind: 0 unresolved, 1 ur-type
+ * (anyType / anySimpleType / anyAtomicType), 2 builtin, 3 complex,
+ * 4 local simple. */
+typedef struct {
+    int kind;
+    XsdCm* cm;
+    const XsdSimple* sm;
+} XsdTypeRef;
+
+static XsdTypeRef xsd_resolve_type_ref(struct leptris_xsd_schema* s,
+                                       const char* name) {
+    XsdTypeRef r = {0, NULL, NULL};
+    if (!name || !name[0]) {
+        r.kind = 1; /* no declared type = xs:anyType (§3.3.2) */
+        return r;
+    }
+    if (strncmp(name, "xs:", 3) == 0) {
+        if (strcmp(name, "xs:anyType") == 0 ||
+            strcmp(name, "xs:anySimpleType") == 0 ||
+            strcmp(name, "xs:anyAtomicType") == 0)
+            r.kind = 1;
+        else
+            r.kind = 2;
+        return r;
+    }
+    const char* tns = xsd_target_ns(s);
+    r.cm = xsd_find_complex_ns(s, name, tns);
+    if (!r.cm) r.cm = xsd_find_complex(s, name);
+    if (r.cm) {
+        r.kind = 3;
+        return r;
+    }
+    r.sm = xsd_find_simple(s, name);
+    if (r.sm) r.kind = 4;
+    return r;
+}
+
+/* §3.3.6.1 cl.7 / cos-ct-type-substitutable: the alternative's type
+ * derives from the declared type. Unresolved names skip (the ref
+ * checks own them); xs:error always substitutes (no valid instances,
+ * so the alternative can never admit anything). */
+static int xsd_alt_substitutable(struct leptris_xsd_schema* s,
+                                 const XsdAlternative* a,
+                                 const char* decl_type) {
+    if (a->xs_error) return 1;
+    XsdTypeRef d = xsd_resolve_type_ref(s, decl_type);
+    XsdTypeRef alt = xsd_resolve_type_ref(s, a->type);
+    if (d.kind == 0 || alt.kind == 0) return 1;
+    if (d.kind == 1) return 1; /* declared ur-type: everything derives */
+    if (decl_type && a->type && strcmp(decl_type, a->type) == 0) return 1;
+    if (alt.kind == 1)
+        return d.kind == 2 || d.kind == 4; /* a ur simple for a simple */
+    if (alt.kind == 3)
+        return (d.kind == 3 || d.kind == 2 || d.kind == 4) &&
+               xsd_cm_derives_from(s, alt.cm, decl_type, 0);
+    if (alt.kind == 2 || alt.kind == 4) {
+        if (d.kind != 2 && d.kind != 4) return 0;
+        /* cos-ct-type-substitutable's union and list arms: D
+         * substitutes a union B when D derives from ANY of B's
+         * member types (cta0014/15: xs:date substitutes the
+         * date/time/dateTime/gYearMonth union), and a list B when D
+         * derives from B's item type. */
+        if (d.kind == 4 && d.sm) {
+            if (d.sm->deriv == XSD_SIMPLE_UNION && d.sm->members) {
+                for (size_t i = 0; i < d.sm->member_count; i++)
+                    if (d.sm->members[i] &&
+                        xsd_simple_name_derives_from(s, a->type,
+                                                     d.sm->members[i]))
+                        return 1;
+                return 0;
+            }
+            if (d.sm->deriv == XSD_SIMPLE_LIST && d.sm->item_type)
+                return xsd_simple_name_derives_from(s, a->type,
+                                                    d.sm->item_type);
+        }
+        return xsd_simple_name_derives_from(s, a->type, decl_type);
+    }
+    return 0;
+}
+
+/* Does the chain carry an inline (synthesized-slot) alternative
+ * type? Those compare by node-address names — equality between
+ * separately captured chains is undecidable here, so table
+ * comparisons skip them. */
+static int xsd_table_has_synth(const XsdAlternative* a) {
+    for (; a; a = a->next)
+        if (a->type && strncmp(a->type, "alternative:", 12) == 0) return 1;
+    return 0;
+}
+
+static int xsd_type_tables_equal(const XsdAlternative* a,
+                                 const XsdAlternative* b) {
+    if (xsd_table_has_synth(a) || xsd_table_has_synth(b)) return 1;
+    while (a && b) {
+        int same_test = (a->test && b->test) ? strcmp(a->test, b->test) == 0
+                                             : (!a->test && !b->test);
+        int same_type = (a->type && b->type) ? strcmp(a->type, b->type) == 0
+                                             : (!a->type && !b->type);
+        if (!same_test || !same_type || a->xs_error != b->xs_error)
+            return 0;
+        a = a->next;
+        b = b->next;
+    }
+    return a == NULL && b == NULL;
+}
+
+/* Per-particle constraint checks (§3.12.2 + §3.3.6.1 cl.7) on one
+ * alternative chain. Returns 0 ok, -1 failed (error set). */
+static int xsd_check_particle_table(struct leptris_xsd_schema* s,
+                                    const char* decl_type,
+                                    const XsdAlternative* chain,
+                                    const char* owner) {
+    for (const XsdAlternative* a = chain; a; a = a->next) {
+        if (a->test && !a->compiled) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-element.5 (XPath valid): the alternative "
+                     "test of '%s' does not parse: \"%s\"",
+                     owner ? owner : "?", a->test);
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        if (!xsd_alt_substitutable(s, a, decl_type)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "cos-ct-type-substitutable: the alternative type "
+                     "'%s' of '%s' does not derive from the declared "
+                     "type '%s'",
+                     a->type, owner ? owner : "?",
+                     decl_type ? decl_type : "xs:anyType");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Particle table collector for the content-model walks. */
+typedef struct {
+    char ns[192];
+    char name[192];
+    char type[192];
+    const XsdAlternative* table;
+} XsdParticleRow;
+
+static void xsd_collect_particles(const XsdCm* n, XsdParticleRow* arr,
+                                  int cap, int* count, int depth) {
+    if (!n || depth > 32) return;
+    if (n->kind == XSD_CM_ELEMENT) {
+        if (!n->name || *count >= cap) return;
+        XsdParticleRow* r = &arr[(*count)++];
+        snprintf(r->ns, sizeof(r->ns), "%s", n->ns ? n->ns : "");
+        snprintf(r->name, sizeof(r->name), "%s", n->name);
+        snprintf(r->type, sizeof(r->type), "%s", n->type ? n->type : "");
+        r->table = n->alternatives;
+        return;
+    }
+    for (const XsdCm* c = n->first_child; c; c = c->next)
+        xsd_collect_particles(c, arr, cap, count, depth + 1);
+}
+
+static int xsd_particle_same_name(const XsdParticleRow* a,
+                                  const XsdParticleRow* b) {
+    return strcmp(a->name, b->name) == 0 && strcmp(a->ns, b->ns) == 0;
+}
+
+/* The sweep: per-element-decl constraints (globals + every complex
+ * type's particles), the content-model table-equality check, and the
+ * restriction particle-table preservation check. */
+static int xsd_check_type_tables(struct leptris_xsd_schema* s) {
+    if (s->ct_failed) {
+        xsd_set_error(s, "src-element.5: a test-less xs:alternative "
+                         "must be the last alternative of the element "
+                         "declaration");
+        return -1;
+    }
+    /* global element declarations */
+    for (const XsdElementDecl* d = s->elements; d; d = d->next) {
+        if (d->alternatives &&
+            xsd_check_particle_table(s, d->type, d->alternatives, d->name) != 0)
+            return -1;
+    }
+    /* complex types: particles + same-model table equality */
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        XsdParticleRow rows[256];
+        int n = 0;
+        xsd_collect_particles(c, rows, 256, &n, 0);
+        for (int i = 0; i < n; i++) {
+            if (rows[i].table &&
+                xsd_check_particle_table(s, rows[i].type[0] ? rows[i].type
+                                                            : NULL,
+                                         rows[i].table,
+                                         rows[i].name) != 0)
+                return -1;
+            /* cos-element-consistent: same (ns, name) twice in one
+             * model — the tables must be equal */
+            for (int j = i + 1; j < n; j++) {
+                if (!xsd_particle_same_name(&rows[i], &rows[j])) continue;
+                if (rows[i].table == rows[j].table) continue;
+                if ((rows[i].table == NULL) != (rows[j].table == NULL)) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "cos-element-consistent: the type table "
+                             "of '%s' in '%s' differs from its "
+                             "same-name particle",
+                             rows[i].name, c->name ? c->name : "?");
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+                if (!xsd_type_tables_equal(rows[i].table, rows[j].table)) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "cos-element-consistent: the same-name "
+                             "particles '%s' in '%s' carry different "
+                             "type tables",
+                             rows[i].name, c->name ? c->name : "?");
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+        }
+        /* particle restriction: the derived same-name particle must
+         * preserve the base particle's type table */
+        if (!c->res_base) continue;
+        const char* tns = xsd_target_ns(s);
+        XsdCm* base = xsd_find_complex_ns(
+            s, c->res_base, c->res_base_ns ? c->res_base_ns : tns);
+        if (!base) base = xsd_find_complex(s, c->res_base);
+        if (!base) continue;
+        XsdParticleRow brows[256];
+        int bn = 0;
+        xsd_collect_particles(base, brows, 256, &bn, 0);
+        for (int i = 0; i < n; i++) {
+            if (!rows[i].table) continue;
+            for (int j = 0; j < bn; j++) {
+                if (!xsd_particle_same_name(&rows[i], &brows[j])) continue;
+                if (!brows[j].table) break; /* base has none: posture */
+                if (!xsd_type_tables_equal(rows[i].table, brows[j].table)) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "cos-particle-restrict: the restriction "
+                             "'%s' changes the type table of '%s'",
+                             c->name ? c->name : "?", rows[i].name);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
+/* #2184 src-ct.1 + §3.2.7.1, walked over the SOURCE elements (the
+ * captured models no longer carry the wrapper shape):
+ *
+ *   - a complexType whose XML representation has a simpleContent /
+ *     complexContent child may not also declare xs:attribute /
+ *     xs:attributeGroup / xs:anyAttribute at the complexType level —
+ *     the s3_12si01 shape;
+ *
+ *   - @inheritable must be a boolean lexical (§3.2.7.1 —
+ *     cta9006err's "" and cta9007err's "2"); gated on the 1.1
+ *     posture, the attribute does not exist in 1.0. */
+static int xsd_check_schema_source(struct leptris_xsd_schema* s,
+                                   LeptrisElement e, int depth) {
+    if (depth > 32) return 0;
+    int bad = 0;
+    for (LeptrisNodeRef n = leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0) {
+            if (strcmp(cl, "complexType") == 0) {
+                int saw_wrapper = 0, saw_direct_attr = 0;
+                for (LeptrisNodeRef m =
+                         leptris_node_first_child(leptris_element_as_node(c));
+                     m; m = leptris_node_next_sibling(m)) {
+                    if (leptris_node_get_type(m) != LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    const char* ml = NULL;
+                    const char* mu = NULL;
+                    leptris_element_expanded_name((LeptrisElement)m, &ml,
+                                                  NULL, &mu);
+                    if (!ml || !mu || strcmp(mu, XSD_NS) != 0) continue;
+                    if (strcmp(ml, "simpleContent") == 0 ||
+                        strcmp(ml, "complexContent") == 0)
+                        saw_wrapper = 1;
+                    else if (strcmp(ml, "attribute") == 0 ||
+                             strcmp(ml, "attributeGroup") == 0 ||
+                             strcmp(ml, "anyAttribute") == 0)
+                        saw_direct_attr = 1;
+                }
+                if (saw_wrapper && saw_direct_attr) {
+                    xsd_set_error(s, "src-ct.1: a complexType with a "
+                                     "simpleContent/complexContent "
+                                     "wrapper may not declare "
+                                     "attributes at the complexType "
+                                     "level");
+                    bad = 1;
+                }
+            } else if (strcmp(cl, "attribute") == 0) {
+                const char* v = leptris_element_attribute(c, "inheritable");
+                if (v && (s->version_11 || s->saw_alternative ||
+                          s->saw_assert)) {
+                    while (*v == ' ' || *v == '\t' || *v == '\n' ||
+                           *v == '\r')
+                        v++;
+                    const char* end = v + strlen(v);
+                    while (end > v && (end[-1] == ' ' || end[-1] == '\t' ||
+                                       end[-1] == '\n' || end[-1] == '\r'))
+                        end--;
+                    size_t len = (size_t)(end - v);
+                    if (!((len == 4 && strncmp(v, "true", 4) == 0) ||
+                          (len == 5 && strncmp(v, "false", 5) == 0) ||
+                          (len == 1 && (v[0] == '0' || v[0] == '1')))) {
+                        xsd_set_error(s, "src-attribute.1 (§3.2.7.1): "
+                                         "inheritable must be a boolean");
+                        bad = 1;
+                    }
+                }
+            }
+        }
+        if (!bad && xsd_check_schema_source(s, c, depth + 1) != 0) bad = 1;
+        if (bad) return 1;
+    }
+    return bad;
 }
 
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
@@ -3540,9 +4055,26 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
 
     /* #2185: the derivation-ok attribute-use clauses — duplicate
      * attribute use on the extension-folded table and the
-     * restriction derived-vs-base consistency, over the POST-capture
-     * tables. A violation fails the SCHEMA. */
+     * restriction derived-vs-base consistency (plus the #2184
+     * {inheritable} match), over the POST-capture tables. A
+     * violation fails the SCHEMA. */
     if (xsd_check_derivation_ok_attrs(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: the alternative-table compile constraints — §3.12.2
+     * XPath-valid tests, §3.3.6.1 cl.7 type substitutability,
+     * cos-element-consistent table equality, the restriction
+     * particle-table preservation, and the src-element.5 mid-table
+     * default flagged at capture. */
+    if (xsd_check_type_tables(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+    if (root && xsd_check_schema_source(s, root, 0) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -5371,10 +5903,11 @@ static void xsd_cta_test_attrs(const char* test, char*** out,
  * through the same ladders as a declared type) or an inline
  * complexType/simpleType child captured into a synthesized slot.
  * A test-less alternative is the DEFAULT: it closes the table
- * (§3.3.2.1 — every alternative but the last carries a test) and its
- * type becomes the no-match fallback. A test that fails to compile
- * is stored with compiled == NULL: §3.12.4 evaluates a dynamic
- * error as false. */
+ * (§3.3.2.1 — every alternative but the last carries a test; a
+ * test-less alternative mid-table is src-element.5, flagged
+ * ct_failed). A test that fails to COMPILE (§3.12.2 XPath valid)
+ * fails the schema (#2184); only evaluation errors take the §3.12.4
+ * "false" channel. */
 static XsdAlternative* xsd_capture_alternatives(
     struct leptris_xsd_schema* s, LeptrisElement decl_elem) {
     XsdAlternative* head = NULL;
@@ -5432,7 +5965,27 @@ static XsdAlternative* xsd_capture_alternatives(
             head = a;
         tail = a;
         s->saw_alternative = 1;
-        if (!a->test) break; /* the default alternative ends the table */
+        if (!a->test) {
+            /* #2184 src-element.5 / §3.3.9.2: the test-less
+             * alternative is the DEFAULT — it may only CLOSE the
+             * table. A further xs:alternative sibling makes the
+             * schema itself invalid (the capture truncates the chain
+             * here, so the violation rides the ct_failed flag to the
+             * post-capture gate — cta9001err). */
+            for (LeptrisNodeRef m = leptris_node_next_sibling(n); m;
+                 m = leptris_node_next_sibling(m)) {
+                if (leptris_node_get_type(m) != LEPTRIS_NODE_TYPE_ELEMENT)
+                    continue;
+                const char* ml = NULL;
+                leptris_element_expanded_name((LeptrisElement)m, &ml,
+                                              NULL, NULL);
+                if (ml && strcmp(ml, "alternative") == 0) {
+                    s->ct_failed = 1;
+                    break;
+                }
+            }
+            break; /* the default alternative ends the table */
+        }
     }
     return head;
 }

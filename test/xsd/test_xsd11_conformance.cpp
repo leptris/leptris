@@ -229,11 +229,25 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * with the 2.2 wildcard arm, the row-level @targetNamespace
  * capture, and the prohibited instance-side enforcement):
  * 1813/2206 — cta0044.n01, target003.n1/n2, s3_2_3ii01 flip
- * (measured 2026-11-26 on the #2193 base). */
-    EXPECT_GE(pass, 1813) << "conformance floor regressed - re-measure the union";
+ * (measured 2026-11-26 on the #2193 base). Raised by #2184 (the
+ * alternative-table compile constraints: §3.12.2 XPath-valid
+ * alternative tests fail the SCHEMA — only evaluation errors take
+ * the §3.12.4 false channel; src-element.5 flags the mid-table
+ * test-less default; §3.3.6.1 cl.7 cos-ct-type-substitutable walks
+ * the declared type's derivation chain (res_base/assert_base/
+ * text_type + builtin ancestry, union member substitution);
+ * cos-element-consistent type-table equality for same-name
+ * particles; the particle-restriction table preservation; src-ct.1
+ * wrapper-plus-direct-attributes; §3.2.7.1 {inheritable} lexical +
+ * restriction-match — the parser's cast-tail fold learned comparison
+ * operators so the valid corpus's cast-into-comparison tests keep
+ * parsing): 1839/2206 — the fifteen cta schema-error rows flip
+ * (s3_12si01-06, cta0043, cta9001err, cta9004-9008err, cta9009err,
+ * cta9010err; measured 2026-11-27 on the #2185 base). */
+    EXPECT_GE(pass, 1839) << "conformance floor regressed - re-measure the union";
     EXPECT_GE(pass_valid, 1192);
-    EXPECT_GE(pass_invalid, 479);
-    EXPECT_GE(pass_schema_error, 142);
+    EXPECT_GE(pass_invalid, 490);
+    EXPECT_GE(pass_schema_error, 157);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

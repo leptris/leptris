@@ -162,8 +162,8 @@ By family (#2151): openContent 122→196; core 1136→1147; valid
 rows the #2148 classifier lumped into openContent are UNION
 tests that flipped with the wildcard-namespace machinery).
 
-By family: assertions 270/296 · cta 99/125 · override 75/87 ·
-openContent 196/205 · core 1147/1493.
+By family: assertions 282/296 · cta 115/125 · override 83/87 ·
+openContent 205/205 · core 1154/1493.
 
 Re-measured 2026-11-26 (#2182, branch `xsd11-defattr` — the
 §3.4.2.5 default attribute groups: xs:schema/@defaultAttributes
@@ -230,6 +230,42 @@ xs:openContent / xs:override (moxml#556 wired xs:assert through the
 XQuery substrate); what the classes below measure is how much of the
 1.1 SEMANTICS each capture actually enforces.
 
+Re-measured 2026-11-27 (#2184, branch `xsd11-tail-2184` — the
+alternative-table compile constraints, the largest OPEN cta class in
+the tail: §3.12.2 XPath-valid alternative tests (a test that does not
+PARSE fails the SCHEMA — only evaluation errors take the §3.12.4
+"false" channel; the #2149 TestEvaluationErrorIsFalse fixture is
+re-pinned to a dynamic error, `1 div 0 eq 1`, and the malformed-syntax
+form moved to Xsd11Cta.MalformedTestSyntaxIsSchemaError), src-element.5
+ordering (a test-less alternative mid-table fails the schema, flagged
+at capture where the chain truncates), §3.3.6.1 cl.7 /
+cos-ct-type-substitutable (every alternative's type derives from the
+declared type — complex chains walk res_base/assert_base/text_type
+plus a builtin-derivation table; a local UNION declared type is
+substituted by any type deriving from a member, cta0014/15; xs:error
+always substitutes; unresolved names stay posture), the parser's
+cast-tail fold now takes comparison operators with proper precedence
+(`@length cast as xs:int > @width cast as xs:int` — the shape three
+ibm valid schemas use — parses, so the syntax gate is regression-free
+there; QT3/xslt/xpath lanes ride unchanged), cos-element-consistent
+type-table equality for same-name particles in one content model
+(cta9009/9010), the particle-restriction table preservation
+(cta0043's narrowed stamp table), src-ct.1 (a complexType with a
+simpleContent/complexContent wrapper may not declare attributes at
+the complexType level — si01), and §3.2.7.1 {inheritable} (malformed
+lexical forms fail the schema, cta9006/9007; a restriction may not
+flip the base use's inheritability, cta9004/9005); re-measured on the
+#2185 base): **1839/2206 pass** — 1192 valid / 490 invalid / 157
+schema-error (367 reds, zero regressions — the pinned 1.0 corpus
+holds at 1041). The cta family goes 100/125 → **115/125**; the gate's
+red split moves to 101 valid / 89 invalid / 177 schema-error. Spec
+tests: test/xsd/test_xsd11_ctatable.cpp (15 specs, red-first). Two
+moxml#579 fixtures (selector_admitted.xsd, only_referenced_exempt.xsd)
+carry the non-substitutable xs:int/xs:string pair the new constraint
+rejects — re-pinned to the substitutable xs:string/xs:token pair (the
+specs' valid/invalid verdicts ride the strict-attribute gate and are
+unchanged).
+
 ## Engine quirk worth knowing while reading the tables
 
 `leptris_xsd_compile_file` on some schema-valid-in-the-suite documents
@@ -255,7 +291,8 @@ schema-error reds; #2150 flips 8 override schema-error rows:
 153 valid / 151 invalid / 192 schema-error reds; #2183 flips 11
 assertion-facet rows invalid-side — the gate split moves
 102 valid / 143 invalid / 166 schema-error reds → 102 valid /
-132 invalid / 166 schema-error reds).
+132 invalid / 166 schema-error reds; #2184 flips 15 cta
+schema-error rows: 101 valid / 89 invalid / 177 schema-error reds).
 
 ## valid rejected by the engine (153)
 
@@ -314,7 +351,7 @@ class and the 3-row cta0040/41 stamp class flipped with it.)
 | 7 | override/redefine cycles residue: ibm S4_2_4/S4_2_2 (2) + ibm S3_4_2_4 (3) + the s3_12ii04 mixed-extension compile-status artifact (1) + s4_2_4si02c (1 — the mutual-redefine cycle's closing document si02b was never copied into the corpus, so the document graph the oracle sees is not reconstructible) | OPEN — cycle detection on redefine graphs beyond the override lane (#2150 flipped the eight saxon Override rows: over011/014/016/017/021/022/024/026 — src-override.1–4 plus the post-merge circular-derivation check, override-scoped) |
 | 19 | saxon Open `.bad` (14) + ibm S3_16_2 (5): openContent derivation rules (derived adds open content over a non-open base; fixed-slot violations) | CLOSED by #2151 — the saxon `.bad` ladder enforces at compile (src-ct.3 any/none co-occurrence, annotation limit, ID form + uniqueness, occurrence attributes on the wildcard, simpleContent carriers, restriction no-add/subset/weaker-pc with the empty-model exemption, extension mode ladder + cos-ns-subset + §3.10.6.3 union); the ibm S3_16_2 rows were misclassified by the #2148 classifier — they are wildcard-UNION tests, not openContent, and flipped with the §3.10.6.3 machinery |
 | 9 | saxon Open defaultAttributes sub-family: open035.n1 (required id from the default attribute group missing must be invalid), open044.n1/n2 + open045.n1/n2 (anyAttribute from the default group mis-admitted / not admitted), open202.n1 (defaultAttributesApply=false must exclude the group's attrs), open205.n1 (foreign-ns default group attrs), open203.bad/204.bad (unresolved + non-imported defaultAttributes refs must fail the schema) | OPEN — re-dispositioned by #2151 from the openContent classes: these nine exercise §3.4.2.5 DEFAULT ATTRIBUTE GROUPS (`xs:schema/@defaultAttributes`, `defaultAttributesApply`, the group's attribute rows + anyAttribute, cross-ns reference resolution) — a separate feature, not openContent |
-| 15 | cta alternative-table SCHEMA constraints (saxon cta9001err/9004-9010err/cta0043 (9) + ibm s3_12si01-06 (6)): §3.3.6.1 cl.7 type-substitutability (every alternative/default type must derive from the declared type or be xs:error), cos-element-consistent type-table equivalence (cta9009/9010err, cta0043's restriction narrowing a table), src-ct.1 (cta9001err mixed+simpleContent), src-element.5 ordering | OPEN — compile-side constraint sweep for type tables; the dispatch validates fine on the legal schemas (#2149 fixed the instance side) |
+| 15 | cta alternative-table SCHEMA constraints (saxon cta9001err/9004-9010err/cta0043 (9) + ibm s3_12si01-06 (6)): §3.3.6.1 cl.7 type-substitutability (every alternative/default type must derive from the declared type or be xs:error), cos-element-consistent type-table equivalence (cta9009/9010err, cta0043's restriction narrowing a table), src-ct.1 (cta9001err mixed+simpleContent), src-element.5 ordering | CLOSED by #2184 — the compile-side sweep for type tables (test/xsd/test_xsd11_ctatable.cpp): §3.12.2 XPath-valid tests reject at compile (si04/si05/si06 — the parser's cast-tail fold first learned comparison operators so the valid corpus's `cast as T > cast as T` shape keeps parsing), src-element.5 flags the mid-table test-less alternative (cta9001err), cos-ct-type-substitutable walks the declared type's derivation chain (complex: res_base/assert_base/text_type + builtin ancestry; union declared types substitute by member derivation, cta0014/15) and rejects si02/si03/cta9008err, cos-element-consistent demands equal tables for same-name particles (cta9009/9010), the particle restriction preserves the base table (cta0043), src-ct.1 rejects the wrapper-plus-direct-attributes shape (si01), and §3.2.7.1 {inheritable} rejects malformed lexicals (cta9006/9007) and restriction flips (cta9004/9005) |
 | 10 | ibm S3_2_3 (9) + D3_3_15 (1): element-decl clauses (targetNamespace on LOCAL declarations) and gDay timezone-bound facets compile clean | OPEN |
 | 5 | saxon/oracle Zone `.bad` (zone004/005/008 + zone408/409): explicitTimezone derivation (required→optional forbidden) | OPEN — the rest flipped under #2155's facet tables |
 | 1 | saxon Complex `.bad`: complexType schema constraints (abstract/block misuse) | OPEN |

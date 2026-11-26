@@ -40,6 +40,17 @@ int verdict_of(const char* schema, const char* instance) {
     return v;
 }
 
+/* Compile result: 1 = clean, 0 = rejected, -1 = no handle. */
+int compile_of(const char* schema) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file(path(schema).c_str(), &st);
+    if (!s) return -1;
+    int ok = (st == LEPTRIS_OK);
+    leptris_xsd_free(s);
+    return ok ? 1 : 0;
+}
+
 }  // namespace
 
 /* Global element declaration: the test match must type the element
@@ -91,12 +102,20 @@ TEST(Xsd11Cta, XsiTypeOverridesSelectedAlternative) {
     EXPECT_NE(verdict_of("xsi_wins.xsd", "xsi_wins_n.xml"), 1);
 }
 
-/* §3.12.4: a test that raises a dynamic (or compile) error is
- * treated as false — the declared type applies and the document is
- * valid. */
+/* §3.12.4: a test that raises a DYNAMIC error is treated as false —
+ * the declared type applies and the document is valid. (Malformed
+ * SYNTAX is the schema-error channel: §3.12.2 XPath valid, pinned by
+ * Xsd11Cta.MalformedTestSyntaxIsSchemaError below and the
+ * test_xsd11_ctatable suite.) */
 TEST(Xsd11Cta, TestEvaluationErrorIsFalse) {
     EXPECT_EQ(verdict_of("testerr_fallback.xsd", "testerr_fallback_v.xml"),
               1);
+}
+
+/* #2184 (§3.12.2 XPath valid): an alternative test whose expression
+ * does not PARSE fails the SCHEMA. */
+TEST(Xsd11Cta, MalformedTestSyntaxIsSchemaError) {
+    EXPECT_EQ(compile_of("testerr_syntax.xsd"), 0);
 }
 
 /* moxml#579: the attributes referenced in the SELECTED alternative's

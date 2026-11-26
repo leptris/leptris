@@ -30,6 +30,12 @@ static XPathASTNode* parse_multiplicative_expr(XPathParser* parser);
 static XPathASTNode* parse_unary_expr(XPathParser* parser);
 static XPathASTNode* parse_union_expr(XPathParser* parser);
 static XPathASTNode* parse_arrow_expr(XPathParser* parser);
+/* #2184: the operators that may trail a type-op result (cast /
+ * castable / treat / instance of), folded with proper precedence. */
+static XPathASTNode* xpath_type_op_tail_fold(XPathParser* parser,
+                                             XPathASTNode* left);
+static XPathASTNode* xpath_type_op_seed(XPathParser* parser,
+                                        XPathASTNode* e);
 
 /* Path parsers */
 static XPathASTNode* parse_path_expr(XPathParser* parser);
@@ -445,63 +451,58 @@ static XPathASTNode* parse_expr(XPathParser* parser) {
         return node;
     }
     /* 2.0 type operators (TODO.xslt-full/06): value-matched
-     * two-word keywords + a SequenceType. Same whole-expr shape as
-     * `to` above (X instance of T — comparisons against the result
-     * need parentheses, as with ranges). */
+     * two-word keywords + a SequenceType. #2184: the keywords also
+     * bind INSIDE comparison operands (`@length cast as xs:int >
+     * @width cast as xs:int`) — xpath_type_op_tail_operand's seed
+     * shares this helper, so the cast node carries the operand and
+     * the tail fold wraps the comparison around it. */
     {
-        XPathOperatorType op;
-        int matched = 0;
-        XPathToken* t = current_token(parser);
-        XPathToken* t2 = (t && parser->token_pos + 1 < parser->token_count)
-                             ? &parser->tokens[parser->token_pos + 1] : NULL;
-        if (ncname_is(t, "instance", 8) &&
-            ncname_is(t2, "of", 2)) {
-            op = XPATH_OP_INSTANCE_OF; matched = 1;
-            advance_token(parser); advance_token(parser);
-        } else if (ncname_is(t, "castable", 8) &&
-                   ncname_is(t2, "as", 2)) {
-            op = XPATH_OP_CASTABLE; matched = 1;
-            advance_token(parser); advance_token(parser);
-        } else if (ncname_is(t, "cast", 4) &&
-                   ncname_is(t2, "as", 2)) {
-            op = XPATH_OP_CAST; matched = 1;
-            advance_token(parser); advance_token(parser);
-        } else if (ncname_is(t, "treat", 5) &&
-                   ncname_is(t2, "as", 2)) {
-            op = XPATH_OP_TREAT; matched = 1;
-            advance_token(parser); advance_token(parser);
-        }
-        if (matched) {
-            char* ty = parse_sequence_type(parser);
-            if (!ty) { ast_node_free(e); return NULL; }
-            XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
-            if (!node) { free(ty); ast_node_free(e); return NULL; }
-            node->number_value = (double)op;
-            node->value = ty;
-            ast_node_add_child(node, e);
-            /* The type-op node closes above the additive level, so
-             * trailing arithmetic on the cast result must fold
-             * here: `'12' cast as xs:integer + 1` (#744). */
-            while (current_token_is(parser, TOK_PLUS) ||
-                   current_token_is(parser, TOK_MINUS) ||
-                   current_token_is(parser, TOK_STAR)) {
-                XPathTokenType ot = current_token(parser)->type;
-                advance_token(parser);
-                XPathASTNode* rhs = parse_or_expr(parser);
-                if (!rhs) { ast_node_free(node); return NULL; }
-                XPathASTNode* opn = ast_node_new(XPATH_AST_OPERATOR);
-                if (!opn) { ast_node_free(rhs); ast_node_free(node); return NULL; }
-                opn->number_value = (double)((ot == TOK_PLUS)   ? XPATH_OP_PLUS
-                                           : (ot == TOK_MINUS)  ? XPATH_OP_MINUS
-                                                                : XPATH_OP_MULTIPLY);
-                ast_node_add_child(opn, node);
-                ast_node_add_child(opn, rhs);
-                node = opn;
-            }
-            return node;
-        }
+        XPathASTNode* node = xpath_type_op_seed(parser, e);
+        if (!node) return NULL;
+        if (node != e)
+            return xpath_type_op_tail_fold(parser, node);
     }
     return e;
+}
+
+/* #2184: if a type-op keyword pair (`instance of` / `castable as` /
+ * `cast as` / `treat as`) follows, build the type-op node over `e`
+ * and return it (ownership taken); otherwise return `e` unchanged.
+ * NULL only on a parse failure (keyword matched, SequenceType bad) or
+ * an allocation failure — `e` is freed on those paths. */
+static XPathASTNode* xpath_type_op_seed(XPathParser* parser,
+                                        XPathASTNode* e) {
+    XPathOperatorType op;
+    int matched = 0;
+    XPathToken* t = current_token(parser);
+    XPathToken* t2 = (t && parser->token_pos + 1 < parser->token_count)
+                         ? &parser->tokens[parser->token_pos + 1] : NULL;
+    if (ncname_is(t, "instance", 8) &&
+        ncname_is(t2, "of", 2)) {
+        op = XPATH_OP_INSTANCE_OF; matched = 1;
+        advance_token(parser); advance_token(parser);
+    } else if (ncname_is(t, "castable", 8) &&
+               ncname_is(t2, "as", 2)) {
+        op = XPATH_OP_CASTABLE; matched = 1;
+        advance_token(parser); advance_token(parser);
+    } else if (ncname_is(t, "cast", 4) &&
+               ncname_is(t2, "as", 2)) {
+        op = XPATH_OP_CAST; matched = 1;
+        advance_token(parser); advance_token(parser);
+    } else if (ncname_is(t, "treat", 5) &&
+               ncname_is(t2, "as", 2)) {
+        op = XPATH_OP_TREAT; matched = 1;
+        advance_token(parser); advance_token(parser);
+    }
+    if (!matched) return e;
+    char* ty = parse_sequence_type(parser);
+    if (!ty) { ast_node_free(e); return NULL; }
+    XPathASTNode* node = ast_node_new(XPATH_AST_OPERATOR);
+    if (!node) { free(ty); ast_node_free(e); return NULL; }
+    node->number_value = (double)op;
+    node->value = ty;
+    ast_node_add_child(node, e);
+    return node;
 }
 
 XPathASTNode* xpath_parse(XPathParser* parser) {
@@ -706,6 +707,134 @@ static int kw_operand_boundary(XPathParser* parser, XPathToken* nx) {
         default:
             return 0;
     }
+}
+
+/* ---- #2184: the type-op tail fold ---------------------------------
+ *
+ * The `cast as` / `castable as` / `treat as` / `instance of` node is
+ * built at the parse_expr level, ABOVE the whole comparison chain, so
+ * every operator that trails it folds here. Precedence climbing over
+ * the XPath grammar's binary levels — tightest first as INNER folds,
+ * loosest last as the outer wrap — so mixed tails build the spec's
+ * tree (`L cast as T > 3 + 1` casts, then adds on the RIGHT of the
+ * comparison; `L cast as T + 1 > 3` adds on the left first).
+ * Multiplicative keeps the `div`/`mod`/`idiv` keyword forms out (the
+ * #744 fold they replace never had them either); value comparisons
+ * ride the same boundary-checked bare-keyword rule as
+ * parse_relational_expr. */
+static XPathASTNode* type_op_tail_level(XPathParser* parser,
+                                        XPathASTNode* left, int level);
+
+/* Levels, tightest first (the indices double as the recursion bound:
+ * a level-L right operand folds levels < L). */
+enum {
+    TAIL_MULT = 0,
+    TAIL_ADD,
+    TAIL_RELATIONAL,
+    TAIL_EQUALITY,
+    TAIL_AND,
+    TAIL_OR
+};
+
+static int type_op_tail_token_op(XPathParser* parser, int level,
+                                 XPathOperatorType* op) {
+    XPathToken* t = current_token(parser);
+    if (!t) return 0;
+    switch (level) {
+        case TAIL_MULT:
+            if (t->type == TOK_STAR) { *op = XPATH_OP_MULTIPLY; return 1; }
+            return 0;
+        case TAIL_ADD:
+            if (t->type == TOK_PLUS) { *op = XPATH_OP_PLUS; return 1; }
+            if (t->type == TOK_MINUS) { *op = XPATH_OP_MINUS; return 1; }
+            return 0;
+        case TAIL_RELATIONAL:
+            if (t->type == TOK_LT) { *op = XPATH_OP_LESS; return 1; }
+            if (t->type == TOK_LE) { *op = XPATH_OP_LESS_EQUAL; return 1; }
+            if (t->type == TOK_GT) { *op = XPATH_OP_GREATER; return 1; }
+            if (t->type == TOK_GE) { *op = XPATH_OP_GREATER_EQUAL; return 1; }
+            /* the bare value-comparison keywords (eq/ne/lt/le/gt/ge):
+             * same boundary rule as parse_relational_expr */
+            if (t->type == TOK_NCNAME && t->value_len == 2) {
+                XPathToken* nx =
+                    parser->token_pos + 1 < parser->token_count
+                        ? &parser->tokens[parser->token_pos + 1] : NULL;
+                if (!kw_operand_boundary(parser, nx)) return 0;
+                if (memcmp(t->value, "eq", 2) == 0) { *op = XPATH_OP_EQUAL; return 1; }
+                if (memcmp(t->value, "ne", 2) == 0) { *op = XPATH_OP_NOT_EQUAL; return 1; }
+                if (memcmp(t->value, "lt", 2) == 0) { *op = XPATH_OP_LESS; return 1; }
+                if (memcmp(t->value, "le", 2) == 0) { *op = XPATH_OP_LESS_EQUAL; return 1; }
+                if (memcmp(t->value, "gt", 2) == 0) { *op = XPATH_OP_GREATER; return 1; }
+                if (memcmp(t->value, "ge", 2) == 0) { *op = XPATH_OP_GREATER_EQUAL; return 1; }
+            }
+            return 0;
+        case TAIL_EQUALITY:
+            if (t->type == TOK_EQUALS) { *op = XPATH_OP_EQUAL; return 1; }
+            if (t->type == TOK_NOT_EQUALS) { *op = XPATH_OP_NOT_EQUAL; return 1; }
+            return 0;
+        case TAIL_AND:
+            if (t->type == TOK_NCNAME && t->value_len == 3 &&
+                memcmp(t->value, "and", 3) == 0) { *op = XPATH_OP_AND; return 1; }
+            return 0;
+        default: /* TAIL_OR */
+            if (t->type == TOK_NCNAME && t->value_len == 2 &&
+                memcmp(t->value, "or", 2) == 0) { *op = XPATH_OP_OR; return 1; }
+            return 0;
+    }
+}
+
+/* One precedence level: left-assoc loop; the right operand is a fresh
+ * unary parse folded through every TIGHTER level (below). */
+static XPathASTNode* type_op_tail_level(XPathParser* parser,
+                                        XPathASTNode* left, int level);
+
+/* A fresh right operand for a level-`max_level` operator: parse the
+ * seed unary expression, bind a trailing type-op keyword onto it (a
+ * cast may sit in any operand position, #2184), then fold every
+ * level tighter than max_level over it (`L > 3 + 4 * 5` binds 4*5
+ * tightest, then +, then hands `> (3+4*5)` back to the relational
+ * loop). */
+static XPathASTNode* type_op_tail_operand(XPathParser* parser,
+                                          int max_level) {
+    XPathASTNode* e = parse_unary_expr(parser);
+    if (!e) return NULL;
+    e = xpath_type_op_seed(parser, e);
+    if (!e) return NULL;
+    for (int lv = TAIL_MULT; lv <= max_level; lv++) {
+        e = type_op_tail_level(parser, e, lv);
+        if (!e) return NULL;
+    }
+    return e;
+}
+
+static XPathASTNode* type_op_tail_level(XPathParser* parser,
+                                        XPathASTNode* left, int level) {
+    while (left) {
+        XPathOperatorType op;
+        if (!type_op_tail_token_op(parser, level, &op)) break;
+        advance_token(parser);
+        XPathASTNode* rhs =
+            (level == TAIL_MULT)
+                ? parse_unary_expr(parser)
+                : type_op_tail_operand(parser, level - 1);
+        if (!rhs) { ast_node_free(left); return NULL; }
+        XPathASTNode* opn = ast_node_new(XPATH_AST_OPERATOR);
+        if (!opn) { ast_node_free(rhs); ast_node_free(left); return NULL; }
+        opn->number_value = (double)op;
+        ast_node_add_child(opn, left);
+        ast_node_add_child(opn, rhs);
+        left = opn;
+    }
+    return left;
+}
+
+XPathASTNode* xpath_type_op_tail_fold(XPathParser* parser,
+                                      XPathASTNode* left) {
+    for (int lv = TAIL_MULT; lv <= TAIL_OR; lv++) {
+        left = type_op_tail_level(parser, left, lv);
+        if (!left) return NULL;
+    }
+    return left;
 }
 
 static XPathASTNode* parse_relational_expr(XPathParser* parser) {
