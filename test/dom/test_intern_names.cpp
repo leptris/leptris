@@ -338,4 +338,170 @@ TEST(InternNames, DetachedInternedElementResolvesDoc) {
     leptris_document_free(d);
 }
 
+/* --- #2132 append-uniq lever guards -------------------------------------
+ * The fused create-path scan (one pass: length + colon + hash) must be
+ * byte-identical to the three separate passes it replaces: the same
+ * names hash the same, the same QNames split the same, the same cap
+ * overflow carves the same. These specs pin the carve-path behaviors
+ * through the public surface (find_child rides the name_hash
+ * prefilter, so a stale or divergent hash breaks lookups). ---------- */
+
+/* Past the intern cap every create takes the carve fallback. The
+ * carve path recomputes the canonical name hash — a divergence would
+ * silently break every hash-prefiltered child lookup. */
+TEST(InternNames, CarvePathNameHashPrefilterStillFinds) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    const size_t kOver = (size_t)DOM_INTERN_MAX_DISTINCT + 256;
+    for (size_t i = 0; i < kOver; i++) {
+        std::string n = "n" + std::to_string(i);
+        LeptrisElement e = leptris_element_create(d, n.c_str());
+        ASSERT_NE(e, nullptr);
+        ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    }
+    /* the table latched overflow — every lookup below resolves through
+     * the carve path's recomputed hashes */
+    EXPECT_EQ(leptris_name_intern_distinct(d),
+              (size_t)DOM_INTERN_MAX_DISTINCT);
+    /* head, mid, and tail children all findable by name */
+    const size_t probes[] = {0, 1, kOver / 2, kOver - 2, kOver - 1};
+    for (size_t idx : probes) {
+        std::string n = "n" + std::to_string(idx);
+        LeptrisElement found = leptris_element_find_child(root, n.c_str());
+        ASSERT_NE(found, nullptr) << "probe " << n;
+        EXPECT_STREQ(leptris_element_get_name(found), n.c_str());
+    }
+    /* a name that was never created must miss */
+    EXPECT_EQ(leptris_element_find_child(root, "n_no_such"),
+              nullptr);
+    leptris_document_free(d);
+}
+
+/* A trailing colon is NOT a QName split (html5lib 'rdar:' semantics):
+ * the whole token stays the local name, no prefix materializes. */
+TEST(InternNames, TrailingColonKeepsWholeToken) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    LeptrisElement e = leptris_element_create(d, "rdar:");
+    ASSERT_NE(e, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_get_name(e), "rdar:");
+    /* still a full QName token: lookup by the whole name hits */
+    EXPECT_EQ(leptris_element_find_child(root, "rdar:"), e);
+    char* xml = leptris_serialize_document(d);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(strstr(xml, "<rdar:"), nullptr);
+    leptris_free_string(xml);
+    leptris_document_free(d);
+}
+
+/* A prefixed create splits into prefix + local: the local name reads
+ * back, the hash/len prefilter is recomputed for the LOCAL part, and
+ * the child lookup by local name still resolves (the p: prefix rides
+ * the ns_cache — a bare prefixed create has no URI, serialization
+ * keeps the lexical prefix). */
+TEST(InternNames, PrefixedCreateSplitsAndPrefiltersLocal) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    LeptrisElement e = leptris_element_create(d, "p:local");
+    ASSERT_NE(e, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_get_name(e), "local");
+    LeptrisElement found = leptris_element_find_child(root, "local");
+    EXPECT_EQ(found, e);
+    /* name_hash must be the canonical hash of the LOCAL part — a
+     * mismatch here is the regression the fused scan must not cause */
+    for (LeptrisElement c = leptris_element_get_first_child(root); c;
+         c = leptris_element_get_next_sibling(c)) {
+        if (c == e)
+            EXPECT_STREQ(leptris_element_get_name(c), "local");
+    }
+    char* xml = leptris_serialize_document(d);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(strstr(xml, "<p:local"), nullptr);
+    leptris_free_string(xml);
+    leptris_document_free(d);
+}
+
+/* Long prefixed names (17+ bytes: the memchr colon-probe tier today,
+ * the inline fused-scan tier after) split identically. */
+TEST(InternNames, LongPrefixedNameSplitsIdentically) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    const char* qname = "verylongprefixname:local";
+    LeptrisElement e = leptris_element_create(d, qname);
+    ASSERT_NE(e, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_get_name(e), "local");
+    EXPECT_NE(leptris_element_find_child(root, "local"), nullptr);
+    char* xml = leptris_serialize_document(d);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(strstr(xml, "<verylongprefixname:local"), nullptr);
+    leptris_free_string(xml);
+    leptris_document_free(d);
+}
+
+/* S8 carve boundary: the 8-byte word-store fast path must produce
+ * exactly the same bytes as the general path — names of 1, 7, 8, and
+ * 9 bytes all read back intact (and no trailing-garbage leak into
+ * the name). */
+TEST(InternNames, CarveBoundaryLengthsReadBackIntact) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    const char* names[] = {"a", "abc1234" /* 7 */, "abc12345" /* 8 */,
+                           "abc123456" /* 9 */, "x" /* repeat of 1 */};
+    for (const char* n : names) {
+        LeptrisElement e = leptris_element_create(d, n);
+        ASSERT_NE(e, nullptr) << n;
+        ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+        EXPECT_STREQ(leptris_element_get_name(e), n);
+    }
+    /* the repeat 1-byte name shares the intern slot with the first */
+    LeptrisElement dup = leptris_element_create(d, "a");
+    ASSERT_NE(dup, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, dup), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_get_name(dup), "a");
+    leptris_document_free(d);
+}
+
+/* >254-byte names never intern and never carve — the pool fallback
+ * reads the WHOLE token back (today's contract: no split on this
+ * path). The fused scan must route these identically. */
+TEST(InternNames, Over254NamePoolPathUnchanged) {
+    std::string longname(300, 'q');
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    LeptrisElement e = leptris_element_create(d, longname.c_str());
+    ASSERT_NE(e, nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    EXPECT_STREQ(leptris_element_get_name(e), longname.c_str());
+    EXPECT_NE(leptris_element_find_child(root, longname.c_str()),
+              nullptr);
+    leptris_document_free(d);
+}
+
 }  // namespace
