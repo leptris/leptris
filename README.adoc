@@ -96,7 +96,7 @@ numbers everywhere.
 |Use libleptris when |Consider alternatives when
 
 |You need a C library with a small footprint and no required runtime dependencies.
-|You need full XML Schema 1.1 validation.
+|You need XSD 1.1 features beyond the shipped set — XSD 1.1 is supported here (81% of the official W3C suite, suite-verified), driving to 100% via leptris/leptris#2181.
 
 |You parse documents that may not fit in memory (SAX streaming).
 |You need schema-aware, streaming or packaged XSLT 3.0.
