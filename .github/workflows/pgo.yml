@@ -50,6 +50,14 @@
 # byte-identical. (MSVC PGO keeps its inherent /LTCG — required by
 # /GENPROFILE and /USEPROFILE; that is linker-side, not the CMake IPO
 # layer this flag turns off.)
+#
+# Determinism gate: FUNCTIONAL determinism is mandatory — two rebuilt
+# trees must both pass the full test suite. Byte-identity is attempted
+# and triaged per-member, but PGO'd artifacts are EXEMPT from it
+# (#2167): shared-runner training flips the odd counter even with
+# fixed workloads (address-keyed caches under layout randomization;
+# the battery mitigates with setarch -R on Linux). The C3
+# byte-identity gate keeps applying to the unprofiled artifacts.
 
 name: PGO
 
@@ -183,19 +191,29 @@ jobs:
             --tolerance "${TOL}" | tee gate.md
           cat gate.md >> "$GITHUB_STEP_SUMMARY"
 
-      # Determinism (the PGO-side C3 gate): two full GENERATE→train→USE
-      # cycles must produce byte-identical library artifacts. The profile
-      # dir path is embedded in every object's LTO command-line record
-      # (-fprofile-use=<dir> — the first proof run failed exactly this:
-      # per-tree default dirs leaked 'a'/'b' into the .a), so both trees
-      # MUST share one absolute profile dir, wiped between cycles so tree
-      # b re-trains from scratch rather than merging into tree a's
-      # counters. Output paths do NOT leak (verified: found profile +
-      # identical flags → byte-identical objects across tree names).
-      - name: Determinism — two PGO trees, shared profile path
+      # Determinism (#2167 gate 2). Two full GENERATE→train→USE cycles
+      # sharing one absolute profile dir — the -fprofile-use=<dir> path
+      # rides every object's LTO-style command-line record, so per-tree
+      # dirs leak 'a'/'b' into the artifacts (the first proof run's
+      # failure). The dir is wiped between cycles so tree b re-trains
+      # from scratch rather than merging tree a's counters.
+      #
+      # Gate semantics:
+      #   1. FUNCTIONAL (mandatory, fails the job): both rebuilt trees
+      #      pass the full test suite. This is the guarantee the release
+      #      relies on.
+      #   2. BYTE-IDENTITY (best-effort): attempted and triaged
+      #      per-member (which TU, which offset) but EXEMPT on failure
+      #      per #2167 — shared-runner training flips the odd counter
+      #      (the library keeps address-keyed caches; layout
+      #      randomization is mitigated with setarch -R in the battery,
+      #      but the residual is real). C3 byte-identity continues to
+      #      apply to the unprofiled artifacts, which have no counter
+      #      input at all.
+      - name: Determinism — two PGO trees (functional gate + byte report)
         env:
           CONFIG: >-
-            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
             -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
             -DLEPTRIS_ENABLE_ICONV=OFF
             -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
@@ -218,28 +236,71 @@ jobs:
           }
           cycle det-a
           cycle det-b
-          cmp_artifacts() {
-            local A="$1" B="$2" what="$3"
-            sha256sum "$A" "$B"
-            if ! cmp "$A" "$B"; then
-              echo "::error::PGO USE builds differ — $what not byte-identical"
-              cmp -l "$A" "$B" | head -10 || true
-              exit 1
-            fi
-            echo "$what: byte-identical"
-          }
+
+          # Gate 1 — functional (mandatory).
+          ctest --test-dir build-det-a --output-on-failure -j 4
+          ctest --test-dir build-det-b --output-on-failure -j 4
+          echo "functional determinism: test suite green on both rebuilt trees"
+
+          # Gate 2 — byte-identity (best-effort, exempt on failure).
           A_LIB=$(find build-det-a -name 'libleptris.a' -type f | head -1)
           B_LIB=$(find build-det-b -name 'libleptris.a' -type f | head -1)
           [ -n "$A_LIB" ] && [ -n "$B_LIB" ]
-          cmp_artifacts "$A_LIB" "$B_LIB" "static lib"
           A_SO=$(find build-det-a -name 'libleptris.so.*' -type f | head -1)
           B_SO=$(find build-det-b -name 'libleptris.so.*' -type f | head -1)
           [ -n "$A_SO" ] && [ -n "$B_SO" ]
-          cmp_artifacts "$A_SO" "$B_SO" "shared lib"
+          byte_verdict="byte-identical"
+          for pair in "$A_LIB $B_LIB static-lib" "$A_SO $B_SO shared-lib"; do
+            set -- $pair
+            A=$1; B=$2; what=$3
+            sha256sum "$A" "$B"
+            if cmp -s "$A" "$B"; then
+              echo "$what: byte-identical"
+              continue
+            fi
+            byte_verdict="EXEMPT per #2167 (differs — triage in the log)"
+            echo "::warning::PGO artifacts are exempt from byte-identity (#2167): $what differs; triage follows"
+            cmp -l "$A" "$B" | head -5 || true
+            python3 - "$A" "$B" <<'PY'
+          import subprocess, sys
+
+          a, b = sys.argv[1], sys.argv[2]
+
+
+          def members(path):
+              return subprocess.run(["ar", "t", path], capture_output=True,
+                                    text=True).stdout.split()
+
+
+          def member_bytes(path, m):
+              return subprocess.run(["ar", "p", path, m],
+                                    capture_output=True).stdout
+
+
+          ma, mb = members(a), members(b)
+          print(f"members: {len(ma)} vs {len(mb)}")
+          if ma != mb:
+              print("a-only:", sorted(set(ma) - set(mb)))
+              print("b-only:", sorted(set(mb) - set(ma)))
+          for m in ma:
+              if m not in mb:
+                  continue
+              xa, xb = member_bytes(a, m), member_bytes(b, m)
+              if xa == xb:
+                  continue
+              if len(xa) == len(xb):
+                  first = next((i for i, (x, y) in enumerate(zip(xa, xb))
+                                if x != y), -1)
+                  print(f"DIFFERS: {m} (same size {len(xa)}, "
+                        f"first-diff byte {first})")
+              else:
+                  print(f"DIFFERS: {m} (size {len(xa)} vs {len(xb)})")
+          PY
+          done
           {
-            echo "### Determinism (PGO build-twice, shared profile path)"
-            echo "- static lib: byte-identical"
-            echo "- shared lib: byte-identical"
+            echo "### Determinism (PGO build-twice)"
+            echo "- functional: test suite green on both rebuilt trees (gate)"
+            echo "- byte-identity: ${byte_verdict}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Binary size delta — OFF vs USE

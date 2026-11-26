@@ -61,6 +61,18 @@ if [ "$mode" = "train" ] && [ "$toolchain" = "clang" ]; then
   export LLVM_PROFILE_FILE="$build/pgo-data/%p.profraw"
 fi
 
+# ASLR off for training on Linux: the library keeps address-keyed
+# caches, and layout randomization flips the odd edge counter between
+# otherwise identical training runs — exactly what the proof's
+# build-twice gate caught (a single differing byte, then a differing
+# member). A fixed layout pins the counters; ROWS mode stays
+# unmodified because it measures performance, not profiles.
+train_wrap=""
+if [ "$mode" = "train" ] && [ "$(uname -s)" = "Linux" ] \
+   && command -v setarch >/dev/null 2>&1; then
+  train_wrap="setarch $(uname -m) -R"
+fi
+
 ran=0 missing=0
 for name in $bins; do
   bin="$bench_dir/$name"
@@ -71,7 +83,7 @@ for name in $bins; do
   fi
   if [ "$mode" = "train" ]; then
     # A deliberately malformed corpus file must not kill training.
-    (cd "$bench_dir" && "./$name" > /dev/null 2>&1) \
+    (cd "$bench_dir" && $train_wrap "./$name" > /dev/null 2>&1) \
       || echo "pgo_battery: $name exited nonzero (training tolerates)"
   else
     (cd "$bench_dir" && "./$name" > "$out/$name.txt" 2>&1) \
