@@ -1,7 +1,7 @@
 #include <leptris.h>
 #include <stdio.h>
-#include <time.h>
-static double now_us(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1e6+t.tv_nsec/1e3;}
+#include "../common/bench_time.h"
+static double now_us(void){return bench_wall_us();}
 int main(void){
     double best=1e18;
     for(int r=0;r<400;r++){

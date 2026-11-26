@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <stdarg.h>
+#include "../common/bench_time.h"
 #include "leptris.h"
 #include "pugixml.hpp"
-static double now_us(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1e6+t.tv_nsec/1e3;}
+static double now_us(void){return bench_wall_us();}
 /* snprintf accumulator that can never run past the buffer: clamps
  * on truncation so the (buf + off, cap - off) pairs stay in range. */
 static size_t snappend(char* buf, size_t off, size_t cap,

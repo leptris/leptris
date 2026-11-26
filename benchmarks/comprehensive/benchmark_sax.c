@@ -7,12 +7,12 @@
  *
  * Method: min-of-N per side, same buffer, entity-bearing corpus file.
  */
-/* CLOCK_MONOTONIC under strict -std=c11 on glibc. */
-#define _POSIX_C_SOURCE 200809L
+/* CLOCK_MONOTONIC under strict -std=c11 on glibc: the portable seam
+ * (bench_time.h) owns that dance now. */
+#include "../common/bench_time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include <leptris.h>
 #include <leptris/sax/sax.h>
@@ -21,9 +21,7 @@
 #include <libxml/SAX2.h>
 
 static double now_us(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (double)t.tv_sec * 1e6 + t.tv_nsec / 1e3;
+    return bench_wall_us();
 }
 
 static char* slurp(const char* path, size_t* len) {

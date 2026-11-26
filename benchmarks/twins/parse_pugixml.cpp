@@ -2,8 +2,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
-static double now_us(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec*1e6+t.tv_nsec/1e3;}
+#include "../common/bench_time.h"
+static double now_us(void){return bench_wall_us();}
 static void gen(char** out,size_t* n,int attrs,int text){
     size_t cap=1<<22;char*b=(char*)malloc(cap);size_t j=0;
     j+=snprintf(b+j,cap-j,"<r>");

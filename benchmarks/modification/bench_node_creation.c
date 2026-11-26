@@ -7,18 +7,12 @@
 #include "leptris/dom/comment.h"
 #include "leptris/dom/cdata.h"
 #include "leptris/dom/pi.h"
+#include "../common/bench_time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 
 #define ITERATIONS 10000
-
-static double get_time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000.0 + tv.tv_usec;
-}
 
 /* Benchmark Comment creation */
 static void bench_comment_creation(void) {
@@ -27,21 +21,21 @@ static void bench_comment_creation(void) {
 
     /* With pool (fast path) */
     LeptrisMemoryPool* pool = leptris_pool_create();
-    double start = get_time_us();
+    double start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_comment_create_fast(content, len, pool);
     }
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double fast_time = (end - start) / ITERATIONS;
     leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
-    start = get_time_us();
+    start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         LeptrisCommentNode* node = leptris_comment_create(content);
         leptris_comment_free(node);
     }
-    end = get_time_us();
+    end = bench_wall_real_us();
     double regular_time = (end - start) / ITERATIONS;
 
     printf("  \"comment\": {\n");
@@ -58,21 +52,21 @@ static void bench_cdata_creation(void) {
 
     /* With pool (fast path) */
     LeptrisMemoryPool* pool = leptris_pool_create();
-    double start = get_time_us();
+    double start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_cdata_create_fast(content, len, pool);
     }
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double fast_time = (end - start) / ITERATIONS;
     leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
-    start = get_time_us();
+    start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         LeptrisCDATANode* node = leptris_cdata_create(content);
         leptris_cdata_free(node);
     }
-    end = get_time_us();
+    end = bench_wall_real_us();
     double regular_time = (end - start) / ITERATIONS;
 
     printf(",\n  \"cdata\": {\n");
@@ -91,21 +85,21 @@ static void bench_pi_creation(void) {
 
     /* With pool (fast path) */
     LeptrisMemoryPool* pool = leptris_pool_create();
-    double start = get_time_us();
+    double start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_pi_create_fast(target, target_len, data, data_len, pool);
     }
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double fast_time = (end - start) / ITERATIONS;
     leptris_pool_destroy(pool);
 
     /* Without pool (regular path) */
-    start = get_time_us();
+    start = bench_wall_real_us();
     for (int i = 0; i < ITERATIONS; i++) {
         LeptrisPINode* node = leptris_pi_create(target, data);
         leptris_pi_free(node);
     }
-    end = get_time_us();
+    end = bench_wall_real_us();
     double regular_time = (end - start) / ITERATIONS;
 
     printf(",\n  \"pi\": {\n");

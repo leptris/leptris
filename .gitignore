@@ -44,6 +44,9 @@ bench_*
 !benchmarks/workflows/bench_pipeline_shapes.cpp
 !benchmarks/dom/
 !benchmarks/dom/bench_zerocopy_text.c
+# bench_time.h is the benchmark tree's SOURCE timing seam (#2191),
+# not a compiled bench_* binary.
+!benchmarks/common/bench_time.h
 profile_*
 element_layout
 
