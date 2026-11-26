@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [1.9.446] - 2026-11-26
+
+### Performance
+
+- intern hot path pays zero calls (CI 45592059216 rider fix) (dom)
+- intern colon-free element names per document (#2132 phase 2) (dom)
+
+
+
 ## [1.9.445] - 2026-11-25
 
 ### Fixed
