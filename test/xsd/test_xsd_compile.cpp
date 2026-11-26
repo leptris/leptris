@@ -3554,6 +3554,21 @@ int validate_compiled(LeptrisXsdSchema s, const char* xml) {
     return ok;
 }
 
+/* Writable scratch directory for the on-disk compile specs. The
+ * environment normally provides TMPDIR/TEMP/TMP (CI, dev shells,
+ * windows runners); the #2199 ASAN+LSan container lane defines NONE
+ * of them and runs the binary from a read-only mount, where the old
+ * "." fallback silently failed every ofstream write — compile_set
+ * then failed and the specs' early-return paths leaked the live
+ * schema handle it returns. Fall through to POSIX /tmp before
+ * giving up. */
+static std::string xsd_scratch_dir() {
+    const char* dir = std::getenv("TMPDIR");
+    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
+    if (!dir) dir = std::getenv("TMP");
+    return dir ? std::string(dir) : std::string("/tmp");
+}
+
 /* XSD 1.0 §3.2.7: the xsi namespace's four attributes — xsi:type,
  * xsi:nil, xsi:schemaLocation, xsi:noNamespaceSchemaLocation — are
  * PROCESSOR-HONORED instance attributes, not schema-validated ones:
@@ -4899,10 +4914,7 @@ TEST(XsdCrossNs, AttributeRefIntoImportedUnitResolves) {
         "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
         "</xs:schema>";
 
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base = dir ? dir : ".";
+    std::string base = xsd_scratch_dir();
     std::string rel_path = base + "/blip_repro_rel.xsd";
     std::string main_path = base + "/blip_repro_main.xsd";
     {
@@ -4918,9 +4930,14 @@ TEST(XsdCrossNs, AttributeRefIntoImportedUnitResolves) {
     LeptrisXsdSchema s =
         leptris_xsd_compile_set(paths, 2, &st);
     if (st != LEPTRIS_OK || s == (LeptrisXsdSchema)0) {
+        /* compile_set returns a live handle even on failure (the
+         * parked error rides it) — free it before the early return
+         * (#2199: this GTEST_FAIL used to leak the schema). */
         const char* err = s ? leptris_xsd_error(s) : "(no handle)";
+        std::string err_msg = err ? err : "(null)";
+        if (s) leptris_xsd_free(s);
         GTEST_FAIL() << "compile_set failed st=" << (int)st
-                     << " err=" << (err ? err : "(null)");
+                     << " err=" << err_msg;
     }
 
     EXPECT_EQ(validate_compiled(s,
@@ -4960,10 +4977,7 @@ TEST(XsdCrossNs, SingleDocImportChaseResolves) {
         "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
         "</xs:schema>";
 
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base = dir ? dir : ".";
+    std::string base = xsd_scratch_dir();
     std::string rel_path = base + "/blip_chase_rel.xsd";
     std::string main_path = base + "/blip_chase_main.xsd";
     {
@@ -5023,10 +5037,7 @@ TEST(XsdCrossNs, AttrGroupRefRowResolvedAfterImportChase) {
         "<xs:element name=\"blip\" type=\"CT_Blip\"/>"
         "</xs:schema>";
 
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base = dir ? dir : ".";
+    std::string base = xsd_scratch_dir();
     std::string rel_path = base + "/ag569_rel.xsd";
     std::string main_path = base + "/ag569_main.xsd";
     {
@@ -5169,10 +5180,7 @@ TEST(Xsd11Gate, OverrideLoadsBaseAndReplacesComponents) {
         "<xs:sequence><xs:element name=\"b\" type=\"xs:integer\"/>"
         "</xs:sequence></xs:complexType>"
         "</xs:override></xs:schema>";
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string tmp = dir ? dir : ".";
+    std::string tmp = xsd_scratch_dir();
     std::string base_path = tmp + "/ovr1913_base.xsd";
     std::string ovr_path = tmp + "/ovr1913_ovr.xsd";
     {
@@ -5218,10 +5226,7 @@ TEST(XsdCrossNs, StrictWildcardSeesImportedDeclarations) {
         "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
         " targetNamespace=\"http://foo\" xmlns=\"http://foo\">"
         "<xs:element name=\"bar\" type=\"xs:string\"/></xs:schema>";
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base = dir ? dir : ".";
+    std::string base = xsd_scratch_dir();
     std::string head_path = base + "/w1920_head.xsd";
     std::string decl_path = base + "/w1920_decl.xsd";
     {
@@ -5239,7 +5244,15 @@ TEST(XsdCrossNs, StrictWildcardSeesImportedDeclarations) {
     LeptrisStatus st = LEPTRIS_OK;
     LeptrisXsdSchema s = leptris_xsd_compile_set(paths, 2, &st);
     ASSERT_NE(s, (LeptrisXsdSchema)0);
-    ASSERT_EQ(st, LEPTRIS_OK) << leptris_xsd_error(s);
+    if (st != LEPTRIS_OK) {
+        /* compile_set returns a live handle even on failure — free
+         * it before the early return (#2199: the ASSERT_EQ here used
+         * to leak the schema). */
+        std::string err_msg =
+            leptris_xsd_error(s) ? leptris_xsd_error(s) : "(null)";
+        leptris_xsd_free(s);
+        GTEST_FAIL() << "status " << (int)st << " err=" << err_msg;
+    }
     EXPECT_EQ(validate_compiled(s, xml), 1)
         << "set compile: strict wildcard admits the imported bar: "
         << leptris_xsd_error(s);
@@ -5287,10 +5300,7 @@ TEST(XsdCrossNs, ChameleonRestrictionAdmitsBaseChainAttributes) {
         "<xsd:attribute name=\"attrTest1\" type=\"xsd:int\"/>"
         "<xsd:attribute name=\"attrTest2\" type=\"xsd:ID\"/>"
         "</xsd:schema>";
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base = dir ? dir : ".";
+    std::string base = xsd_scratch_dir();
     std::string head_path = base + "/cte019_a.xsd";
     std::string ch_path = base + "/cte019_b.xsd";
     {
@@ -5344,11 +5354,8 @@ TEST(XsdCrossNs, RedefineExtensionKeepsTheExtensionModel) {
         " maxOccurs=\"unbounded\"/>"
         "</xsd:sequence></xsd:complexType></xsd:element>"
         "</xsd:schema>";
-    const char* dir = std::getenv("TMPDIR");
-    if (!dir) dir = std::getenv("TEMP"); /* windows runners define TEMP/TMP */
-    if (!dir) dir = std::getenv("TMP");
-    std::string base_p = std::string(dir ? dir : ".") + "/f030_base.xsd";
-    std::string redef_p = std::string(dir ? dir : ".") + "/f030_red.xsd";
+    std::string base_p = xsd_scratch_dir() + "/f030_base.xsd";
+    std::string redef_p = xsd_scratch_dir() + "/f030_red.xsd";
     {
         std::ofstream f(base_p);
         f << base;
