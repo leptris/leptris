@@ -482,9 +482,17 @@ jobs:
           # Consolidate one profile next to the dll: plain /USEPROFILE
           # looks for <output>.pgd beside the output. The seed pgd's own
           # data is already inside the copy — the loop below must not
-          # fold it in a second time.
-          $dllDir = Split-Path (Get-ChildItem -Recurse -Filter leptris.dll |
-                               Select-Object -First 1).FullName
+          # fold it in a second time. The DLL is libleptris.dll on
+          # Windows (TODO.concurrency/05 rename) — filter for that;
+          # the CLI links the static lib, so the dll never writes its
+          # own pgc (PG0188 below is expected) and the CLI-trained
+          # profile IS the payload.
+          $dll = Get-ChildItem -Recurse -Filter libleptris.dll |
+                 Select-Object -First 1
+          if (-not $dll) { $dll = Get-ChildItem -Recurse -Filter leptris.dll |
+                 Select-Object -First 1 }
+          if (-not $dll) { throw "leptris dll not found in build tree" }
+          $dllDir = Split-Path $dll.FullName
           $target = Join-Path $dllDir 'libleptris.pgd'
           $first = (Get-ChildItem -Recurse -Filter *.pgd |
                     Select-Object -First 1).FullName
@@ -577,7 +585,7 @@ jobs:
           # share `leptris.lib` under the VS generator (pre-existing
           # multi-config quirk — see the manifest legs' artifact regex).
           $files = Get-ChildItem -Recurse -File -Path build |
-                   Where-Object { $_.Name -in 'leptris.dll','leptris.lib','leptris.exe' } |
+                   Where-Object { $_.Name -in 'libleptris.dll','leptris.lib','leptris.exe' } |
                    Sort-Object FullName -Unique |
                    Group-Object Name | ForEach-Object { $_.Group[0] }
           $files | ForEach-Object { $_.FullName }
