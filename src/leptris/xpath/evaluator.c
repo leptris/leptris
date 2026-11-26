@@ -186,6 +186,11 @@ void xpath_context_init(XPathContext* context,
     context->cap_ctor_cache = 0;
     context->xquery_default_ns = NULL;
     context->xquery_spelling = 0;
+    /* #2183: base-uri anchoring and assert-subtree rooting are
+     * per-eval — stale stack bytes must not root ordinary queries
+     * at a previous assertion's element */
+    context->xquery_base_uri = NULL;
+    context->xquery_assert_root = NULL;
 }
 
 void xpath_context_free(XPathContext* context) {
@@ -947,6 +952,16 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
     if (ast->child_count == 0) {
         if (strcmp(func_name, "position") == 0 ||
             strcmp(func_name, "last") == 0) {
+            /* XSD 1.1 §3.16.4 absent focus (#2183): context_size 0
+             * is the absent-focus sentinel — the focus is undefined
+             * (XPDY0002), mirroring the registry handlers. */
+            if (ctx->context_size == 0) {
+                snprintf(ctx->error_code, sizeof(ctx->error_code),
+                         "XPDY0002");
+                snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                         "%s(): focus is undefined", func_name);
+                return NULL;
+            }
             struct leptris_xpath_result* r =
                 xpath_result_new(XPATH_RESULT_NUMBER);
             if (r) {

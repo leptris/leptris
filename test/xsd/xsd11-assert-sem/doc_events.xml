@@ -1,0 +1,6 @@
+<events>
+  <event name="birth"/>
+  <event name="baptism"/>
+  <event name="marriage"/>
+  <event name="death"/>
+</events>

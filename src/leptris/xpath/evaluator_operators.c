@@ -3308,6 +3308,24 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         memcpy(base, ty, tlen);
         base[tlen] = '\0';
 
+        /* #2183 (XSD 1.1 §3.16.2/§3.13.2): an UNPREFIXED type name
+         * in an assertion test resolves through xpathDefaultNamespace
+         * — the assert prolog delivers it as the XQuery default
+         * element namespace (`declare default element namespace`). A
+         * schema-scope name the engine cannot assess stays on the
+         * permissive path; only the XML Schema namespace qualifies
+         * into the builtin registry spelling (`double` -> xs:double,
+         * assert-simple003/004). */
+        char xdnq[96];
+        if (!strchr(base, ':') && ctx->xquery_default_ns &&
+            strcmp(ctx->xquery_default_ns,
+                   "http://www.w3.org/2001/XMLSchema") == 0 &&
+            strlen(base) < sizeof(xdnq) - 4) {
+            snprintf(xdnq, sizeof(xdnq), "xs:%s", base);
+            tlen = strlen(xdnq);
+            memcpy(base, xdnq, tlen + 1);
+        }
+
         if (op == XPATH_OP_INSTANCE_OF) {
             struct leptris_xpath_result* out =
                 xpath_result_new(XPATH_RESULT_BOOLEAN);
@@ -4064,6 +4082,29 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
         }
         double lval = xpath_to_number(left);
         double rval = xpath_to_number(right);
+        /* #2183 (XQuery arithmetic, assert012): an INTEGER- or
+         * DECIMAL-typed zero divisor raises FOAR0001 — xs:double
+         * keeps INF/NaN and the XPath 1.0 lanes keep 1 div 0 = INF.
+         * Only the XQuery spelling runs this rule; the typed
+         * channels are the ctor results (is_int) and the
+         * atomic_type label. idiv is FOAR0001 for every numeric
+         * type (F&O 6.2.4). */
+        if (ctx->xquery_spelling && rval == 0.0 &&
+            (op == XPATH_OP_DIV || op == XPATH_OP_MOD ||
+             op == XPATH_OP_IDIV) &&
+            right->type == XPATH_RESULT_NUMBER &&
+            (op == XPATH_OP_IDIV || right->is_int ||
+             (right->atomic_type &&
+              (strcmp(right->atomic_type, "xs:integer") == 0 ||
+               strcmp(right->atomic_type, "xs:decimal") == 0)))) {
+            snprintf(ctx->error_code, sizeof(ctx->error_code),
+                     "FOAR0001");
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "division by zero");
+            xpath_result_free(left);
+            xpath_result_free(right);
+            return NULL;
+        }
         result = xpath_result_new(XPATH_RESULT_NUMBER);
         if (result) {
             switch (op) {

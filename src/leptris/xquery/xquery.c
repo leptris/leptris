@@ -31,7 +31,7 @@ extern XPathNodeSet* xpath_nodeset_deep_copy(const XPathNodeSet* src);
 /* ---- query model ---- */
 
 typedef enum { XQ_DECL_VAR, XQ_DECL_NS, XQ_DECL_FN, XQ_DECL_DEFAULT_NS,
-                 XQ_DECL_SKIP } XqDeclKind;
+                 XQ_DECL_BASE_URI, XQ_DECL_SKIP } XqDeclKind;
 
 typedef struct {
     XqDeclKind kind;
@@ -871,16 +871,24 @@ static int parse_decl(struct LeptrisXQueryInternal* q, Scan* s,
         return 1;
     }
     if (word_is(w, wl, "base-uri")) {
-        /* `declare base-uri "URI";` — accepted and skipped: it only
-         * anchors RELATIVE collation URIs, and codepoint ordering
-         * is URI-independent (QT3 orderBy60). */
+        /* `declare base-uri "URI";` — CAPTURED (#2183): the static
+         * base URI anchors fn:doc's relative-URI resolution inside
+         * assertion test expressions (the XSD lane delivers the
+         * schema's directory). Collation anchoring is unchanged
+         * (codepoint ordering is URI-independent, QT3 orderBy60). */
         scan_ws(s);
         if (s->p >= s->end || (*s->p != '"' && *s->p != '\''))
             return 0;
+        const char* lit = s->p;
         scan_string(s);
+        size_t ll = (size_t)(s->p - lit);
+        if (ll >= 2) {
+            out->uri = span_dup(lit + 1, lit + ll - 1);
+            if (!out->uri) return 0;
+        }
         scan_ws(s);
         if (s->p < s->end && *s->p == ';') s->p++;
-        out->kind = XQ_DECL_SKIP;
+        out->kind = XQ_DECL_BASE_URI;
         return 1;
     }
     if (word_is(w, wl, "default")) {
@@ -1958,19 +1966,22 @@ LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
 static LeptrisXPathResult xq_eval_impl(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* param_names, const char* const* param_selects,
-    size_t nparams, unsigned flags);
+    size_t nparams, unsigned flags, char* out_error_code,
+    size_t error_code_cap);
 
 LEPTRIS_API LeptrisXPathResult leptris_xquery_eval(LeptrisXQuery query,
                                                    LeptrisDocument doc,
                                                    LeptrisElement context_node) {
-    return xq_eval_impl(query, doc, context_node, NULL, NULL, 0, 0);
+    return xq_eval_impl(query, doc, context_node, NULL, NULL, 0, 0,
+                        NULL, 0);
 }
 
 LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* names, const char* const* selects, size_t count) {
     if (count && (!names || !selects)) return NULL;
-    return xq_eval_impl(query, doc, context_node, names, selects, count, 0);
+    return xq_eval_impl(query, doc, context_node, names, selects, count,
+                        0, NULL, 0);
 }
 
 LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params_ex(
@@ -1979,7 +1990,16 @@ LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params_ex(
     unsigned flags) {
     if (count && (!names || !selects)) return NULL;
     return xq_eval_impl(query, doc, context_node, names, selects, count,
-                        flags);
+                        flags, NULL, 0);
+}
+
+LEPTRIS_API LeptrisXPathResult leptris_xquery_eval_params_ec(
+    LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
+    const char* const* names, const char* const* selects, size_t count,
+    unsigned flags, char* out_error_code, size_t error_code_cap) {
+    if (count && (!names || !selects)) return NULL;
+    return xq_eval_impl(query, doc, context_node, names, selects, count,
+                        flags, out_error_code, error_code_cap);
 }
 
 LEPTRIS_API void leptris_xquery_free(LeptrisXQuery query) {
@@ -2795,8 +2815,10 @@ static struct leptris_xpath_result* xq_eval_param(
 static LeptrisXPathResult xq_eval_impl(
     LeptrisXQuery query, LeptrisDocument doc, LeptrisElement context_node,
     const char* const* param_names, const char* const* param_selects,
-    size_t nparams, unsigned flags) {
+    size_t nparams, unsigned flags, char* out_error_code,
+    size_t error_code_cap) {
     struct LeptrisXQueryInternal* q = (struct LeptrisXQueryInternal*)query;
+    if (out_error_code && error_code_cap) out_error_code[0] = 0;
     if (!q || !doc) return NULL;
 
     LeptrisElement ctx_elem =
@@ -2810,6 +2832,21 @@ static LeptrisXPathResult xq_eval_impl(
      * not part of the tree the query sees. */
     ctx->assert_data_model =
         (flags & (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL) ? 1 : 0;
+    /* #2183 §3.16.4: simple-type assertion facets evaluate with
+     * NO context item — the owning element is a placeholder for
+     * init only; position()/last() and relative paths raise
+     * XPDY0002 (context_size 0 is the absent-focus sentinel). */
+    if (flags & (unsigned)LEPTRIS_XQUERY_ASSERT_ABSENT_FOCUS) {
+        ctx->context_node = NULL;
+        ctx->context_position = 0;
+        ctx->context_size = 0;
+    }
+    /* #2183 §3.13.4.1 cl. 1.3: complexType asserts see ONLY the
+     * validated element's subtree — '/' and '//' select NOTHING
+     * (the document root the paths reach for is not in the model;
+     * d4_3_15ii14/ii31 pin both directions). */
+    if (flags & (unsigned)LEPTRIS_XQUERY_ASSERT_ROOTED)
+        ctx->xquery_assert_root = ctx_elem;
 
     /* local: functions: merged registry over the standard library.
      * Closure contents live for the eval; the registry itself is
@@ -2929,6 +2966,11 @@ static LeptrisXPathResult xq_eval_impl(
              * namespace (XQuery §4.2.3): path tests and
              * constructed elements */
             ctx->xquery_default_ns = d->uri;
+        } else if (d->kind == XQ_DECL_BASE_URI) {
+            /* #2183: the query's static base URI — fn:doc's
+             * relative URIs resolve against it (the XSD lane
+             * anchors the schema document's directory) */
+            ctx->xquery_base_uri = d->uri;
         } else if (d->kind == XQ_DECL_VAR) {
             struct leptris_xpath_result* v = NULL;
             if (d->external) {
@@ -3468,6 +3510,18 @@ static LeptrisXPathResult xq_eval_impl(
         ctx->ns_set = NULL;
     }
     xpath_context_cleanup(ctx);
+    /* #2183 error-code channel: a spec-defined dynamic error
+     * (FOAR0001, XPDY0002, FODC0002, ...) rides out with the NULL
+     * result so the XSD assertion lane can treat "the engine
+     * assessed the expression and it raised" differently from "the
+     * engine could not assess it". */
+    if (out_error_code && error_code_cap) {
+        if (!result && ctx->error_code[0])
+            snprintf(out_error_code, error_code_cap, "%s",
+                     ctx->error_code);
+        else
+            out_error_code[0] = 0;
+    }
     /* Hoisted ctor wrapper (`<tag>{ FLWOR }</tag>`): the element
      * wraps the WHOLE FLWOR result sequence once (the hoist moved
      * it out of the per-tuple return). Element members serialize;

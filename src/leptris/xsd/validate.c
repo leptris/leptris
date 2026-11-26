@@ -284,10 +284,10 @@ static int text_valid(struct xsd_validator* v,
     /* XSD 1.1 xs:assertion facets (#2154): every facet list across
      * the restriction ladder must hold (§3.16.6 accumulation), with
      * the list-item and union-member chains layered on (§3.16.4).
-     * $value binds the typed value — the engine cannot model the
-     * facet's ABSENT focus (§3.16.4: context item, position and last
-     * undefined), so the context is the owning element; the rows
-     * hinging on that gap are dispositioned in the README. */
+     * $value binds the typed value; #2183 runs the facet lane
+     * ABSENT FOCUS (§3.16.4 — context item, position and last are
+     * undefined; referencing them raises XPDY0002 and the facet
+     * does not hold). */
     if (st && elem && v->doc &&
         !assertions_hold(v, s, st, value, elem)) {
         verrf_atk(v, elem, "assertion", name, what, name,
@@ -305,13 +305,14 @@ static int text_valid(struct xsd_validator* v,
  * (the lexical, numerics as bare literals), the empty sequence
  * otherwise — test4.xsd's selected simpleContent type asserts
  * $value mod 2 = 0 (#2149). #2154 posture: an expression the engine
- * cannot COMPILE or EVALUATE is not enforced — §3.13.4 turns
- * dynamic errors into false verdicts, but the engine's unsupported
- * corners (PSVI-typed instance-of, absent-focus position()) would
- * then reject suite-VALID documents; the evaluation-error rows are
- * dispositioned in the README. A compiled query that evaluates
- * FALSE still fails the element. Returns the number of FAILED
- * asserts. */
+ * cannot COMPILE or EVALUATE is not enforced; #2183 refines the
+ * error half — an ASSESSED dynamic error (the eval reports a spec
+ * error code: FOAR0001 div-by-zero, FODC0002 doc() miss, XPDY0002)
+ * fails the assertion (§3.13.4), while an unassessable expression
+ * (no code) stays not-enforced. #2183 also roots '/' and '//' at
+ * the VALIDATED ELEMENT's subtree (§3.13.4 — d4_3_15ii14/15). A
+ * compiled query that evaluates FALSE still fails the element.
+ * Returns the number of FAILED asserts. */
 static int xsd_eval_assert_list(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 const XsdCm* ct, LeptrisElement elem,
@@ -362,24 +363,38 @@ static int xsd_eval_assert_list(struct xsd_validator* v,
             }
             const char* names[1] = {"value"};
             const char* sels[1] = {sel};
-            LeptrisXPathResult r = leptris_xquery_eval_params_ex(
+            char ecode[32];
+            LeptrisXPathResult r = leptris_xquery_eval_params_ec(
                 a->compiled, v->doc, elem, names, sels, 1,
-                (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+                (unsigned)(LEPTRIS_XQUERY_ASSERT_DATA_MODEL |
+                           LEPTRIS_XQUERY_ASSERT_ROOTED),
+                ecode, sizeof(ecode));
             if (r) {
                 ebv = leptris_xpath_result_boolean(r);
                 evaluated = 1;
                 leptris_xpath_result_free(r);
+            } else if (ecode[0]) {
+                /* #2183 §3.13.4: an assessed dynamic error (FOAR0001
+                 * div-by-zero, FODC0002 doc() miss, XPDY0002) fails
+                 * the assertion — the instance is invalid, never a
+                 * crash */
+                evaluated = 1;
             }
         } else {
             const char* names[1] = {"value"};
             const char* sels[1] = {"()"};
-            LeptrisXPathResult r = leptris_xquery_eval_params_ex(
+            char ecode[32];
+            LeptrisXPathResult r = leptris_xquery_eval_params_ec(
                 a->compiled, v->doc, elem, names, sels, 1,
-                (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+                (unsigned)(LEPTRIS_XQUERY_ASSERT_DATA_MODEL |
+                           LEPTRIS_XQUERY_ASSERT_ROOTED),
+                ecode, sizeof(ecode));
             if (r) {
                 ebv = leptris_xpath_result_boolean(r);
                 evaluated = 1;
                 leptris_xpath_result_free(r);
+            } else if (ecode[0]) {
+                evaluated = 1;   /* assessed error = assertion false */
             }
         }
         if (evaluated && !ebv) {
@@ -1454,21 +1469,42 @@ static int assertion_bind_list(struct leptris_xsd_schema* s,
 /* One facet: lazily compiled under a $value declaration (§3.16.4's
  * binding; the same wrapper the complexType assert uses), then
  * evaluated per instance. Compile failure = not enforced (the facet
- * posture — never reject what we cannot assess); evaluation failure
- * or a false EBV = the facet does not hold (§3.16.4: errors are
- * failures). */
-static int assertion_ebv(struct xsd_validator* v, XsdAssertionFacet* f,
+ * posture — never reject what we cannot assess). #2183: the facet
+ * lane runs ABSENT FOCUS (§3.16.4 — no context item: position(),
+ * last() and relative paths raise XPDY0002) and an evaluated
+ * dynamic error is a FAILURE (the engine distinguishes "assessed
+ * and raised" via the error-code channel from "could not assess",
+ * which stays not-enforced). A false EBV does not hold. */
+static int assertion_ebv(struct xsd_validator* v,
+                         struct leptris_xsd_schema* s,
+                         XsdAssertionFacet* f,
                          LeptrisElement elem, const char* select) {
+    (void)elem; /* §3.16.4: absent focus — the element is not the
+                 * context item */
     if (!f->tried) {
         f->tried = 1;
         size_t pl = f->ns_prolog ? strlen(f->ns_prolog) : 0;
+        /* #2183: the facet's static base URI — fn:doc in the test
+         * resolves relative URIs against the SCHEMA document's
+         * directory (the capture side carries no schema) */
+        const char* base_dir = xsd_schema_base_dir(s);
+        int have_base = base_dir && base_dir[0] &&
+                        !strchr(base_dir, '"');
+        size_t bl = have_base ? strlen(base_dir) + 32 : 0;
         size_t tl = f->test ? strlen(f->test) : 0;
-        char* wrapped = (char*)malloc(pl + tl + 64);
+        char* wrapped = (char*)malloc(pl + bl + tl + 64);
         if (wrapped) {
             size_t o = 0;
             if (pl) {
                 memcpy(wrapped + o, f->ns_prolog, pl);
                 o += pl;
+                wrapped[o++] = ' ';
+            }
+            if (have_base) {
+                int w = snprintf(wrapped + o, bl,
+                                 "declare base-uri \"%s/\";",
+                                 base_dir);
+                if (w > 0 && (size_t)w < bl) o += (size_t)w;
                 wrapped[o++] = ' ';
             }
             {
@@ -1485,13 +1521,24 @@ static int assertion_ebv(struct xsd_validator* v, XsdAssertionFacet* f,
     if (!f->q) return 1;
     const char* names[1] = {"value"};
     const char* sels[1] = {select};
-    LeptrisXPathResult r = leptris_xquery_eval_params_ex(
-        f->q, v->doc, elem, names, sels, 1,
-        (unsigned)LEPTRIS_XQUERY_ASSERT_DATA_MODEL);
+    char ecode[32];
+    LeptrisXPathResult r = leptris_xquery_eval_params_ec(
+        f->q, v->doc, NULL, names, sels, 1,
+        (unsigned)(LEPTRIS_XQUERY_ASSERT_DATA_MODEL |
+                   LEPTRIS_XQUERY_ASSERT_ABSENT_FOCUS),
+        ecode, sizeof(ecode));
     int ebv = 0;
     if (r) {
         ebv = leptris_xpath_result_boolean(r);
         leptris_xpath_result_free(r);
+    } else if (ecode[0]) {
+        /* assessed and raised (XPDY0002 on position()/last()/dot,
+         * FODC0002 on a doc() miss, FOAR0001 on integer div-by-0):
+         * §3.16.4 — the facet does not hold */
+        ebv = 0;
+    } else {
+        /* engine could not assess: not enforced (facet posture) */
+        ebv = 1;
     }
     return ebv;
 }
@@ -1504,7 +1551,7 @@ static int assertion_ladder_holds(struct xsd_validator* v,
                                   const char* select) {
     for (int d = 0; t && d < 32; d++) {
         for (XsdAssertionFacet* f = t->assertions; f; f = f->next)
-            if (!assertion_ebv(v, f, elem, select)) return 0;
+            if (!assertion_ebv(v, s, f, elem, select)) return 0;
         t = assertion_base_next(s, t);
     }
     return 1;

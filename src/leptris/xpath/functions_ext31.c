@@ -526,6 +526,61 @@ static struct leptris_xpath_result* fn_unordered(XPathContext* ctx,
     return out;
 }
 
+/* fn:data (F&O 2.4, #2183): atomization. ATOMIC sequences (the
+ * engine's scalar/synthetic carriers) pass through — the XSD 1.1
+ * assertion rows walk the itemized $value binding through it
+ * (every $x in data($value) ...). REAL nodes are NOT atomized:
+ * their typed values need the PSVI overlay the engine does not
+ * build (#1712-wave residue) — the code-free error keeps the
+ * assertion lane's not-enforced posture instead of assessing an
+ * untyped guess as a typed class (assert013/014/016/017/022 hinge
+ * on exactly that). The zero-argument form with NO context item is
+ * XPDY0002 (assessed — §3.16.4's absent focus). */
+static struct leptris_xpath_result* fn_data(XPathContext* ctx,
+        XPathASTNode** args, size_t n) {
+    if (n == 0) {
+        if (ctx->context_size == 0) {
+            snprintf(ctx->error_code, sizeof(ctx->error_code),
+                     "XPDY0002");
+            snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                     "data(): no context item");
+            return NULL;
+        }
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "data(): node atomization requires PSVI typing "
+                 "(unsupported)");
+        return NULL;
+    }
+    {
+        struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+        if (!r) return NULL;
+        if (r->type == XPATH_RESULT_NODESET && r->value.nodeset_value) {
+            XPathNodeSet* ns = r->value.nodeset_value;
+            for (size_t k = 0; k < ns->count; k++) {
+                void* nd = ns->nodes[k];
+                if (nd && (int)XPATH_NODE_TYPE(nd) !=
+                              (int)LEPTRIS_NODE_TEXT) {
+                    xpath_result_free(r);
+                    snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                             "data(): node atomization requires PSVI "
+                             "typing (unsupported)");
+                    return NULL;
+                }
+            }
+        }
+        xpath_result_free(r);
+    }
+    size_t cnt;
+    /* atomize=1: array carriers decompose (fn:avg's member
+     * discipline) */
+    char** items = collect_items(ctx, args, n, 0, &cnt, NULL, 1, NULL);
+    if (!items) return NULL;
+    struct leptris_xpath_result* out = seq_new();
+    if (out) seq_from_items(out, items, cnt, 1, -1);
+    free_items(items, cnt);
+    return out;
+}
+
 static struct leptris_xpath_result* fn_subsequence(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     size_t cnt;
@@ -2746,11 +2801,44 @@ static struct leptris_xpath_result* fn_node_name(XPathContext* ctx,
 #include "../dom/document_node.h"
 static struct leptris_xpath_result* xq_anchor_owned_doc(
     XPathContext* ctx, struct leptris_document* doc, int fragment);
+/* Does s carry a URI scheme (RFC 3986: ALPHA *( ALPHA / DIGIT /
+ * "+" / "-" / "." ) ":")? Filesystem-absolute detection rides the
+ * caller. */
+static int xq_uri_has_scheme(const char* s) {
+    if (!isalpha((unsigned char)s[0])) return 0;
+    for (const char* p = s + 1; *p; p++) {
+        if (*p == ':') return 1;
+        if (!isalnum((unsigned char)*p) && *p != '+' && *p != '-' &&
+            *p != '.')
+            return 0;
+    }
+    return 0;
+}
+
 static struct leptris_xpath_result* fn_doc(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     (void)n;
     char* path = re_str_arg(ctx, args, 0);
     if (!path) return NULL;
+    /* #2183: a relative URI resolves against the query's static
+     * base URI (`declare base-uri` — the XSD assertion lane
+     * anchors the schema document's directory, XQuery §2.1.1). */
+    if (path[0] && path[0] != '/' && path[0] != '\\' &&
+        !xq_uri_has_scheme(path) && ctx->xquery_base_uri &&
+        ctx->xquery_base_uri[0]) {
+        const char* b = ctx->xquery_base_uri;
+        size_t bl = strlen(b);
+        int needs_slash = b[bl - 1] != '/';
+        char* merged = (char*)malloc(
+            bl + (size_t)needs_slash + strlen(path) + 1);
+        if (merged) {
+            snprintf(merged,
+                     bl + (size_t)needs_slash + strlen(path) + 1,
+                     "%s%s%s", b, needs_slash ? "/" : "", path);
+            free(path);
+            path = merged;
+        }
+    }
     LeptrisDocument doc = leptris_parse_file(path, NULL);
     free(path);
     if (!doc) {
@@ -7036,6 +7124,9 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "tail", fn_tail, 1, 1);
     xpath_function_registry_register(registry, "reverse", fn_reverse, 1, 1);
     xpath_function_registry_register(registry, "unordered", fn_unordered, 1, 1);
+    /* fn:data (F&O 2.4, #2183): atomization, zero-arg rides the
+     * context item */
+    xpath_function_registry_register(registry, "data", fn_data, 0, 1);
     xpath_function_registry_register(registry, "doc", fn_doc, 1, 1);
     xpath_function_registry_register(registry, "parse-xml",
                                      fn_parse_xml, 1, 1);

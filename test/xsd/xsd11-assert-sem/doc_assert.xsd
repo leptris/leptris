@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified" attributeFormDefault="unqualified">
+
+  <!-- #2183 fn:doc inside an assert test (assert011): the relative
+       URI resolves against the SCHEMA's base URI -- the directory
+       this schema file lives in -- and the loaded document is
+       cached for the schema's assertions. -->
+
+  <xs:element name="temp">
+    <xs:complexType>
+      <xs:simpleContent>
+        <xs:restriction base="datedEvent">
+          <xs:assert test="./@event = doc('doc_events.xml')//event/@name"/>
+        </xs:restriction>
+      </xs:simpleContent>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="datedEvent">
+    <xs:simpleContent>
+      <xs:extension base="xs:date">
+        <xs:attribute name="event" use="required" type="xs:string"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+</xs:schema>

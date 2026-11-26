@@ -902,6 +902,18 @@ typedef struct xpath_context {
      * evaluation (assert023: empty(.//comment()) over commented
      * content is true). Set by the XSD assert/assertion evaluator. */
     int assert_data_model;
+
+    /* XQuery `declare base-uri` — the query's static base URI
+     * (#2183): fn:doc resolves a relative URI against it (the XSD
+     * assertion lane anchors the schema document's directory).
+     * Borrowed (query-owned). */
+    const char* xquery_base_uri;
+
+    /* XSD 1.1 §3.13.4.1 cl. 1.3 subtree scoping (#2183): when set,
+     * the eval runs in the assert lane — the data model contains
+     * only this element and its subtree, so '/' and '//' select
+     * NOTHING. Borrowed; set only by the ROOTED eval flag. */
+    LeptrisElement xquery_assert_root;
 } XPathContext;
 
 /* XPath operator types - From ext/leptris/xpath.h */

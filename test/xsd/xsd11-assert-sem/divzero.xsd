@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified" attributeFormDefault="unqualified">
+
+  <!-- #2183 arithmetic error semantics (assert012): xs:integer
+       division by zero inside a test expression is a dynamic error,
+       the assertion does not hold -- the instance is invalid, never
+       a crash. (The engine's XPath 1.0 lane keeps 1 div 0 = INF;
+       the assertion lane follows the XQuery error rules.) -->
+
+  <xs:element name="temp">
+    <xs:complexType>
+      <xs:sequence/>
+      <xs:attribute name="x" use="required"/>
+      <xs:attribute name="y" use="optional"/>
+      <xs:assert test="100 div xs:integer(@x) > 50"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

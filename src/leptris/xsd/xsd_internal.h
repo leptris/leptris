@@ -265,6 +265,10 @@ typedef struct xsd_group_def {
 /* XSD 1.1 (xs:schema @version="1.1") gates 1.1 enforcement. */
 int xsd_schema_version_11(struct leptris_xsd_schema* s);
 
+/* #2183: the schema document's directory (file compile) — the
+ * assertion lane anchors fn:doc's relative URIs here. */
+const char* xsd_schema_base_dir(struct leptris_xsd_schema* s);
+
 /* Group refs resolve through the schema at NFA-build time —
  * forward references need no capture order. */
 XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
