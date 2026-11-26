@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           defaultAttributes="da">
+<!-- #2182: defaults ride derivation — the extension of a base that
+     itself receives the default group enforces the default rows too. -->
+
+<xs:element name="doc" type="base"/>
+<xs:element name="wrap" type="derived"/>
+
+<xs:complexType name="base">
+  <xs:sequence/>
+</xs:complexType>
+
+<xs:complexType name="derived">
+  <xs:complexContent>
+    <xs:extension base="base">
+      <xs:sequence>
+        <xs:element name="child"/>
+      </xs:sequence>
+    </xs:extension>
+  </xs:complexContent>
+</xs:complexType>
+
+<xs:attributeGroup name="da">
+  <xs:attribute name="id" type="xs:ID" use="required"/>
+</xs:attributeGroup>
+
+</xs:schema>

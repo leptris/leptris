@@ -80,6 +80,14 @@ struct leptris_xsd_schema {
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
+    /* #2182 §3.4.2.5: xs:schema/@defaultAttributes — one list per
+     * schema document unit, applied to that unit's complexTypes
+     * post-capture (xsd_apply_default_attrs). */
+    XsdUnitDefAttrs* unit_defattrs;
+    /* #2182: while an OVERRIDE body captures, its types ride the
+     * OVERRIDDEN document's defaults (§4.2.5) — captured with the
+     * application suppressed (open045). */
+    int defattr_suppressed;
     XsdElementIcs* element_ics;
     char* target_ns;
     int version_11;    /* xs:schema @version = "1.1" */
@@ -177,8 +185,10 @@ static int xsd_oc_finalize(struct leptris_xsd_schema* s);
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root);
 static char* xsd_read_file(const char* path, size_t* out_len);
-static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src);
+static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src,
+                                       int from_base);
 static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s);
+static int xsd_apply_default_attrs(struct leptris_xsd_schema* s);
 static int xsd_resolve_ic_refs(struct leptris_xsd_schema* s);
 static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
@@ -3396,6 +3406,17 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     xsd_resolve_pending_attr_refs(s);
     xsd_canon_builtin_refs(s);
 
+    /* #2182 §3.4.2.5: default attribute groups — every unit's
+     * @defaultAttributes list resolves (§3.17.6.2), then the
+     * groups' uses append to each applying type's table (§3.4.2.4)
+     * with the c-props-correct.4 duplicate check. A broken ref or
+     * a duplicate use fails the SCHEMA. */
+    if (xsd_apply_default_attrs(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
     /* #2150 §4.3.2: overriding references resolve against the
      * POST-merge set (src-override.4), and a self-named derivation
      * base is circular. */
@@ -3505,7 +3526,7 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                         break;
                     }
                 XsdAttrDecl* prepend =
-                    xsd_copy_attr_rows(bt->attrs);
+                    xsd_copy_attr_rows(bt->attrs, 1);
                 if (mine) {
                     XsdAttrDecl* tail_a = prepend;
                     while (tail_a && tail_a->next)
@@ -4210,6 +4231,79 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
     for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next)
         if (!g->attrs && g->elem)
             g->attrs = xsd_capture_attr_rows(s, g->elem, 0);
+    /* #2182 §3.4.2.5: capture THIS document's @defaultAttributes
+     * list (a whitespace-separated QName list, document order).
+     * Each QName resolves against the xs:schema element's in-scope
+     * namespace declarations (§3.17.6.2 — an unprefixed QName rides
+     * the default namespace; open035's bare name meets the schema's
+     * default xmlns). The unit's list applies to that unit's
+     * complexTypes in the post-capture pass; resolution is checked
+     * for the WHOLE list regardless of any type's opt-out. */
+    {
+        const char* da =
+            leptris_element_attribute(root, "defaultAttributes");
+        XsdDefAttrRef* refs = NULL;
+        XsdDefAttrRef* refs_tail = NULL;
+        const char* p = da ? da : NULL;
+        while (p && *p) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                   *p == '\r')
+                p++;
+            if (!*p) break;
+            const char* tok = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                   *p != '\r')
+                p++;
+            size_t tl = (size_t)(p - tok);
+            char qname[512];
+            if (tl >= sizeof(qname)) continue;
+            memcpy(qname, tok, tl);
+            qname[tl] = '\0';
+            char uri[256], local[256];
+            xsd_resolve_qname(root, qname, uri, sizeof(uri), local,
+                              sizeof(local));
+            XsdDefAttrRef* r =
+                (XsdDefAttrRef*)calloc(1, sizeof(*r));
+            if (!r) continue;
+            r->local = xsd_strdup(local);
+            if (strchr(qname, ':') && !local[0]) {
+                /* prefixed QName with no in-scope binding —
+                 * resolution fails (§3.17.6.2) */
+                ;
+            } else if (uri[0]) {
+                r->ns = xsd_strdup(uri);
+            } else {
+                r->ns = xsd_strdup("");
+            }
+            if (!r->local) {
+                free(r);
+                continue;
+            }
+            if (refs_tail)
+                refs_tail->next = r;
+            else
+                refs = r;
+            refs_tail = r;
+        }
+        if (refs) {
+            XsdUnitDefAttrs* ud =
+                (XsdUnitDefAttrs*)calloc(1, sizeof(*ud));
+            if (ud) {
+                ud->unit = s->current_unit;
+                ud->refs = refs;
+                ud->next = s->unit_defattrs;
+                s->unit_defattrs = ud;
+            } else {
+                while (refs) {
+                    XsdDefAttrRef* rn = refs->next;
+                    free(refs->local);
+                    free(refs->ns);
+                    free(refs);
+                    refs = rn;
+                }
+            }
+        }
+    }
     /* #2151: capture THIS document's defaultOpenContent up front so
      * declarations that precede it in document order (a redefine
      * body — open042) still see it; the in-order walk below keeps
@@ -4482,6 +4576,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             XsdCm* saved_ovr = NULL;
                             int saved_ovr_e = 0, saved_ovr_m = 0,
                                 saved_ovr_u = 0;
+                            int saved_da_supp =
+                                s->defattr_suppressed;
                             if (strcmp(local, "override") == 0) {
                                 saved_ovr = s->default_open;
                                 saved_ovr_e = s->default_oc_empty;
@@ -4491,6 +4587,11 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                 s->default_oc_empty = 0;
                                 s->default_oc_mode = 0;
                                 s->default_oc_unit_id = 0;
+                                /* #2182: the override body's types
+                                 * ride the OVERRIDDEN document's
+                                 * defaultAttributes (§4.2.5) —
+                                 * capture suppressed (open045). */
+                                s->defattr_suppressed = 1;
                             }
                             xsd_capture_root(s, (LeptrisElement)n);
                             if (strcmp(local, "override") == 0) {
@@ -4502,6 +4603,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                 s->default_oc_empty = saved_ovr_e;
                                 s->default_oc_mode = saved_ovr_m;
                                 s->default_oc_unit_id = saved_ovr_u;
+                                s->defattr_suppressed =
+                                    saved_da_supp;
                                 if (ovr_default &&
                                     ovr_default != saved_ovr) {
                                     if (!s->oc_default_pool)
@@ -4876,6 +4979,21 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(ta);
         ta = tn;
     }
+    /* #2182: the per-unit defaultAttributes lists */
+    XsdUnitDefAttrs* ud = s->unit_defattrs;
+    while (ud) {
+        XsdUnitDefAttrs* un = ud->next;
+        XsdDefAttrRef* r = ud->refs;
+        while (r) {
+            XsdDefAttrRef* rn = r->next;
+            free(r->local);
+            free(r->ns);
+            free(r);
+            r = rn;
+        }
+        free(ud);
+        ud = un;
+    }
     XsdElementDecl* d = s->elements;
     while (d) {
         XsdElementDecl* dn = d->next;
@@ -5008,7 +5126,13 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
     if (s->target_ns) root->ns = xsd_strdup(s->target_ns);
     root->next = s->complex_types;
     s->complex_types = root;
-    if (attrs || any_attr_ns || base_any_attr_ns) {
+    /* #2182: EVERY complexType root registers its row slot — an
+     * attribute-less type's EMPTY entry keeps the entry keyed to
+     * THIS root, so a same-named replacement (redefine/override
+     * re-capture) never applies its defaults or wildcards onto the
+     * shadowed component's entry, and the strict attribute walk
+     * runs on attribute-less types (zero declared rows). */
+    {
         XsdTypeAttrs* ta = (XsdTypeAttrs*)calloc(1, sizeof(*ta));
         if (ta) {
             ta->type_name = xsd_strdup(name);
@@ -5021,12 +5145,12 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
             ta->any_attr_base_unit_ns = base_any_attr_unit_ns;
             ta->next = s->type_attrs;
             s->type_attrs = ta;
+        } else {
+            free(any_attr_ns);
+            free(any_attr_unit_ns);
+            free(base_any_attr_ns);
+            free(base_any_attr_unit_ns);
         }
-    } else {
-        free(any_attr_ns);
-        free(any_attr_unit_ns);
-        free(base_any_attr_ns);
-        free(base_any_attr_unit_ns);
     }
 }
 
@@ -5481,6 +5605,14 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
      * character data even with no particle model — the flag must
      * survive capture or the validator treats the type as empty. */
     root->mixed = xsd_mixed_flag(ct);
+    /* #2182 §3.4.2.5: the type's opt-out flag (tri-state: absent =
+     * apply) and the unit whose @defaultAttributes list governs it.
+     * Override bodies capture suppressed — the body rides the
+     * OVERRIDDEN document's defaults, not the overriding one's. */
+    root->defattr_apply = xsd_bool_attr(ct, "defaultAttributesApply",
+                                        -1);
+    root->defattr_unit =
+        s->defattr_suppressed ? -1 : s->current_unit;
     XsdAttrDecl* attrs = NULL;
     char* any_attr_ns = NULL;
     char* any_attr_not_qname = NULL;
@@ -5584,7 +5716,8 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         const XsdTypeAttrs* bt = xsd_find_type_attrs(
                             s, base);
                         attrs = xsd_copy_attr_rows(bt ? bt->attrs
-                                                      : NULL);
+                                                      : NULL,
+                                                   1);
                         /* the spec's attribute-wildcard union: the
                          * derived type also allows what the base's
                          * xs:anyAttribute allowed (#1691) */
@@ -6135,8 +6268,12 @@ const XsdAttrDecl* xsd_find_top_attr(
 }
 
 /* Deep-copy a captured row chain (attributeGroup refs splice
- * copies — every referencing type owns its rows). */
-static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
+ * copies — every referencing type owns its rows). from_base marks
+ * copies of a DERIVATION BASE's uses (#2182): the default-attrs
+ * application merges against them (cos-st-extends) instead of
+ * failing c-props-correct.4. */
+static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src,
+                                       int from_base) {
     XsdAttrDecl* head = NULL;
     XsdAttrDecl* tail = NULL;
     for (; src; src = src->next) {
@@ -6149,6 +6286,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src) {
         d->required = src->required;
         d->inheritable = src->inheritable;
         d->pending_ref = src->pending_ref;
+        d->from_base = from_base ? 1 : 0;
         if (tail)
             tail->next = d;
         else
@@ -6207,6 +6345,251 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 progressed = 1;
             }
     }
+}
+
+/* ---- #2182 §3.4.2.5: default attribute groups --------------------- */
+
+/* Resolve one @defaultAttributes QName against the merged schema's
+ * attributeGroup definitions. The group's namespace is the
+ * declaring document's targetNamespace (read through its retained
+ * element). ns == NULL never matches (an unresolvable ref — the
+ * caller fails the schema), ns == "" matches a no-tns unit. */
+static XsdAttrGroupDef* xsd_find_attr_group_qname(
+    struct leptris_xsd_schema* s, const char* local, const char* ns) {
+    if (!local) return NULL;
+    for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next) {
+        if (!g->name || strcmp(g->name, local) != 0) continue;
+        char* gns = g->elem ? xsd_capture_unit_tns(g->elem) : NULL;
+        int match;
+        if (!ns)
+            match = 0;
+        else if (!ns[0])
+            match = !gns || !gns[0];
+        else
+            match = gns && strcmp(gns, ns) == 0;
+        free(gns);
+        if (match) return g;
+    }
+    return NULL;
+}
+
+/* Mutable XsdTypeAttrs lookup — the const accessor only serves
+ * reads; the application pass appends rows and wildcards. */
+static XsdTypeAttrs* xsd_type_attrs_mutable(
+    struct leptris_xsd_schema* s, const char* name, const char* ns) {
+    for (XsdTypeAttrs* t = s->type_attrs; t; t = t->next)
+        if (strcmp(t->type_name, name) == 0 &&
+            ((!ns && !t->ns) ||
+             (ns && t->ns && strcmp(t->ns, ns) == 0) ||
+             (ns && !t->ns && !ns[0]) || (!ns && t->ns && !t->ns[0])))
+            return t;
+    return NULL;
+}
+
+/* Do two attribute rows denote the same expanded name? (ns ==
+ * NULL and ns == "" both denote no namespace.) */
+static int xsd_attr_rows_same_name(const XsdAttrDecl* a,
+                                   const XsdAttrDecl* b) {
+    if (!a->name || !b->name || strcmp(a->name, b->name) != 0)
+        return 0;
+    int an = a->ns && a->ns[0];
+    int bn = b->ns && b->ns[0];
+    if (an != bn) return 0;
+    return !an || strcmp(a->ns, b->ns) == 0;
+}
+
+/* Apply ONE default group to ONE type's attribute table: the
+ * group's uses append AFTER the type's own (§3.4.2.4 — computed as
+ * if an <attributeGroup ref> child appeared after any other
+ * attributeGroup children). A collision with the type's OWN use is
+ * c-props-correct.4 and fails the schema (si02/si03); a collision
+ * with a base-derived use is the cos-st-extends merge — skipped.
+ * The group's xs:anyAttribute joins the type's wildcard computation
+ * (own slot when free, else the base-union slot). Returns 0 on
+ * success, -1 on the schema error. */
+static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
+                                   XsdTypeAttrs* ta,
+                                   XsdAttrGroupDef* g,
+                                   const char* tname) {
+    XsdAttrDecl* rows =
+        g->attrs ? xsd_copy_attr_rows(g->attrs, 0)
+                 : xsd_capture_attr_rows_ex(s, g->elem, 0, g);
+    for (XsdAttrDecl* r = rows; r; r = r->next) {
+        int skip = 0;
+        for (XsdAttrDecl* e = ta->attrs; e && !skip; e = e->next) {
+            if (!xsd_attr_rows_same_name(e, r)) continue;
+            if (e->from_base) {
+                /* derivation union: one use survives */
+                skip = 1;
+            } else {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "c-props-correct.4: the defaultAttributes "
+                         "group re-declares attribute '%s' on type "
+                         "'%s'",
+                         r->name ? r->name : "?",
+                         tname ? tname : "?");
+                xsd_set_error(s, msg);
+                while (rows) {
+                    XsdAttrDecl* rn = rows->next;
+                    free(rows->name);
+                    free(rows->type);
+                    free(rows->fixed);
+                    free(rows->ns);
+                    free(rows);
+                    rows = rn;
+                }
+                return -1;
+            }
+        }
+        if (skip) {
+            free(r->name);
+            free(r->type);
+            free(r->fixed);
+            free(r->ns);
+            /* splice out: the walker continues from r->next, so
+             * rebuild the chain by freeing in place — the caller's
+             * loop iterates `rows`, which we rewire below */
+            r->name = NULL;
+            r->type = NULL;
+            r->fixed = NULL;
+            r->ns = NULL;
+            r->from_base = 2; /* tombstone */
+            continue;
+        }
+    }
+    /* append the survivors to the tail */
+    XsdAttrDecl** tailp = &ta->attrs;
+    while (*tailp) tailp = &(*tailp)->next;
+    for (XsdAttrDecl* r = rows; r; r = r->next) {
+        if (r->from_base == 2) continue;
+        XsdAttrDecl* d = (XsdAttrDecl*)calloc(1, sizeof(*d));
+        if (!d) break;
+        d->name = r->name;
+        d->type = r->type;
+        d->fixed = r->fixed;
+        d->ns = r->ns;
+        d->required = r->required;
+        d->inheritable = r->inheritable;
+        d->pending_ref = r->pending_ref;
+        *tailp = d;
+        tailp = &d->next;
+        r->name = NULL;
+        r->type = NULL;
+        r->fixed = NULL;
+        r->ns = NULL;
+    }
+    while (rows) {
+        XsdAttrDecl* rn = rows->next;
+        free(rows->name);
+        free(rows->type);
+        free(rows->fixed);
+        free(rows->ns);
+        free(rows);
+        rows = rn;
+    }
+    /* the group's xs:anyAttribute rides the default (open044) */
+    char* wunit = NULL;
+    char* wns = xsd_capture_any_attr_ns_deep(s, g->elem, 0, &wunit);
+    if (wns) {
+        /* the capture path stores the declaring unit's tns even
+         * when no wildcard exists — free before overwriting */
+        if (!ta->any_attr_ns && !ta->any_attr_not_qname) {
+            ta->any_attr_ns = wns;
+            free(ta->any_attr_unit_ns);
+            ta->any_attr_unit_ns = wunit;
+        } else if (!ta->any_attr_base_ns) {
+            ta->any_attr_base_ns = wns;
+            free(ta->any_attr_base_unit_ns);
+            ta->any_attr_base_unit_ns = wunit;
+        } else {
+            free(wns);
+            free(wunit);
+        }
+    } else {
+        free(wunit);
+    }
+    return 0;
+}
+
+/* The post-capture pass: resolve every unit's @defaultAttributes
+ * list (§3.17.6.2 — checked regardless of any type's opt-out,
+ * open203.bad) and append each applying type's groups' uses
+ * (§3.4.2.4). Returns 0, or -1 with s->error set (the caller
+ * fails the compile). */
+static int xsd_apply_default_attrs(struct leptris_xsd_schema* s) {
+    for (XsdUnitDefAttrs* ud = s->unit_defattrs; ud; ud = ud->next)
+        for (XsdDefAttrRef* r = ud->refs; r; r = r->next) {
+            if (xsd_find_attr_group_qname(s, r->local, r->ns))
+                continue;
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "defaultAttributes: attribute group '%s' does "
+                     "not resolve%s%s",
+                     r->local ? r->local : "?",
+                     r->ns && r->ns[0] ? " in namespace " : "",
+                     r->ns && r->ns[0] ? r->ns : "");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    /* one application per (type name, ns): a capture_force
+     * re-registration can list a type's root twice — the merged
+     * table is keyed by the name, not by each capture */
+    typedef struct {
+        const char* name;
+        const char* ns;
+    } applied_t;
+    size_t applied_n = 0, applied_cap = 0;
+    applied_t* applied = NULL;
+    int rc = 0;
+    for (XsdCm* c = s->complex_types; c && !rc; c = c->next) {
+        if (!c->name || c->defattr_apply == 0 || c->defattr_unit < 0)
+            continue;
+        int seen = 0;
+        for (size_t i = 0; i < applied_n && !seen; i++)
+            if (strcmp(applied[i].name, c->name) == 0 &&
+                ((!applied[i].ns && !c->ns) ||
+                 (applied[i].ns && c->ns &&
+                  strcmp(applied[i].ns, c->ns) == 0)))
+                seen = 1;
+        if (seen) continue;
+        XsdUnitDefAttrs* ud = NULL;
+        for (XsdUnitDefAttrs* u = s->unit_defattrs; u; u = u->next)
+            if (u->unit == c->defattr_unit) {
+                ud = u;
+                break;
+            }
+        if (!ud || !ud->refs) continue;
+        if (applied_n == applied_cap) {
+            size_t ncap = applied_cap ? applied_cap * 2 : 8;
+            applied_t* grown = (applied_t*)realloc(
+                applied, ncap * sizeof(applied_t));
+            if (!grown) break;
+            applied = grown;
+            applied_cap = ncap;
+        }
+        applied[applied_n].name = c->name;
+        applied[applied_n].ns = c->ns;
+        applied_n++;
+        XsdTypeAttrs* ta =
+            xsd_type_attrs_mutable(s, c->name, c->ns);
+        if (!ta) {
+            ta = (XsdTypeAttrs*)calloc(1, sizeof(*ta));
+            if (!ta) break;
+            ta->type_name = xsd_strdup(c->name);
+            if (c->ns) ta->ns = xsd_strdup(c->ns);
+            ta->next = s->type_attrs;
+            s->type_attrs = ta;
+        }
+        for (XsdDefAttrRef* r = ud->refs; r && !rc; r = r->next) {
+            XsdAttrGroupDef* g =
+                xsd_find_attr_group_qname(s, r->local, r->ns);
+            if (!g) continue; /* failed the check above */
+            rc = xsd_defattr_apply_group(s, ta, g, c->name);
+        }
+    }
+    free(applied);
+    return rc;
 }
 
 /* Capture the attribute rows of a complexType or attributeGroup:
@@ -6387,7 +6770,7 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
              * run, or runs later in document order). depth+1 keeps
              * the cycle guard. */
             XsdAttrDecl* copied =
-                g->attrs ? xsd_copy_attr_rows(g->attrs)
+                g->attrs ? xsd_copy_attr_rows(g->attrs, 0)
                          : xsd_capture_attr_rows_ex(s, g->elem, depth + 1,
                                                     g);
             if (!copied) continue;

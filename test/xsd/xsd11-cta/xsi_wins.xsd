@@ -6,9 +6,14 @@
        (xsi:type) OVERRIDES the conditionally selected one. The
        alternative would select ext (which REQUIRES the b child);
        xsi:type=base pulls assessment back to base, under which the
-       bare <a/> content is valid. -->
+       bare <a/> content is valid. #2182: base declares the
+       selector attribute k — an attribute-less nominated type
+       rejects the undeclared selector (strict assessment runs on
+       attribute-less types now), which would mask the override
+       discriminator. -->
   <xs:complexType name="base">
     <xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence>
+    <xs:attribute name="k" type="xs:string"/>
   </xs:complexType>
 
   <xs:complexType name="ext">

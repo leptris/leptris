@@ -165,9 +165,43 @@ tests that flipped with the wildcard-namespace machinery).
 By family: assertions 270/296 · cta 99/125 · override 75/87 ·
 openContent 196/205 · core 1147/1493.
 
+Re-measured 2026-11-26 (#2182, branch `xsd11-defattr` — the
+§3.4.2.5 default attribute groups: xs:schema/@defaultAttributes
+captured per schema DOCUMENT unit as resolved QNames (unprefixed
+rides the default namespace, §3.17.6.2), the groups' attribute uses
+appended to each applying complexType's table AFTER its own uses
+(§3.4.2.4 — computed as if an <attributeGroup ref> child appeared
+last), defaultAttributesApply="false" opting a type out, per-unit
+scoping (an included document's types ride their own document's
+list; redefine bodies stay in the including unit and DO receive the
+defaults, open044; override bodies capture suppressed — §4.2.5,
+open045), the group's xs:anyAttribute joining the type's wildcard
+union, the schema-level ref resolution independent of any opt-out
+(open203.bad), cross-namespace group refs resolved by (ns, name)
+through the declaring unit's targetNamespace (open204.bad vs
+open205), the c-props-correct.4 duplicate-use rejection where the
+synthetic ref collides with the type's OWN use (si02, and si03's
+circular re-introduction) while a collision with a BASE-derived use
+merges per cos-st-extends (from_base provenance on the extension
+fold's row copies); plus the strict attribute walk now running on
+attribute-less complexTypes (every root registers its row slot —
+the open044.n1 shape: the included doc's bare alpha rejects
+xml:lang); re-measured on the release-447 base): **1809/2206
+pass** — 1192 valid / 475 invalid / 142 schema-error (397 reds,
+zero regressions). The 1.0 lane rides the same engine and gains 3
+rows (1022 → 1025, see xsd-dispositions/README.md). Two pre-#2182
+local pins rode the old attribute-less leniency and were
+re-pinned to the strict posture: XsdAlternative11.
+FirstMatchingAlternativeTypes (the no-match fallback asserts its
+content typing attribute-free; the unreferenced selector on the
+fallback is now invalid) and Xsd11Cta.XsiTypeOverridesSelected
+Alternative (xsi_wins.xsd's base declares the selector k so the
+override discriminator survives strict assessment). Spec tests:
+test/xsd/test_xsd11_defattr.cpp (13 specs, red-first).
+
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1787) is pinned and
+record for every row left in it. The floor (now 1809) is pinned and
 >>>>>>> 39f81619 (xsd11: xs:openContent phase-3 rules (#2151))
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /

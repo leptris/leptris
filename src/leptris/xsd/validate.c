@@ -2184,6 +2184,14 @@ static void validate_local_uri(struct xsd_validator* v,
         const XsdTypeAttrs* rows =
             xsd_find_type_attrs_ns(s, type, euri);
         if (!rows) rows = xsd_find_type_attrs(s, type);
+        if (!rows) {
+            /* #2182: an attribute-less complexType runs the strict
+             * walk with zero declared rows — anything not
+             * xsi-admitted is invalid (the open044.n1 shape: the
+             * included doc's bare alpha rejects xml:lang). */
+            static const XsdTypeAttrs k_no_attrs;
+            rows = &k_no_attrs;
+        }
         validate_attributes(v, s, elem, rows, ct);
         validate_children(v, s, elem, ct);
         /* XSD 1.1 §3.13.6: {assertions} accumulate down the
