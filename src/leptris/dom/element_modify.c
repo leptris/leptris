@@ -78,10 +78,16 @@ char* leptris_dom_name_slot_carve(struct leptris_document* doc,
     *(struct leptris_document**)slot = doc;
     char* dst = slot + sizeof(struct leptris_document*);
     if (name_len <= 8) {
-        uint64_t w = 0;
-        for (size_t i = 0; i < name_len; i++)
-            ((unsigned char*)&w)[i] = (unsigned char)name[i];
-        memcpy(dst, &w, 8);
+        /* S8: direct byte stores. The old stack-word + memcpy(dst,
+         * &w, 8) dance compiled to a LIBC CALL per create (clang
+         * could not prove the destination alignment, so the
+         * fixed-width copy emitted _platform_memmove — the #2132
+         * append-uniq profile's second-biggest leaf). 1-8 strb
+         * stores inline; the reserve contract is unchanged (the
+         * bound check above still reserves the full word, and bytes
+         * past the NUL stay unwritten — nothing reads past it:
+         * cstr_len16/memeq_short/strcmp all stop at the NUL). */
+        for (size_t i = 0; i < name_len; i++) dst[i] = name[i];
         dst[name_len] = '\0';
     } else {
         memcpy(dst, name, name_len);
@@ -194,12 +200,31 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
          * Same init contract as leptris_element_create_with_view
          * (memset-zero + type/name/name_hash/name_len). Falls back
          * to the plain pool path when a block can't be allocated. */
-        /* Lane 18: element names are almost always tiny — a bounded
-         * byte scan resolves the length without the strlen call;
-         * anything 8+ bytes pays the same strlen as before. */
+        /* #2132 append-uniq: ONE fused pass derives the length, the
+         * colon presence, and the canonical 16-bit name hash. The
+         * distinct-heavy shape (200k unique names — the append-uniq
+         * bench row, steady state post-cap) paid FOUR serial byte
+         * scans per create — the len scan, the intern-gate colon
+         * probe, the carve path's leptris_name_hash_compute
+         * recompute, and split_qname's own probe — ~58% of the
+         * profiled row (2026-11-27 sample); the fused scan collapses
+         * them to one loop. scan_hash is the engine-canonical FNV-1a
+         * 16-bit over the same bytes (identical algorithm to
+         * leptris_name_hash_compute), so the carve path consumes it
+         * directly; the intern path keeps its own authoritative
+         * table cache. Names past 254 bytes keep the exact legacy
+         * routing (strlen + pool strdup + hash recompute, no split). */
         size_t name_len = 0;
-        while (name_len < 8 && name[name_len]) name_len++;
-        if (name_len == 8 && name[8]) name_len = strlen(name);
+        int colon_seen = 0;
+        uint16_t scan_hash = 0x811C;
+        while (name_len < 255) {
+            unsigned char c = (unsigned char)name[name_len];
+            if (!c) break;
+            scan_hash = (uint16_t)((scan_hash ^ c) * 0x0193u);
+            colon_seen |= (c == ':');
+            name_len++;
+        }
+        if (name_len == 255 && name[255]) name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
             /* #2132 phase 2: per-document name interning — the
@@ -229,16 +254,12 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 struct leptris_name_intern* ix = doc->name_intern;
                 if (!ix) ix = leptris_name_intern_get(doc);
                 if (ix && !ix->overflow) {
-                    int colon_free = (name_len < 3);
-                    if (!colon_free && name_len <= 16) {
-                        colon_free = 1;
-                        for (const char* c = name; *c; c++) {
-                            if (*c == ':') { colon_free = 0; break; }
-                        }
-                    } else if (!colon_free) {
-                        colon_free =
-                            memchr(name, ':', name_len) == NULL;
-                    }
+                    /* Colon gate from the fused pass: names under 3
+                     * bytes cannot carry a splittable QName (the
+                     * split_qname probe law — today's `name_len < 3`
+                     * trivial-accept is preserved exactly, so 1-2
+                     * byte names with a colon stay internable). */
+                    int colon_free = (name_len < 3) || !colon_seen;
                     if (colon_free) {
                         if (ix->memo_len == (uint16_t)name_len &&
                             ix->memo_name &&
@@ -279,7 +300,9 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
                 elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
                 elem_set_name_doc(elem, name_copy, doc);
-                elem->name_hash = leptris_name_hash_compute(name_copy);
+                /* The fused pass already hashed these exact bytes —
+                 * the recompute pass is gone (#2132 append-uniq). */
+                elem->name_hash = scan_hash;
                 elem->name_len = (name_len > 254) ? 0xFF : (uint8_t)name_len;
                 /* Round 20 contract: create registers every new element
                  * so pre-attach ops (set_root validation, get_document
@@ -296,8 +319,14 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                  * below keep registering — their names carry no
                  * backpointer. */
                 /* Mut-block copy is writable: a QName splits in
-                 * place (#846). */
-                leptris_elem_split_qname(elem, doc->pool);
+                 * place (#846). Called only when a splittable colon
+                 * exists — the colon-free case is a proven no-op
+                 * (split_qname's probe would scan and find nothing;
+                 * the 1-2-byte tier trivially skips), so skipping it
+                 * is byte-identical (#2132 append-uniq: the third
+                 * byte scan gone). */
+                if (name_len >= 3 && colon_seen)
+                    leptris_elem_split_qname(elem, doc->pool);
             } else {
                 /* Long name or block alloc failure: fall through to
                  * the pool path (registration follows below — pool
