@@ -199,9 +199,31 @@ Alternative (xsi_wins.xsd's base declares the selector k so the
 override discriminator survives strict assessment). Spec tests:
 test/xsd/test_xsd11_defattr.cpp (13 specs, red-first).
 
+Re-measured 2026-11-26 (#2185, branch `xsd-sweep-2185` — the
+derivation-ok attribute-use clauses over the POST-capture tables:
+an extension's own row re-declaring a folded base use by expanded
+name fails the schema unless it spells use="prohibited" (which
+contributes nothing to the union), a restriction's derived rows
+must match a non-prohibited base use (a required base use cannot
+weaken; optional/required with no matching base use fails unless
+the base's attribute wildcard admits the row's namespace),
+attribute rows capture use="prohibited" and an explicit
+@targetNamespace (1.1's local-declaration form), and the instance
+side rejects an attribute a governing prohibited row names; the
+wildcard arm rides validate.c's namespace-set matcher exported as
+xsd_any_attr_matches; re-measured on the #2193 base):
+**1813/2206 pass** — 1192 valid / 479 invalid / 142 schema-error
+(393 reds, zero regressions). The 1.0 lane rides the same engine
+and gains 16 rows (1025 → 1041, see xsd-dispositions/README.md).
+Four 1.1 rows flip: cta0044.n01 (the selected aType_f prohibits
+@r; the instance carries it), target003.n1/n2 (the att row binds
+its declared @targetNamespace — the foreign-ns and no-namespace
+spellings are no longer admitted), s3_2_3ii01 (an unprefixed
+attribute against a @targetNamespace-qualified local declaration).
+
 `XsdConformance11.ManifestExpectationsMatch` (test/xsd/
 test_xsd11_conformance.cpp) is the gate; this file is the disposition
-record for every row left in it. The floor (now 1809) is pinned and
+record for every row left in it. The floor (now 1813) is pinned and
 monotonic — same law as the 1.0 lane. Scaffolding context: the engine
 already captures xs:assert / xs:assertion / xs:alternative /
 xs:openContent / xs:override (moxml#556 wired xs:assert through the
@@ -259,13 +281,13 @@ schema-error reds; #2150 flips 8 override schema-error rows:
 | 21 | saxon Id id004-id017: instance-invalid ID-family rows accepted (ID list types, ID-typed complexTypes with simple content, ID attribute defaults) | OPEN — re-sliced out of #2155's ic class row (#2156): the one-ID gate engine flip + the ID value-space checks, same class as the ibm S3_3_4 ii row |
 | 11 | assertion-facet residue (#2154's class, 66 of the 85 caught): assert tests the engine cannot ASSESS — the facet's ABSENT focus (assert-simple008/009/010: context item, position() and last() are undefined during simple-type validation; the engine evaluates with the owning element), fn:doc() relative loading inside assert tests (assert011 n+v), xs:integer division by zero must raise (assert012), recursive count asserts over derived contexts (d4_3_15ii14/15), the sequence-carrier decomposition for every-over-$value (listunion6_2), castable-as-double accepting '10f4' (assert-simple003/004) | OPEN — each names an ENGINE gap (focus semantics, doc loading, arithmetic error semantics, carrier decomposition, castable lexical validators), not a facet-capture gap |
 | 60 | saxon Wild: wildcard namespace-set violations (`notNamespace`/`notQName`/multi-ns `namespace`) accepted | OPEN — same wildcard-predicate class as the valid table, accept-side (#2156 retired the six wild101/wild103 key rows whose real blocker was an unevaluated xs:key) |
-| 5 | saxon CTA cta0001/cta0044 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044's residue is the complexContent content-model gap — the selected aType_f requires an `f` child the instance lacks) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
+| 4 | saxon CTA cta0001 + ibm s3_12ii01+03: invalid instances accepted — the SELECTED alternative types lack their TEXT typing (cta0040/41 flipped in #2155 when xs:dateTimeStamp registered; cta0044.n01 flipped in #2185 — the selected aType_f's use="prohibited" @r row rejects the instance's attribute) | OPEN — mirror of the valid-side restriction-facet class; the dispatch and selection themselves are correct (#2149) |
 | 1 | saxon CTA cta0002: invalid instance accepted — the test expression `@c2:min=1` binds its prefix in the SCHEMA document (§3.13.2 {namespace bindings}); the instance binds a different prefix, the test evaluates false and the base type accepts | OPEN — schema-side namespace bindings for CTA tests |
 | 12 | saxon Open (11) + ibm s3_16_2ii06 (1): openContent `mode="strict"` violations accepted — strict-mode gate (unknown element must be declared) missing; `mode="sibling"` ordering likewise | CLOSED by #2151 — the violations these rows encode are namespace-set violations, and the open content wildcard now enforces its full grammar (@namespace lists, @notNamespace, prefix-resolved @notQName, greedy attribution so a declared particle still type-checks its own instances: open025.n1). Strict processContents on open-content-absorbed children remains tier-1 lax (§3.10.4.1 posture pinned by the moxml corpus); no remaining row depends on it |
 | 5 | saxon VC: invalid-under-version-control documents accepted | OPEN — conditional inclusion: the version test prunes NOTHING (all branches evaluated/none pruned), so vc-invalid instances sail through |
 | 3 | ibm S3_4_2_4 + saxon Override: instance validity under overridden/redefined components | OPEN — overridden components captured (compile.c:55) but instance typing uses the pre-override definitions (#679 retired the three Override n02 no-namespace-instance rows via exact root binding) |
-| 3 | ibm S3_2_3: element-decl clause violations (targetNamespace on local declarations) accepted | OPEN |
-| 3 | saxon TargetNS: targetNamespace violations accepted | OPEN |
+| 2 | ibm S3_2_3: element-decl clause violations (targetNamespace on local declarations) accepted (s3_2_3ii01 flipped in #2185 — the @targetNamespace-qualified local declaration rejects the unprefixed instance attribute) | OPEN |
+| 1 | saxon TargetNS: targetNamespace violations accepted (target003.n1/n2 flipped in #2185 — the row-level @targetNamespace capture plus the base wildcard's namespace set reject the foreign-ns and no-namespace spellings; target001.n1 remains) | OPEN |
 | 3 | saxon All: xs:all occurrence-limit violations accepted | OPEN — mirror of the valid-side relaxed-occurrence gap: the RELAXED limits are neither enforced nor bounded |
 | 2 | saxon Simple: default/fixed violations accepted | OPEN — shares the default-semantics class |
 | 1 | ibm D3_3_17 ii: base64Binary with minLength=4 octets accepts the unpadded "123456" (the suite's base64Binary lexical requires the RFC-2045 padding) | OPEN — binary lexical strictness (re-dispositioned here from #2148's datatype row; not a 1.1-datatype defect) |

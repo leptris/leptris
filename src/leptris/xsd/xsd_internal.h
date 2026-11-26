@@ -321,6 +321,11 @@ typedef struct xsd_attr_decl {
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
     char* fixed; /* #FIXED value: present values must string-equal it */
     int required;
+    /* #2185: use="prohibited" — the row REMOVES the attribute from
+     * the type's {attribute uses} (XSD 1.0 §3.4.2/§3.4.3): an
+     * instance attribute it names is rejected, and the row is not a
+     * match candidate for the derivation-ok comparison. */
+    int prohibited;
     /* leptris-ruby#679: the row's {target namespace} (XSD 1.0
      * §3.2.3) — a qualified-form row (attributeFormDefault or the
      * declaration's own form) carries the declaring unit's

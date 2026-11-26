@@ -224,6 +224,17 @@ static int xsd_check_override_docs(struct leptris_xsd_schema* s,
 static int xsd_check_override_refs(struct leptris_xsd_schema* s,
                                    LeptrisElement root);
 static int xsd_check_derivation_cycles(struct leptris_xsd_schema* s);
+static int xsd_attr_rows_same_name(const XsdAttrDecl* a,
+                                   const XsdAttrDecl* b);
+/* validate.c's wildcard namespace-set matcher (##any/##other/
+ * ##targetNamespace/##local/URI lists) — shared with the compile-side
+ * derivation-ok attribute check (#2185: a derived use with no
+ * matching base use is legal when the base's attribute wildcard
+ * admits its namespace). */
+extern int xsd_any_attr_matches(const char* grammar, const char* uri,
+                                const char* target_ns);
+extern const char* xsd_target_ns(struct leptris_xsd_schema* s);
+static int xsd_check_derivation_ok_attrs(struct leptris_xsd_schema* s);
 
 /* #1626: prefixed QName refs (type="w:CT_Border") resolve by local
  * name — the engine's tables key on local names; the prefix maps
@@ -3237,6 +3248,114 @@ static int xsd_check_derivation_cycles(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* ---- #2185: the derivation-ok attribute-use clauses ----------------
+ *
+ * The oracle (libxml2 2.9.13) enforces two attribute families over
+ * the derived types that the capture pass never sees. Both run over
+ * the POST-capture tables (extension folds in, pending refs
+ * resolved, default groups applied), so cross-document and
+ * deferred-base shapes ride the same comparison:
+ *
+ *   - duplicate attribute use (derivation-ok-extension-err): an
+ *     extension's OWN row re-declaring a FOLDED base row by expanded
+ *     name fails the schema — unless the own row is use="prohibited",
+ *     which removes the base use instead of duplicating it
+ *     (derivation-ok-extension_0's legal twin shape).
+ *
+ *   - restriction attribute-use consistency (derivation-ok-
+ *     restriction-2.1.1/2.2, restriction-attr1): every derived row
+ *     must match a NON-prohibited base row by expanded name. A base
+ *     REQUIRED use cannot weaken — a derived optional OR prohibited
+ *     row against it fails 2.1.1. A derived optional/required row
+ *     with no matching base use fails 2.2 (a prohibited base row is
+ *     not in the base {attribute uses}, so it never matches); a
+ *     derived prohibited row with no match is the redundant
+ *     prohibition and stays legal. */
+static const XsdTypeAttrs* xsd_derivation_type_attrs(
+    struct leptris_xsd_schema* s, const XsdCm* c) {
+    if (!c || !c->name) return NULL;
+    const XsdTypeAttrs* ta = xsd_find_type_attrs_ns(s, c->name, c->ns);
+    if (!ta) ta = xsd_find_type_attrs(s, c->name);
+    return ta;
+}
+
+static int xsd_check_derivation_ok_attrs(struct leptris_xsd_schema* s) {
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        const XsdTypeAttrs* ta = xsd_derivation_type_attrs(s, c);
+        if (!ta) continue;
+        /* duplicate attribute use on the POST-fold table */
+        for (const XsdAttrDecl* own = ta->attrs; own; own = own->next) {
+            if (own->from_base || own->prohibited || !own->name)
+                continue;
+            for (const XsdAttrDecl* b = ta->attrs; b; b = b->next) {
+                if (!b->from_base || b == own || !b->name) continue;
+                if (!xsd_attr_rows_same_name(own, b)) continue;
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "duplicate attribute use: the extension of "
+                         "'%s' re-declares attribute '%s'",
+                         c->name, own->name);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+        /* restriction attribute-use consistency */
+        if (!c->res_base) continue;
+        XsdCm* base = xsd_find_complex_ns(s, c->res_base,
+                                          c->res_base_ns ? c->res_base_ns
+                                                         : c->ns);
+        if (!base) base = xsd_find_complex_ns(s, c->res_base, c->ns);
+        if (!base) continue; /* unresolved: the ref check owns it */
+        const XsdTypeAttrs* ba = xsd_derivation_type_attrs(s, base);
+        if (!ba) continue;
+        for (const XsdAttrDecl* d = ta->attrs; d; d = d->next) {
+            if (!d->name) continue;
+            const XsdAttrDecl* m = NULL;
+            for (const XsdAttrDecl* b = ba->attrs; b; b = b->next) {
+                /* a prohibited base row is not in {attribute uses} */
+                if (b->prohibited || !b->name) continue;
+                if (xsd_attr_rows_same_name(d, b)) {
+                    m = b;
+                    break;
+                }
+            }
+            if (!m) {
+                /* 2.2's wildcard arm: a derived use with no matching
+                 * base use is legal when the base's attribute
+                 * wildcard admits the row's namespace (ns5/tns5's
+                 * bare <xs:anyAttribute/> base, target003's URI-list
+                 * wildcard). */
+                if (d->prohibited) continue; /* redundant removal */
+                const char* bunit = ba->any_attr_unit_ns
+                                        ? ba->any_attr_unit_ns
+                                        : xsd_target_ns(s);
+                if (xsd_any_attr_matches(ba->any_attr_ns, d->ns,
+                                         bunit))
+                    continue;
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "derivation-ok-restriction-2.2: attribute "
+                         "'%s' of '%s' has no matching use in the "
+                         "base '%s'",
+                         d->name, c->name, c->res_base);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            if (m->required && !d->required) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "derivation-ok-restriction-2.1.1: attribute "
+                         "'%s' of '%s' weakens a required use in the "
+                         "base '%s'",
+                         d->name, c->name, c->res_base);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                                          size_t len,
                                          const char* base_dir,
@@ -3412,6 +3531,16 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * with the c-props-correct.4 duplicate check. A broken ref or
      * a duplicate use fails the SCHEMA. */
     if (xsd_apply_default_attrs(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2185: the derivation-ok attribute-use clauses — duplicate
+     * attribute use on the extension-folded table and the
+     * restriction derived-vs-base consistency, over the POST-capture
+     * tables. A violation fails the SCHEMA. */
+    if (xsd_check_derivation_ok_attrs(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -4795,6 +4924,8 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     const char* use = leptris_element_attribute(
                         (LeptrisElement)n, "use");
                     d->required = (use && strcmp(use, "required") == 0);
+                    d->prohibited =
+                        (use && strcmp(use, "prohibited") == 0);
                     d->inheritable =
                         xsd_bool_attr((LeptrisElement)n, "inheritable",
                                       -1);
@@ -6284,6 +6415,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src,
         d->fixed = xsd_strdup(src->fixed);
         d->ns = xsd_strdup(src->ns);
         d->required = src->required;
+        d->prohibited = src->prohibited;
         d->inheritable = src->inheritable;
         d->pending_ref = src->pending_ref;
         d->from_base = from_base ? 1 : 0;
@@ -6320,8 +6452,10 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 a->fixed = xsd_strdup(src->fixed);
                 free(a->ns);
                 a->ns = xsd_strdup(src->ns);
-                if (!(a->pending_ref & XSD_PENDING_USE))
+                if (!(a->pending_ref & XSD_PENDING_USE)) {
                     a->required = src->required;
+                    a->prohibited = src->prohibited;
+                }
                 if (a->inheritable < 0) a->inheritable = src->inheritable;
                 a->pending_ref &= ~XSD_PENDING_REF;
                 progressed = 1;
@@ -6338,8 +6472,10 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 a->fixed = xsd_strdup(src->fixed);
                 free(a->ns);
                 a->ns = xsd_strdup(src->ns);
-                if (!(a->pending_ref & XSD_PENDING_USE))
+                if (!(a->pending_ref & XSD_PENDING_USE)) {
                     a->required = src->required;
+                    a->prohibited = src->prohibited;
+                }
                 if (a->inheritable < 0) a->inheritable = src->inheritable;
                 a->pending_ref &= ~XSD_PENDING_REF;
                 progressed = 1;
@@ -6470,6 +6606,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
         d->fixed = r->fixed;
         d->ns = r->ns;
         d->required = r->required;
+        d->prohibited = r->prohibited;
         d->inheritable = r->inheritable;
         d->pending_ref = r->pending_ref;
         *tailp = d;
@@ -6667,6 +6804,8 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                 d->fixed = xsd_strdup(
                     leptris_element_attribute(ae, "fixed"));
                 d->required = (use && strcmp(use, "required") == 0);
+                d->prohibited =
+                    (use && strcmp(use, "prohibited") == 0);
                 /* leptris-ruby#679: form qualification (§3.2.3) —
                  * @form wins; otherwise the unit's
                  * attributeFormDefault decides (the same unit walk
@@ -6700,6 +6839,19 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                         else
                             free(tns);
                     }
+                    /* #2185: an explicit @targetNamespace on the row
+                     * (1.1 allows it on local declarations —
+                     * target003) is the row's {target namespace};
+                     * it overrides the form-derived one. */
+                    {
+                        const char* tns =
+                            leptris_element_attribute(ae,
+                                                      "targetNamespace");
+                        if (tns && tns[0]) {
+                            free(d->ns);
+                            d->ns = xsd_strdup(tns);
+                        }
+                    }
                 }
             } else {
                 /* ref to a top-level attribute declaration */
@@ -6724,6 +6876,8 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     d->name = xsd_strdup(xsd_local_name(ref));
                     d->pending_ref = use ? 3 : 1;
                     d->required = (use && strcmp(use, "required") == 0);
+                    d->prohibited =
+                        (use && strcmp(use, "prohibited") == 0);
                 } else {
                     d->name = xsd_strdup(src->name);
                     d->type = xsd_strdup(src->type);
@@ -6736,6 +6890,10 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     d->required = use
                                       ? (strcmp(use, "required") == 0)
                                       : src->required;
+                    d->prohibited = use
+                                        ? (strcmp(use, "prohibited") ==
+                                           0)
+                                        : src->prohibited;
                     if (inh < 0) d->inheritable = src->inheritable;
                 }
             }
