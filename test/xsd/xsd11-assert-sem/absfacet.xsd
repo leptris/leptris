@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified" attributeFormDefault="unqualified">
+
+  <!-- #2183 leak-shape regression: a simple-type assertion facet
+       whose test is an ABSOLUTE location path. The facet lane runs
+       absent focus (§3.16.4): there is no context item and no tree,
+       so the path raises XPDY0002 and the facet does not hold —
+       for every value (d4_3_15ii22/ii24 shape). The evaluation
+       enters evaluate_location_path and must release the seed
+       nodeset on the error path (LSan: 45836902979). -->
+
+  <xs:element name="date">
+    <xs:simpleType>
+      <xs:restriction base="xs:date">
+        <xs:assertion test="/root = 'present'"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+
+  <xs:element name="outer">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="date" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

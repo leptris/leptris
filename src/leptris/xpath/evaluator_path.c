@@ -1269,12 +1269,14 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
     /* Starting nodeset */
     if (path->type == XPATH_AST_ABSOLUTE_PATH) {
         /* XSD 1.1 §3.16.4 absent focus (#2183): no context item —
-         * there is no tree to navigate either (XPDY0002). */
+         * there is no tree to navigate either (XPDY0002). `current`
+         * was allocated above; release it with the error. */
         if (ctx->context_size == 0) {
             snprintf(ctx->error_code, sizeof(ctx->error_code),
                      "XPDY0002");
             snprintf(ctx->error_msg, sizeof(ctx->error_msg),
                      "path '/': no context item");
+            xpath_nodeset_free(current);
             return NULL;
         }
         /* An absolute path roots at the CONTEXT NODE'S document
@@ -1292,17 +1294,17 @@ struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
          * both directions: count(//ele1) must see neither the 2
          * document ele1s nor the 1 subtree ele1). Not an error —
          * the empty sequence (§3.13.4.1's "not in themselves
-         * errors"). */
-        LeptrisElement assert_root = ctx->xquery_assert_root;
-        if (assert_root) {
+         * errors"). The result ADOPTS `current` (already allocated
+         * above; xpath_result_free releases it) — a fresh nodeset
+         * here leaked the seed one on every assert-path eval. */
+        if (ctx->xquery_assert_root) {
             struct leptris_xpath_result* empty =
                 xpath_result_new(XPATH_RESULT_NODESET);
-            if (!empty) return NULL;
-            empty->value.nodeset_value = xpath_nodeset_new();
-            if (!empty->value.nodeset_value) {
-                xpath_result_free(empty);
+            if (!empty) {
+                xpath_nodeset_free(current);
                 return NULL;
             }
+            empty->value.nodeset_value = current;
             return empty;
         }
         /* Special case: Absolute path with element name as first step
