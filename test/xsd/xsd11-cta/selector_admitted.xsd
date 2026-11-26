@@ -4,9 +4,12 @@
   <!-- moxml#579: the attributes referenced in the SELECTED
        alternative's test are exempt from strict attribute assessment
        (§3.12.4). kind names the alternative's own selector: an
-       undeclared kind must be admitted when the test matches. -->
-  <xs:element name="doc" type="xs:int">
-    <xs:alternative test="@kind='text'" type="xs:string"/>
+       undeclared kind must be admitted when the test matches. The
+       type pair is substitutable (#2184 cos-ct-type-substitutable:
+       xs:token derives from xs:string); the no-match leg fails on
+       the undeclared attribute, not the text. -->
+  <xs:element name="doc" type="xs:string">
+    <xs:alternative test="@kind='text'" type="xs:token"/>
   </xs:element>
 
 </xs:schema>

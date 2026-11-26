@@ -3,9 +3,11 @@
 
   <!-- moxml#579 scope check: only the attributes the SELECTED test
        references are exempt; every other undeclared attribute stays
-       strict. lang is referenced (admitted on a match), kind is not. -->
-  <xs:element name="doc" type="xs:int">
-    <xs:alternative test="@lang='en'" type="xs:string"/>
+       strict. lang is referenced (admitted on a match), kind is not.
+       The type pair is substitutable (#2184 cos-ct-type-substitutable:
+       xs:token derives from xs:string). -->
+  <xs:element name="doc" type="xs:string">
+    <xs:alternative test="@lang='en'" type="xs:token"/>
   </xs:element>
 
 </xs:schema>
