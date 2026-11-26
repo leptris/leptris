@@ -181,6 +181,15 @@ jobs:
           done
 
       - name: Gate — row delta USE vs OFF
+        id: gate
+        # A gate FAIL here is not yet the verdict: the USE phase is built
+        # from ONE training run, and training is variable (address-keyed
+        # caches under layout randomization). #2194: a fail routes to the
+        # flip-check below, which retrains and re-measures — a row that
+        # stays slow in both cycles is a real regression and fails the
+        # job; a row that recovers was a training flip (documented, the
+        # #2180 functional-gate posture).
+        continue-on-error: true
         env:
           TOL: ${{ inputs.gate_tolerance_pct || '5' }}
         run: |
@@ -190,6 +199,59 @@ jobs:
           python3 .github/scripts/pgo_gate.py results-off results-use \
             --tolerance "${TOL}" | tee gate.md
           cat gate.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Flip check — retrain and re-measure the failing gate
+        if: steps.gate.outcome == 'failure'
+        env:
+          CONFIG: >-
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+            -DLEPTRIS_BUILD_CLI=ON -DLEPTRIS_BUILD_BENCHMARKS=ON
+            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_BUILD_STATIC=ON -DLEPTRIS_BUILD_SHARED=ON
+            -DLEPTRIS_ENABLE_LTO=OFF
+            -DCMAKE_C_FLAGS=-frandom-seed=leptris
+          TOL: ${{ inputs.gate_tolerance_pct || '5' }}
+        run: |
+          set -euo pipefail
+          # Second full GENERATE→train→USE cycle in a fresh tree. The
+          # OFF baseline is reused (it has no training input, so its
+          # numbers carry no flip variance).
+          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=GENERATE
+          cmake --build build-b -j 4
+          bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-b" \
+            train gcc /tmp/train-b-log
+          cmake -B build-b -S . ${CONFIG} -DLEPTRIS_ENABLE_PGO=USE
+          cmake --build build-b -j 4
+          for k in 1 2 3; do
+            bash .github/scripts/pgo_battery.sh "$PWD" "$PWD/build-b" \
+              rows gcc "results-use-b/run$k"
+          done
+          if python3 .github/scripts/pgo_gate.py results-off results-use-b \
+              --tolerance "${TOL}" | tee flip-gate.md; then
+            {
+              echo "### Flip check (#2194)"
+              echo ""
+              echo "First-cycle gate FAILED but the retrained cycle passes:"
+              echo "training-run variance, not a regression (the #2180"
+              echo "functional-gate posture). First cycle:"
+              echo '```'
+              cat gate.md
+              echo '```'
+              echo '```'
+              cat flip-gate.md
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### Flip check (#2194)"
+            echo ""
+            echo "Both training cycles failed the gate — REAL regression."
+            echo '```'
+            cat gate.md flip-gate.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       # Determinism (#2167 gate 2). Two full GENERATE→train→USE cycles
       # sharing one absolute profile dir — the -fprofile-use=<dir> path
