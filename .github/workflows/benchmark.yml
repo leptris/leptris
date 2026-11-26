@@ -46,16 +46,47 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja utf8proc pugixml libxml2
+        run: |
+          brew install cmake ninja utf8proc libxml2
+          # pugixml is PINNED to 1.14 — the same version the linux legs get
+          # via apt libpugixml1v5. brew's `pugixml` formula floats (1.16
+          # today) and its numbers moved ~3x between runs, making every
+          # macos cross-run comparison apples-to-oranges (#2174). Build the
+          # 1.14 tarball into a prefix and point the Configure step's
+          # CMAKE_PREFIX_PATH at it; find_package(pugixml) prefers it over
+          # the platform search paths, and no brew pugixml exists to drift.
+          PUGI_PREFIX="$RUNNER_TEMP/pugixml-1.14"
+          if [ ! -f "$PUGI_PREFIX/lib/libpugixml.a" ]; then
+            curl -fL --retry 3 -o "$RUNNER_TEMP/pugixml-1.14.tar.gz" \
+              https://github.com/zeux/pugixml/releases/download/v1.14/pugixml-1.14.tar.gz
+            echo "2f10e276870c64b1db6809050a75e11a897a8d7456c4be5c6b2e35a11168a015  $RUNNER_TEMP/pugixml-1.14.tar.gz" | shasum -a 256 -c -
+            tar -xzf "$RUNNER_TEMP/pugixml-1.14.tar.gz" -C "$RUNNER_TEMP"
+            cmake -S "$RUNNER_TEMP/pugixml-1.14" -B "$RUNNER_TEMP/pugixml-1.14/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$PUGI_PREFIX"
+            cmake --build "$RUNNER_TEMP/pugixml-1.14/build" -j 3
+            cmake --install "$RUNNER_TEMP/pugixml-1.14/build"
+          fi
+          echo "PUGIXML_1_14_PREFIX=$PUGI_PREFIX" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
+          # Version echo: makes pugixml drift visible forever (#2174).
+          if [ -n "${PUGIXML_1_14_PREFIX:-}" ]; then
+            echo "pugixml (pinned, macOS): $(grep -m1 'define PUGIXML_VERSION' "$PUGIXML_1_14_PREFIX/include/pugixml.hpp")"
+            PUGI_ARGS="-DCMAKE_PREFIX_PATH=$PUGIXML_1_14_PREFIX"
+          else
+            dpkg-query -W -f='pugixml (Linux, apt): libpugixml-dev ${Version}\n' libpugixml-dev || true
+            PUGI_ARGS=""
+          fi
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=ON \
             -DLEPTRIS_BUILD_BENCHMARKS=ON \
             -DLEPTRIS_ENABLE_LTO=ON \
-            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            $PUGI_ARGS
 
       - name: Build
         run: cmake --build build
@@ -162,16 +193,43 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ninja utf8proc pugixml libxml2
+        run: |
+          brew install cmake ninja utf8proc libxml2
+          # pugixml PINNED to 1.14 — same version the linux legs get via apt
+          # libpugixml1v5; brew's formula floats and poisons cross-run
+          # comparisons (#2174).
+          PUGI_PREFIX="$RUNNER_TEMP/pugixml-1.14"
+          if [ ! -f "$PUGI_PREFIX/lib/libpugixml.a" ]; then
+            curl -fL --retry 3 -o "$RUNNER_TEMP/pugixml-1.14.tar.gz" \
+              https://github.com/zeux/pugixml/releases/download/v1.14/pugixml-1.14.tar.gz
+            echo "2f10e276870c64b1db6809050a75e11a897a8d7456c4be5c6b2e35a11168a015  $RUNNER_TEMP/pugixml-1.14.tar.gz" | shasum -a 256 -c -
+            tar -xzf "$RUNNER_TEMP/pugixml-1.14.tar.gz" -C "$RUNNER_TEMP"
+            cmake -S "$RUNNER_TEMP/pugixml-1.14" -B "$RUNNER_TEMP/pugixml-1.14/build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$PUGI_PREFIX"
+            cmake --build "$RUNNER_TEMP/pugixml-1.14/build" -j 3
+            cmake --install "$RUNNER_TEMP/pugixml-1.14/build"
+          fi
+          echo "PUGIXML_1_14_PREFIX=$PUGI_PREFIX" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
+          # Version echo: makes pugixml drift visible forever (#2174).
+          if [ -n "${PUGIXML_1_14_PREFIX:-}" ]; then
+            echo "pugixml (pinned, macOS): $(grep -m1 'define PUGIXML_VERSION' "$PUGIXML_1_14_PREFIX/include/pugixml.hpp")"
+            PUGI_ARGS="-DCMAKE_PREFIX_PATH=$PUGIXML_1_14_PREFIX"
+          else
+            dpkg-query -W -f='pugixml (Linux, apt): libpugixml-dev ${Version}\n' libpugixml-dev || true
+            PUGI_ARGS=""
+          fi
           cmake -B build -S . -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
             -DLEPTRIS_BUILD_BENCHMARKS=ON \
             -DLEPTRIS_ENABLE_LTO=ON \
-            -DLEPTRIS_ENABLE_ICONV=OFF
+            -DLEPTRIS_ENABLE_ICONV=OFF \
+            $PUGI_ARGS
 
       - name: Build the bench harness
         run: cmake --build build --target bench_append_attr_pugixml
