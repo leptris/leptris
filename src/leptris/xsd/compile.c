@@ -253,6 +253,8 @@ static void xsd_wc_fold_union_locals(char** ns, char** nq, char** nns,
 static void xsd_wc_expand_defined_sibling_pass(
     struct leptris_xsd_schema* s);
 static int xsd_check_attr_wildcards(struct leptris_xsd_schema* s);
+/* #2184 §3.8.3: merged-all wildcard namespace-set overlap. */
+static int xsd_all_wildcards_overlap(const XsdCm* w1, const XsdCm* w2);
 /* #2184 wildcard canon helpers (defined past the capture driver) */
 static void xsd_wc_canon_ns(const char* raw, const char* tns,
                             char** out_ns, char** out_other);
@@ -4091,6 +4093,48 @@ static int xsd_check_all_restriction(struct leptris_xsd_schema* s) {
             continue;
         if (xsd_all_flatten(s, der->first_child, dparts, &dn, 0) < 0)
             continue;
+        /* §3.10.6.3 cl. 3 (wild069): a derived wildcard must not
+         * ADMIT a name the base declares as an element particle,
+         * unless the derived re-declares it (the element particle
+         * would take the attribution away from the wildcard —
+         * dropping the base's typed declaration widens the model). */
+        for (long i = 0; i < dn; i++) {
+            XsdCm* d = dparts[i];
+            if (d->kind != XSD_CM_ANY) continue;
+            for (long j = 0; j < bn; j++) {
+                XsdCm* b = bparts[j];
+                if (b->kind != XSD_CM_ELEMENT || !b->name) continue;
+                int redeclared = 0;
+                for (long k = 0; k < dn && !redeclared; k++) {
+                    XsdCm* dd = dparts[k];
+                    if (dd->kind != XSD_CM_ELEMENT || !dd->name)
+                        continue;
+                    const char* dns = dd->ns ? dd->ns : "";
+                    const char* bns = b->ns ? b->ns : "";
+                    if (strcmp(dd->name, b->name) == 0 &&
+                        strcmp(dns, bns) == 0)
+                        redeclared = 1;
+                }
+                if (redeclared) continue;
+                const char* bns = b->ns ? b->ns : "";
+                int admitted = oc_ns_admits(d, b->ns) &&
+                               !(d->not_ns &&
+                                 oc_ns_list_has(d->not_ns, bns)) &&
+                               !(d->not_qname && !bns[0] &&
+                                 oc_ns_list_has(d->not_qname, b->name));
+                if (admitted) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "cos-particle-restrict: the restriction "
+                             "of '%s' keeps a wildcard admitting "
+                             "'%s', which the base declares as an "
+                             "element particle",
+                             c->name ? c->name : "?", b->name);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+        }
         /* per-base accumulators over the restricting derived
          * particles: the windows SUM (§3.9.6 substitution fold and
          * wildcard splits) */
@@ -4578,6 +4622,28 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
             if (!base || base->ext_base) continue;
             XsdCm* copied = xsd_cm_copy_list(base->first_child);
             if (copied) {
+                /* #2184 §3.4.4.2: the extension particle grammar
+                 * (deferred-fold leg — an all extends only by an
+                 * all, a sequence by a sequence, an empty all only
+                 * by an empty all) */
+                if (copied && !copied->next && c->first_child &&
+                    !c->first_child->next &&
+                    ((copied->kind == XSD_CM_ALL &&
+                      c->first_child->kind != XSD_CM_ALL) ||
+                     (copied->kind == XSD_CM_SEQ &&
+                      c->first_child->kind == XSD_CM_ALL) ||
+                     (copied->kind == XSD_CM_ALL &&
+                      !copied->first_child &&
+                      c->first_child->kind == XSD_CM_ALL &&
+                      c->first_child->first_child))) {
+                    xsd_set_error(
+                        s,
+                        "cos-ct-extends: the extension particle "
+                        "does not match the base content shape "
+                        "(all extends only by all, sequence by "
+                        "sequence, empty all by empty all)");
+                    s->oc_failed = 1;
+                }
                 /* #2184 §3.4.4.2: extending an all with an all
                  * merges the particle sets (all301/all314 — the
                  * deferred-fold leg of the same rule the capture
@@ -4599,6 +4665,29 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                         copied->first_child = kids;
                     }
                     c->first_child = copied;
+                    /* §3.8.3: merged-all wildcard disjointness */
+                    if (!s->oc_failed) {
+                        for (XsdCm* w1 = copied->first_child; w1;
+                             w1 = w1->next) {
+                            if (w1->kind != XSD_CM_ANY) continue;
+                            for (XsdCm* w2 = w1->next; w2;
+                                 w2 = w2->next) {
+                                if (w2->kind != XSD_CM_ANY) continue;
+                                if (xsd_all_wildcards_overlap(w1,
+                                                              w2)) {
+                                    xsd_set_error(
+                                        s,
+                                        "cos-ct-extends: the merged "
+                                        "all carries two wildcards "
+                                        "with overlapping namespace "
+                                        "sets");
+                                    s->oc_failed = 1;
+                                    break;
+                                }
+                            }
+                            if (s->oc_failed) break;
+                        }
+                    }
                 } else {
                     XsdCm* tail = copied;
                     while (tail->next) tail = tail->next;
@@ -4828,6 +4917,51 @@ static int oc_wildcard_subset(const XsdCm* sub, const XsdCm* super) {
         }
     }
     return 1;
+}
+
+/* #2184 §3.8.3: do two wildcard particles of one all group carry
+ * OVERLAPPING namespace sets? Token enumeration over the positive
+ * filters only — a conservative under-reject that never fires
+ * without concrete evidence (an ##any side overlaps any enumerable
+ * set; bare notNamespace positives are ##any by canon). */
+static int xsd_all_wildcards_overlap(const XsdCm* w1, const XsdCm* w2) {
+    int w1_any = !w1->any_ns || !w1->any_ns[0] ||
+                 strcmp(w1->any_ns, "##any") == 0;
+    int w2_any = !w2->any_ns || !w2->any_ns[0] ||
+                 strcmp(w2->any_ns, "##any") == 0;
+    if (w1_any && w2_any) return 1;
+    const XsdCm* enum_side = w1_any ? w2 : w1;
+    const XsdCm* other = w1_any ? w1 : w2;
+    int overlap = 0;
+    const char* p = enum_side->any_ns;
+    while (*p && !overlap) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        const char* uri = NULL;
+        char tok[512];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        if (strcmp(tok, "##local") == 0) {
+            uri = NULL;
+        } else if (tok[0] == '#') {
+            /* ##other / bare ##targetNamespace: unenumerable here —
+             * posture */
+            continue;
+        } else {
+            uri = tok;
+        }
+        if (oc_ns_admits(other, uri) &&
+            !(other->not_ns &&
+              oc_ns_list_has(other->not_ns, uri ? uri : "")))
+            overlap = 1;
+    }
+    return overlap;
 }
 
 /* Attribute Wildcard Union (§3.10.6.3) at the engine's grammar
@@ -7025,6 +7159,30 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             ? xsd_cm_copy_list(base_root->first_child)
                             : NULL;
                     XsdCm* own = xsd_cm_parse(s, dq, NULL);
+                    /* #2184 §3.4.4.2 (cos-ct-extends): the extension
+                     * particle grammar — an all extends only by an
+                     * all, a sequence only by a sequence, and an
+                     * EMPTY all extends only by an empty all (bug
+                     * 6202: all308). A mixed-shape extension fails
+                     * the SCHEMA (all309-312). */
+                    if (base_copy && !base_copy->next && own &&
+                        !own->next &&
+                        ((base_copy->kind == XSD_CM_ALL &&
+                          own->kind != XSD_CM_ALL) ||
+                         (base_copy->kind == XSD_CM_SEQ &&
+                          own->kind == XSD_CM_ALL) ||
+                         (base_copy->kind == XSD_CM_ALL &&
+                          !base_copy->first_child &&
+                          own->kind == XSD_CM_ALL &&
+                          own->first_child))) {
+                        xsd_set_error(
+                            s,
+                            "cos-ct-extends: the extension particle "
+                            "does not match the base content shape "
+                            "(all extends only by all, sequence by "
+                            "sequence, empty all by empty all)");
+                        s->oc_failed = 1;
+                    }
                     /* #2184 §3.4.4.2 (cos-ct-extends): extending an
                      * all with an all MERGES the particle sets — the
                      * instance interleaves base and derived
@@ -7045,6 +7203,37 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                             base_copy->first_child = kids;
                         }
                         root->first_child = base_copy;
+                        /* #2184 §3.8.3: distinct wildcard particles
+                         * of one all group need disjoint namespace
+                         * sets — the merge is where base and
+                         * extension wildcards meet (all305.n's
+                         * one.com vs notNamespace two.com). Token
+                         * enumeration only: a conservative under-
+                         * reject that never fires without concrete
+                         * evidence. */
+                        if (!s->oc_failed) {
+                            for (XsdCm* w1 = base_copy->first_child;
+                                 w1 && !s->oc_failed; w1 = w1->next) {
+                                if (w1->kind != XSD_CM_ANY) continue;
+                                for (XsdCm* w2 = w1->next; w2;
+                                     w2 = w2->next) {
+                                    if (w2->kind != XSD_CM_ANY)
+                                        continue;
+                                    if (xsd_all_wildcards_overlap(
+                                            w1, w2)) {
+                                        xsd_set_error(
+                                            s,
+                                            "cos-ct-extends: the "
+                                            "merged all carries two "
+                                            "wildcards with "
+                                            "overlapping namespace "
+                                            "sets");
+                                        s->oc_failed = 1;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         root->first_child = base_copy;
                         XsdCm* own_tail = root->first_child;
