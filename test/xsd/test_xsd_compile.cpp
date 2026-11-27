@@ -3734,9 +3734,13 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * prohibited-row capture, and the prohibited instance-side
      * enforcement): 1041/1056 — the derivation-ok grid rows and
      * attruse_0_2 flip to their oracle verdicts (measured
-     * 2026-11-26). */
-    EXPECT_GE(pass, 1041) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 182);
+     * 2026-11-26). Raised by the #2184 all lane (the relaxed xs:all
+     * engine rides the shared paths: the xsi:nil="1" boolean
+     * spelling, the order-free all matcher, the element-only
+     * character-content gate): 1044/1056 — three rows flip to their
+     * oracle verdicts (measured 2026-11-27 on the #2215 base). */
+    EXPECT_GE(pass, 1044) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 185);
     EXPECT_GE(pass_invalid, 657);
     EXPECT_GE(pass_schema_error, 202);
     RecordProperty("pass_valid", std::to_string(pass_valid));
