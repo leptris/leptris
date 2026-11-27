@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- s3_2_3si04/si07: a top-level declaration's targetNamespace must
+     equal the schema's own. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="e1" targetNamespace="b"/>
+  <xs:element name="root"/>
+</xs:schema>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- s3_2_3si03: @form is not allowed beside @targetNamespace on a
+     local declaration, even inside a restriction. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:bb="b">
+  <xs:complexType name="ct">
+    <xs:complexContent>
+      <xs:restriction base="xs:anyType">
+        <xs:attribute name="a1" form="qualified" type="xs:string" targetNamespace="b"/>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="root" type="ct"/>
+</xs:schema>

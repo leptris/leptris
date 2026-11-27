@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- target007: an import WITHOUT @namespace must reference a
+     no-targetNamespace document. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="http://top.tns.example/">
+  <xs:import schemaLocation="import_ns_mismatch_sub.xsd"/>
+</xs:schema>

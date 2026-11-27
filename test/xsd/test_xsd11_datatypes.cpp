@@ -354,3 +354,24 @@ TEST(Xsd11Datatypes, UnionCircularityRejected) {
 TEST(Xsd11Datatypes, UnionAcyclicGuard) {
     expect_schema_ok("union_cycle_guard.xsd");
 }
+
+/* ---- the targetNamespace placement rules (#2184 residue) ---------- */
+
+/* targetNamespace on a LOCAL declaration: legal inside a restriction
+ * without @form (target001); rejected in an extension (target002/
+ * target004), rejected beside @form (s3_2_3si03), and a top-level
+ * declaration's targetNamespace must equal the schema's (s3_2_3si04/
+ * si07). */
+TEST(Xsd11Datatypes, TargetNamespacePlacement) {
+    expect_schema_ok("tns_local_restriction_ok.xsd");
+    expect_schema_error("tns_local_extension_rejected.xsd");
+    expect_schema_error("tns_local_attr_extension_rejected.xsd");
+    expect_schema_error("tns_toplevel_mismatch_rejected.xsd");
+    expect_schema_error("tns_local_form_rejected.xsd");
+}
+
+/* An xs:import's @namespace and the imported document's
+ * targetNamespace must agree (target007). */
+TEST(Xsd11Datatypes, ImportNamespaceAgreement) {
+    expect_schema_error("import_ns_mismatch_rejected.xsd");
+}
