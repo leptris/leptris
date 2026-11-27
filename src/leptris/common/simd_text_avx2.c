@@ -176,10 +176,14 @@ void leptris_text_count3_high_avx2(const char* s, size_t len,
 
 /* Fused copy + census ANY-flags (#2132): the x86 mirror of
  * leptris_copy_census_neon. The bounded lane's scratch copy carries
- * the census: '&' cmpeq mask, control (< 0x20 signed compare — the
- * class is entirely below 0x80) mask, high-byte via the sign-bit
- * movemask trick; masks OR-accumulate across chunks, one branch per
- * class at the end. */
+ * the census: '&' cmpeq mask; control class via the TOP-THREE-BITS
+ * test — (v & 0xE0) == 0 is exactly "unsigned byte < 0x20" and, per
+ * the cross-arch law, must NOT be spelled as a signed compare
+ * (cmpgt_epi8(kctl, v) fires on every >= 0x80 byte: as int8 they are
+ * negative, so "0x20 > v" is true — caught by the boundary spec on
+ * the x86 CI leg); high-byte via the sign-bit movemask trick;
+ * masks OR-accumulate across chunks, one branch per class at the
+ * end. */
 void leptris_copy_census_avx2(char* dst, const char* src, size_t len,
                               int* saw_high, int* amp_any,
                               int* ctlws_any) {
@@ -187,7 +191,7 @@ void leptris_copy_census_avx2(char* dst, const char* src, size_t len,
     const char* end = src + len;
     char* q = dst;
     const __m256i kamp = _mm256_set1_epi8('&');
-    const __m256i kctl = _mm256_set1_epi8(0x20);
+    const __m256i kmask = _mm256_set1_epi8((char)0xE0);
     const __m256i zero = _mm256_setzero_si256();
     uint32_t acc_a = 0, acc_w = 0;
     int h = 0;
@@ -198,7 +202,7 @@ void leptris_copy_census_avx2(char* dst, const char* src, size_t len,
         acc_a |= (uint32_t)_mm256_movemask_epi8(
             _mm256_cmpeq_epi8(v, kamp));
         acc_w |= (uint32_t)_mm256_movemask_epi8(
-            _mm256_cmpgt_epi8(kctl, v));
+            _mm256_cmpeq_epi8(_mm256_and_si256(v, kmask), zero));
         h |= (_mm256_movemask_epi8(_mm256_cmpgt_epi8(zero, v)) != 0);
         p += 32;
         q += 32;
