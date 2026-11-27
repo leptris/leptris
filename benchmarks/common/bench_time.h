@@ -36,9 +36,14 @@
  * Feature-test macros (glibc): the tree builds with -std=c11
  * (C_EXTENSIONS OFF), which defines __STRICT_ANSI__ and makes glibc
  * hide clock_gettime/gettimeofday/getrusage behind _DEFAULT_SOURCE.
- * The macro is defined here, before any system include, and only when
- * the translation unit has not chosen its own feature set. Apple and
- * Windows need nothing.
+ * The macro must be set BEFORE glibc's first header. For the
+ * CMake-built tree benchmarks/CMakeLists.txt carries it
+ * (add_compile_definitions) — bench sources include leptris.h ahead
+ * of this header, so a define here cannot win that race. For
+ * HAND-COMPILED TUs (the twins/ A/B probes: a bare cc/cc++ line with
+ * no CMake), pass -D_DEFAULT_SOURCE on the command line — or include
+ * this header before leptris.h; the guarded define below covers only
+ * the include-first case. Apple and Windows need nothing.
  *
  * Windows: PSAPI_VERSION 2 before <psapi.h> so the process-memory
  * calls resolve to the K32* names — those live in kernel32.dll, which
