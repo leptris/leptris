@@ -321,7 +321,31 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * falling back to the selected type (§3.3.4.3 Note), complex-over-
  * complex keeping the pinned lax direction; spec tests
  * test/xsd/test_xsd11_xitype.cpp (10 specs, red-first)): +18 rows on
- * the wildcard-union base, disjoint classes → **1926/2206**. */
+ * the wildcard-union base, disjoint classes → **1926/2206**. Raised
+ * by the #2184 all lane (relaxed xs:all, §3.8.3: the order-free
+ * counting matcher — per-child min/max windows, wildcard children
+ * with weak-wildcard precedence, substitution-group members counting
+ * toward the head, group refs flattening — the compile-side
+ * relaxed-all UPA arming, the all-to-all extension MERGE with the
+ * §3.8.3 wildcard-disjointness law and the cos-ct-extends particle
+ * grammar (all extends only by all, sequence by sequence, empty all
+ * by empty all), the all-restriction sweep (§3.9.6
+ * partition-with-summed-windows, substitution membership, wildcard
+ * subset, element-in-wildcard, §3.10.6.3's no-wider-wildcard
+ * clause), the mixed-flag source check reading the base's own
+ * @mixed, the xsi:nil="1" boolean spelling, the element-only
+ * character-content gate, and the reserved-namespace wildcard gate
+ * — the XML Schema/xsi namespaces are never wildcard-admitted):
+ * 55 flips (34 all-family rows: the 18-row ibm S3_3_6/S3_4_6 +
+ * saxon All valid class, the 3-row occurrence-limit class, the
+ * 11-row subsumption subset, the si02 pair, and the 3-row s3_12
+ * mixed-extension artifact; 17 wild riders; 4 wild070/071/074/084
+ * rows from the #2214 names-buffer fix), zero regressions by
+ * red-set diff against main. #2214's root cause — the
+ * uninitialized ##definedSibling expansion buffer — is fixed in the
+ * same wave, so the 1909-vs-1908 platform delta it carried should
+ * be gone; re-pin on the first cross-platform measure if any row
+ * still straddles. */
     EXPECT_GE(pass, 1926) << "conformance floor regressed - re-measure the union";
     EXPECT_GE(pass_valid, 1212);
     EXPECT_GE(pass_invalid, 492);
