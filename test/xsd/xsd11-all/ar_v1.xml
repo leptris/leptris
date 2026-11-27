@@ -1,3 +1,4 @@
 <a:root xmlns:a="a" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <e1>1</e1>
+  <extra>w</extra>
 </a:root>
