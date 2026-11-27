@@ -1,11 +1,10 @@
 #include "benchmark.h"
+#include "bench_time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <sys/time.h>
 #include <time.h>
-#include <sys/resource.h>
 
 /* Payload size hint for throughput reporting.  Set per benchmark via
  * bench_set_payload_size_kb().  Zero disables MB/s reporting. */
@@ -15,46 +14,9 @@ void bench_set_payload_size_kb(double size_kb) {
     g_payload_size_kb = size_kb;
 }
 
-/* Wall-clock time in microseconds. */
-static double get_time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000.0 + tv.tv_usec;
-}
-
-/* Per-process CPU time in microseconds.
- *
- * clock_gettime(CLOCK_PROCESS_CPUTIME_ID) is available on Linux and
- * macOS 10.12+.  Falls back to clock() (which has CLOCKS_PER_SEC
- * granularity and includes wait time on some platforms) if the
- * POSIX timer is missing. */
-static double get_cpu_time_us(void) {
-#if defined(_POSIX_TIMERS) && _POSIX_TIMERS > 0 && \
-    defined(_POSIX_CPUTIME) && _POSIX_CPUTIME > 0
-    struct timespec ts;
-    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
-        return ts.tv_sec * 1000000.0 + ts.tv_nsec / 1000.0;
-    }
-#endif
-    return (double)clock() * (1000000.0 / CLOCKS_PER_SEC);
-}
-
-/* Peak resident set size in kilobytes.
- *
- * getrusage(RUSAGE_SELF).ru_maxrss is the portable POSIX answer.
- * Units differ by platform: kilobytes on Linux, bytes on macOS/BSD.
- * Normalize to KB.  This is a high-water mark for the process; the
- * benchmark harness reads it after each iteration and keeps the
- * max, so the reported value reflects the heaviest single call. */
-static double get_rss_kb(void) {
-    struct rusage ru;
-    if (getrusage(RUSAGE_SELF, &ru) != 0) return 0.0;
-#if defined(__APPLE__) && defined(__MACH__)
-    return (double)ru.ru_maxrss / 1024.0;  /* bytes -> KB */
-#else
-    return (double)ru.ru_maxrss;            /* already KB */
-#endif
-}
+/* Wall / CPU / RSS come from the shared portable seam (bench_time.h);
+ * the semantics are unchanged: real-time wall clock, process CPU
+ * time, peak RSS normalized to KiB. */
 
 static double calculate_mean(const double* values, size_t count) {
     double sum = 0.0;
@@ -103,19 +65,19 @@ BenchResult bench_run(const char* name,
     fn(ctx);
 
     double rss_peak_kb = 0.0;
-    double rss_before = get_rss_kb();
+    double rss_before = bench_rss_peak_kb();
 
     for (size_t i = 0; i < iterations; i++) {
-        double w0 = get_time_us();
-        double c0 = get_cpu_time_us();
+        double w0 = bench_wall_real_us();
+        double c0 = bench_cpu_us();
         fn(ctx);
-        double c1 = get_cpu_time_us();
-        double w1 = get_time_us();
+        double c1 = bench_cpu_us();
+        double w1 = bench_wall_real_us();
 
         wall[i] = w1 - w0;
         cpu[i]  = c1 - c0;
 
-        double rss_now = get_rss_kb();
+        double rss_now = bench_rss_peak_kb();
         if (rss_now > rss_peak_kb) rss_peak_kb = rss_now;
     }
 

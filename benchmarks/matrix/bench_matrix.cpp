@@ -18,12 +18,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <sys/time.h>
-#include <sys/resource.h>
 
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#endif
+#include "../common/bench_time.h"
 
 #include <leptris.h>
 #include <leptris/sax/sax.h>
@@ -41,48 +37,11 @@
 // Helpers
 
 static double now_us() {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (double)t.tv_sec * 1e6 + (double)t.tv_nsec / 1e3;
+    return bench_wall_us();
 }
 
 static size_t current_rss_kb() {
-#if defined(__APPLE__)
-    mach_task_basic_info_data_t info;
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
-                  (task_info_t)&info, &count) == KERN_SUCCESS) {
-        return (size_t)(info.resident_size / 1024);
-    }
-    return 0;
-#else
-    FILE* f = fopen("/proc/self/status", "r");
-    if (!f) return 0;
-    char line[256];
-    size_t kb = 0;
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "VmRSS:", 6) == 0) {
-            sscanf(line + 6, "%zu", &kb);
-            break;
-        }
-    }
-    fclose(f);
-    return kb;
-#endif
-}
-
-struct CpuTime {
-    double user_ms;
-    double sys_ms;
-};
-static CpuTime cpu_time_delta(const struct rusage& before,
-                              const struct rusage& after) {
-    CpuTime d;
-    d.user_ms = (after.ru_utime.tv_sec - before.ru_utime.tv_sec) * 1000.0 +
-                (after.ru_utime.tv_usec - before.ru_utime.tv_usec) / 1000.0;
-    d.sys_ms = (after.ru_stime.tv_sec - before.ru_stime.tv_sec) * 1000.0 +
-               (after.ru_stime.tv_usec - before.ru_stime.tv_usec) / 1000.0;
-    return d;
+    return (size_t)bench_rss_current_kb();
 }
 
 static char* slurp(const char* path, size_t* len) {
@@ -205,8 +164,8 @@ BenchResult run_bench(const char* id, const char* feature, const char* input,
 
     std::vector<double> times;
     times.reserve(iterations);
-    struct rusage ru_before;
-    getrusage(RUSAGE_SELF, &ru_before);
+    BenchCpuSplit cpu_before, cpu_after;
+    bench_cpu_split_us(&cpu_before);
     size_t rss_before = current_rss_kb();
 
     for (int i = 0; i < iterations; i++) {
@@ -215,16 +174,14 @@ BenchResult run_bench(const char* id, const char* feature, const char* input,
         times.push_back(now_us() - t0);
     }
 
-    struct rusage ru_after;
-    getrusage(RUSAGE_SELF, &ru_after);
+    bench_cpu_split_us(&cpu_after);
     size_t rss_after = current_rss_kb();
 
     std::sort(times.begin(), times.end());
     r.latency_us_min = times.front();
     r.latency_us_median = times[times.size() / 2];
-    CpuTime cpu = cpu_time_delta(ru_before, ru_after);
-    r.cpu_user_ms = cpu.user_ms;
-    r.cpu_sys_ms = cpu.sys_ms;
+    r.cpu_user_ms = (cpu_after.user_us - cpu_before.user_us) / 1000.0;
+    r.cpu_sys_ms = (cpu_after.sys_us - cpu_before.sys_us) / 1000.0;
     r.memory_peak_kb = rss_after > rss_before ? rss_after - rss_before : 0;
     r.throughput_mbs = (size_bytes > 0 && r.latency_us_min > 0.001)
         ? size_bytes / r.latency_us_min / 1000.0

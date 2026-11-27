@@ -9,6 +9,15 @@
 
 cmake_minimum_required(VERSION 3.20)
 
+# glibc feature contract for the timing seam (#2191): the tree builds
+# with strict C99/C11 (C_EXTENSIONS OFF), under which glibc hides
+# clock_gettime/gettimeofday/getrusage unless a feature-test macro is
+# set BEFORE its first header — and bench sources include leptris.h
+# ahead of benchmarks/common/bench_time.h, so a header-side define
+# cannot win. The build system carries it instead; MSVC ignores the
+# unknown define harmlessly (its timing paths use the Win32 API).
+add_compile_definitions(_DEFAULT_SOURCE)
+
 # ----------------------------------------------------------------------------
 # Optional dependencies: pugixml (DOM competitor) and libxml2 (XPath/SAX competitor)
 # ----------------------------------------------------------------------------

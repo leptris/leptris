@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 
 #include "leptris.h"
@@ -30,6 +31,21 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
     ASSERT_NE(f, nullptr) << "manifest missing";
     const bool verbose = getenv("LEPTRIS_XSD11_VERBOSE") != nullptr;
     char line[1024];
+    /* pass 1: the schemas the SUITE itself invalidates (#2184) — an
+     * instance row pinned "invalid" against such a schema is
+     * satisfied by the failed validation (over015.v01 vs over027:
+     * the suite's schemaTest rejects the schema, so no document can
+     * validate against it). */
+    std::set<std::string> suite_rejected;
+    while (fgets(line, sizeof(line), f))
+        if (line[0] != '#' && line[0] != '\n') {
+            char inst[512], schema[512], expect[32], family[32];
+            if (std::sscanf(line, "%511[^\t]\t%511[^\t]\t%31[^\t]\t%31s",
+                            inst, schema, expect, family) == 4 &&
+                std::strcmp(expect, "schema-error") == 0)
+                suite_rejected.insert(schema);
+        }
+    rewind(f);
     int pass = 0, fail = 0, total = 0;
     int pass_valid = 0, pass_invalid = 0, pass_schema_error = 0;
     /* families: assertions / cta / override / openContent / core */
@@ -66,8 +82,21 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
              * so it must compile clean */
             ok = (s != (LeptrisXsdSchema)0) && st == LEPTRIS_OK;
             if (s != (LeptrisXsdSchema)0) leptris_xsd_free(s);
-        } else if (s == (LeptrisXsdSchema)0) {
-            ok = false; /* the suite compiled it; we must too */
+        } else if (suite_rejected.count(schema) > 0 &&
+                   ((s == (LeptrisXsdSchema)0) || st != LEPTRIS_OK)) {
+            /* #2184: the SUITE invalidates this schema (the schema is
+             * one of the schema-error rows) and the engine rejects it
+             * too — the instance cannot validate against it, and the
+             * suite's expected=invalid is exactly that verdict
+             * (over015.v01 vs over027). Scoped to the suite-rejected
+             * set: the non-OK-status-with-empty-error compile quirk
+             * (complex003+, s3_8_6v01) produces USABLE handles whose
+             * instance rows keep validating normally. Only the
+             * invalid expectation is satisfied this way: an expected
+             * valid row against a rejected schema stays red (the
+             * suite compiled it; we must too). */
+            ok = std::strcmp(expect, "invalid") == 0;
+            if (s != (LeptrisXsdSchema)0) leptris_xsd_free(s);
         } else {
             std::string ipath =
                 std::string(LEPTRIS_XSD11_CASES_DIR) + "/" + inst;
@@ -243,11 +272,30 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * operators so the valid corpus's cast-into-comparison tests keep
  * parsing): 1839/2206 — the fifteen cta schema-error rows flip
  * (s3_12si01-06, cta0043, cta9001err, cta9004-9008err, cta9009err,
- * cta9010err; measured 2026-11-27 on the #2185 base). */
-    EXPECT_GE(pass, 1839) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1192);
-    EXPECT_GE(pass_invalid, 490);
-    EXPECT_GE(pass_schema_error, 157);
+ * cta9010err; measured 2026-11-27 on the #2185 base). Raised by
+ * #2184 wave 2 (the Override tails: the redefine/override location
+ * graph must not cycle — flagged at chase time with the
+ * empty-body/mutual-override exemption, and si02c's missing corpus
+ * document si02b copied from the pinned snapshot; a-props-correct
+ * NOTATION attributes must be enumerated — over027 plus the
+ * simple091/094 simpleType shapes; document-scoped ID uniqueness —
+ * over008.n01; and the gate now judges an instance row whose schema
+ * the SUITE rejects with the suite's own invalid expectation when
+ * the engine rejects it too — over015.v01 vs over027, scoped to the
+ * suite-rejected set so the non-OK-status compile quirk handles keep
+ * validating): 1845/2206 — the override family closes 87/87,
+ * simple091/094 flip with the NOTATION rule (measured 2026-11-27 on
+ * the 8e05b358 base). Raised by #2207 (moxml#588; the float/double
+ * fixed-value constraint compares in the datatype's VALUE space —
+ * the infinity family's spellings and the overflow forms are one
+ * value, so the lexical strcmp no longer false-rejects):
+ * 1847/2206 — simple001.v01/simple002 (saxonData/Simple) flip to
+ * their oracle verdicts, attribute- and element-side alike
+ * (measured 2026-11-27 on the c0da7a9e base). */
+    EXPECT_GE(pass, 1847) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1194);
+    EXPECT_GE(pass_invalid, 492);
+    EXPECT_GE(pass_schema_error, 161);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

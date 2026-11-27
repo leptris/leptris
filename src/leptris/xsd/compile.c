@@ -82,6 +82,17 @@ struct leptris_xsd_schema {
      * capture truncates the chain there, so only the element walk can
      * see it). Surfaced post-capture like oc_failed. */
     int ct_failed;
+    /* #2184: the redefine/override location graph closed back on
+     * itself (§4.2.2 — the IBM cyclic-redefine family; a target
+     * equal to the CONTAINING document is the legal self-reference
+     * hook, a target closing an ancestor chain is the error).
+     * Flagged at chase time, surfaced post-capture. */
+    int ro_cyclic;
+    /* #2184: the chain of redefine/override target documents being
+     * chased (canonical paths, strdup'd) — the ancestor set the
+     * cycle check matches against. */
+    char** ro_stack;
+    size_t ro_len, ro_cap;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -156,6 +167,10 @@ struct leptris_xsd_schema {
 /* ---- slice 3: content-model capture ------------------------------ */
 
 static char* xsd_strdup(const char* s);
+/* #2184: the entry document joins the visited set at setup — the
+ * redefine/override chase must not re-enter it. */
+static void xsd_visited_add(struct leptris_xsd_schema* s,
+                            const char* path);
 
 /* #1592: capture an INLINE anonymous xs:complexType / xs:simpleType
  * under a synthesized name ("element:NAME" — ':' cannot appear in
@@ -3794,6 +3809,56 @@ static int xsd_check_type_tables(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* #2184 a-props-correct (§3.2.2.1): an attribute typed xs:NOTATION
+ * — or a type whose terminal is NOTATION — must be ENUMERATED (the
+ * notation symbols exist only as enumeration values; the over027
+ * shape). The builtin carries no facets of its own, so a bare
+ * xs:NOTATION type reference always fails; an enumerated local
+ * restriction is the legal form. Unresolved names stay posture (the
+ * ref checks own them). */
+static int xsd_attr_row_notation_ok(struct leptris_xsd_schema* s,
+                                    const XsdAttrDecl* a) {
+    if (!a->type) return 1;
+    if (strcmp(a->type, "xs:NOTATION") == 0 ||
+        strcmp(a->type, "xsd:NOTATION") == 0)
+        return 0;
+    if (strncmp(a->type, "xs:", 3) == 0) return 1;
+    const XsdSimple* t = xsd_find_simple(s, a->type);
+    if (!t) return 1;
+    if (t->enum_values) return 1;
+    const char* term = xsd_chain_terminal(s, t);
+    if (term && (strcmp(term, "xs:NOTATION") == 0 ||
+                 strcmp(term, "xsd:NOTATION") == 0))
+        return 0;
+    return 1;
+}
+
+static int xsd_check_notation_attrs(struct leptris_xsd_schema* s) {
+    for (const XsdAttrDecl* a = s->top_attrs; a; a = a->next) {
+        if (xsd_attr_row_notation_ok(s, a)) continue;
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                 "a-props-correct: the attribute '%s' is typed "
+                 "NOTATION without an enumeration",
+                 a->name ? a->name : "?");
+        xsd_set_error(s, msg);
+        return -1;
+    }
+    for (const XsdTypeAttrs* ta = s->type_attrs; ta; ta = ta->next)
+        for (const XsdAttrDecl* a = ta->attrs; a; a = a->next) {
+            if (xsd_attr_row_notation_ok(s, a)) continue;
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "a-props-correct: the attribute '%s' of type "
+                     "'%s' is typed NOTATION without an enumeration",
+                     a->name ? a->name : "?",
+                     ta->type_name ? ta->type_name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    return 0;
+}
+
 /* #2184 src-ct.1 + §3.2.7.1, walked over the SOURCE elements (the
  * captured models no longer carry the wrapper shape):
  *
@@ -3898,6 +3963,12 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         char canon[4096];
         xsd_path_normalize(self_path, canon, sizeof(canon));
         s->self_path = xsd_strdup(canon);
+        /* #2184: the entry document is IN the visited set — the
+         * redefine/override chase must not re-enter and re-capture
+         * it (the mutual-override's closing edge targets it; without
+         * the mark the second round saw a bogus ancestor chain). The
+         * cycle check still sees the edge before the dedup. */
+        xsd_visited_add(s, canon);
     }
     /* #2151: unit 0 is the compiled document itself; includes and
      * imports push their own unit id while their declarations are
@@ -4028,6 +4099,16 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         goto fail;
 
     xsd_capture_root(s, root);
+    /* #2184 §4.2.2/§4.3: the redefine/override location graph must
+     * not cycle — flagged during the capture chase, where the
+     * visited dedup would otherwise swallow the closing edge. */
+    if (s->ro_cyclic) {
+        xsd_set_error(s, "src-redefine: the redefine/override "
+                         "schemaLocation graph is cyclic");
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
     xsd_resolve_extension_bases(s);
     /* #2151: the open-content derivation pass (inheritance, wildcard
      * union, the cos-ct-extends ladder, the restriction subset
@@ -4075,6 +4156,14 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
     if (root && xsd_check_schema_source(s, root, 0) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184 a-props-correct: NOTATION-typed attributes must be
+     * enumerated. */
+    if (xsd_check_notation_attrs(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -4724,6 +4813,56 @@ static void xsd_visited_add(struct leptris_xsd_schema* s,
     s->visited[s->visited_len++] = dup;
 }
 
+/* #2184: the redefine/override chase ancestor set. The stack holds
+ * every target document currently being chased; the cycle check
+ * matches a new target against it (and the entry document's
+ * self_path) BEFORE the visited dedup swallows the closing edge. */
+static int xsd_ro_stack_has(struct leptris_xsd_schema* s,
+                            const char* path) {
+    for (size_t i = 0; i < s->ro_len; i++)
+        if (strcmp(s->ro_stack[i], path) == 0) return 1;
+    return 0;
+}
+
+static void xsd_ro_stack_push(struct leptris_xsd_schema* s,
+                              const char* path) {
+    if (s->ro_len == s->ro_cap) {
+        size_t nc = s->ro_cap ? s->ro_cap * 2 : 8;
+        char** ns = (char**)realloc(s->ro_stack, nc * sizeof(*ns));
+        if (!ns) return;
+        s->ro_stack = ns;
+        s->ro_cap = nc;
+    }
+    char* dup = xsd_strdup(path);
+    if (!dup) return;
+    s->ro_stack[s->ro_len++] = dup;
+}
+
+static void xsd_ro_stack_pop(struct leptris_xsd_schema* s) {
+    if (!s->ro_len) return;
+    free(s->ro_stack[--s->ro_len]);
+}
+
+/* #2184: an override/redefine body with NO declaration children
+ * contributes nothing — src-override.3 keeps the empty-body mutual
+ * override legal (over023's I_base shape), and an empty redefine is
+ * the include equivalent. Such a directive never closes a cycle. */
+static int xsd_override_body_empty(LeptrisElement e) {
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(e));
+         c; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name((LeptrisElement)c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            xsd_is_declaration(cl, cu))
+            return 0;
+    }
+    return 1;
+}
+
 static XsdAttrDecl* xsd_capture_attr_rows(
     struct leptris_xsd_schema* s, LeptrisElement container, int depth);
 /* #1880: top-level attributeGroup definitions are captured in a
@@ -5072,8 +5211,37 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                  * (w.xsd includes a1.xsd includes w.xsd). */
                 char canon[4096];
                 xsd_path_normalize(path, canon, sizeof(canon));
+                /* #2184 §4.2.2/§4.3: a redefine/override location
+                 * graph must not close back on itself (the IBM
+                 * cyclic-redefine family — si02c redefines si02
+                 * redefines si02b redefines si02c). A target equal
+                 * to the CONTAINING document is the legal
+                 * self-reference hook; a target closing the ancestor
+                 * chain (or the entry document) is the error. The
+                 * check runs BEFORE the visited dedup, which is
+                 * exactly where the closing edge would be silently
+                 * swallowed. Include/import cycles stay legal. */
+                if (strcmp(local, "redefine") == 0 ||
+                    strcmp(local, "override") == 0) {
+                    int closes =
+                        xsd_ro_stack_has(s, canon) ||
+                        (s->self_path && strcmp(canon, s->self_path) == 0);
+                    int self_ref =
+                        s->ro_len > 0 &&
+                        strcmp(s->ro_stack[s->ro_len - 1], canon) == 0;
+                    /* an empty body contributes nothing — the mutual
+                     * override whose closing form replaces nothing
+                     * stays legal (src-override.3, over023) */
+                    int empty_body = xsd_override_body_empty(
+                        (LeptrisElement)n);
+                    if (closes && !self_ref && !empty_body)
+                        s->ro_cyclic = 1;
+                }
                 if (xsd_visited_has(s, canon)) continue;
                 xsd_visited_add(s, canon);
+                if (strcmp(local, "redefine") == 0 ||
+                    strcmp(local, "override") == 0)
+                    xsd_ro_stack_push(s, canon);
                 /* The SUBFILE's own schemaLocations resolve
                  * against ITS directory, not the compiled
                  * file's (#440 shape A): wml-2010 -> word12 ->
@@ -5344,6 +5512,12 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     s->base_dir = saved_dir;
                     free(sub_dir);
                 }
+                /* #2184: the chased redefine/override target leaves
+                 * the ancestor chain (mirrors the push after the
+                 * visited add). */
+                if (strcmp(local, "redefine") == 0 ||
+                    strcmp(local, "override") == 0)
+                    xsd_ro_stack_pop(s);
             }
             continue;
         }
@@ -5590,6 +5764,8 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(sd);
         sd = sn;
     }
+    for (size_t i = 0; i < s->ro_len; i++) free(s->ro_stack[i]);
+    free(s->ro_stack);
     free(s->report);
     xsd_cm_free(s->complex_types);
     XsdElementIcs* slot = s->element_ics;

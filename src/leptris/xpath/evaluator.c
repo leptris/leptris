@@ -728,7 +728,7 @@ void* xpath_nodeset_get(XPathNodeSet* nodeset, size_t index) {
     return nodeset->nodes[index];
 }
 
-void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
+LEPTRIS_CACHELINE_ALIGNED void xpath_nodeset_add(XPathNodeSet* nodeset, void* node) {
     if (!nodeset || !node) return;
 
     /* SAFETY: Validate node pointer before adding

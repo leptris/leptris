@@ -461,20 +461,19 @@ jobs:
       - name: Configure GENERATE (Windows / MSVC)
         if: runner.os == 'Windows'
         run: |
-          # Same shape as build.yml's 1577 flags. Benchmarks stay OFF:
-          # the benchmark sources are POSIX-timing-only (sys/time.h,
-          # getrusage) and cannot compile under MSVC — the portable
-          # sweep to restore the full battery on Windows is tracked
-          # separately. SHARED-ONLY: the CLI must run against the
-          # INSTRUMENTED dll for the dll to receive training data —
-          # static-linked training leaves the dll's pgd empty and a
-          # copied EXE profile fails the USE link (LNK1268, option
-          # mismatch). Training tops up with the CLI over the corpus.
+          # Same shape as build.yml's 1577 flags. Benchmarks are ON
+          # again: the timing seam (benchmarks/common/bench_time.h)
+          # made the whole tree MSVC-compilable (#2191), so the full
+          # promise-set battery trains on Windows. SHARED-ONLY: the
+          # CLI must run against the INSTRUMENTED dll for the dll to
+          # receive training data — static-linked training leaves the
+          # dll's pgd empty and a copied EXE profile fails the USE
+          # link (LNK1268, option mismatch).
           cmake -B build -S . `
             -DCMAKE_BUILD_TYPE=Release `
             -DBUILD_TESTING=OFF `
             -DLEPTRIS_BUILD_CLI=ON `
-            -DLEPTRIS_BUILD_BENCHMARKS=OFF `
+            -DLEPTRIS_BUILD_BENCHMARKS=ON `
             -DLEPTRIS_ENABLE_UTF8PROC=OFF `
             -DLEPTRIS_ENABLE_ICONV=OFF `
             -DLEPTRIS_BUILD_STATIC=OFF `
@@ -530,8 +529,10 @@ jobs:
           Write-Host "seed pgds: $($pgds.Count)"
           $pgds | ForEach-Object { Write-Host "  $($_.FullName)" }
           $root = (Get-Location).Path -replace '\\','/'
+          # The battery builds fully on MSVC now (#2191 seam) — every
+          # row binary must be present, so no --allow-missing.
           bash .github/scripts/pgo_battery.sh "$root" "$root/build" `
-            train msvc "$root/train-log" --allow-missing
+            train msvc "$root/train-log"
           $cli = (Get-ChildItem -Recurse -Filter leptris.exe |
                   Select-Object -First 1).FullName
           if (-not $cli) { throw "trainer CLI not found" }
@@ -588,7 +589,6 @@ jobs:
             -DLEPTRIS_BUILD_SHARED=ON `
             -DLEPTRIS_ENABLE_LTO=OFF `
             -DLEPTRIS_ENABLE_PGO=USE `
-            -DLEPTRIS_BUILD_BENCHMARKS=OFF `
             -DLEPTRIS_BUILD_STATIC=OFF `
             -DLEPTRIS_BUILD_SHARED=ON `
             -DCMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Zi" `

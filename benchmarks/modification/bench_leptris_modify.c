@@ -3,33 +3,26 @@
  */
 
 #include "leptris.h"
+#include "../common/bench_time.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 
 #define ITERATIONS 1000
-
-// Timing utilities
-static double get_time_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000.0 + tv.tv_usec;
-}
 
 // Benchmark: Create element
 static void bench_create_element(void) {
     LeptrisDocument doc = leptris_parse_string("<root/>", 7, NULL);
     LeptrisElement root = leptris_document_root(doc);
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         LeptrisElement elem = leptris_element_create(doc, "item");
         leptris_element_append_child(root, elem);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf("  \"create_element\": {\n");
@@ -52,13 +45,13 @@ static void bench_append_child(void) {
         items[i] = leptris_element_create(doc, "item");
     }
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_element_append_child(root, items[i]);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"append_child\": {\n");
@@ -82,13 +75,13 @@ static void bench_remove_child(void) {
         leptris_element_append_child(root, items[i]);
     }
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_element_remove_child(root, items[i]);
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"remove_child\": {\n");
@@ -112,13 +105,13 @@ static void bench_set_text(void) {
         leptris_element_append_child(root, items[i]);
     }
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_element_set_text(items[i], "Test content");
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"set_text\": {\n");
@@ -142,13 +135,13 @@ static void bench_set_attribute(void) {
         leptris_element_append_child(root, items[i]);
     }
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_element_set_attribute(items[i], "id", "123");
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"set_attribute\": {\n");
@@ -173,13 +166,13 @@ static void bench_remove_attribute(void) {
         leptris_element_set_attribute(items[i], "id", "123");
     }
 
-    double start = get_time_us();
+    double start = bench_wall_real_us();
 
     for (int i = 0; i < ITERATIONS; i++) {
         leptris_element_remove_attribute(items[i], "id");
     }
 
-    double end = get_time_us();
+    double end = bench_wall_real_us();
     double total = end - start;
 
     printf(",\n  \"remove_attribute\": {\n");

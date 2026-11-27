@@ -1,51 +1,23 @@
 /**
  * Benchmark Utilities Implementation.
  *
- * clock_gettime / CLOCK_MONOTONIC need _POSIX_C_SOURCE >= 199309L on
- * glibc (Linux).  Defining it there is enough.  macOS exposes them
- * without any feature-test macro and is fine with the same define,
- * but combined with strict POSIX mode its libc hides snprintf — so
- * we pull in <stdio.h> BEFORE the feature-test definition on macOS.
+ * The monotonic clock comes from the shared portable seam
+ * (common/bench_time.h): CLOCK_MONOTONIC on Linux,
+ * mach_absolute_time on macOS, QueryPerformanceCounter on Windows.
+ * The feature-test macro dance that clock_gettime used to need here
+ * lives in the seam header now.
  */
 
-#ifndef _POSIX_C_SOURCE
-#  if !defined(__APPLE__) && !defined(__MACH__)
-#    define _POSIX_C_SOURCE 199309L
-#  endif
-#endif
-
+#include "bench_time.h"
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
-/* Platform-specific timing */
-#if defined(__APPLE__)
-    #include <mach/mach_time.h>
-#elif defined(__linux__)
-    #include <time.h>
-#else
-    #error "Unsupported platform for benchmarking"
-#endif
-
 /* Get current time in microseconds */
 long benchmark_time_us(void) {
-#if defined(__APPLE__)
-    static mach_timebase_info_data_t timebase = {0};
-    if (timebase.denom == 0) {
-        mach_timebase_info(&timebase);
-    }
-    uint64_t now = mach_absolute_time();
-    /* Convert to nanoseconds, then to microseconds */
-    return (long)((now * timebase.numer / timebase.denom) / 1000);
-
-#elif defined(__linux__)
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long)(ts.tv_sec * 1000000L + ts.tv_nsec / 1000);
-
-#endif
+    return (long)bench_wall_us();
 }
 
 /* Comparison function for qsort */

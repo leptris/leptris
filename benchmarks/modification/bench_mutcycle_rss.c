@@ -13,9 +13,9 @@
  * THEIR peak — this probe isolates the mutcycle shape.
  */
 #include "leptris.h"
+#include "../common/bench_time.h"
 
 #include <stdio.h>
-#include <sys/resource.h>
 
 int main(void) {
     const int N_WARM = 5000;
@@ -46,14 +46,10 @@ int main(void) {
         leptris_document_free(d);
     }
 
-    struct rusage ru;
-    if (getrusage(RUSAGE_SELF, &ru) != 0) return 1;
-    /* Linux reports ru_maxrss in KB; macOS in bytes — normalize. */
-#if defined(__APPLE__)
-    double peak_kib = (double)ru.ru_maxrss / 1024.0;
-#else
-    double peak_kib = (double)ru.ru_maxrss;
-#endif
+    /* Peak RSS via the portable seam (getrusage ru_maxrss on POSIX,
+     * GetProcessMemoryInfo on Windows) — KiB on every platform. */
+    double peak_kib = bench_rss_peak_kb();
+    if (peak_kib <= 0.0) return 1;
     printf("mutcycle peak RSS: %.0f KiB (20k cycles x 1024 children, "
            "5k warm)\n",
            peak_kib);

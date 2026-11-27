@@ -100,7 +100,7 @@ static struct leptris_document* xpath_context_document(
     return nd ? nd : ctx->document;
 }
 
-int matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) {
+int LEPTRIS_CACHELINE_ALIGNED matches_node_test(XPathContext* ctx, LeptrisNode* node, XPathASTNode* test) {
     if (!node || !test) return 1;  /* No test means match all */
 
     /* XSD 1.1 §3.13.4.1/§3.16.4 (assertion data model, #2154):
@@ -910,9 +910,10 @@ static void merge_step_axis_result(XPathContext* ctx,
     xpath_nodeset_free(axis_result);
 }
 
-struct leptris_xpath_result* evaluate_step(XPathContext* ctx,
-                                          XPathASTNode* step,
-                                          XPathNodeSet* input) {
+LEPTRIS_CACHELINE_ALIGNED struct leptris_xpath_result* evaluate_step(
+        XPathContext* ctx,
+        XPathASTNode* step,
+        XPathNodeSet* input) {
     DEBUG_LOG("  === evaluate_step START ===");
     if (!step || step->type != XPATH_AST_STEP || !input) {
         DEBUG_LOG("    Invalid parameters: step=%p, type=%d, input=%p",
