@@ -91,7 +91,59 @@ struct xsd_validator {
     /* #2184 §3.3.5: ID-typed attribute values seen this run —
      * uniqueness is document-scoped (over008.n01). Chaining hash. */
     struct id_seen* id_buckets[128];
+    /* #2184 §3.11.4: the type each validated element was ASSESSED
+     * against (validate_local_uri is the chokepoint) — the keyref
+     * tuple comparison reads the field terminal's type from here to
+     * compare in the VALUE space (zone206-302). Names are owned
+     * copies; the element pointers are borrowed DOM refs. */
+    struct ic_type_rec* type_recs;
+    size_t type_rec_n, type_rec_cap;
 };
+
+struct ic_type_rec {
+    LeptrisElement e;
+    char* type;
+};
+
+/* #2184: a string copy helper for the map above (declared before
+ * its first use at the record sites). */
+static char* xsd_dup_str(const char* s);
+
+/* #2184: record the assessed type of one element (last write
+ * wins). */
+static void xsd_record_element_type(struct xsd_validator* v,
+                                    LeptrisElement elem,
+                                    const char* type) {
+    if (!v || !elem || !type || !type[0]) return;
+    for (size_t i = 0; i < v->type_rec_n; i++)
+        if (v->type_recs[i].e == elem) {
+            free(v->type_recs[i].type);
+            v->type_recs[i].type = xsd_dup_str(type);
+            return;
+        }
+    if (v->type_rec_n == v->type_rec_cap) {
+        size_t nc = v->type_rec_cap ? v->type_rec_cap * 2 : 64;
+        struct ic_type_rec* nr = (struct ic_type_rec*)realloc(
+            v->type_recs, nc * sizeof(*nr));
+        if (!nr) return;
+        v->type_recs = nr;
+        v->type_rec_cap = nc;
+    }
+    v->type_recs[v->type_rec_n].e = elem;
+    v->type_recs[v->type_rec_n].type = xsd_dup_str(type);
+    v->type_rec_n++;
+}
+
+/* The recorded type of a validated element (NULL when the main
+ * walk never typed it — wildcard-admitted and undeclared elements
+ * stay string-compared). */
+static const char* xsd_recorded_type(struct xsd_validator* v,
+                                     LeptrisElement elem) {
+    if (!v || !elem) return NULL;
+    for (size_t i = 0; i < v->type_rec_n; i++)
+        if (v->type_recs[i].e == elem) return v->type_recs[i].type;
+    return NULL;
+}
 
 struct id_seen {
     char* v;
@@ -2493,6 +2545,10 @@ static void validate_local_uri(struct xsd_validator* v,
                                const char* xsi_q, const char* fill,
                                const char* tns_hint) {
     if (!type) return;
+    /* #2184 §3.11.4: the assessed type rides the element for the
+     * identity-constraint value-space comparison (the keyref field
+     * terminal looks it up). */
+    xsd_record_element_type(v, elem, type);
     /* leptris#1958: the DECLARING unit's targetNamespace binds the
      * type reference first — a no-targetNamespace declaration's
      * unprefixed type must resolve to ITS OWN unit's component, not
@@ -2665,9 +2721,12 @@ static void validate_local_uri(struct xsd_validator* v,
 
 /* ---- slice 6: identity constraints -------------------------------- */
 
-/* A key tuple: the field values of one selected node. */
+/* A key tuple: the field values of one selected node, with each
+ * field's ASSESSED TYPE (recorded by the main walk) beside it —
+ * the keyref comparison is value-space, §3.11.4 (#2184). */
 typedef struct xsd_key_tuple {
     char* values[8];
+    char* types[8];
     size_t count;
     struct xsd_key_tuple* next;
 } XsdKeyTuple;
@@ -2715,7 +2774,8 @@ static void table_ensure(XsdKeyTable** head, const char* name) {
 }
 
 static void table_add(XsdKeyTable** head, const char* name,
-                      char* const* values, size_t count) {
+                      char* const* values, char* const* types,
+                      size_t count) {
     table_ensure(head, name);
     XsdKeyTable* t = table_find(*head, name);
     if (!t) return;
@@ -2723,6 +2783,9 @@ static void table_add(XsdKeyTable** head, const char* name,
     if (!tup) return;
     for (size_t i = 0; i < count && i < 8; i++)
         tup->values[i] = xsd_dup_str(values[i]);
+    if (types)
+        for (size_t i = 0; i < count && i < 8; i++)
+            tup->types[i] = xsd_dup_str(types[i]);
     tup->count = count < 8 ? count : 8;
     if (t->tail)
         t->tail->next = tup;
@@ -2822,9 +2885,12 @@ static void ic_collect_branch(LeptrisElement ctx, const XsdIcPath* p,
 
 /* One field value relative to a selected node; NULL = no node
  * matched (§3.11.4 cl. 3: the key-sequence is shorter and the node
- * leaves the qualified set). */
+ * leaves the qualified set). term_out receives the field's terminal
+ * ELEMENT (NULL for attribute finals and misses) so the keyref
+ * comparison can read the assessed type (#2184). */
 static char* ic_field_walk(LeptrisElement node, const XsdIcPath* p,
-                           int depth) {
+                           int depth, LeptrisElement* term_out) {
+    if (term_out) *term_out = (LeptrisElement)0;
     for (; depth < p->step_count; depth++) {
         const XsdIcStep* st = &p->steps[depth];
         if (st->is_self) continue;
@@ -2866,11 +2932,13 @@ static char* ic_field_walk(LeptrisElement node, const XsdIcPath* p,
         if (!hit) return NULL;
         node = hit;
     }
+    if (term_out) *term_out = node;
     return xsd_dup_str(leptris_element_text(node));
 }
 
-static char* ic_field_value(LeptrisElement node, const XsdIcPath* p) {
-    if (!p->desc) return ic_field_walk(node, p, 0);
+static char* ic_field_value(LeptrisElement node, const XsdIcPath* p,
+                            LeptrisElement* term_out) {
+    if (!p->desc) return ic_field_walk(node, p, 0, term_out);
     /* './/' in a field: the first descendant matching the FIRST step
      * continues the chain (same seed semantics as the selector) */
     for (LeptrisNodeRef c =
@@ -2880,10 +2948,16 @@ static char* ic_field_value(LeptrisElement node, const XsdIcPath* p) {
             continue;
         LeptrisElement ce = (LeptrisElement)c;
         char* got = NULL;
+        LeptrisElement term = (LeptrisElement)0;
         if (ic_step_elem_match(&p->steps[0], ce))
-            got = ic_field_walk(ce, p, 1);
-        if (!got) got = ic_field_value(ce, p);
-        if (got) return got;
+            got = ic_field_walk(ce, p, 1, &term);
+        if (!got) {
+            got = ic_field_value(ce, p, &term);
+        }
+        if (got) {
+            if (term_out) *term_out = term;
+            return got;
+        }
     }
     return NULL;
 }
@@ -2928,14 +3002,23 @@ static void validate_ics(struct xsd_validator* v,
             if (ic_is_skipped(v, node)) continue;
             /* field values: string of each field expression */
             char* vals[8] = {0};
+            char* vtyp[8] = {0};
             size_t nv = 0;
             int missing = 0;
             for (size_t f = 0; f < ic->field_count && f < 8; f++) {
-                char* sv = ic_field_value(node, &ic->fpaths[f]);
+                LeptrisElement term = (LeptrisElement)0;
+                char* sv = ic_field_value(node, &ic->fpaths[f], &term);
                 if (!sv) {
                     missing = 1;
                     break;
                 }
+                /* #2184: the terminal's ASSESSED type rides the
+                 * tuple (the main walk recorded it) — attribute
+                 * finals and untyped nodes stay NULL (string
+                 * identity). */
+                const char* tn = term ? xsd_recorded_type(v, term)
+                                      : NULL;
+                if (tn) vtyp[nv] = xsd_dup_str(tn);
                 vals[nv++] = sv;
             }
             for (size_t k = 0; k < nv; k++)
@@ -2944,7 +3027,10 @@ static void validate_ics(struct xsd_validator* v,
                 if (ic->kind == 0)
                     verrfk(v, "identity-constraint", "key", ic->name,
                            "a selected node is missing a field value");
-                for (size_t k = 0; k < nv; k++) free(vals[k]);
+                for (size_t k = 0; k < nv; k++) {
+                    free(vals[k]);
+                    free(vtyp[k]);
+                }
                 continue;
             }
             if (pass == 1) {
@@ -2969,19 +3055,136 @@ static void validate_ics(struct xsd_validator* v,
                            ic->kind == 0 ? "key" : "unique",
                            ic->name, "duplicate key tuple");
                 }
-                table_add(&scope, ic->name, vals, nv);
-                table_add(tables, ic->name, vals, nv);
+                table_add(&scope, ic->name, vals, vtyp, nv);
+                table_add(tables, ic->name, vals, vtyp, nv);
             } else {
                 /* keyref: resolve later (deferred to pass 2 end) —
                  * store under the REFER name */
-                table_add(tables, ic->refer ? ic->refer : "",
-                          vals, nv);
+                table_add(tables, ic->refer ? ic->refer : "", vals,
+                          vtyp, nv);
             }
-            for (size_t k = 0; k < nv; k++) free(vals[k]);
+            for (size_t k = 0; k < nv; k++) {
+                free(vals[k]);
+                free(vtyp[k]);
+            }
         }
         free(sel.v);
     }
     tables_free(scope);
+}
+
+/* ---- #2184 §3.11.4: keyref tuples compare in the VALUE space -----
+ *
+ * The string lexical is not the identity: xs:time values carry a
+ * timezone (12:00:00Z == 13:00:00+01:00; 24:00:00 == 00:00:00; a
+ * tz-absent lexical never equals a tz-carrying one), durations
+ * compare by total months/seconds, instants by their UTC reading,
+ * numerics by value. The field terminal's ASSESSED type drives the
+ * dispatch — types the main walk never recorded (wildcard-admitted
+ * nodes) stay string-compared. */
+
+/* xs:time reader: hh:mm:ss[.frac][Z|±hh:mm]. timeOnDay folds
+ * 24:00:00 (and 24:00:00.0) to midnight — the equality identity —
+ * while OTHER 24hh spellings stay malformed. Returns 0 on a
+ * malformed lexical. */
+static int ic_time_value(const char* v, double* out, int* has_tz) {
+    *has_tz = 0;
+    const char* p = v;
+    int d[3];
+    for (int i = 0; i < 3; i++) {
+        if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+            return 0;
+        d[i] = (p[0] - '0') * 10 + (p[1] - '0');
+        p += 2;
+        if (i < 2) {
+            if (*p != ':') return 0;
+            p++;
+        }
+    }
+    double frac = 0;
+    if (*p == '.') {
+        p++;
+        double f = 0.1;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            frac += (*p++ - '0') * f;
+            f /= 10.0;
+            digits++;
+        }
+        if (!digits) return 0;
+    }
+    if (d[0] > 24 || d[1] > 59 || d[2] > 60) return 0;
+    if (d[0] == 24 && (d[1] != 0 || d[2] != 0)) return 0;
+    long tzo = 0;
+    if (*p == 'Z') {
+        p++;
+        *has_tz = 1;
+    } else if (*p == '+' || *p == '-') {
+        int sign = (*p == '+') ? 1 : -1;
+        p++;
+        if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+            return 0;
+        int zh = (p[0] - '0') * 10 + (p[1] - '0');
+        p += 2;
+        long zm = 0;
+        if (*p == ':') {
+            p++;
+            if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+                return 0;
+            zm = (p[0] - '0') * 10 + (p[1] - '0');
+            p += 2;
+        }
+        if (zh > 14 || zm > 59) return 0;
+        tzo = sign * (zh * 60 + zm);
+        *has_tz = 1;
+    }
+    if (*p) return 0;
+    double tod = (d[0] == 24 ? 0.0
+                             : d[0] * 3600.0 + d[1] * 60.0 + d[2]) +
+                 frac;
+    *out = tod - (double)tzo * 60.0;
+    return 1;
+}
+
+/* The tuple slot's value-space identity: 1 equal. `ta`/`tb` are the
+ * recorded assessed type names (either may be NULL). */
+static int ic_value_space_equal(struct leptris_xsd_schema* s,
+                                const char* ta, const char* tb,
+                                const char* a, const char* b) {
+    if (!ta || !tb || strcmp(ta, tb) != 0) return 0;
+    /* canonicalize the recorded name to its terminal builtin */
+    char term[128];
+    term[0] = 0;
+    if (strncmp(ta, "xs:", 3) == 0) {
+        snprintf(term, sizeof(term), "%s", ta);
+    } else {
+        const XsdSimple* st =
+            s ? xsd_find_simple_pub(s, ta) : NULL;
+        int hops = 0;
+        while (st && hops++ < 32) {
+            if (!st->base) break;
+            if (strncmp(st->base, "xs:", 3) == 0) {
+                snprintf(term, sizeof(term), "%s", st->base);
+                break;
+            }
+            st = xsd_find_simple_pub(s, st->base);
+        }
+    }
+    if (!term[0]) return 0;
+    if (strcmp(term, "xs:time") == 0) {
+        double ka, kb;
+        int tza, tzb;
+        if (!ic_time_value(a, &ka, &tza) ||
+            !ic_time_value(b, &kb, &tzb))
+            return 0;
+        /* a timezone-less lexical never equals a tz-carrying one */
+        return tza == tzb && ka == kb;
+    }
+    /* the shared facet table answers the rest of the ordered
+     * space: instants (dateTime/date/dateTimeStamp), durations
+     * (total months/seconds), numerics (exact decimals) */
+    int c = xsd_facet_value_compare(term, a, b);
+    return c == 0;
 }
 
 /* Pass 2 tail: every keyref tuple must appear in the referenced
@@ -2989,7 +3192,6 @@ static void validate_ics(struct xsd_validator* v,
 static void resolve_keyrefs(struct xsd_validator* v,
                             struct leptris_xsd_schema* s,
                             XsdKeyTable* all, XsdKeyTable* refs) {
-    (void)s;
     for (XsdKeyTable* rt = refs; rt; rt = rt->next) {
         XsdKeyTable* target = table_find(all, rt->name);
         if (!target) {
@@ -3007,7 +3209,10 @@ static void resolve_keyrefs(struct xsd_validator* v,
                  have = have->next) {
                 int eq = have->count == want->count;
                 for (size_t k = 0; eq && k < want->count; k++)
-                    if (strcmp(have->values[k], want->values[k]) != 0)
+                    if (strcmp(have->values[k], want->values[k]) != 0 &&
+                        !ic_value_space_equal(
+                            s, have->types[k], want->types[k],
+                            have->values[k], want->values[k]))
                         eq = 0;
                 if (eq) { found = 1; break; }
             }
@@ -3024,7 +3229,10 @@ static void tables_free(XsdKeyTable* t) {
         XsdKeyTuple* tup = t->tuples;
         while (tup) {
             XsdKeyTuple* tn = tup->next;
-            for (size_t k = 0; k < tup->count; k++) free(tup->values[k]);
+            for (size_t k = 0; k < tup->count; k++) {
+                free(tup->values[k]);
+                free(tup->types[k]);
+            }
             free(tup);
             tup = tn;
         }
@@ -3075,6 +3283,11 @@ void xsd_validator_free(struct xsd_validator* v) {
             n = nn;
         }
     }
+    /* #2184: the assessed-type records (§3.11.4 value-space
+     * comparison) */
+    for (size_t i = 0; i < v->type_rec_n; i++)
+        free(v->type_recs[i].type);
+    free(v->type_recs);
     struct xsd_error* e = v->errors;
     while (e) {
         struct xsd_error* n = e->next;
