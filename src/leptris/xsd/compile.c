@@ -8996,7 +8996,14 @@ static void xsd_wc_expand_defined_sibling(XsdCm* any, XsdCm* parent,
     if (!any || !any->not_qname ||
         !strstr(any->not_qname, "##definedSibling"))
         return;
+    /* #2214: names is strstr()ed for the dup check BEFORE the first
+     * append — an uninitialized read made the whole expansion
+     * stack-garbage-dependent (the wild072 verdicts flipped per
+     * binary: the dup test spuriously matched, saw stayed 0 and the
+     * rewrite kept the raw ##definedSibling spelling, which admits
+     * the defined siblings). Zero-init. */
     char names[4096];
+    names[0] = 0;
     size_t o = 0;
     int saw = 0;
     for (XsdCm* c = parent ? parent->first_child : NULL; c;
