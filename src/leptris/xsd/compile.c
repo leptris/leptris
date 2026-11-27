@@ -620,9 +620,28 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
     simple->total_digits = simple->fraction_digits = -1;
     simple->min_scale = simple->max_scale = -1;
 
+    /* #2184: an xs:restriction element may arrive DIRECTLY — the
+     * simpleContent derivation's synthesized text-type capture hands
+     * the restriction over with its facets at this level (the
+     * s3_12ii03 squareType/rectType shapes: enumeration right under
+     * the restriction). The restriction logic below then reads the
+     * element itself instead of hunting a restriction child. */
+    int direct_restriction = 0;
+    {
+        const char* sl = NULL;
+        const char* su = NULL;
+        leptris_element_expanded_name(st, &sl, NULL, &su);
+        direct_restriction = sl && su && strcmp(su, XSD_NS) == 0 &&
+                             strcmp(sl, "restriction") == 0;
+    }
     for (LeptrisNodeRef n =
-             leptris_node_first_child(leptris_element_as_node(st));
-         n; n = leptris_node_next_sibling(n)) {
+             direct_restriction
+                 ? leptris_element_as_node(st)
+                 : leptris_node_first_child(
+                     leptris_element_as_node(st));
+         n;
+         n = direct_restriction ? NULL
+                                : leptris_node_next_sibling(n)) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
             continue;
         LeptrisElement e = (LeptrisElement)n;
@@ -7373,10 +7392,33 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                 strcmp(fl, "assert") != 0)
                                 has_facets = 1;
                         }
-                        XsdSimple* captured =
-                            has_facets
-                                ? xsd_capture_simple(dq)
-                                : NULL;
+                        /* #2184 (§3.4.3.3 cl. 1): an inline
+                         * <xs:simpleType> child of the derivation
+                         * IS the text type — the cta0001/s3_12ii01
+                         * shapes restrict the base's text to
+                         * xs:date/xs:float through it. Captured so
+                         * the SELECTED alternative's text typing
+                         * actually runs (it used to ride the base's
+                         * name, which resolves complex and accepted
+                         * every lexical). */
+                        XsdSimple* captured = NULL;
+                        for (LeptrisNodeRef f =
+                                 leptris_node_first_child(
+                                     leptris_element_as_node(dq));
+                             f && !captured;
+                             f = leptris_node_next_sibling(f)) {
+                            if (leptris_node_get_type(f) !=
+                                LEPTRIS_NODE_TYPE_ELEMENT)
+                                continue;
+                            const char* fl = NULL;
+                            leptris_element_expanded_name(
+                                (LeptrisElement)f, &fl, NULL, NULL);
+                            if (fl && strcmp(fl, "simpleType") == 0)
+                                captured = xsd_capture_simple(
+                                    (LeptrisElement)f);
+                        }
+                        if (!captured && has_facets)
+                            captured = xsd_capture_simple(dq);
                         if (captured) {
                             char synth[512];
                             snprintf(synth, sizeof(synth),
