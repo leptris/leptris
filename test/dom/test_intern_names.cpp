@@ -504,4 +504,260 @@ TEST(InternNames, Over254NamePoolPathUnchanged) {
     leptris_document_free(d);
 }
 
+/* --- #2132 uniq-intern sizing lever guards -------------------------------
+ * The intern table grows as distinct names arrive (open addressing:
+ * every growth re-probes every live entry into a fresh slot array).
+ * These specs pin the growth-time contracts independent of the growth
+ * POLICY (doubling cadence or final-size jump):
+ *   - an entry interned early is still sharable after the table has
+ *     grown (same name bytes, same cached hash) — no stale entries
+ *   - the distinct count never double-counts across a rehash
+ *   - lookups (hash-prefiltered find_child) resolve across growth
+ * and one spec pins the carve-path zero-init contract the block
+ * memset used to provide (fresh elements carry no recycled state).
+ * ---------------------------------------------------------------------- */
+
+/* Names interned BEFORE a growth must still share their original
+ * slot bytes AFTER the table has grown past several rehashes, and
+ * the distinct count must not double-count. 1200 distinct names
+ * crosses multiple growth boundaries under any geometric policy. */
+TEST(InternNames, EarlyEntriesStaySharableAcrossGrowth) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    /* seed names interned at the smallest table size */
+    const char* seeds[] = {"k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7"};
+    const char* seed_slots[8];
+    for (int i = 0; i < 8; i++) {
+        LeptrisElement e = leptris_element_create(d, seeds[i]);
+        ASSERT_NE(e, nullptr) << seeds[i];
+        seed_slots[i] = elem_name(e);
+    }
+
+    /* distinct stream interleaved with seed re-creates: crosses the
+     * growth boundaries mid-stream (rehashes happen while earlier
+     * entries are live — the stale-entry hazard). */
+    const int kDistinct = 1200;
+    for (int i = 0; i < kDistinct; i++) {
+        std::string n = "g" + std::to_string(i);
+        LeptrisElement e = leptris_element_create(d, n.c_str());
+        ASSERT_NE(e, nullptr) << n;
+        /* every ~100 names re-create a seed: must share the ORIGINAL
+         * slot bytes — a rehash must not move or orphan them */
+        if (i % 100 == 0) {
+            LeptrisElement s =
+                leptris_element_create(d, seeds[i % 8]);
+            ASSERT_NE(s, nullptr) << seeds[i % 8];
+            EXPECT_EQ(elem_name(s), seed_slots[i % 8])
+                << "seed slot moved at distinct " << i;
+            EXPECT_STREQ(leptris_element_get_name(s), seeds[i % 8]);
+        }
+    }
+    /* seeds share after the FULL growth too */
+    for (int i = 0; i < 8; i++) {
+        LeptrisElement s = leptris_element_create(d, seeds[i]);
+        ASSERT_NE(s, nullptr);
+        EXPECT_EQ(elem_name(s), seed_slots[i]) << seeds[i];
+    }
+    /* exact distinct count: root + 8 seeds + 1200 stream (seed
+     * re-creates must not double-count through any rehash) */
+    EXPECT_EQ(leptris_name_intern_distinct(d), 1u + 8u + (size_t)kDistinct);
+
+    leptris_document_free(d);
+}
+
+/* The cached 16-bit hash and the slot bytes of an entry interned at
+ * the initial table size must be identical after the table reaches
+ * its largest size — XPath child-axis prefilters ride this hash. */
+TEST(InternNames, HashStableAcrossGrowth) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    LeptrisElement keeper = leptris_element_create(d, "keeper");
+    ASSERT_NE(keeper, nullptr);
+    const char* keeper_slot = elem_name(keeper);
+    uint16_t keeper_hash = keeper->name_hash;
+    EXPECT_EQ(keeper_hash, leptris_name_hash_compute("keeper"));
+
+    const int kGrow = 3000;
+    for (int i = 0; i < kGrow; i++) {
+        std::string n = "h" + std::to_string(i);
+        LeptrisElement e = leptris_element_create(d, n.c_str());
+        ASSERT_NE(e, nullptr) << n;
+        EXPECT_EQ(e->name_hash, leptris_name_hash_compute(n.c_str()))
+            << n;
+    }
+
+    /* keeper after growth: same slot, same hash */
+    LeptrisElement again = leptris_element_create(d, "keeper");
+    ASSERT_NE(again, nullptr);
+    EXPECT_EQ(elem_name(again), keeper_slot);
+    EXPECT_EQ(again->name_hash, keeper_hash);
+    EXPECT_EQ(again->name_hash, leptris_name_hash_compute("keeper"));
+    /* the hash prefilter still resolves keeper from the grown table */
+    EXPECT_EQ(leptris_element_find_child(root, "keeper"), nullptr);
+    ASSERT_EQ(leptris_element_append_child(root, again), LEPTRIS_OK);
+    EXPECT_EQ(leptris_element_find_child(root, "keeper"), again);
+
+    leptris_document_free(d);
+}
+
+/* No stale entries: after growth, a fresh pass over EVERY name must
+ * share (each name resolves to exactly one slot), the distinct count
+ * must be unchanged, and head/mid/tail names must stay findable. */
+TEST(InternNames, NoStaleEntriesAfterGrowth) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    const int kNames = 1500;
+    std::vector<std::string> names;
+    std::vector<const char*> slots;
+    names.reserve(kNames);
+    slots.reserve(kNames);
+    for (int i = 0; i < kNames; i++) {
+        names.push_back("s" + std::to_string(i));
+        LeptrisElement e = leptris_element_create(d, names.back().c_str());
+        ASSERT_NE(e, nullptr) << names.back();
+        slots.push_back(elem_name(e));
+    }
+    ASSERT_EQ(leptris_name_intern_distinct(d), 1u + (size_t)kNames);
+
+    /* full re-probe pass: every name must share its slot; the
+     * distinct count must not move */
+    for (int i = 0; i < kNames; i++) {
+        LeptrisElement e = leptris_element_create(d, names[i].c_str());
+        ASSERT_NE(e, nullptr) << names[i];
+        EXPECT_EQ(elem_name(e), slots[i]) << names[i];
+        EXPECT_STREQ(leptris_element_get_name(e), names[i].c_str());
+    }
+    EXPECT_EQ(leptris_name_intern_distinct(d), 1u + (size_t)kNames);
+
+    /* hash-prefiltered lookups resolve across the growth (attach a
+     * sample spread over head/mid/tail and find them) */
+    const int probes[] = {0, 1, kNames / 3, kNames / 2,
+                          (2 * kNames) / 3, kNames - 2, kNames - 1};
+    for (int idx : probes) {
+        LeptrisElement e =
+            leptris_element_create(d, names[idx].c_str());
+        ASSERT_NE(e, nullptr) << names[idx];
+        ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+        LeptrisElement found =
+            leptris_element_find_child(root, names[idx].c_str());
+        EXPECT_EQ(found, e) << names[idx];
+        EXPECT_STREQ(leptris_element_get_name(found), names[idx].c_str());
+    }
+
+    leptris_document_free(d);
+}
+
+/* Deep growth up to near the distinct cap stays coherent: 8000
+ * distinct names (under DOM_INTERN_MAX_DISTINCT) with seed sharing
+ * and exact counts at the end — "table growth across the cap". */
+TEST(InternNames, GrowthUpToNearCapStaysCoherent) {
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+
+    const char* seed = "anchor";
+    LeptrisElement seed_elem = leptris_element_create(d, seed);
+    ASSERT_NE(seed_elem, nullptr);
+    const char* seed_slot = elem_name(seed_elem);
+
+    const size_t kDeep = (size_t)DOM_INTERN_MAX_DISTINCT - 192;
+    for (size_t i = 0; i < kDeep; i++) {
+        std::string n = "d" + std::to_string(i);
+        LeptrisElement e = leptris_element_create(d, n.c_str());
+        ASSERT_NE(e, nullptr) << n;
+    }
+    EXPECT_EQ(leptris_name_intern_distinct(d), 1u + 1u + kDeep);
+    /* the seed still shares after the deep growth */
+    LeptrisElement again = leptris_element_create(d, seed);
+    ASSERT_NE(again, nullptr);
+    EXPECT_EQ(elem_name(again), seed_slot);
+    EXPECT_EQ(leptris_name_intern_distinct(d), 1u + 1u + kDeep);
+
+    leptris_document_free(d);
+}
+
+/* The carve path's zero-init contract: fresh elements carry NO
+ * recycled state. Round 1 dirties the mutation caches (attrs,
+ * children, prefixed splits); round 2 creates bare elements and
+ * asserts every field the create path does not assign reads as
+ * zero/empty — the block memset this spec guards used to provide
+ * this (assign-not-clear must not resurrect a previous document's
+ * attribute/child/namespace state). */
+TEST(InternNames, FreshElementCarriesNoRecycledState) {
+    /* round 1: dirty doc — attrs, children, QNames — then free so
+     * the recycle caches hold fully-populated element blocks */
+    for (int round = 0; round < 2; round++) {
+        LeptrisDocument dirty = leptris_document_create();
+        ASSERT_NE(dirty, nullptr);
+        LeptrisElement droot = leptris_element_create(dirty, "root");
+        ASSERT_NE(droot, nullptr);
+        ASSERT_EQ(leptris_document_set_root(dirty, droot), LEPTRIS_OK);
+        for (int i = 0; i < 600; i++) {
+            LeptrisElement e =
+                leptris_element_create(dirty, "rich");
+            ASSERT_NE(e, nullptr);
+            ASSERT_EQ(leptris_element_set_attribute(e, "a", "v"),
+                      LEPTRIS_OK);
+            ASSERT_EQ(leptris_element_set_attribute(e, "b", "w"),
+                      LEPTRIS_OK);
+            LeptrisElement kid =
+                leptris_element_create(dirty, "p:child");
+            ASSERT_NE(kid, nullptr);
+            ASSERT_EQ(leptris_element_append_child(e, kid), LEPTRIS_OK);
+            ASSERT_EQ(leptris_element_append_child(droot, e),
+                      LEPTRIS_OK);
+        }
+        leptris_document_free(dirty);
+    }
+
+    /* round 2: bare elements from the recycled blocks */
+    LeptrisDocument d = leptris_document_create();
+    ASSERT_NE(d, nullptr);
+    LeptrisElement root = leptris_element_create(d, "root");
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(leptris_document_set_root(d, root), LEPTRIS_OK);
+    for (int i = 0; i < 600; i++) {
+        LeptrisElement e = leptris_element_create(d, "bare");
+        ASSERT_NE(e, nullptr);
+        /* detached, pre-append: nothing may be set */
+        const char* anames[8];
+        const char* avals[8];
+        EXPECT_EQ(leptris_element_attributes_raw(e, anames, avals, 8),
+                  0u)
+            << "recycled attrs leaked at " << i;
+        EXPECT_EQ(leptris_element_child_count(e), 0u) << i;
+        EXPECT_EQ(leptris_element_get_first_child(e), nullptr) << i;
+        /* name/hash coherent for a fresh create */
+        EXPECT_STREQ(leptris_element_get_name(e), "bare");
+        EXPECT_EQ(e->name_hash, leptris_name_hash_compute("bare"));
+        ASSERT_EQ(leptris_element_append_child(root, e), LEPTRIS_OK);
+    }
+    /* serialization carries exactly the bare tree — no phantom
+     * attributes, children, or xmlns from the recycled state */
+    char* xml = leptris_serialize_document(d);
+    ASSERT_NE(xml, nullptr);
+    EXPECT_NE(strstr(xml, "<bare"), nullptr);
+    EXPECT_EQ(strstr(xml, "a="), nullptr);
+    EXPECT_EQ(strstr(xml, "b="), nullptr);
+    EXPECT_EQ(strstr(xml, "xmlns"), nullptr);
+    EXPECT_EQ(strstr(xml, "p:child"), nullptr);
+    leptris_free_string(xml);
+
+    leptris_document_free(d);
+}
+
 }  // namespace
