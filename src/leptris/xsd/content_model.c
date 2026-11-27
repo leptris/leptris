@@ -305,8 +305,11 @@ static int any_ns_matches(XsdCm* any, const char* uri,
     const char* f = any->any_ns ? any->any_ns : "##any";
     if (strcmp(f, "##any") == 0) return 1;
     if (strcmp(f, "##local") == 0) return uri == NULL;
+    /* #2184: a schema without a targetNamespace has {target
+     * namespace} = absent — ##targetNamespace then names the
+     * ABSENT namespace, so unqualified children match (all006) */
     if (strcmp(f, "##targetNamespace") == 0)
-        return target_ns && uri && strcmp(uri, target_ns) == 0;
+        return uri == NULL && (!target_ns || !target_ns[0]);
     if (strcmp(f, "##other") == 0)
         return uri != NULL &&
                !(target_ns && strcmp(uri, target_ns) == 0);
@@ -325,6 +328,8 @@ static int any_ns_matches(XsdCm* any, const char* uri,
             continue;
         }
         if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            /* #2184: no targetNamespace → the absent namespace */
+            if (uri == NULL && (!target_ns || !target_ns[0])) return 1;
             if (target_ns && uri && strcmp(uri, target_ns) == 0) return 1;
             continue;
         }
@@ -358,6 +363,8 @@ static int cm_not_ns_hits(XsdCm* any, const char* uri,
             continue;
         }
         if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            /* #2184: no targetNamespace → the absent namespace */
+            if (uri == NULL && (!target_ns || !target_ns[0])) return 1;
             if (target_ns && uri && strcmp(uri, target_ns) == 0)
                 return 1;
             continue;

@@ -126,6 +126,13 @@ struct leptris_xsd_schema {
      * WROTE asserts must have those asserts evaluate, or the facet
      * is decorative. */
     int saw_assert;
+    /* #2184: the schema carries relaxed xs:all syntax (an xs:any or
+     * xs:group child inside an xs:all, or an occurrence window other
+     * than 1..1 on an xs:all or its children) — 1.1-only forms whose
+     * order-free counting match defers to the weak-wildcard UPA
+     * relaxation even on unmarked schemas (the ibm S3_3_6/S3_4_6
+     * sets carry no version attribute). */
+    int saw_relaxed_all;
     char* base_dir;    /* schemaLocation resolution (file compile) */
     int include_depth;
     /* xs:override body capture replaces same-named components: the
@@ -318,6 +325,7 @@ static int xsd_bool_attr(LeptrisElement e, const char* name, int dflt);
 static int xsd_doc_has_alternative(LeptrisElement e, int depth);
 static int xsd_doc_has_open_content(LeptrisElement e, int depth);
 static int xsd_doc_has_assert(LeptrisElement e, int depth);
+static int xsd_doc_has_relaxed_all(LeptrisElement e, int depth);
 static XsdSimple* xsd_capture_simple(LeptrisElement st);
 
 
@@ -2296,13 +2304,17 @@ static int xsd_check_derivation(struct leptris_xsd_schema* s,
         if (!base) continue; /* cross-document: capture handles it */
 
         if (is_extension) {
-            /* cos-ct-derived-ok: the content types must agree. */
+            /* cos-ct-derived-ok: the content types must agree.
+             * The BASE's own @mixed counts even for a direct
+             * (non-complexContent) particle model — an all base
+             * with mixed="true" extends only by a mixed type
+             * (all306); reading it only through cc_b flagged every
+             * mixed extension over a mixed all base. */
             LeptrisElement cc_b = xsd_find_child(base, "complexContent");
             LeptrisElement sc_b = xsd_find_child(base, "simpleContent");
             int d_mixed = xsd_mixed_flag(ct);
-            int b_mixed = cc_b ? xsd_mixed_flag(base) : 0;
-            if ((sc_b && !cc_b) || (cc_b && d_mixed != b_mixed) ||
-                (!cc_b && !sc_b && d_mixed)) {
+            int b_mixed = xsd_mixed_flag(base);
+            if ((sc_b && !cc_b) || d_mixed != b_mixed) {
                 xsd_set_error(
                     s,
                     "derivation-ok: the content type of both, the "
@@ -2713,8 +2725,12 @@ static int xsd_check_upa(struct leptris_xsd_schema* s,
     const char* tns = s->target_ns;
     /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
      * arm the relaxation on any 1.1 evidence (open034 is unmarked).
-     * #2151; #2184 adds the ##definedSibling spellings. */
+     * #2151; #2184 adds the ##definedSibling spellings and the
+     * relaxed xs:all syntax — the all's counting match defers to
+     * element particles (weak wildcards) even on unmarked schemas
+     * (the ibm S3_3_6/S3_4_6 sets carry no version attribute). */
     int relax_wildcard = (s->version_11 || s->saw_open_content ||
+                          s->saw_relaxed_all ||
                           xsd_doc_has_defined_sibling(root));
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
@@ -3959,6 +3975,190 @@ static int xsd_check_notation_attrs(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* #2184 (§3.9.6 cos-particle-restricts): an xs:all restricts an
+ * xs:all particle-for-particle. The derived particles PARTITION
+ * across the base's: each derived particle restricts some base
+ * particle (element identity, substitution-group membership under
+ * the base head, wildcard set narrowing, or an element inside a
+ * lax/skip base wildcard's set); per base particle the derived
+ * windows SUM (substitution members and wildcard splits share the
+ * head's window — all221/222/225/230/237), the sum may not drop
+ * under the base's min nor rise over its max, and every base
+ * particle whose window demands presence keeps a counterpart.
+ * Group references inside either all flatten (all206). A violation
+ * fails the SCHEMA (s3_3_6si02/s3_4_6si02, the saxon all202-205
+ * subsumption rows). SEQUENCE-in-place-of-all subsumption (si06,
+ * all212/213, the choice-bearing all234/238 valids) needs the
+ * distinct-particle machinery and stays with the all
+ * compile-constraint class. */
+static int oc_wildcard_subset(const XsdCm* sub, const XsdCm* super);
+static int oc_ns_admits(const XsdCm* w, const char* uri);
+static int oc_ns_list_has(const char* list, const char* token);
+
+#define XSD_ALL_RESTRICT_MAX 512
+
+static long xsd_all_flatten(struct leptris_xsd_schema* s, XsdCm* head,
+                            XsdCm** out, long* n, int depth) {
+    for (XsdCm* p = head; p; p = p->next) {
+        if (*n >= XSD_ALL_RESTRICT_MAX) return -1;
+        if (p->kind == XSD_CM_GROUP_REF) {
+            if (depth > 32) return -1;
+            XsdGroupDef* g = s ? xsd_find_group(s, p->name) : NULL;
+            if (!g || !g->model || g->model->kind != XSD_CM_ALL)
+                return -1;
+            if (xsd_all_flatten(s, g->model->first_child, out, n,
+                                depth + 1) < 0)
+                return -1;
+            continue;
+        }
+        out[(*n)++] = p;
+    }
+    return *n;
+}
+
+static int xsd_all_part_restricts(struct leptris_xsd_schema* s,
+                                  const XsdCm* d, const XsdCm* b) {
+    if (d->kind == XSD_CM_ELEMENT && b->kind == XSD_CM_ELEMENT) {
+        if (!d->name || !b->name) return 0;
+        const char* dns = d->ns ? d->ns : "";
+        const char* bns = b->ns ? b->ns : "";
+        if (strcmp(d->name, b->name) == 0 && strcmp(dns, bns) == 0)
+            return 1;
+        /* substitution-group membership: the derived member
+         * restricts its base head (all221/222/225/226's A1/A2 under
+         * the global head) — the member matches in its own
+         * declaration's namespace */
+        const XsdElementDecl* m =
+            s ? xsd_substitute_member(s, d->name, b->name) : NULL;
+        if (!m) return 0;
+        const char* mns = m->ns ? m->ns : "";
+        return strcmp(mns, bns) == 0;
+    }
+    if (d->kind == XSD_CM_ANY && b->kind == XSD_CM_ANY)
+        return oc_wildcard_subset(d, b);
+    if (d->kind == XSD_CM_ELEMENT && b->kind == XSD_CM_ANY) {
+        /* element-in-place-of-wildcard: lax or skip only, and the
+         * element's (ns, name) inside the set (§3.9.6) */
+        if (b->pc_level == 0) return 0;
+        if (!oc_ns_admits(b, d->ns)) return 0;
+        if (b->not_ns && oc_ns_list_has(b->not_ns, d->ns ? d->ns : ""))
+            return 0;
+        if (b->not_qname) {
+            /* prefix-less tokens name no-namespace members */
+            const char* p = b->not_qname;
+            while (*p) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                       *p == '\r')
+                    p++;
+                const char* start = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                       *p != '\r')
+                    p++;
+                size_t len = (size_t)(p - start);
+                if (len == 0) break;
+                if (d->name && strlen(d->name) == len &&
+                    strncmp(start, d->name, len) == 0 && !d->ns)
+                    return 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int xsd_check_all_restriction(struct leptris_xsd_schema* s) {
+    const char* tns = xsd_target_ns(s);
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        if (!c->res_base || !c->first_child) continue;
+        XsdCm* der = c->first_child;
+        /* all-vs-all only — the sequence-permutation subsumption
+         * (si06, all212/213, all234/238's choice shapes) rides the
+         * compile-constraint sweep */
+        if (der->kind != XSD_CM_ALL) continue;
+        XsdCm* base = xsd_find_complex_ns(
+            s, c->res_base, c->res_base_ns ? c->res_base_ns : tns);
+        if (!base) base = xsd_find_complex(s, c->res_base);
+        if (!base || !base->first_child ||
+            base->first_child->kind != XSD_CM_ALL)
+            continue;
+        XsdCm* ball = base->first_child;
+        XsdCm* bparts[XSD_ALL_RESTRICT_MAX];
+        XsdCm* dparts[XSD_ALL_RESTRICT_MAX];
+        long bn = 0, dn = 0;
+        /* an unresolvable group ref is the ref-check's duty: skip
+         * the type rather than guess */
+        if (xsd_all_flatten(s, ball->first_child, bparts, &bn, 0) < 0)
+            continue;
+        if (xsd_all_flatten(s, der->first_child, dparts, &dn, 0) < 0)
+            continue;
+        /* per-base accumulators over the restricting derived
+         * particles: the windows SUM (§3.9.6 substitution fold and
+         * wildcard splits) */
+        long bmin_sum[XSD_ALL_RESTRICT_MAX];
+        long bmax_sum[XSD_ALL_RESTRICT_MAX];
+        int bhit[XSD_ALL_RESTRICT_MAX];
+        for (long i = 0; i < bn; i++) {
+            bmin_sum[i] = 0;
+            bmax_sum[i] = 0;
+            bhit[i] = 0;
+        }
+        for (long i = 0; i < dn; i++) {
+            XsdCm* d = dparts[i];
+            int owner = -1;
+            for (long j = 0; j < bn && owner < 0; j++)
+                if (xsd_all_part_restricts(s, d, bparts[j]))
+                    owner = (int)j;
+            if (owner < 0) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-particle-restrict: the restriction of "
+                         "'%s' adds or widens particle '%s' beyond "
+                         "the base all",
+                         c->name ? c->name : "?",
+                         d->name ? d->name
+                                 : (d->kind == XSD_CM_ANY ? "the "
+                                                            "wildcard"
+                                                          : "?"));
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            bhit[owner] = 1;
+            bmin_sum[owner] += d->min;
+            bmax_sum[owner] = (bmax_sum[owner] < 0 || d->max < 0)
+                                  ? -1
+                                  : bmax_sum[owner] + d->max;
+        }
+        for (long j = 0; j < bn; j++) {
+            XsdCm* b = bparts[j];
+            if (b->min > 0 && !bhit[j]) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-particle-restrict: the restriction of "
+                         "'%s' drops the required particle '%s'",
+                         c->name ? c->name : "?",
+                         b->name ? b->name : "the wildcard");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            if (!bhit[j]) continue;
+            if (bmin_sum[j] < b->min ||
+                (b->max >= 0 &&
+                 (bmax_sum[j] < 0 || bmax_sum[j] > b->max))) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-particle-restrict: the restriction "
+                         "of '%s' widens the occurrence window of "
+                         "'%s'",
+                         c->name ? c->name : "?",
+                         b->name ? b->name : "the wildcard");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* #2184 src-ct.1 + §3.2.7.1, walked over the SOURCE elements (the
  * captured models no longer carry the wrapper shape):
  *
@@ -4133,6 +4333,11 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
          * an xs:any occurrence rule inside an included document
          * (open048) still applies. */
         s->saw_open_content = xsd_doc_has_open_content(root, 0);
+        /* #2184: relaxed xs:all syntax evidence — the ibm
+         * S3_3_6/S3_4_6 and saxon All schemas are unmarked; their
+         * wildcard-in-all and relaxed-occurrence shapes arm the
+         * weak-wildcard UPA relaxation (§3.8.6.4). */
+        s->saw_relaxed_all = xsd_doc_has_relaxed_all(root, 0);
     }
 
     const char* local = NULL;
@@ -4260,6 +4465,16 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
 
+    /* #2184: the all-restriction compatibility sweep — an xs:all
+     * restricts an xs:all particle-for-particle with narrowing
+     * occurrence windows (s3_3_6/s3_4_6, the saxon subsumption
+     * set). A violation fails the SCHEMA. */
+    if (xsd_check_all_restriction(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
     /* #2184: the alternative-table compile constraints — §3.12.2
      * XPath-valid tests, §3.3.6.1 cl.7 type substitutability,
      * cos-element-consistent table equality, the restriction
@@ -4363,18 +4578,41 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
             if (!base || base->ext_base) continue;
             XsdCm* copied = xsd_cm_copy_list(base->first_child);
             if (copied) {
-                XsdCm* tail = copied;
-                while (tail->next) tail = tail->next;
-                tail->next = c->first_child;
-                c->first_child = copied;
-                /* capture wraps a multi-particle splice under one
-                 * sequence (the NFA consumes ONE root particle) —
-                 * the deferred fold owes the same normalization */
-                if (c->first_child->next) {
-                    XsdCm* seq = xsd_cm_new(XSD_CM_SEQ);
-                    if (seq) {
-                        seq->first_child = c->first_child;
-                        c->first_child = seq;
+                /* #2184 §3.4.4.2: extending an all with an all
+                 * merges the particle sets (all301/all314 — the
+                 * deferred-fold leg of the same rule the capture
+                 * fold applies) */
+                if (copied && !copied->next &&
+                    copied->kind == XSD_CM_ALL && c->first_child &&
+                    !c->first_child->next &&
+                    c->first_child->kind == XSD_CM_ALL) {
+                    XsdCm* down = c->first_child;
+                    XsdCm* kids = down->first_child;
+                    down->first_child = NULL;
+                    xsd_cm_free(down);
+                    c->first_child = NULL;
+                    XsdCm* tail = copied->first_child;
+                    if (tail) {
+                        while (tail->next) tail = tail->next;
+                        tail->next = kids;
+                    } else {
+                        copied->first_child = kids;
+                    }
+                    c->first_child = copied;
+                } else {
+                    XsdCm* tail = copied;
+                    while (tail->next) tail = tail->next;
+                    tail->next = c->first_child;
+                    c->first_child = copied;
+                    /* capture wraps a multi-particle splice under one
+                     * sequence (the NFA consumes ONE root particle) —
+                     * the deferred fold owes the same normalization */
+                    if (c->first_child->next) {
+                        XsdCm* seq = xsd_cm_new(XSD_CM_SEQ);
+                        if (seq) {
+                            seq->first_child = c->first_child;
+                            c->first_child = seq;
+                        }
                     }
                 }
             }
@@ -4792,9 +5030,13 @@ static int xsd_oc_finalize(struct leptris_xsd_schema* s) {
                 }
                 /* cos-ct-extends.1.4.3.2.2.1 (s3_4_1si08): the
                  * content types must both be mixed or both
-                 * element-only */
-                if (!s->oc_failed && bot && bot->first_child &&
-                    bot->mixed != t->mixed) {
+                 * element-only. The flags live on the TYPE rows
+                 * (base/t are the captured wrappers; `bot` is the
+                 * nested content model, whose flag is never set —
+                 * reading it there flagged every mixed extension
+                 * over an all base, all306). */
+                if (!s->oc_failed && base && base->first_child &&
+                    base->mixed != t->mixed) {
                     xsd_set_error(s,
                                   "the extension content type and "
                                   "its base must both be mixed or "
@@ -6357,6 +6599,74 @@ static int xsd_doc_has_assert(LeptrisElement e, int depth) {
     return 0;
 }
 
+/* #2184: does the document carry RELAXED xs:all syntax at any depth
+ * (1.1-only forms on schemas that may carry no version marker)?
+ *   - an xs:any or xs:group child inside an xs:all;
+ *   - an occurrence window other than 1..1 on an xs:all itself or
+ *     on its children (maxOccurs "unbounded"/>1, minOccurs > 1).
+ * Such an all is matched by ORDER-FREE counting with weak wildcards
+ * (§3.8.6), so its element/wildcard FIRST-set overlap is legal and
+ * the UPA relaxation arms on this evidence alone. */
+static int xsd_all_relaxed_syntax(LeptrisElement all_el) {
+    const char* mn =
+        leptris_element_attribute(all_el, "minOccurs");
+    const char* mx =
+        leptris_element_attribute(all_el, "maxOccurs");
+    if (mn && mn[0] && strcmp(mn, "0") != 0) {
+        long v = strtol(mn, NULL, 10);
+        if (v > 1) return 1;
+    }
+    if (mx && mx[0] && strcmp(mx, "1") != 0) {
+        if (strcmp(mx, "unbounded") == 0) return 1;
+        long v = strtol(mx, NULL, 10);
+        if (v > 1) return 1;
+    }
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(all_el));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (!cl || !cu || strcmp(cu, XSD_NS) != 0) continue;
+        if (strcmp(cl, "any") == 0 || strcmp(cl, "group") == 0)
+            return 1;
+        const char* cmn = leptris_element_attribute(c, "minOccurs");
+        const char* cmx = leptris_element_attribute(c, "maxOccurs");
+        if (cmn && cmn[0]) {
+            long v = strtol(cmn, NULL, 10);
+            if (v > 1) return 1;
+        }
+        if (cmx && cmx[0] && strcmp(cmx, "1") != 0) {
+            if (strcmp(cmx, "unbounded") == 0) return 1;
+            long v = strtol(cmx, NULL, 10);
+            if (v > 1) return 1;
+        }
+    }
+    return 0;
+}
+
+static int xsd_doc_has_relaxed_all(LeptrisElement e, int depth) {
+    if (depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            strcmp(cl, "all") == 0 && xsd_all_relaxed_syntax(c))
+            return 1;
+        if (xsd_doc_has_relaxed_all(c, depth + 1)) return 1;
+    }
+    return 0;
+}
+
 /* #2151: does the document carry an xs:openContent or
  * xs:defaultOpenContent element at any depth (open-content-syntax
  * evidence for schemas unmarked or marked 1.0 — the whole
@@ -6710,18 +7020,41 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                 }
                 if (strcmp(dl, "extension") == 0) {
                     /* base content first, derived content after */
-                    root->first_child = xsd_cm_copy_list(
-                        (base_root && !defer_base)
-                            ? base_root->first_child
-                            : NULL);
-                    XsdCm* own_tail = root->first_child;
-                    while (own_tail && own_tail->next)
-                        own_tail = own_tail->next;
+                    XsdCm* base_copy =
+                        (!defer_base && base_root)
+                            ? xsd_cm_copy_list(base_root->first_child)
+                            : NULL;
                     XsdCm* own = xsd_cm_parse(s, dq, NULL);
-                    if (own_tail)
-                        own_tail->next = own;
-                    else if (!root->first_child)
-                        root->first_child = own;
+                    /* #2184 §3.4.4.2 (cos-ct-extends): extending an
+                     * all with an all MERGES the particle sets — the
+                     * instance interleaves base and derived
+                     * particles freely, so the two-children
+                     * sequence-wrap shape can never match. The
+                     * merged all keeps the base's occurrence. */
+                    if (base_copy && !base_copy->next &&
+                        base_copy->kind == XSD_CM_ALL && own &&
+                        !own->next && own->kind == XSD_CM_ALL) {
+                        XsdCm* kids = own->first_child;
+                        own->first_child = NULL;
+                        xsd_cm_free(own);
+                        XsdCm* tail = base_copy->first_child;
+                        if (tail) {
+                            while (tail->next) tail = tail->next;
+                            tail->next = kids;
+                        } else {
+                            base_copy->first_child = kids;
+                        }
+                        root->first_child = base_copy;
+                    } else {
+                        root->first_child = base_copy;
+                        XsdCm* own_tail = root->first_child;
+                        while (own_tail && own_tail->next)
+                            own_tail = own_tail->next;
+                        if (own_tail)
+                            own_tail->next = own;
+                        else if (!root->first_child)
+                            root->first_child = own;
+                    }
                     if (base_root && !defer_base) {
                         const XsdTypeAttrs* bt = xsd_find_type_attrs(
                             s, base);
