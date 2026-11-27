@@ -86,14 +86,12 @@ static struct leptris_intern_entry* dom_intern_slots_new(
     struct leptris_intern_entry* ns = (struct leptris_intern_entry*)
         leptris_pool_alloc(pool, ncap * sizeof(*ns));
     if (!ns) return NULL;
-    /* Clear ONLY the name fields (strided: 8 of every 16 bytes — a
-     * contiguous half-size memset would leave the upper half of the
-     * array with garbage names). The empty-slot test is `!e->name`
-     * and the probe loop breaks on it BEFORE reading probe_hash/len,
-     * so the tail bytes of an empty slot are never read; rehash and
-     * insert write all four fields of every live entry. Halving the
-     * growth clear is the #2132 append-uniq rehash-burst lever. */
-    for (size_t k = 0; k < ncap; k++) ns[k].name = NULL;
+    /* Full contiguous clear (vectorized on the hot architectures).
+     * Measured on the #2132 row harness (M1 Max): the contiguous
+     * NEON memset beats a name-only strided store loop by ~0.4
+     * ns/child on the append-uniq shape despite writing 2x the
+     * bytes — scalar strided stores lose to the libc memset. */
+    memset(ns, 0, ncap * sizeof(*ns));
     return ns;
 }
 
