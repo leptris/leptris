@@ -70,7 +70,18 @@ fi
 train_wrap=""
 if [ "$mode" = "train" ] && [ "$(uname -s)" = "Linux" ] \
    && command -v setarch >/dev/null 2>&1; then
-  train_wrap="setarch $(uname -m) -R"
+  # Probe before adopting: sandboxes that block the personality
+  # syscall (default Docker, gVisor) make setarch exit nonzero BEFORE
+  # the training binary runs — every binary then "exits nonzero" with
+  # zero .gcda written, training silently voids, and the USE build
+  # compiles from an empty profile (#2194 container-lane finding).
+  if setarch "$(uname -m)" -R /bin/true >/dev/null 2>&1; then
+    train_wrap="setarch $(uname -m) -R"
+  else
+    echo "pgo_battery: WARNING setarch -R unusable here (personality blocked)" \
+         "— training runs with ASLR ON; address-keyed caches make the" \
+         "profile noisier than CI's fixed-layout training" >&2
+  fi
 fi
 
 ran=0 missing=0
