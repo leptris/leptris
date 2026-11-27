@@ -5237,8 +5237,21 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     if (closes && !self_ref && !empty_body)
                         s->ro_cyclic = 1;
                 }
-                if (xsd_visited_has(s, canon)) continue;
-                xsd_visited_add(s, canon);
+                /* #2208 §4.3/§4.2.2: an override/redefine TARGET
+                 * already in the visited set — the base landed as an
+                 * earlier set member, or an earlier import chased it
+                 * — must still trigger the directive: the BODY's
+                 * components replace the target's same-named ones
+                 * (§4.3) or fold the hook (§4.2.2) even though the
+                 * target itself is not re-captured. Skipping only the
+                 * target's capture keeps include/import of an
+                 * already-captured unit contributing nothing. */
+                int ovr_seen =
+                    (strcmp(local, "override") == 0 ||
+                     strcmp(local, "redefine") == 0) &&
+                    xsd_visited_has(s, canon);
+                if (xsd_visited_has(s, canon) && !ovr_seen) continue;
+                if (!ovr_seen) xsd_visited_add(s, canon);
                 if (strcmp(local, "redefine") == 0 ||
                     strcmp(local, "override") == 0)
                     xsd_ro_stack_push(s, canon);
@@ -5280,7 +5293,12 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                          * compiler had its own targetNamespace). */
                         int same_ns = subroot && (!tns || !s->target_ns ||
                                                   strcmp(tns, s->target_ns) == 0);
-                        if (subroot &&
+                        /* #2208: an already-captured override/redefine
+                         * target re-parses only to feed the directive
+                         * arm below — its components are in the tables
+                         * from the first capture, and re-capturing
+                         * them would duplicate every declaration. */
+                        if (subroot && !ovr_seen &&
                             (strcmp(local, "import") == 0 || same_ns)) {
                             /* leptris-ruby#440/#439: each captured
                              * unit stamps ITS OWN targetNamespace on

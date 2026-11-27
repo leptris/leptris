@@ -221,3 +221,97 @@ TEST(Xsd11Override, DocumentScopedIdUniqueness) {
                                "saxonData/Override/over008.v01.xml"),
               1);
 }
+
+/* ---- #2208: xs:override @schemaLocation through the SET path ---- */
+
+namespace {
+
+/* verdict against a compiled SET: 1 valid, 0 invalid, -1 schema or
+ * parse failure. The members compile as one merged schema — the
+ * same composition rule leptris_xsd_compile_set documents. */
+int set_verdict_of(const char* const* paths, size_t count,
+                   const char* instance) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_set(paths, count, &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << "set must compile";
+    EXPECT_EQ(st, LEPTRIS_OK) << "set compile status";
+    if (!s) return -1;
+    std::string ip =
+        std::string(LEPTRIS_XSD11_CASES_DIR) + "/" + instance;
+    LeptrisStatus pst = (LeptrisStatus)0;
+    LeptrisDocument d = leptris_parse_file(ip.c_str(), &pst);
+    EXPECT_NE(d, (LeptrisDocument)0) << instance << " must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
+}  // namespace
+
+/* moxml#590 / leptris#2208 (over001): an xs:override whose
+ * overridden document arrives through @schemaLocation must resolve
+ * into the set composition — the located base is chased, captured,
+ * and its same-named components replaced (§4.3). The override's
+ * date shape validates; the base's para shape and the undeclared
+ * root do not. The single-document path already passes these rows
+ * (the suite manifest is green); the set path drops the located
+ * document, leaving the surface with no top-level 'doc'. */
+TEST(Xsd11Override, OverrideSchemaLocationChasedThroughSet) {
+    std::string sp = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                     "/saxonData/Override/over001.xsd";
+    const char* paths[1] = {sp.c_str()};
+    EXPECT_EQ(set_verdict_of(
+                  paths, 1, "saxonData/Override/over001.v01.xml"),
+              1);
+    EXPECT_NE(set_verdict_of(
+                  paths, 1, "saxonData/Override/over001.n01.xml"),
+              1);
+    EXPECT_NE(set_verdict_of(
+                  paths, 1, "saxonData/Override/over001.n02.xml"),
+              1);
+}
+
+/* #2208 (over001, base-first member order): when the overridden
+ * document lands as an EARLIER set member, the override directive's
+ * chase sees the target already visited — §4.3 must still apply:
+ * the body's components replace the base's same-named ones. The
+ * base's para shape must not survive unreplaced (the failure mode:
+ * the visited dedup swallowed the whole chase arm, replacement
+ * included). */
+TEST(Xsd11Override, OverrideReplacesBaseCapturedAsEarlierMember) {
+    std::string over = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                       "/saxonData/Override/over001.xsd";
+    std::string base = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                       "/saxonData/Override/over001a.xsd";
+    const char* paths[2] = {base.c_str(), over.c_str()};
+    EXPECT_EQ(set_verdict_of(
+                  paths, 2, "saxonData/Override/over001.v01.xml"),
+              1)
+        << "the override's date shape must win over the base's";
+    EXPECT_NE(set_verdict_of(
+                  paths, 2, "saxonData/Override/over001.n01.xml"),
+              1);
+}
+
+/* Control (the pre-#2150 probe shape): the overridden base as a
+ * LATER set member composes correctly — the set-member shape is
+ * not the gap; this pins it while the schemaLocation shape heals. */
+TEST(Xsd11Override, OverrideBaseAsExplicitSetMemberComposes) {
+    std::string over = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                       "/saxonData/Override/over001.xsd";
+    std::string base = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                       "/saxonData/Override/over001a.xsd";
+    const char* paths[2] = {over.c_str(), base.c_str()};
+    EXPECT_EQ(set_verdict_of(
+                  paths, 2, "saxonData/Override/over001.v01.xml"),
+              1);
+    EXPECT_NE(set_verdict_of(
+                  paths, 2, "saxonData/Override/over001.n01.xml"),
+              1);
+}
