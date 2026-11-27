@@ -2213,18 +2213,20 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
                             const char* type, const char* ns,
                             const char* value, LeptrisElement carrier,
                             int via_content) {
+    /* the collapsed-value buffer lives at FUNCTION scope: the pointer
+     * escapes into every record/classify call below, and a nested
+     * block would make each of those a stack-use-after-scope (the
+     * Linux ASAN leg's finding — macOS Release builds never see it). */
+    char norm[512];
     if (!v || !s || !type || !value || !value[0]) return;
     /* The token-family datatypes collapse their lexical before the
      * [normalized value] exists (§3.2.4.2) — the tables see the
      * normalized form: v16's trailing-newline idref resolves as b2,
      * id001.n02's " aaa " duplicates para1's aaa. */
-    {
-        char norm[512];
-        if (strlen(value) < sizeof(norm) &&
-            type_collapses_ws(s, type, ns) &&
-            xsd_collapse_str(value, norm, sizeof(norm)))
-            value = norm;
-    }
+    if (strlen(value) < sizeof(norm) &&
+        type_collapses_ws(s, type, ns) &&
+        xsd_collapse_str(value, norm, sizeof(norm)))
+        value = norm;
     const XsdSimple* st = NULL;
     if (strncmp(type, "xs:", 3) == 0 || strncmp(type, "xsd:", 4) == 0) {
         if (strcmp(type, "xs:ID") == 0 || strcmp(type, "xsd:ID") == 0) {
