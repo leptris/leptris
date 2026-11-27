@@ -2124,7 +2124,6 @@ static void xsd_resolve_qname(LeptrisElement e, const char* qname,
 }
 
 static LeptrisElement xsd_find_child(LeptrisElement e, const char* local) {
-    if (!e) return NULL;
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(e));
          n; n = leptris_node_next_sibling(n)) {
@@ -5832,9 +5831,23 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(ta->type_name);
         free(ta->any_attr_ns);
         free(ta->any_attr_not_qname);
+        free(ta->any_attr_not_ns);
         free(ta->any_attr_base_ns);
+        free(ta->any_attr_base_not_qname);
+        free(ta->any_attr_base_not_ns);
         free(ta->any_attr_unit_ns);
         free(ta->any_attr_base_unit_ns);
+        /* #2184: the gathered intersection members */
+        XsdAttrWc* m = ta->any_attr_int;
+        while (m) {
+            XsdAttrWc* mn = m->next;
+            free(m->ns);
+            free(m->unit_ns);
+            free(m->not_ns);
+            free(m->not_qname);
+            free(m);
+            m = mn;
+        }
         free(ta);
         ta = tn;
     }
