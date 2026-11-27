@@ -32,6 +32,16 @@ static int rng_dir_of(char* s) {
     return 1;
 }
 
+/* Join `href` onto `base_dir` into out. Absolute hrefs (POSIX root,
+ * Windows backslash root or drive letter) are taken as-is. */
+static void rng_join_path(char* out, size_t outsz, const char* base_dir,
+                          const char* href) {
+    if (href[0] == '/' || href[0] == '\\' || (href[0] && href[1] == ':'))
+        snprintf(out, outsz, "%s", href);
+    else
+        snprintf(out, outsz, "%s/%s", base_dir, href);
+}
+
 static RngPattern* pat_new(RngPatternKind kind) {
     RngPattern* p = (RngPattern*)calloc(1, sizeof(*p));
     if (p) p->kind = kind;
@@ -395,6 +405,24 @@ static int parse_grammar_body(RngGrammar* g, LeptrisElement grammar,
                               const char* base_dir, unsigned depth,
                               char* err, size_t errsz);
 
+/* Record, on each still-unpinned externalRef placeholder in the
+ * subtree, its href resolved against `base_dir` (the directory of
+ * the file the externalRef was written in). The resolved path rides
+ * in the placeholder's `value` slot. */
+static void pin_external_refs(RngPattern* p, const char* base_dir) {
+    for (; p; p = p->next) {
+        if (p->kind == RNG_EXTERNAL_REF) {
+            if (!p->value && p->name) {
+                char path[1024];
+                rng_join_path(path, sizeof(path), base_dir, p->name);
+                p->value = leptris_strdup(path);
+            }
+            continue;   /* no children per spec */
+        }
+        pin_external_refs(p->first_child, base_dir);
+    }
+}
+
 /* <include href="...">: parse the included grammar, apply the
  * include element's nested <start>/<define> as replacements, then
  * merge everything into `g`. */
@@ -418,10 +446,7 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
     }
 
     char path[1024];
-    if (href[0] == '/')
-        snprintf(path, sizeof(path), "%s", href);
-    else
-        snprintf(path, sizeof(path), "%s/%s", base_dir, href);
+    rng_join_path(path, sizeof(path), base_dir, href);
 
     size_t len = 0;
     char* buf = slurp_file(path, &len);
@@ -477,6 +502,16 @@ static int handle_include(RngGrammar* g, LeptrisElement inc,
         rng_grammar_free(ig);
         return 0;
     }
+    /* RNG 4.5/4.7: an externalRef resolves against the base URI of
+     * its own element. Placeholders are resolved after the whole
+     * include tree is assembled, against the TOP schema's directory,
+     * so pin every placeholder written in the included file to that
+     * file's directory now — before the <include>'s own nested
+     * overrides (written in the including file) are parsed in. Nested
+     * includes pinned theirs first; pinned placeholders are kept. */
+    pin_external_refs(ig->start, nbase);
+    for (RngDefine* pd = ig->defines; pd; pd = pd->next)
+        pin_external_refs(pd->body, nbase);
 
     /* Nested <start>/<define> replace the included grammar's
      * matching declaration, which must exist. */
@@ -704,7 +739,7 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
     for (RngPattern** link = slot; *link; ) {
         RngPattern* p = *link;
         if (p->kind == RNG_EXTERNAL_REF) {
-            if (!base_dir) {
+            if (!base_dir && !p->value) {
                 snprintf(err, errsz,
                          "externalRef %s: no base URI "
                          "(use leptris_rng_parse_file)", p->name);
@@ -715,12 +750,13 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
                          "externalRef %s: too deep (cycle?)", p->name);
                 return 0;
             }
+            /* A placeholder pinned to its own file's directory (see
+             * pin_external_refs) ignores the caller's base_dir. */
             char path[1024];
-            if (p->name[0] == '/' || p->name[0] == '\\'
-                || (p->name[0] && p->name[1] == ':'))
-                snprintf(path, sizeof(path), "%s", p->name);
+            if (p->value)
+                snprintf(path, sizeof(path), "%s", p->value);
             else
-                snprintf(path, sizeof(path), "%s/%s", base_dir, p->name);
+                rng_join_path(path, sizeof(path), base_dir, p->name);
             size_t len = 0;
             char* buf = slurp_file(path, &len);
             if (!buf) {
@@ -781,6 +817,7 @@ static int resolve_external_refs(RngGrammar* g, RngPattern** slot,
             *link = ig->start;
             ig->start = NULL;
             free(p->name);
+            free(p->value);
             free(p);
             rng_grammar_free(ig);
             free(ex);
