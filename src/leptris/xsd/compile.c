@@ -239,6 +239,10 @@ static XsdCm* xsd_capture_any(struct leptris_xsd_schema* s,
                               LeptrisElement any_child);
 static char* xsd_capture_unit_tns(LeptrisElement e);
 static char* xsd_capture_ns_prolog(LeptrisElement e, const char* base_dir);
+static char* xsd_ic_default_ns(LeptrisElement host);
+static void xsd_cta_scan_cast_targets(struct leptris_xsd_schema* s,
+                                      XsdAlternative* a,
+                                      LeptrisElement host);
 static void xsd_resolve_qname(LeptrisElement e, const char* qname,
                               char* uri, size_t urisz, char* local,
                               size_t localsz);
@@ -360,6 +364,7 @@ static void xsd_cm_free(XsdCm* cm) {
             if (alt->compiled) leptris_xquery_free(alt->compiled);
             free(alt->test);
             free(alt->ns_prolog);
+            free(alt->cast_target);
             free(alt->type);
             for (int i = 0; i < alt->test_attr_n; i++)
                 free(alt->test_attrs[i]);
@@ -3816,6 +3821,15 @@ static int xsd_check_particle_table(struct leptris_xsd_schema* s,
             xsd_set_error(s, msg);
             return -1;
         }
+        if (a->cast_target) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "XPST0080: the cast target '%s' in the "
+                     "alternative test of '%s' is not a simple type",
+                     a->cast_target, owner ? owner : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
         if (!xsd_alt_substitutable(s, a, decl_type)) {
             char msg[512];
             snprintf(msg, sizeof(msg),
@@ -6368,6 +6382,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             if (a->compiled) leptris_xquery_free(a->compiled);
             free(a->test);
             free(a->ns_prolog);
+            free(a->cast_target);
             free(a->type);
             for (int i = 0; i < a->test_attr_n; i++)
                 free(a->test_attrs[i]);
@@ -6606,6 +6621,106 @@ static void xsd_cta_test_attrs(const char* test, char*** out,
  * ct_failed). A test that fails to COMPILE (§3.12.2 XPath valid)
  * fails the schema (#2184); only evaluation errors take the §3.12.4
  * "false" channel. */
+/* #2184 (XPST0080): the target type of a cast / castable inside a
+ * CTA test must be a simple type — a cast naming a COMPLEX type of
+ * the schema is a static error and fails the SCHEMA (s3_12ii06's
+ * `@kind cast as messageTypeString`). Lexical scan: string literals
+ * are skipped, `cast as` / `castable as` introduces the
+ * SequenceType (an occurrence indicator '?' may trail). Targets are
+ * resolved like the IC lane — prefixed against the host's in-scope
+ * bindings, unprefixed through xpathDefaultNamespace (§3.13.2).
+ * Unresolved names stay posture (the parse gate owns syntax). */
+static int xsd_ncname_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '.' ||
+           c == '-' || (unsigned char)c >= 0x80;
+}
+
+static void xsd_cta_scan_cast_targets(struct leptris_xsd_schema* s,
+                                      XsdAlternative* a,
+                                      LeptrisElement host) {
+    if (!a || !a->test || a->cast_target) return;
+    const char* p = a->test;
+    char tok[256];
+    while (*p) {
+        /* string literals never carry keywords */
+        if (*p == '\'' || *p == '"') {
+            char q = *p++;
+            while (*p) {
+                if (*p == q) {
+                    if (p[1] == q) { p += 2; continue; }
+                    break;
+                }
+                p++;
+            }
+            if (*p) p++;
+            continue;
+        }
+        if (xsd_ncname_char(*p)) {
+            size_t n = 0;
+            while (*p && xsd_ncname_char(*p)) {
+                if (n + 1 < sizeof(tok)) tok[n++] = *p;
+                p++;
+            }
+            tok[n] = 0;
+            int is_cast = strcmp(tok, "cast") == 0;
+            int is_castable = strcmp(tok, "castable") == 0;
+            if ((!is_cast && !is_castable) || *p != ' ' ||
+                strncmp(p, " as", 3) != 0 ||
+                (p[3] && p[3] != ' ' && p[3] != '\t' &&
+                 p[3] != '\n' && p[3] != '\r' &&
+                 !xsd_ncname_char(p[3])))
+                continue;
+            p += 3;
+            while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                   *p == '\r')
+                p++;
+            /* the SequenceType's QName (+ optional '?') */
+            if (!xsd_ncname_char(*p)) continue;
+            char qn[256];
+            size_t qn_n = 0;
+            while ((*p && xsd_ncname_char(*p)) || *p == ':') {
+                if (qn_n + 1 < sizeof(qn)) qn[qn_n++] = *p;
+                p++;
+            }
+            if (*p == '?') p++;
+            qn[qn_n] = 0;
+            /* resolve: prefixed against the host's bindings,
+             * unprefixed through xpathDefaultNamespace */
+            char uri[512];
+            char local[256];
+            char* defns = NULL;
+            if (strchr(qn, ':')) {
+                xsd_resolve_qname(host, qn, uri, sizeof(uri), local,
+                                  sizeof(local));
+                if (!local[0]) continue; /* unbound prefix: posture */
+            } else {
+                snprintf(local, sizeof(local), "%s", qn);
+                defns = xsd_ic_default_ns(host);
+                snprintf(uri, sizeof(uri), "%s",
+                         defns ? defns : "");
+                free(defns);
+            }
+            const char* ns = uri[0] ? uri : NULL;
+            if (ns && strcmp(ns, XSD_NS) == 0) {
+                /* a builtin reference: always simple */
+                char builtin[300];
+                if (snprintf(builtin, sizeof(builtin), "xs:%s",
+                             local) < (int)sizeof(builtin) &&
+                    xsd_builtin_known(builtin))
+                    continue;
+            }
+            if (xsd_ladder_simple(s, local, ns, 0)) continue;
+            if (xsd_ladder_complex(s, local, ns, 0)) {
+                a->cast_target = xsd_strdup(qn);
+                return;
+            }
+            continue;
+        }
+        p++;
+    }
+}
+
 static XsdAlternative* xsd_capture_alternatives(
     struct leptris_xsd_schema* s, LeptrisElement decl_elem) {
     XsdAlternative* head = NULL;
@@ -6653,6 +6768,7 @@ static XsdAlternative* xsd_capture_alternatives(
             }
             xsd_cta_test_attrs(a->test, &a->test_attrs,
                                &a->test_attr_n);
+            xsd_cta_scan_cast_targets(s, a, e);
         }
         if (type && type[0]) {
             char turi[512], tlocal[256];
