@@ -2672,11 +2672,13 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
     return 0;
 }
 
-/* #2184: a wildcard carrying a 1.1 negative set (@notQName /
- * @notNamespace / ##definedSibling) is 1.1-only syntax evidence —
- * the §3.8.6.4 wildcard-vs-element relaxation arms for schemas that
- * spell it, the same posture as version_11 / saw_open_content. */
-static int xsd_doc_has_wildcard_negative_set(LeptrisElement root) {
+/* #2184: a wildcard spelling ##definedSibling structurally cannot
+ * overlap its parent's element particles — the §3.8.6.4 relaxation
+ * MUST arm for such models (the defined-sibling expansion runs
+ * post-capture, after this document-level gate). General
+ * notQName/notNamespace spellings do NOT arm it: all305's and
+ * s3_3_6si03's overlap invalidity depends on the strict posture. */
+static int xsd_doc_has_defined_sibling(LeptrisElement root) {
     if (!root) return 0;
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
@@ -2688,17 +2690,17 @@ static int xsd_doc_has_wildcard_negative_set(LeptrisElement root) {
         const char* u = NULL;
         leptris_element_expanded_name(e, &l, NULL, &u);
         if (!l || !u || strcmp(u, XSD_NS) != 0) continue;
-        if ((strcmp(l, "any") == 0 || strcmp(l, "anyAttribute") == 0) &&
-            (leptris_element_attribute(e, "notQName") ||
-             leptris_element_attribute(e, "notNamespace")))
-            return 1;
+        if ((strcmp(l, "any") == 0 || strcmp(l, "anyAttribute") == 0)) {
+            const char* nq = leptris_element_attribute(e, "notQName");
+            if (nq && strstr(nq, "##definedSibling")) return 1;
+        }
         /* nested models (complexType bodies, groups) */
         for (LeptrisNodeRef c = leptris_node_first_child(
                  leptris_element_as_node(e));
              c; c = leptris_node_next_sibling(c)) {
             if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
                 continue;
-            if (xsd_doc_has_wildcard_negative_set((LeptrisElement)c))
+            if (xsd_doc_has_defined_sibling((LeptrisElement)c))
                 return 1;
         }
     }
@@ -2711,9 +2713,9 @@ static int xsd_check_upa(struct leptris_xsd_schema* s,
     const char* tns = s->target_ns;
     /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
      * arm the relaxation on any 1.1 evidence (open034 is unmarked).
-     * #2151; #2184 adds the negative-set spellings. */
+     * #2151; #2184 adds the ##definedSibling spellings. */
     int relax_wildcard = (s->version_11 || s->saw_open_content ||
-                          xsd_doc_has_wildcard_negative_set(root));
+                          xsd_doc_has_defined_sibling(root));
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
