@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- interleaved governance: a declared particle still available to
+     the model governs its own instance across a wildcard span (the
+     open025 shape — i+ then d*, ##local skip interleave) -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="interleave">
+      <xs:any namespace="##local" processContents="skip"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="i" maxOccurs="unbounded" type="xs:integer"/>
+      <xs:element name="d" minOccurs="0" maxOccurs="unbounded"
+                  type="xs:date"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:element>
+</xs:schema>

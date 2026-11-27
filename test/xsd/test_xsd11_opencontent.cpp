@@ -204,6 +204,36 @@ TEST(Xsd11OpenContent, ChoiceModelInterleave) {
                          "choice_interleave.n1.xml"), 1);
 }
 
+/* ---- interleaved governance (§3.4.4.3 cl. 3.3, greedy) ------------- */
+
+/* A declared particle still available to the model governs its own
+ * instance even after a wildcard span: the skip wildcard absorbs the
+ * extra, but the mis-typed <i> rides its own i+ particle (the
+ * particle-only trace's old prefix-cut handed everything from the
+ * first divergence to the wildcard and let the mis-type slide). */
+TEST(Xsd11OpenContent, InterleaveSpanBeforeParticleStillGoverned) {
+    EXPECT_NE(verdict_of("inter_govern.xsd", "inter_govern.n1.xml"), 1);
+    /* the open025.n1 shape: the mis-typed <i> directly follows its
+     * particle — governed without any span at all */
+    EXPECT_NE(verdict_of("inter_govern.xsd", "inter_govern.n2.xml"), 1);
+}
+
+/* A name the model can no longer match rides the wildcard untyped:
+ * once d* has begun, the i+ particle is past the model's horizon, so
+ * a mis-typed <i> there is an extra (open025.v1/open047.v3
+ * posture), and a well-typed one still validates across spans. */
+TEST(Xsd11OpenContent, InterleaveConsumedParticleDoesNotGovern) {
+    EXPECT_EQ(verdict_of("inter_govern.xsd", "inter_govern.v1.xml"), 1);
+    EXPECT_EQ(verdict_of("inter_govern.xsd", "inter_govern.v2.xml"), 1);
+}
+
+/* The same greedy governance on a choice model. */
+TEST(Xsd11OpenContent, InterleaveChoiceGoverned) {
+    EXPECT_NE(verdict_of("inter_choice.xsd", "inter_choice.n1.xml"), 1);
+    EXPECT_EQ(verdict_of("inter_choice.xsd", "inter_choice.v1.xml"), 1);
+    EXPECT_EQ(verdict_of("inter_choice.xsd", "inter_choice.v2.xml"), 1);
+}
+
 /* ---- the schema-error class --------------------------------------- */
 
 /* mode="none" forbids an xs:any child (bug 7069 / open036.bad). */

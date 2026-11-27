@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<!-- interleaved governance on a choice model: the choice's branch
+     element still governs its instance across a wildcard span -->
+<xs:element name="doc">
+  <xs:complexType>
+    <xs:openContent mode="interleave">
+      <xs:any namespace="##local" processContents="skip"/>
+    </xs:openContent>
+    <xs:choice>
+      <xs:element name="i" type="xs:integer"/>
+      <xs:element name="d" type="xs:date"/>
+    </xs:choice>
+  </xs:complexType>
+</xs:element>
+</xs:schema>
