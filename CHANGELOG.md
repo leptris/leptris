@@ -2,9 +2,30 @@
 
 ## [1.9.449] - 2026-11-27
 
-### Performance
+The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1926 / 2206 (65.2% → 87.3%)** in one train, with zero regressions at every step (per-row red-set diffs, monotonic CI pins at the cross-platform stable values).
 
-- pin the evaluator hot set to cache lines (#2194) (xpath)
+### XSD 1.1 (leptris/leptris#2181 umbrella, #2184 slices)
+- **Default attribute groups** (#2182): `xs:schema/@defaultAttributes` capture + §3.4.2.4 application, `defaultAttributesApply` opt-out, per-document scoping, derivation collisions.
+- **Assertion-facet XQuery semantics** (#2183): absent focus (§3.16.4), fn:doc via schema base-URI, FOAR0001 under the XQuery spelling, §3.13.4.1 subtree scoping (absolute paths select nothing), list-carrier decomposition via fn:data, castable-as default-namespace qualification.
+- **Derivation-ok attribute-use clauses** (#2185): duplicate-use on extension folds, restriction derived-vs-base consistency with the 2.2 wildcard arm, prohibited capture + instance enforcement.
+- **CTA alternative-table compile constraints** (#2200): §3.12.2 XPath-valid, src-element.5 ordering, cos-ct-type-substitutable, cos-element-consistent, src-ct.1, inheritable forms — plus the parser's cast-tail precedence climb (a real gap three ibm valid schemas exercise).
+- **The Override tails** (#2205): redefine/override location-graph cycles, a-props-correct NOTATION, document-scoped ID uniqueness — the override family closes 87/87.
+- **Wildcard negative namespace/name sets** (#2213, +64 rows): fold-at-capture canonization, §3.10.6.3 intersection/union algebra, notNamespace/notQName with the xml prefix prebound, ##definedSibling expansion, the restriction-subset law, UPA-relaxation arming.
+- **Defaulted-xsi:type class** (#2216, +18 rows): built-in xsi declarations resolve and capture without import; §3.4.4.2 cl.4 (the default has no assessment effect) + the §3.3.4.3 cl.4 simple-for-complex override rule.
+- **Consumer fixes** (via moxml): restriction-lane `castable as` now qualifies bare builtin names (#2212/#2206 — was always-true), float/double fixed-value compares in the value space — INF/+INF and overflow forms (#2210/#2207), override via schemaLocation works on the set path (#2211/#2208).
+
+### Performance
+- **append-uniq 2.13x → 1.45x vs pugixml** (#2203): one fused pass replaces four serial byte scans in element_create; the S8 name-slot copy drops its per-create libc call.
+- **The XPath hot set is cacheline-pinned** (#2209): the PGO alignment lottery is gone — the functions row goes from +11.3% under PGO to −57%/−62% in two independent training cycles; xpath and axes rows join it as stable winners.
+- **PGO flip-check protocol** (#2201): a gate FAIL retrains and re-measures before failing — training-run variance is distinguished from real regressions; tolerance unchanged.
+- The **windows PGO battery is restored** (#2204/#2191): the portable timing seam (`bench_time.h`) makes the whole benchmark tree MSVC-compilable; the windows legs train on the full promise set again; the battery probes setarch before adopting it (sandboxed containers no longer train on zero profiles).
+
+### Fixed
+- Two XsdCrossNs specs no longer leak the compiled set (#2202/#2199).
+- The windows legs fix chain from 1.9.448's first PGO release: pgomgr PATH, the libleptris.dll name, shared-only dll training (#2189/#2198).
+
+### Floors
+XSD 1.0: **1041/1056 (98.6%)** — unchanged. XSD 1.1: **1926/2206 (87.3%)** — driving to 100% via #2181 (remaining: openContent interleaved, relaxed xs:all, multi-ID, CTA/IC residues).
 
 
 
