@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The guard: acyclic nested unions and derived members compile
+     clean. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="chap">
+    <xs:union memberTypes="dt time"/>
+  </xs:simpleType>
+  <xs:simpleType name="dt">
+    <xs:union memberTypes="xs:date xs:dateTime"/>
+  </xs:simpleType>
+  <xs:simpleType name="sub-chap">
+    <xs:restriction base="xs:date"/>
+  </xs:simpleType>
+  <xs:simpleType name="ok">
+    <xs:union memberTypes="sub-chap xs:integer"/>
+  </xs:simpleType>
+</xs:schema>

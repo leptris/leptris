@@ -4254,6 +4254,75 @@ static int xsd_simple_type_refs_ok(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* #2184 (§3.16.6 st-props-correct's circularity law): the
+ * TRANSITIVE membership of a union type — member types, their
+ * restriction bases, their list item types, their union members —
+ * must not reach the union itself (simple017-020, s3_16_2si01-05).
+ * Depth-capped; name matches strip prefixes (member refs keep
+ * theirs). */
+static const XsdSimple* xsd_union_member_resolve(
+    struct leptris_xsd_schema* s, const char* ref) {
+    if (!ref) return NULL;
+    const char* colon = strchr(ref, ':');
+    const char* local = colon ? colon + 1 : ref;
+    for (const XsdSimple* t = s->simple_types; t; t = t->next)
+        if (t->name && strcmp(t->name, local) == 0) return t;
+    return NULL;
+}
+
+static int xsd_union_reaches(struct leptris_xsd_schema* s,
+                             const XsdSimple* u, const XsdSimple* t,
+                             int depth) {
+    if (!t || depth > 32) return 0;
+    if (t == u) return 1;
+    if (t->name && u->name && strcmp(t->name, u->name) == 0) return 1;
+    if (t->base_def && xsd_union_reaches(s, u, t->base_def, depth + 1))
+        return 1;
+    if (t->base) {
+        const XsdSimple* b = xsd_union_member_resolve(s, t->base);
+        if (b && xsd_union_reaches(s, u, b, depth + 1)) return 1;
+    }
+    if (t->item_def && xsd_union_reaches(s, u, t->item_def, depth + 1))
+        return 1;
+    if (t->item_type) {
+        const XsdSimple* it = xsd_union_member_resolve(s, t->item_type);
+        if (it && xsd_union_reaches(s, u, it, depth + 1)) return 1;
+    }
+    for (size_t i = 0; i < t->member_def_count; i++)
+        if (xsd_union_reaches(s, u, t->member_defs[i], depth + 1))
+            return 1;
+    for (size_t i = 0; i < t->member_count; i++) {
+        const XsdSimple* m = xsd_union_member_resolve(s, t->members[i]);
+        if (m && xsd_union_reaches(s, u, m, depth + 1)) return 1;
+    }
+    return 0;
+}
+
+static int xsd_check_union_circularity(struct leptris_xsd_schema* s) {
+    for (const XsdSimple* u = s->simple_types; u; u = u->next) {
+        if (u->deriv != XSD_SIMPLE_UNION) continue;
+        int circular = 0;
+        for (size_t i = 0; i < u->member_count && !circular; i++) {
+            const XsdSimple* m =
+                xsd_union_member_resolve(s, u->members[i]);
+            circular = m && xsd_union_reaches(s, u, m, 1);
+        }
+        for (size_t i = 0; i < u->member_def_count && !circular; i++)
+            circular =
+                xsd_union_reaches(s, u, u->member_defs[i], 1);
+        if (!circular) continue;
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                 "st-props-correct: the transitive membership of the "
+                 "union '%s' contains the union itself (or a type "
+                 "derived from it)",
+                 u->name ? u->name : "?");
+        xsd_set_error(s, msg);
+        return -1;
+    }
+    return 0;
+}
+
 /* #2184 (Structures §3.2.2/§3.3.4 + Part 2 §4.2): an attribute or
  * element {value constraint} is a LEXICAL of the declared type — a
  * default/fixed value that violates the type's facets (the
@@ -4986,6 +5055,14 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * default or fixed value violating the declared type's facets
      * fails the schema (s3_3_4si01-11). */
     if (xsd_check_decl_values(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: union circularity — a union's transitive membership
+     * never reaches the union itself (s3_16_2si01-05, simple017-020). */
+    if (xsd_check_union_circularity(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple018/s3_16_2si02: the membership must not contain a type
+     DERIVED FROM the union (a restriction chain back to it). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="chap">
+    <xs:union memberTypes="dt time"/>
+  </xs:simpleType>
+  <xs:simpleType name="dt">
+    <xs:union memberTypes="xs:date xs:dateTime sub-chap"/>
+  </xs:simpleType>
+  <xs:simpleType name="sub-chap">
+    <xs:restriction base="chap"/>
+  </xs:simpleType>
+</xs:schema>

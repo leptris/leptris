@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple017/s3_16_2si01: the transitive membership of a union must
+     not contain the union itself. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="chap">
+    <xs:union memberTypes="dt time"/>
+  </xs:simpleType>
+  <xs:simpleType name="dt">
+    <xs:union memberTypes="xs:date xs:dateTime chap"/>
+  </xs:simpleType>
+</xs:schema>

@@ -337,3 +337,20 @@ TEST(Xsd11Datatypes, DeclaredValueConstraintInvalidRejected) {
 TEST(Xsd11Datatypes, DeclaredValueConstraintValidGuard) {
     expect_schema_ok("default_values_valid_guard.xsd");
 }
+
+/* ---- union circularity (#2184 residue) ---------------------------- */
+
+/* The transitive membership of a union type must not contain the
+ * union itself (simple017/s3_16_2si01), a type derived from it
+ * (simple018/s3_16_2si02), or a type constructed from it — list or
+ * union (simple019/020/s3_16_2si04/si05). */
+TEST(Xsd11Datatypes, UnionCircularityRejected) {
+    expect_schema_error("union_cycle_self.xsd");
+    expect_schema_error("union_cycle_derived.xsd");
+    expect_schema_error("union_cycle_list.xsd");
+    expect_schema_error("union_cycle_union.xsd");
+}
+
+TEST(Xsd11Datatypes, UnionAcyclicGuard) {
+    expect_schema_ok("union_cycle_guard.xsd");
+}
