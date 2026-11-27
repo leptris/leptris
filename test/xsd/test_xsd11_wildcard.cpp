@@ -737,4 +737,30 @@ TEST(Xsd11Wildcard, CorpusLegalSchemasStayGreen) {
     EXPECT_EQ(1, corpus_schema_ok("saxonData/Wild/wild074.xsd"));
 }
 
+/* #2214 regression pins: a DECLARED sibling name appearing again
+ * where only the ##definedSibling wildcard could consume it must be
+ * INVALID — ref="a"'s window (maxOccurs=1) must not leak into the
+ * wildcard, and the expansion must exclude the defined siblings.
+ * The expansion's dup check used to strstr() an uninitialized
+ * buffer, so these verdicts rode stack garbage — green standalone,
+ * red in the long-running conformance runner. */
+TEST(Xsd11Wildcard, DefinedSiblingExpansionIsDeterministic) {
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild072.xsd",
+                                "saxonData/Wild/wild072.n1.xml"));
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild072.xsd",
+                                "saxonData/Wild/wild072.n2.xml"));
+    /* the legal instance keeps validating */
+    EXPECT_EQ(1, corpus_verdict("saxonData/Wild/wild072.xsd",
+                                "saxonData/Wild/wild072.v1.xml"));
+    /* the four rows that straddled binaries before the fix */
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild070.xsd",
+                                "saxonData/Wild/wild070.n1.xml"));
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild071.xsd",
+                                "saxonData/Wild/wild071.n1.xml"));
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild074.xsd",
+                                "saxonData/Wild/wild074.n1.xml"));
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild084.xsd",
+                                "saxonData/Wild/wild084.n1.xml"));
+}
+
 } // namespace
