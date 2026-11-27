@@ -15,15 +15,18 @@
 #define DOM_INTERN_INIT_CAP 64u
 
 /* Last doubling step before the final-size jump (#2132 uniq sizing):
- * growth doubles 64->128->256->512->1024, then lands on
+ * growth doubles 64->128->...->2048, then lands on
  * DOM_INTERN_MAX_SLOTS in ONE jump. The append-uniq profile (2026-11-27)
- * showed the staged 1024->2048->...->16384 cadence costing a
+ * showed the staged 2048->4096->...->16384 cadence costing a
  * memset+copy+walk burst per stage (dom_intern_rehash 4.6% of the row);
  * the single jump reaches the same ceiling with the small-doc tables
- * unchanged (<= 719 distinct names still live in a 1024-slot, 16 KiB
- * array) and abandons <= 31 KiB of small arrays to the pool bump
- * instead of the previous <= 2x-final geometric waste. */
-#define DOM_INTERN_JUMP_AFTER 1024u
+ * unchanged (<= 1437 distinct names still live in a 2048-slot, 32 KiB
+ * array) and abandons <= 39 KiB of small arrays to the pool bump
+ * instead of the previous <= 2x-final geometric waste. Measured
+ * neutral-vs-better on the row harness vs a 1024 jump point, with
+ * half the mid-size-table RSS (an 800-1437-name document stays at
+ * 32 KiB instead of paying the 256 KiB ceiling array). */
+#define DOM_INTERN_JUMP_AFTER 2048u
 
 /* Slot-array ceiling: 8192 entries sit at 50% load of this — the
  * rehash gate naturally stops here and the distinct cap fires first. */
