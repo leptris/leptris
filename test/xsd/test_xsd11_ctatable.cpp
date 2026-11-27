@@ -49,6 +49,26 @@ int compile_of(const char* schema) {
     return ok ? 1 : 0;
 }
 
+/* Instance verdict against a corpus schema: 1 valid, 0 invalid. */
+int verdict_of(const char* schema, const char* instance) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s =
+        leptris_xsd_compile_file(path(schema).c_str(), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << schema << " must compile";
+    if (!s) return -1;
+    LeptrisStatus pst = (LeptrisStatus)0;
+    LeptrisDocument d = leptris_parse_file(path(instance).c_str(), &pst);
+    EXPECT_NE(d, (LeptrisDocument)0) << instance << " must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
 }  // namespace
 
 /* ---- type substitutability (§3.3.6.1 cl.7) ----------------------- */
@@ -168,4 +188,78 @@ TEST(Xsd11CtaTable, RestrictionInheritabilityFlipRejected) {
  * inheritable="true" with no restriction in play) stays legal. */
 TEST(Xsd11CtaTable, LegalInheritableAttributeCompiles) {
     EXPECT_EQ(compile_of("ibmData/valid/S3_12/s3_12v11.xsd"), 1);
+}
+
+/* ---- #2184 CTA/IC residues --------------------------------------- */
+
+/* Slice A (§3.12.4 dispatch is only half the story): the SELECTED
+ * alternative type's TEXT typing must run on the instance's text.
+ * cta0001's alternatives select simpleContent restrictions of the
+ * mixed messageType (date / time / base64 / string text types);
+ * s3_12ii01 selects an xs:float text restriction, s3_12ii03 a
+ * facet-enumerated one. The invalid instances carry text the
+ * selected type rejects. */
+TEST(Xsd11CtaTable, SelectedAlternativeTextTypingRuns) {
+    EXPECT_NE(verdict_of("saxonData/CTA/cta0001.xsd",
+                         "saxonData/CTA/cta0001.n01.xml"), 1);
+    EXPECT_NE(verdict_of("saxonData/CTA/cta0001.xsd",
+                         "saxonData/CTA/cta0001.n02.xml"), 1);
+    EXPECT_EQ(verdict_of("saxonData/CTA/cta0001.xsd",
+                         "saxonData/CTA/cta0001.v01.xml"), 1);
+    EXPECT_EQ(verdict_of("saxonData/CTA/cta0001.xsd",
+                         "saxonData/CTA/cta0001.v02.xml"), 1);
+    EXPECT_EQ(verdict_of("saxonData/CTA/cta0001.xsd",
+                         "saxonData/CTA/cta0001.v03.xml"), 1);
+    EXPECT_NE(verdict_of("ibmData/instance_invalid/S3_12/s3_12ii01.xsd",
+                         "ibmData/instance_invalid/S3_12/s3_12ii01.xml"),
+              1);
+    EXPECT_NE(verdict_of("ibmData/instance_invalid/S3_12/s3_12ii03.xsd",
+                         "ibmData/instance_invalid/S3_12/s3_12ii03.xml"),
+              1);
+}
+
+/* Slice B (§3.12.2 / §3.13.2): the alternative test's prefixes bind
+ * in the SCHEMA document ({namespace bindings} + xpathDefaultNamespace),
+ * never in the instance's. cta0002's test `@c2:min=1` uses the
+ * schema's c2 prefix; the instances bind the SAME namespace with a
+ * different prefix (c:) — the test still selects treq for min="1",
+ * whose empty content fails the required-particle floor. */
+TEST(Xsd11CtaTable, TestPrefixesBindInSchemaDocument) {
+    EXPECT_NE(verdict_of("saxonData/CTA/cta0002.xsd",
+                         "saxonData/CTA/cta0002.n01.xml"), 1);
+    EXPECT_EQ(verdict_of("saxonData/CTA/cta0002.xsd",
+                         "saxonData/CTA/cta0002.v01.xml"), 1);
+}
+
+/* Slice C (XPST0080): the target of a cast / castable in a CTA test
+ * must be a simple type — a cast naming a COMPLEX type of the
+ * schema fails the SCHEMA (s3_12ii06: cast as messageTypeString). */
+TEST(Xsd11CtaTable, CastToComplexTypeIsSchemaError) {
+    EXPECT_EQ(
+        compile_of("ibmData/instance_invalid/S3_12/s3_12ii06.xsd"), 0);
+}
+
+/* Slice D (§4.2.2 conditional inclusion): vc:-gated components are
+ * pruned before capture, and malformed vc: attribute values fail
+ * the schema. s4_2_2si01's vc:minVersion="3.2" root prunes away,
+ * leaving the duplicate root pair for the duplicate-global check;
+ * the vc90x .bad schemas carry malformed version/QName lexicals. */
+TEST(Xsd11CtaTable, ConditionalInclusionGates) {
+    EXPECT_EQ(
+        compile_of("ibmData/schema_invalid/S4_2_2/s4_2_2si01.xsd"), 0);
+    EXPECT_EQ(compile_of("saxonData/VC/vc901.bad.xsd"), 0);
+    EXPECT_EQ(compile_of("saxonData/VC/vc902.bad.xsd"), 0);
+    EXPECT_EQ(compile_of("saxonData/VC/vc904.bad.xsd"), 0);
+    EXPECT_EQ(compile_of("saxonData/VC/vc905.bad.xsd"), 0);
+}
+
+/* The prune laws that keep the valid corpus green: an unrecognized
+ * vc: attribute name is IGNORED, never an error (vc009); a
+ * foreign-namespace facet pruned by vc:minVersion="5.0" leaves the
+ * restriction legal (vc003); a vc:maxVersion="0.9" schema root
+ * empties the whole document (vc006's own compile row). */
+TEST(Xsd11CtaTable, ConditionalInclusionValidCorpusStaysGreen) {
+    EXPECT_EQ(compile_of("saxonData/VC/vc009.xsd"), 1);
+    EXPECT_EQ(compile_of("saxonData/VC/vc003.xsd"), 1);
+    EXPECT_EQ(compile_of("saxonData/VC/vc006.xsd"), 1);
 }

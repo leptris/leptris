@@ -51,6 +51,29 @@ void expect_schema_error(const char* schema) {
     if (s) leptris_xsd_free(s);
 }
 
+/* Instance verdict against a PINNED-CORPUS (xsd11-cases) pair. */
+int verdict_cases(const char* schema, const char* instance) {
+    std::string base = LEPTRIS_XSD11_CASES_DIR;
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(
+        (base + "/" + schema).c_str(), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << schema << " must compile";
+    EXPECT_EQ(st, LEPTRIS_OK) << schema << " compile status";
+    if (!s) return -1;
+    LeptrisStatus pst = (LeptrisStatus)0;
+    LeptrisDocument d = leptris_parse_file(
+        (base + "/" + instance).c_str(), &pst);
+    EXPECT_NE(d, (LeptrisDocument)0) << instance << " must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
 }  // namespace
 
 /* Schema-prefix selector/field resolution + key/keyref dependency on
@@ -137,4 +160,39 @@ TEST(Xsd11Ic, SubsetViolationsAreSchemaErrors) {
     expect_schema_error("bad_attr_mid.xsd");
     expect_schema_error("bad_field_union.xsd");
     expect_schema_error("bad_prefix.xsd");
+}
+
+/* ---- #2184: keyref tuples compare in the VALUE space -------------- */
+/* §3.11.4: "equal or identical ... on the values" — the string
+ * lexical is not the identity. Fixtures ride the pinned corpus
+ * (saxonData/Zone), oracle = the suite metadata. */
+
+/* xs:time keyrefs: instants compare timezone-normalized, 24:00:00
+ * equals 00:00:00, and a tz-absent lexical never equals a
+ * tz-carrying one (zone206.n01 stays invalid; n02's
+ * 02:00:00+14:00 instant falls on the previous day and fails). */
+TEST(Xsd11Ic, KeyrefTimeValueSpace) {
+    EXPECT_EQ(verdict_cases("saxonData/Zone/zone206.xsd",
+                            "saxonData/Zone/zone206.v01.xml"), 1);
+    EXPECT_EQ(verdict_cases("saxonData/Zone/zone206.xsd",
+                            "saxonData/Zone/zone206.v02.xml"), 1);
+    EXPECT_NE(verdict_cases("saxonData/Zone/zone206.xsd",
+                            "saxonData/Zone/zone206.n01.xml"), 1);
+    EXPECT_NE(verdict_cases("saxonData/Zone/zone206.xsd",
+                            "saxonData/Zone/zone206.n02.xml"), 1);
+}
+
+/* xs:dayTimeDuration / xs:yearMonthDuration keyrefs: total seconds
+ * / total months compare (P1DT5H == PT29H0M0.000S == P01DT300M;
+ * P2Y4M == P01Y016M), off-by-fraction and off-by-count spellings
+ * fail (the .n01 rows stay invalid). */
+TEST(Xsd11Ic, KeyrefDurationValueSpace) {
+    EXPECT_EQ(verdict_cases("saxonData/Zone/zone301.xsd",
+                            "saxonData/Zone/zone301.v01.xml"), 1);
+    EXPECT_NE(verdict_cases("saxonData/Zone/zone301.xsd",
+                            "saxonData/Zone/zone301.n01.xml"), 1);
+    EXPECT_EQ(verdict_cases("saxonData/Zone/zone302.xsd",
+                            "saxonData/Zone/zone302.v01.xml"), 1);
+    EXPECT_NE(verdict_cases("saxonData/Zone/zone302.xsd",
+                            "saxonData/Zone/zone302.n01.xml"), 1);
 }
