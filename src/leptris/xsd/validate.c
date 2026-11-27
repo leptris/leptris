@@ -88,7 +88,39 @@ struct xsd_validator {
      * GCC. */
     char** cta_exempt;
     int cta_exempt_n;
+    /* #2184 §3.3.5: ID-typed attribute values seen this run —
+     * uniqueness is document-scoped (over008.n01). Chaining hash. */
+    struct id_seen* id_buckets[128];
 };
+
+struct id_seen {
+    char* v;
+    struct id_seen* next;
+};
+
+/* #2184 §3.3.5: record an ID value; 1 = new (recorded), 0 = the
+ * value repeats — the document is invalid. */
+static int xsd_id_value_record(struct xsd_validator* v, const char* val) {
+    if (!v || !val || !val[0]) return 1;
+    unsigned h = 2166136261u;
+    for (const char* p = val; *p; p++) {
+        h ^= (unsigned char)*p;
+        h *= 16777619u;
+    }
+    struct id_seen** b = &v->id_buckets[h % 128];
+    for (struct id_seen* n = *b; n; n = n->next)
+        if (strcmp(n->v, val) == 0) return 0;
+    struct id_seen* n = (struct id_seen*)malloc(sizeof(*n));
+    if (!n) return 1;
+    n->v = strdup(val);
+    if (!n->v) {
+        free(n);
+        return 1;
+    }
+    n->next = *b;
+    *b = n;
+    return 1;
+}
 
 struct ic_skipped {
     LeptrisElement e;
@@ -1879,6 +1911,12 @@ static void validate_attributes(struct xsd_validator* v,
         }
         text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
                    a->name, elem);
+        /* #2184 §3.3.5: ID-typed values are unique within the
+         * document — the overridden attributeGroup's required @id
+         * (over008.n01) is no exception. */
+        if (attr_type_is_id(s, a->type) && !xsd_id_value_record(v, val))
+            verrf_atk(v, elem, "attribute-use", a->name, "attribute",
+                      a->name, "duplicate ID value");
         if (a->fixed && strcmp(val, a->fixed) != 0 &&
             !attr_fixed_matches(s, a->type, ta ? ta->ns : NULL, val,
                                 a->fixed))
@@ -2776,6 +2814,16 @@ void xsd_validator_free(struct xsd_validator* v) {
         struct ic_skipped* sn = sk->next;
         free(sk);
         sk = sn;
+    }
+    for (size_t b = 0; b < sizeof(v->id_buckets) / sizeof(v->id_buckets[0]);
+         b++) {
+        struct id_seen* n = v->id_buckets[b];
+        while (n) {
+            struct id_seen* nn = n->next;
+            free(n->v);
+            free(n);
+            n = nn;
+        }
     }
     struct xsd_error* e = v->errors;
     while (e) {

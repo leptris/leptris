@@ -207,7 +207,8 @@ target_compile_definitions(test_xsd11_ic PRIVATE
 # #2150: xs:override (XSD 1.1 §4.3) spec tests.
 leptris_add_test(test_xsd11_override xsd/test_xsd11_override.cpp)
 target_compile_definitions(test_xsd11_override PRIVATE
-    LEPTRIS_XSD11_OVERRIDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-override")
+    LEPTRIS_XSD11_OVERRIDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-override"
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 # #2151: xs:openContent / xs:defaultOpenContent (XSD 1.1).
 leptris_add_test(test_xsd11_opencontent xsd/test_xsd11_opencontent.cpp)
 target_compile_definitions(test_xsd11_opencontent PRIVATE
