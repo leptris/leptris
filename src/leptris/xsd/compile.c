@@ -93,6 +93,13 @@ struct leptris_xsd_schema {
      * cycle check matches against. */
     char** ro_stack;
     size_t ro_len, ro_cap;
+    /* #2184: the wildcard negative-set capture rejected the schema —
+     * namespace + notNamespace co-occurrence (src-wildcard), a
+     * notQName token that is malformed or binds an undeclared
+     * prefix, and a notQName exclusion whose namespace the wildcard
+     * can never admit (vacuous, wild031-039). Surfaced post-capture
+     * like oc_failed / ct_failed. */
+    int wc_failed;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -214,24 +221,43 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
                                  const char* name, char* any_attr_ns,
                                  char* any_attr_not_qname,
-                                 char* any_attr_unit_ns,
-                                 char* base_any_attr_ns,
-                                 char* base_any_attr_unit_ns);
+                                 char* any_attr_not_ns,
+                                 char* any_attr_unit_ns);
 static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                                         LeptrisElement ct,
                                         const char* name);
 static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
-static XsdCm* xsd_capture_any(LeptrisElement any_child);
+static XsdCm* xsd_capture_any(struct leptris_xsd_schema* s,
+                              LeptrisElement any_child);
 static char* xsd_capture_unit_tns(LeptrisElement e);
 static char* xsd_capture_ns_prolog(LeptrisElement e, const char* base_dir);
 static void xsd_resolve_qname(LeptrisElement e, const char* qname,
                               char* uri, size_t urisz, char* local,
                               size_t localsz);
-static char* xsd_capture_any_attr_ns_deep(
-    struct leptris_xsd_schema* s, LeptrisElement container, int depth,
-    char** out_unit);
-static char* xsd_capture_any_attr_not_qname(LeptrisElement container);
+static int xsd_capture_attr_wc(struct leptris_xsd_schema* s,
+                               LeptrisElement container,
+                               XsdAttrWc* eff);
+static void xsd_wc_fold_union(XsdTypeAttrs* mine,
+                              const XsdTypeAttrs* base);
+static void xsd_wc_fold_union_locals(char** ns, char** nq, char** nns,
+                                     char** unit,
+                                     const XsdAttrWc* b);
+static void xsd_wc_expand_defined_sibling_pass(
+    struct leptris_xsd_schema* s);
+static int xsd_check_attr_wildcards(struct leptris_xsd_schema* s);
+/* #2184 wildcard canon helpers (defined past the capture driver) */
+static void xsd_wc_canon_ns(const char* raw, const char* tns,
+                            char** out_ns, char** out_other);
+static char* xsd_wc_canon_not_ns(const char* raw, const char* tns);
+static char* xsd_wc_canon_not_qname(struct leptris_xsd_schema* s,
+                                    LeptrisElement decl,
+                                    const char* raw);
+static int xsd_wc_check(struct leptris_xsd_schema* s,
+                        const char* raw_ns, const char* raw_not_ns,
+                        const char* canon_ns, const char* canon_not_ns,
+                        const char* canon_nq);
+static void xsd_wc_append(char** dst, const char* tok, size_t len);
 static void xsd_path_normalize(const char* in, char* out, size_t outsz);
 
 /* #2150 §4.3: the override lane. */
@@ -510,11 +536,34 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
             if (cm) {
                 cm->any_ns = xsd_strdup(
                     leptris_element_attribute(e, "namespace"));
-                cm->not_qname = xsd_strdup(
-                    leptris_element_attribute(e, "notQName"));
+                /* #2184: prefixed notQName tokens canonize at
+                 * capture ({uri}local) — malformed spellings and
+                 * undeclared prefixes fail the schema (wild036-039)
+                 * and the matcher's canon arm bites (wild028) */
+                cm->not_qname = xsd_wc_canon_not_qname(
+                    s, e, leptris_element_attribute(e, "notQName"));
                 cm->not_ns = xsd_strdup(
                     leptris_element_attribute(e, "notNamespace"));
                 cm->any_unit_tns = xsd_capture_unit_tns(e);
+                /* #2184 src-wildcard sweep on the element wildcard:
+                 * co-occurrence + vacuous exclusions (wild031/037,
+                 * wild007's xs:any arm) — canon views, raw fields */
+                {
+                    char* cns = NULL;
+                    char* cother = NULL;
+                    xsd_wc_canon_ns(cm->any_ns, cm->any_unit_tns,
+                                    &cns, &cother);
+                    char* cnns = xsd_wc_canon_not_ns(
+                        cm->not_ns, cm->any_unit_tns);
+                    if (cother) {
+                        xsd_wc_append(&cnns, cother, strlen(cother));
+                        free(cother);
+                    }
+                    xsd_wc_check(s, cm->any_ns, cm->not_ns, cns,
+                                 cnns, cm->not_qname);
+                    free(cns);
+                    free(cnns);
+                }
                 const char* pc = leptris_element_attribute(
                     e, "processContents");
                 cm->process_skip =
@@ -2124,6 +2173,7 @@ static void xsd_resolve_qname(LeptrisElement e, const char* qname,
 }
 
 static LeptrisElement xsd_find_child(LeptrisElement e, const char* local) {
+    if (!e) return NULL;
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(e));
          n; n = leptris_node_next_sibling(n)) {
@@ -2622,14 +2672,48 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
     return 0;
 }
 
+/* #2184: a wildcard carrying a 1.1 negative set (@notQName /
+ * @notNamespace / ##definedSibling) is 1.1-only syntax evidence —
+ * the §3.8.6.4 wildcard-vs-element relaxation arms for schemas that
+ * spell it, the same posture as version_11 / saw_open_content. */
+static int xsd_doc_has_wildcard_negative_set(LeptrisElement root) {
+    if (!root) return 0;
+    for (LeptrisNodeRef n = leptris_node_first_child(
+             leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement e = (LeptrisElement)n;
+        const char* l = NULL;
+        const char* u = NULL;
+        leptris_element_expanded_name(e, &l, NULL, &u);
+        if (!l || !u || strcmp(u, XSD_NS) != 0) continue;
+        if ((strcmp(l, "any") == 0 || strcmp(l, "anyAttribute") == 0) &&
+            (leptris_element_attribute(e, "notQName") ||
+             leptris_element_attribute(e, "notNamespace")))
+            return 1;
+        /* nested models (complexType bodies, groups) */
+        for (LeptrisNodeRef c = leptris_node_first_child(
+                 leptris_element_as_node(e));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            if (xsd_doc_has_wildcard_negative_set((LeptrisElement)c))
+                return 1;
+        }
+    }
+    return 0;
+}
+
 static int xsd_check_upa(struct leptris_xsd_schema* s,
                          LeptrisElement root) {
     if (!root) return 0;
     const char* tns = s->target_ns;
     /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
      * arm the relaxation on any 1.1 evidence (open034 is unmarked).
-     * #2151 */
-    int relax_wildcard = (s->version_11 || s->saw_open_content);
+     * #2151; #2184 adds the negative-set spellings. */
+    int relax_wildcard = (s->version_11 || s->saw_open_content ||
+                          xsd_doc_has_wildcard_negative_set(root));
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -4109,6 +4193,10 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
     xsd_resolve_extension_bases(s);
+    /* #2184 §3.10.2: expand ##definedSibling tokens into the
+     * concrete sibling names — after the fold, when the spliced
+     * base particles are in place. */
+    xsd_wc_expand_defined_sibling_pass(s);
     /* #2151: the open-content derivation pass (inheritance, wildcard
      * union, the cos-ct-extends ladder, the restriction subset
      * checks) — after the fold, when every base has landed. The
@@ -4139,6 +4227,17 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * {inheritable} match), over the POST-capture tables. A
      * violation fails the SCHEMA. */
     if (xsd_check_derivation_ok_attrs(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: the wildcard negative-set sweep — the parked
+     * src-wildcard capture errors (co-occurrence, malformed or
+     * undeclared-prefix notQName tokens, vacuous exclusions) plus
+     * the §3.10.6.3 attribute-wildcard RESTRICTION subset law over
+     * the captured canon rows. */
+    if (xsd_check_attr_wildcards(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -4286,15 +4385,10 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                         tail_a->next = mine->attrs;
                         mine->attrs = prepend;
                     }
-                    /* the base's attribute wildcard joins the union */
-                    if (bt->any_attr_ns && !mine->any_attr_base_ns) {
-                        mine->any_attr_base_unit_ns =
-                            bt->any_attr_unit_ns
-                                ? xsd_strdup(bt->any_attr_unit_ns)
-                                : NULL;
-                        mine->any_attr_base_ns =
-                            xsd_strdup(bt->any_attr_ns);
-                    }
+                    /* #2184 §3.10.6.3: the base's effective wildcard
+                     * UNIONS into the derived's (no separate base
+                     * arm — one canon wildcard per row) */
+                    xsd_wc_fold_union(mine, bt);
                 } else if (prepend) {
                     XsdTypeAttrs* row =
                         (XsdTypeAttrs*)calloc(1, sizeof(*row));
@@ -5152,7 +5246,7 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 const char* ql = NULL;
                 leptris_element_expanded_name(qe, &ql, NULL, NULL);
                 if (ql && strcmp(ql, "any") == 0)
-                    s->default_open = xsd_capture_any(qe);
+                    s->default_open = xsd_capture_any(s, qe);
             }
             if (s->default_open) {
                 const char* ape = leptris_element_attribute(
@@ -5814,22 +5908,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(ta->any_attr_ns);
         free(ta->any_attr_not_qname);
         free(ta->any_attr_not_ns);
-        free(ta->any_attr_base_ns);
-        free(ta->any_attr_base_not_qname);
-        free(ta->any_attr_base_not_ns);
         free(ta->any_attr_unit_ns);
-        free(ta->any_attr_base_unit_ns);
-        /* #2184: the gathered intersection members */
-        XsdAttrWc* m = ta->any_attr_int;
-        while (m) {
-            XsdAttrWc* mn = m->next;
-            free(m->ns);
-            free(m->unit_ns);
-            free(m->not_ns);
-            free(m->not_qname);
-            free(m);
-            m = mn;
-        }
         free(ta);
         ta = tn;
     }
@@ -5968,9 +6047,8 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
                                  XsdCm* root, XsdAttrDecl* attrs,
                                  const char* name, char* any_attr_ns,
                                  char* any_attr_not_qname,
-                                 char* any_attr_unit_ns,
-                                 char* base_any_attr_ns,
-                                 char* base_any_attr_unit_ns) {
+                                 char* any_attr_not_ns,
+                                 char* any_attr_unit_ns) {
     if (!root) return;
     root->name = xsd_strdup(name);
     /* leptris-ruby#440: the DECLARING file's targetNamespace — the
@@ -5994,16 +6072,15 @@ static void xsd_register_complex(struct leptris_xsd_schema* s,
             ta->attrs = attrs;
             ta->any_attr_ns = any_attr_ns;
             ta->any_attr_not_qname = any_attr_not_qname;
-            ta->any_attr_base_ns = base_any_attr_ns;
+            ta->any_attr_not_ns = any_attr_not_ns;
             ta->any_attr_unit_ns = any_attr_unit_ns;
-            ta->any_attr_base_unit_ns = base_any_attr_unit_ns;
             ta->next = s->type_attrs;
             s->type_attrs = ta;
         } else {
             free(any_attr_ns);
+            free(any_attr_not_qname);
+            free(any_attr_not_ns);
             free(any_attr_unit_ns);
-            free(base_any_attr_ns);
-            free(base_any_attr_unit_ns);
         }
     }
 }
@@ -6359,7 +6436,8 @@ static int xsd_oc_id_seen(struct leptris_xsd_schema* s,
     return 0;
 }
 
-static XsdCm* xsd_capture_any(LeptrisElement any_child) {
+static XsdCm* xsd_capture_any(struct leptris_xsd_schema* s,
+                              LeptrisElement any_child) {
     XsdCm* w = xsd_cm_new(XSD_CM_ANY);
     if (!w) return NULL;
     w->any_ns = xsd_strdup(
@@ -6368,10 +6446,30 @@ static XsdCm* xsd_capture_any(LeptrisElement any_child) {
      * wildcard (open047's union side). */
     w->not_ns = xsd_strdup(
         leptris_element_attribute(any_child, "notNamespace"));
-    /* #2151: the open-content wildcard's @notQName (s3_4_1ii04) */
-    w->not_qname = xsd_strdup(
-        leptris_element_attribute(any_child, "notQName"));
+    /* #2151: the open-content wildcard's @notQName (s3_4_1ii04) —
+     * #2184: prefixed tokens canonize to {uri}local at capture so
+     * the matcher's canon arm bites (wild027/028, wild036-039) */
+    w->not_qname = xsd_wc_canon_not_qname(
+        s, any_child, leptris_element_attribute(any_child, "notQName"));
     w->any_unit_tns = xsd_capture_unit_tns(any_child);
+    /* #2184 src-wildcard sweep: co-occurrence + vacuous exclusions.
+     * The cm keeps the RAW grammar/not_ns (the content-model matcher
+     * resolves ##targetNamespace/##other per-unit at match time);
+     * the check runs on canon views. */
+    {
+        char* cns = NULL;
+        char* cother = NULL;
+        xsd_wc_canon_ns(w->any_ns, w->any_unit_tns, &cns, &cother);
+        char* cnns = xsd_wc_canon_not_ns(w->not_ns, w->any_unit_tns);
+        if (cother) {
+            xsd_wc_append(&cnns, cother, strlen(cother));
+            free(cother);
+        }
+        xsd_wc_check(s, w->any_ns, w->not_ns, cns, cnns,
+                     w->not_qname);
+        free(cns);
+        free(cnns);
+    }
     const char* pc = leptris_element_attribute(any_child,
                                                "processContents");
     w->process_skip =
@@ -6491,9 +6589,11 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
     XsdAttrDecl* attrs = NULL;
     char* any_attr_ns = NULL;
     char* any_attr_not_qname = NULL;
+    char* any_attr_not_ns = NULL;
     char* any_attr_unit_ns = NULL;
-    char* base_any_attr_ns = NULL;
-    char* base_any_attr_unit_ns = NULL;
+    /* #2184: the eager extension's already-captured base row — its
+     * effective wildcard unions into the derived's at the fold */
+    const XsdTypeAttrs* eager_bt = NULL;
 
     for (LeptrisNodeRef n =
              leptris_node_first_child(leptris_element_as_node(ct));
@@ -6593,17 +6693,10 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         attrs = xsd_copy_attr_rows(bt ? bt->attrs
                                                       : NULL,
                                                    1);
-                        /* the spec's attribute-wildcard union: the
-                         * derived type also allows what the base's
-                         * xs:anyAttribute allowed (#1691) */
-                        if (bt && bt->any_attr_ns && !base_any_attr_ns) {
-                            base_any_attr_unit_ns =
-                                bt->any_attr_unit_ns
-                                    ? xsd_strdup(bt->any_attr_unit_ns)
-                                    : NULL;
-                            base_any_attr_ns =
-                                xsd_strdup(bt->any_attr_ns);
-                        }
+                        /* #2184: the base's effective wildcard
+                         * unions into the derived's at the fold
+                         * below — no separate base arm. */
+                        eager_bt = bt;
                     }
                     XsdAttrDecl* own_attrs =
                         xsd_capture_attr_rows(s, dq, 0);
@@ -6649,24 +6742,34 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                     s->saw_assert)
                     xsd_capture_assert_children(s, dq, root);
                 if (!any_attr_ns) {
-                    if (!any_attr_unit_ns)
-                        any_attr_unit_ns = xsd_capture_unit_tns(dq);
-                    /* leptris-rs#72: the extension's wildcard rides
-                     * attributeGroup refs too — the shallow scan
-                     * misses attgD019/wildZ013 shapes. Cross-unit
-                     * found-groups carry their own tns. */
-                    char* deep_unit = NULL;
-                    any_attr_ns = xsd_capture_any_attr_ns_deep(
-                        s, dq, 0, &deep_unit);
-                    if (any_attr_ns && deep_unit) {
+                    /* #2184: gather the derivation's OWN wildcard
+                     * (direct xs:anyAttribute + attributeGroup refs)
+                     * canonized and intersected; an extension then
+                     * unions the base's effective wildcard in (the
+                     * eager base is already captured; a deferred one
+                     * folds at xsd_resolve_extension_bases). */
+                    XsdAttrWc eff;
+                    if (xsd_capture_attr_wc(s, dq, &eff)) {
+                        any_attr_ns = eff.ns;
+                        any_attr_not_qname = eff.not_qname;
+                        any_attr_not_ns = eff.not_ns;
                         free(any_attr_unit_ns);
-                        any_attr_unit_ns = deep_unit;
+                        any_attr_unit_ns = eff.unit_ns;
                     } else {
-                        free(deep_unit);
+                        free(eff.unit_ns);
                     }
-                    if (!any_attr_not_qname)
-                        any_attr_not_qname =
-                            xsd_capture_any_attr_not_qname(dq);
+                    if (eager_bt) {
+                        XsdAttrWc bb;
+                        memset(&bb, 0, sizeof(bb));
+                        bb.ns = eager_bt->any_attr_ns;
+                        bb.not_qname = eager_bt->any_attr_not_qname;
+                        bb.not_ns = eager_bt->any_attr_not_ns;
+                        bb.unit_ns = eager_bt->any_attr_unit_ns;
+                        xsd_wc_fold_union_locals(
+                            &any_attr_ns, &any_attr_not_qname,
+                            &any_attr_not_ns, &any_attr_unit_ns,
+                            &bb);
+                    }
                 }
             }
         } else if (strcmp(local, "simpleContent") == 0) {
@@ -6762,23 +6865,23 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
          * re-capturing would orphan those rows. */
         root->first_child = xsd_cm_parse(s, ct, NULL);
         if (!attrs) attrs = xsd_capture_attr_rows(s, ct, 0);
-        if (!any_attr_unit_ns)
-            any_attr_unit_ns = xsd_capture_unit_tns(ct);
-        if (!any_attr_ns) {
-            char* deep_unit = NULL;
-            any_attr_ns = xsd_capture_any_attr_ns_deep(s, ct, 0,
-                                                       &deep_unit);
-            if (any_attr_ns && deep_unit) {
-                /* the wildcard lives in a REFERENCED group from
-                 * another unit — its declaring tns wins */
+        if (!any_attr_ns && !any_attr_not_qname &&
+            !any_attr_not_ns) {
+            /* #2184: gather + intersect the type's own wildcard
+             * (direct xs:anyAttribute + attributeGroup refs); the
+             * declaring-unit tns rides each member (wildcards in
+             * REFERENCED groups from another unit carry their own) */
+            XsdAttrWc eff;
+            if (xsd_capture_attr_wc(s, ct, &eff)) {
+                any_attr_ns = eff.ns;
+                any_attr_not_qname = eff.not_qname;
+                any_attr_not_ns = eff.not_ns;
                 free(any_attr_unit_ns);
-                any_attr_unit_ns = deep_unit;
+                any_attr_unit_ns = eff.unit_ns;
             } else {
-                free(deep_unit);
+                free(eff.unit_ns);
             }
         }
-        if (!any_attr_not_qname)
-            any_attr_not_qname = xsd_capture_any_attr_not_qname(ct);
     }
     /* #2151: XSD 1.1 openContent (§3.4.2.3.3 clauses 5/6). The
      * declared spelling (direct on the complexType or under the
@@ -6975,7 +7078,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         break;
                     }
                     if (!root->open_any) {
-                        root->open_any = xsd_capture_any(qe);
+                        root->open_any = xsd_capture_any(s, qe);
                         if (root->open_any) {
                             root->oc_owned = 1;
                             xsd_oc_resolve_not_qname(root->open_any,
@@ -7101,8 +7204,8 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
         root->open_any = NULL;
     }
     xsd_register_complex(s, root, attrs, name, any_attr_ns,
-                          any_attr_not_qname, any_attr_unit_ns,
-                          base_any_attr_ns, base_any_attr_unit_ns);
+                         any_attr_not_qname, any_attr_not_ns,
+                         any_attr_unit_ns);
     return root;
 }
 
@@ -7377,26 +7480,21 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
         free(rows);
         rows = rn;
     }
-    /* the group's xs:anyAttribute rides the default (open044) */
-    char* wunit = NULL;
-    char* wns = xsd_capture_any_attr_ns_deep(s, g->elem, 0, &wunit);
-    if (wns) {
-        /* the capture path stores the declaring unit's tns even
-         * when no wildcard exists — free before overwriting */
-        if (!ta->any_attr_ns && !ta->any_attr_not_qname) {
-            ta->any_attr_ns = wns;
-            free(ta->any_attr_unit_ns);
-            ta->any_attr_unit_ns = wunit;
-        } else if (!ta->any_attr_base_ns) {
-            ta->any_attr_base_ns = wns;
-            free(ta->any_attr_base_unit_ns);
-            ta->any_attr_base_unit_ns = wunit;
-        } else {
-            free(wns);
-            free(wunit);
+    /* the group's xs:anyAttribute rides the default (open044):
+     * #2184 — UNION the gathered group wildcard into the type's
+     * effective wildcard (§3.4.2.4 appends the group's uses) */
+    {
+        XsdAttrWc gw;
+        if (xsd_capture_attr_wc(s, g->elem, &gw)) {
+            xsd_wc_fold_union_locals(&ta->any_attr_ns,
+                                     &ta->any_attr_not_qname,
+                                     &ta->any_attr_not_ns,
+                                     &ta->any_attr_unit_ns, &gw);
+            free(gw.ns);
+            free(gw.unit_ns);
+            free(gw.not_ns);
+            free(gw.not_qname);
         }
-    } else {
-        free(wunit);
     }
     return 0;
 }
@@ -7828,14 +7926,544 @@ static char* xsd_capture_ns_prolog(LeptrisElement e,
     return o ? out : (free(out), NULL);
 }
 
-/* leptris#1964: the anyAttribute grammar rides attributeGroup
- * refs too — attgD019's wildcard lives inside the referenced
- * group, not the complexType's direct children. Follows refs
- * (depth-bounded); the group's OWN element is the walk root. */
-static char* xsd_capture_any_attr_ns_deep(
-    struct leptris_xsd_schema* s, LeptrisElement container,
-    int depth, char** out_unit) {
-    if (depth > 8) return NULL;
+/* ---- #2184: the attribute wildcard negative sets ------------------
+ * §3.10.2 XML representation + §3.10.6.3 subset/union/intersection.
+ * Every wildcard is CANONIZED at capture:
+ *   - grammar: ##targetNamespace resolved to the declaring unit's
+ *     tns, ##other folded into ns=##any + not_ns {tns, ##local},
+ *     absent @namespace spelled "##any" (leptris-rs#73);
+ *   - notNamespace: ##targetNamespace resolved (no unit tns -> the
+ *     token denotes the ABSENT namespace -> "##local");
+ *   - notQName: prefixed tokens resolved to "{uri}local" against
+ *     the declaring element's in-scope bindings.
+ * A type's effective wildcard = the §3.10.6.3 INTERSECTION over its
+ * direct xs:anyAttribute and every wildcard carried by its
+ * attributeGroup refs; across an EXTENSION the base's wildcard
+ * unions in (folds at the resolve site). */
+
+/* The parked wildcard error: parks the message and flips wc_failed
+ * (surfaced post-capture, the ct_failed pattern). */
+static void xsd_wc_fail(struct leptris_xsd_schema* s, const char* msg) {
+    xsd_set_error(s, msg);
+    s->wc_failed = 1;
+}
+
+/* One grammar/exclusion token walk with shared whitespace rules. */
+static const char* xsd_wc_next_tok(const char* p, const char** start,
+                                   size_t* len) {
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    *start = p;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+        p++;
+    *len = (size_t)(p - *start);
+    return p;
+}
+
+static void xsd_wc_append(char** dst, const char* tok, size_t len) {
+    size_t old = *dst ? strlen(*dst) : 0;
+    char* grown = (char*)realloc(*dst, old + len + 2);
+    if (!grown) return;
+    *dst = grown;
+    if (old) (*dst)[old++] = ' ';
+    memcpy(*dst + old, tok, len);
+    (*dst)[old + len] = 0;
+}
+
+static int xsd_wc_tok_in(const char* list, const char* tok, size_t len) {
+    const char* p = list;
+    while (p && *p) {
+        const char* start;
+        size_t l;
+        p = xsd_wc_next_tok(p, &start, &l);
+        if (l == 0) break;
+        if (l == len && strncmp(start, tok, len) == 0) return 1;
+    }
+    return 0;
+}
+
+/* Canonize the POSITIVE namespace grammar. *out_ns gets the canon
+ * grammar (##any / URI list / ##local / ""); *out_other gets the
+ * exclusions ##other implies (the declaring unit's tns + ##local).
+ * A ##targetNamespace token with no unit tns drops out (admits
+ * nothing). */
+static void xsd_wc_canon_ns(const char* raw, const char* tns,
+                            char** out_ns, char** out_other) {
+    if (!raw || !*raw) {
+        /* leptris-rs#73: absent @namespace means ##any — a bare
+         * <xs:anyAttribute /> is a live wildcard, not an invisible
+         * one. */
+        *out_ns = xsd_strdup("##any");
+        return;
+    }
+    int saw_any = 0;
+    const char* p = raw;
+    while (*p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (len == 5 && strncmp(start, "##any", 5) == 0) {
+            saw_any = 1;
+            continue;
+        }
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (tns && *tns) xsd_wc_append(out_ns, tns, strlen(tns));
+            continue;
+        }
+        if (len == 7 && strncmp(start, "##other", 7) == 0) {
+            saw_any = 1;
+            if (tns && *tns) xsd_wc_append(out_other, tns, strlen(tns));
+            xsd_wc_append(out_other, "##local", 7);
+            continue;
+        }
+        xsd_wc_append(out_ns, start, len);
+    }
+    if (saw_any) {
+        free(*out_ns);
+        *out_ns = xsd_strdup("##any");
+    } else if (!*out_ns) {
+        *out_ns = xsd_strdup("");
+    }
+}
+
+/* Canonize an @notNamespace exclusion list: ##targetNamespace
+ * resolves to the unit tns, or denotes the ABSENT namespace
+ * ("##local") when the declaring unit has none (wild033). */
+static char* xsd_wc_canon_not_ns(const char* raw, const char* tns) {
+    if (!raw) return NULL;
+    char* out = NULL;
+    const char* p = raw;
+    while (*p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (tns && *tns)
+                xsd_wc_append(&out, tns, strlen(tns));
+            else
+                xsd_wc_append(&out, "##local", 7);
+            continue;
+        }
+        if (len == 7 && strncmp(start, "##local", 7) == 0) {
+            xsd_wc_append(&out, "##local", 7);
+            continue;
+        }
+        xsd_wc_append(&out, start, len);
+    }
+    return out;
+}
+
+/* The @notNamespace hit test over a CANON list (URIs + ##local).
+ * target_ns defends against legacy raw captures that still carry
+ * ##targetNamespace tokens. */
+static int xsd_wc_not_ns_hits(const char* tokens, const char* uri,
+                              const char* target_ns) {
+    if (!tokens) return 0;
+    const char* p = tokens;
+    while (*p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (len == 7 && strncmp(start, "##local", 7) == 0) {
+            if (uri == NULL) return 1;
+            continue;
+        }
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (target_ns && uri && strcmp(uri, target_ns) == 0)
+                return 1;
+            continue;
+        }
+        if (uri && strlen(uri) == len &&
+            strncmp(start, uri, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Canonize the @notQName token list: prefixed QNames resolve to
+ * "{uri}local" against the declaring element's in-scope bindings;
+ * malformed spellings (empty prefix, empty local, an embedded
+ * colon) and undeclared prefixes FAIL the schema (wild036-039).
+ * ##defined / ##definedSibling / bare NCName literals pass
+ * through. Returns the canon list, or NULL with wc_failed set. */
+static char* xsd_wc_canon_not_qname(struct leptris_xsd_schema* s,
+                                    LeptrisElement decl,
+                                    const char* raw) {
+    if (!raw) return NULL;
+    char* out = NULL;
+    const char* p = raw;
+    while (*p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (len == 9 && strncmp(start, "##defined", 9) == 0) {
+            xsd_wc_append(&out, "##defined", 9);
+            continue;
+        }
+        if (len == 16 &&
+            strncmp(start, "##definedSibling", 16) == 0) {
+            xsd_wc_append(&out, "##definedSibling", 16);
+            continue;
+        }
+        const char* colon = memchr(start, ':', len);
+        if (!colon) {
+            xsd_wc_append(&out, start, len); /* bare no-ns literal */
+            continue;
+        }
+        /* prefixed: exactly one colon, non-empty halves */
+        size_t plen = (size_t)(colon - start);
+        size_t llen = len - plen - 1;
+        if (plen == 0 || llen == 0 ||
+            memchr(colon + 1, ':', llen)) {
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                     "src-wildcard: malformed notQName token "
+                     "'%.*s'", (int)len, start);
+            xsd_wc_fail(s, msg);
+            free(out);
+            return NULL;
+        }
+        char pfx[64];
+        if (plen >= sizeof(pfx)) plen = sizeof(pfx) - 1;
+        memcpy(pfx, start, plen);
+        pfx[plen] = 0;
+        char uri[512];
+        xsd_ns_for_prefix(decl, pfx, uri, sizeof(uri));
+        if (!uri[0]) {
+            /* the xml prefix is predeclared to the XML namespace
+             * (in scope without a xmlns:xml declaration — wild027:
+             * notQName='xml:space xml:id' with no binding spelled);
+             * xmlns defends the same way xsd_resolve_qname does */
+            if (strcmp(pfx, "xml") == 0)
+                snprintf(uri, sizeof(uri), "%s",
+                         "http://www.w3.org/XML/1998/namespace");
+            else if (strcmp(pfx, "xmlns") == 0)
+                snprintf(uri, sizeof(uri), "%s",
+                         "http://www.w3.org/2000/xmlns/");
+        }
+        if (!uri[0]) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "src-wildcard: the notQName prefix '%s' is "
+                     "not declared in the schema's scope", pfx);
+            xsd_wc_fail(s, msg);
+            free(out);
+            return NULL;
+        }
+        char tok[600];
+        snprintf(tok, sizeof(tok), "{%s}%.*s", uri, (int)llen,
+                 colon + 1);
+        xsd_wc_append(&out, tok, strlen(tok));
+    }
+    return out;
+}
+
+/* The instance namespace a canon notQName token denotes: NULL for
+ * the absent namespace, the URI for "{uri}local", NULL for
+ * ##defined/#definedSibling (their namespace varies). */
+static void xsd_wc_qname_ns(const char* tok, size_t len,
+                            const char** uri, size_t* ulen) {
+    *uri = NULL;
+    *ulen = 0;
+    if (len == 0 || tok[0] != '{') return;
+    const char* close = memchr(tok, '}', len);
+    if (!close) return;
+    *uri = tok + 1;
+    *ulen = (size_t)(close - tok - 1);
+}
+
+/* src-wildcard sweep on ONE wildcard element: the @namespace and
+ * @notNamespace varieties are mutually exclusive, and a notQName
+ * token whose namespace the wildcard could never admit is vacuous
+ * (wild031-035). The grammar/not_ns arguments are the CANON forms;
+ * raw_not_ns defends the co-occurrence check. */
+static int xsd_wc_check(struct leptris_xsd_schema* s,
+                        const char* raw_ns, const char* raw_not_ns,
+                        const char* canon_ns, const char* canon_not_ns,
+                        const char* canon_nq) {
+    if (raw_ns && raw_not_ns) {
+        xsd_wc_fail(s,
+                    "src-wildcard: the @namespace and @notNamespace "
+                    "attributes cannot both be present");
+        return 0;
+    }
+    if (!canon_nq) return 1;
+    const char* p = canon_nq;
+    while (*p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (start[0] == '#') continue; /* ##defined family */
+        const char* turi;
+        size_t tulen;
+        xsd_wc_qname_ns(start, len, &turi, &tulen);
+        char tbuf[512];
+        const char* t = NULL;
+        if (turi) {
+            if (tulen >= sizeof(tbuf)) tulen = sizeof(tbuf) - 1;
+            memcpy(tbuf, turi, tulen);
+            tbuf[tulen] = 0;
+            t = tbuf;
+        }
+        int admitted = xsd_any_attr_matches(canon_ns, t, NULL) &&
+                       !xsd_wc_not_ns_hits(canon_not_ns, t, NULL);
+        if (!admitted) {
+            xsd_wc_fail(s,
+                        "src-wildcard: the notQName exclusion is "
+                        "vacuous — the wildcard cannot admit a "
+                        "name in that namespace");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Capture ONE xs:anyAttribute element into a canon member. Returns
+ * 0 (with wc_failed set) when the wildcard is illegal. */
+static int xsd_wc_capture_member(struct leptris_xsd_schema* s,
+                                 LeptrisElement ae, XsdAttrWc* m) {
+    memset(m, 0, sizeof(*m));
+    m->unit_ns = xsd_capture_unit_tns(ae);
+    const char* raw_ns = leptris_element_attribute(ae, "namespace");
+    const char* raw_nns =
+        leptris_element_attribute(ae, "notNamespace");
+    const char* raw_nq = leptris_element_attribute(ae, "notQName");
+    char* other = NULL;
+    xsd_wc_canon_ns(raw_ns, m->unit_ns, &m->ns, &other);
+    m->not_ns = xsd_wc_canon_not_ns(raw_nns, m->unit_ns);
+    if (other) {
+        xsd_wc_append(&m->not_ns, other, strlen(other));
+        free(other);
+    }
+    m->not_qname = xsd_wc_canon_not_qname(s, ae, raw_nq);
+    if (!xsd_wc_check(s, raw_ns, raw_nns, m->ns, m->not_ns,
+                      m->not_qname))
+        return 0;
+    return 1;
+}
+
+static void xsd_wc_member_free(XsdAttrWc* m) {
+    while (m) {
+        XsdAttrWc* n = m->next;
+        free(m->ns);
+        free(m->unit_ns);
+        free(m->not_ns);
+        free(m->not_qname);
+        free(m);
+        m = n;
+    }
+}
+
+static int xsd_wc_empty(const XsdAttrWc* m) {
+    return !m->ns && !m->not_ns && !m->not_qname;
+}
+
+/* §3.10.6.3 intersection fold: the admitted set of the fold admits
+ * a name only when EVERY member admits it — the positive sets
+ * intersect and the exclusion lists concat. */
+static void xsd_wc_intersect(XsdAttrWc* acc, const XsdAttrWc* m) {
+    if (xsd_wc_empty(acc)) {
+        free(acc->ns);
+        free(acc->not_ns);
+        free(acc->not_qname);
+        memset(acc, 0, sizeof(*acc));
+        acc->ns = m->ns ? xsd_strdup(m->ns) : NULL;
+        acc->not_ns = m->not_ns ? xsd_strdup(m->not_ns) : NULL;
+        acc->not_qname =
+            m->not_qname ? xsd_strdup(m->not_qname) : NULL;
+        if (!acc->unit_ns) acc->unit_ns = m->unit_ns
+                                              ? xsd_strdup(m->unit_ns)
+                                              : NULL;
+        return;
+    }
+    /* positive: ##any ∩ X = X; list ∩ list = common tokens */
+    if (m->ns && strcmp(m->ns, "##any") == 0) {
+        /* keep acc's */
+    } else if (acc->ns && strcmp(acc->ns, "##any") == 0) {
+        free(acc->ns);
+        acc->ns = xsd_strdup(m->ns);
+    } else if (acc->ns && m->ns) {
+        char* kept = NULL;
+        const char* p = acc->ns;
+        while (*p) {
+            const char* start;
+            size_t len;
+            p = xsd_wc_next_tok(p, &start, &len);
+            if (len == 0) break;
+            char tok[512];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = 0;
+            const char* uri = strcmp(tok, "##local") == 0
+                                  ? NULL
+                                  : tok;
+            if (xsd_any_attr_matches(m->ns, uri, NULL))
+                xsd_wc_append(&kept, tok, strlen(tok));
+        }
+        free(acc->ns);
+        acc->ns = kept ? kept : xsd_strdup("");
+    }
+    if (m->not_ns) xsd_wc_append(&acc->not_ns, m->not_ns,
+                                 strlen(m->not_ns));
+    if (m->not_qname) xsd_wc_append(&acc->not_qname, m->not_qname,
+                                    strlen(m->not_qname));
+}
+
+/* §3.10.6.3 union fold (extension + the default attribute group's
+ * wildcard): the positive sets union and a name/namespace survives
+ * the exclusion fold only when EVERY arm rejects it. */
+static void xsd_wc_union(XsdAttrWc* acc, const XsdAttrWc* b) {
+    if (xsd_wc_empty(b)) return;
+    if (xsd_wc_empty(acc)) {
+        free(acc->ns);
+        free(acc->not_ns);
+        free(acc->not_qname);
+        memset(acc, 0, sizeof(*acc));
+        acc->ns = b->ns ? xsd_strdup(b->ns) : NULL;
+        acc->not_ns = b->not_ns ? xsd_strdup(b->not_ns) : NULL;
+        acc->not_qname =
+            b->not_qname ? xsd_strdup(b->not_qname) : NULL;
+        if (!acc->unit_ns) acc->unit_ns = b->unit_ns
+                                              ? xsd_strdup(b->unit_ns)
+                                              : NULL;
+        return;
+    }
+    const char* a_ns_orig = acc->ns;
+    const char* b_ns_orig = b->ns;
+    int a_any = a_ns_orig && strcmp(a_ns_orig, "##any") == 0;
+    int b_any = b_ns_orig && strcmp(b_ns_orig, "##any") == 0;
+    char* ns = NULL;
+    if (a_any || b_any) {
+        ns = xsd_strdup("##any");
+    } else if (a_ns_orig && b_ns_orig) {
+        ns = xsd_strdup(a_ns_orig);
+        xsd_wc_append(&ns, b_ns_orig, strlen(b_ns_orig));
+    } else if (a_ns_orig) {
+        ns = xsd_strdup(a_ns_orig);
+    } else {
+        ns = xsd_strdup(b_ns_orig ? b_ns_orig : "");
+    }
+    /* exclusion fold: keep a token only when both arms reject it */
+    const char* sources[4];
+    int is_a[4];
+    int is_q[4];
+    int n = 0;
+    if (acc->not_ns) {
+        sources[n] = acc->not_ns;
+        is_a[n] = 1;
+        is_q[n] = 0;
+        n++;
+    }
+    if (acc->not_qname) {
+        sources[n] = acc->not_qname;
+        is_a[n] = 1;
+        is_q[n] = 1;
+        n++;
+    }
+    if (b->not_ns) {
+        sources[n] = b->not_ns;
+        is_a[n] = 0;
+        is_q[n] = 0;
+        n++;
+    }
+    if (b->not_qname) {
+        sources[n] = b->not_qname;
+        is_a[n] = 0;
+        is_q[n] = 1;
+        n++;
+    }
+    char* kept_ns = NULL;
+    char* kept_nq = NULL;
+    for (int si = 0; si < n; si++) {
+        const char* p = sources[si];
+        int from_a = is_a[si];
+        int is_qname_list = is_q[si];
+        while (*p) {
+            const char* start;
+            size_t len;
+            p = xsd_wc_next_tok(p, &start, &len);
+            if (len == 0) break;
+            char tok[600];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = 0;
+            int defined_tok =
+                strcmp(tok, "##defined") == 0 ||
+                strcmp(tok, "##definedSibling") == 0;
+            /* arm rejection of this token */
+            int rej_a = 1;
+            int rej_b = 1;
+            if (defined_tok) {
+                rej_a = from_a
+                            ? xsd_wc_tok_in(acc->not_qname, tok,
+                                            strlen(tok))
+                            : xsd_wc_tok_in(b->not_qname, tok,
+                                            strlen(tok));
+                rej_b = from_a
+                            ? xsd_wc_tok_in(b->not_qname, tok,
+                                            strlen(tok))
+                            : xsd_wc_tok_in(acc->not_qname, tok,
+                                            strlen(tok));
+            } else if (is_qname_list) {
+                const char* turi;
+                size_t tulen;
+                xsd_wc_qname_ns(tok, strlen(tok), &turi, &tulen);
+                char tbuf[512];
+                const char* t = NULL;
+                if (turi) {
+                    if (tulen >= sizeof(tbuf))
+                        tulen = sizeof(tbuf) - 1;
+                    memcpy(tbuf, turi, tulen);
+                    tbuf[tulen] = 0;
+                    t = tbuf;
+                }
+                rej_a = xsd_wc_tok_in(acc->not_qname, tok,
+                                      strlen(tok)) ||
+                        !xsd_any_attr_matches(a_ns_orig, t, NULL);
+                rej_b = xsd_wc_tok_in(b->not_qname, tok,
+                                      strlen(tok)) ||
+                        !xsd_any_attr_matches(b_ns_orig, t, NULL);
+            } else {
+                const char* t = strcmp(tok, "##local") == 0
+                                    ? NULL
+                                    : tok;
+                rej_a = xsd_wc_tok_in(acc->not_ns, tok,
+                                      strlen(tok)) ||
+                        !xsd_any_attr_matches(a_ns_orig, t, NULL);
+                rej_b = xsd_wc_tok_in(b->not_ns, tok,
+                                      strlen(tok)) ||
+                        !xsd_any_attr_matches(b_ns_orig, t, NULL);
+            }
+            if (rej_a && rej_b) {
+                if (is_qname_list || defined_tok)
+                    xsd_wc_append(&kept_nq, tok, strlen(tok));
+                else
+                    xsd_wc_append(&kept_ns, tok, strlen(tok));
+            }
+        }
+    }
+    free(acc->ns);
+    free(acc->not_ns);
+    free(acc->not_qname);
+    acc->ns = ns;
+    acc->not_ns = kept_ns;
+    acc->not_qname = kept_nq;
+}
+
+/* Gather every wildcard under `container` (its direct
+ * xs:anyAttribute plus each referenced attributeGroup's, recursive,
+ * depth-bounded) into the linked `members` list. */
+static void xsd_wc_gather(struct leptris_xsd_schema* s,
+                          LeptrisElement container, int depth,
+                          XsdAttrWc** members, XsdAttrWc** tail) {
+    if (depth > 8) return;
     for (LeptrisNodeRef ac = leptris_node_first_child(
              leptris_element_as_node(container));
          ac; ac = leptris_node_next_sibling(ac)) {
@@ -7846,12 +8474,22 @@ static char* xsd_capture_any_attr_ns_deep(
         leptris_element_expanded_name(ae, &al, NULL, &au);
         if (!al || (au && strcmp(au, XSD_NS) != 0)) continue;
         if (strcmp(al, "anyAttribute") == 0) {
-            /* leptris-rs#73: absent @namespace means ##any — a
-             * bare <xs:anyAttribute /> is a live wildcard, not an
-             * invisible one. */
-            const char* ns =
-                leptris_element_attribute(ae, "namespace");
-            return xsd_strdup(ns ? ns : "##any");
+            XsdAttrWc* m = (XsdAttrWc*)calloc(1, sizeof(*m));
+            if (!m) continue;
+            if (!xsd_wc_capture_member(s, ae, m)) {
+                free(m->ns);
+                free(m->unit_ns);
+                free(m->not_ns);
+                free(m->not_qname);
+                free(m);
+                continue;
+            }
+            if (*tail)
+                (*tail)->next = m;
+            else
+                *members = m;
+            *tail = m;
+            continue;
         }
         if (strcmp(al, "attributeGroup") == 0) {
             const char* ref = xsd_local_name(
@@ -7860,44 +8498,381 @@ static char* xsd_capture_any_attr_ns_deep(
             XsdAttrGroupDef* g = s->attr_groups;
             for (; g; g = g->next)
                 if (strcmp(g->name, ref) == 0) break;
-            if (g && g->elem) {
-                char* inner_unit = NULL;
-                char* r = xsd_capture_any_attr_ns_deep(
-                    s, g->elem, depth + 1, &inner_unit);
-                if (r) {
-                    /* leptris-rs#72: the wildcard resolves against
-                     * its DECLARING unit's tns — the group's own
-                     * unit ("" for a namespace-less import), which
-                     * may differ from the consuming type's. */
-                    if (out_unit)
-                        *out_unit = inner_unit
-                                        ? inner_unit
-                                        : xsd_capture_unit_tns(g->elem);
-                    return r;
+            if (g && g->elem)
+                xsd_wc_gather(s, g->elem, depth + 1, members,
+                              tail);
+        }
+    }
+}
+
+/* The effective attribute wildcard for a complexType body: the
+ * §3.10.6.3 intersection over the gathered members. Fills `eff`;
+ * returns 1 when a wildcard exists. */
+static int xsd_capture_attr_wc(struct leptris_xsd_schema* s,
+                               LeptrisElement container,
+                               XsdAttrWc* eff) {
+    memset(eff, 0, sizeof(*eff));
+    XsdAttrWc* members = NULL;
+    XsdAttrWc* tail = NULL;
+    xsd_wc_gather(s, container, 0, &members, &tail);
+    for (XsdAttrWc* m = members; m; m = m->next)
+        xsd_wc_intersect(eff, m);
+    xsd_wc_member_free(members);
+    if (xsd_wc_empty(eff)) {
+        free(eff->ns);
+        free(eff->not_ns);
+        free(eff->not_qname);
+        free(eff->unit_ns);
+        memset(eff, 0, sizeof(*eff));
+        return 0;
+    }
+    return 1;
+}
+
+/* Fold the BASE wildcard into the four locals the capture driver
+ * carries (the eager extension path and the default-group ride). */
+static void xsd_wc_fold_union_locals(char** ns, char** nq, char** nns,
+                                     char** unit,
+                                     const XsdAttrWc* b) {
+    if (xsd_wc_empty(b)) return;
+    XsdAttrWc acc;
+    memset(&acc, 0, sizeof(acc));
+    acc.ns = *ns;
+    acc.not_qname = *nq;
+    acc.not_ns = *nns;
+    acc.unit_ns = *unit;
+    xsd_wc_union(&acc, b);
+    *ns = acc.ns;
+    *nq = acc.not_qname;
+    *nns = acc.not_ns;
+    *unit = acc.unit_ns;
+}
+
+/* The deferred fold (xsd_resolve_extension_bases): union the base
+ * row's effective wildcard into the DERIVED row in place. */
+static void xsd_wc_fold_union(XsdTypeAttrs* mine,
+                              const XsdTypeAttrs* base) {
+    XsdAttrWc b;
+    memset(&b, 0, sizeof(b));
+    b.ns = base->any_attr_ns;
+    b.not_qname = base->any_attr_not_qname;
+    b.not_ns = base->any_attr_not_ns;
+    b.unit_ns = base->any_attr_unit_ns;
+    xsd_wc_fold_union_locals(&mine->any_attr_ns,
+                             &mine->any_attr_not_qname,
+                             &mine->any_attr_not_ns,
+                             &mine->any_attr_unit_ns, &b);
+}
+
+/* ---- #2184: ##definedSibling + the restriction subset law -------- */
+
+/* §3.10.2: ##definedSibling excludes every name the SIBLING element
+ * particles of the wildcard's parent declare. The expansion pass
+ * rewrites the token into the concrete canon names (wild070-074,
+ * wild084) — after the fold, when the spliced base particles are
+ * in place. */
+static void xsd_wc_expand_defined_sibling(XsdCm* any, XsdCm* parent,
+                                          struct leptris_xsd_schema* s);
+
+static void xsd_wc_expand_defined_sibling(XsdCm* any, XsdCm* parent,
+                                          struct leptris_xsd_schema* s) {
+    if (!any || !any->not_qname ||
+        !strstr(any->not_qname, "##definedSibling"))
+        return;
+    char names[4096];
+    size_t o = 0;
+    int saw = 0;
+    for (XsdCm* c = parent ? parent->first_child : NULL; c;
+         c = c->next) {
+        if (c->kind != XSD_CM_ELEMENT || !c->name) continue;
+        char tok[600];
+        if (c->ns && *c->ns)
+            snprintf(tok, sizeof(tok), "{%s}%s", c->ns, c->name);
+        else
+            snprintf(tok, sizeof(tok), "%s", c->name);
+        /* §3.10.2: the sibling names expand by SUBSTITUTION GROUP
+         * membership (wild071: the head's member A is a defined
+         * sibling too) — every global whose sub_head chains to the
+         * sibling's name rides along, transitive to depth 4. */
+        char heads[8][256];
+        int hn = 0;
+        snprintf(heads[hn++], sizeof(heads[0]), "%s", c->name);
+        for (int pass = 0; pass < 4; pass++) {
+            int added = 0;
+            for (const XsdElementDecl* d = s ? s->elements : NULL;
+                 d; d = d->next) {
+                if (!d->sub_head) continue;
+                int in_chain = 0;
+                for (int i = 0; i < hn && !in_chain; i++)
+                    if (strcmp(d->sub_head, heads[i]) == 0)
+                        in_chain = 1;
+                if (!in_chain) continue;
+                char mtok[600];
+                if (d->ns && *d->ns)
+                    snprintf(mtok, sizeof(mtok), "{%s}%s", d->ns,
+                             d->name);
+                else
+                    snprintf(mtok, sizeof(mtok), "%s", d->name);
+                int dup = strstr(names, mtok) != NULL;
+                if (!dup && o + strlen(mtok) + 2 < sizeof(names)) {
+                    if (o) names[o++] = ' ';
+                    memcpy(names + o, mtok, strlen(mtok) + 1);
+                    o += strlen(mtok);
+                    saw = 1;
+                    added = 1;
                 }
+                /* walk the member chain */
+                int known = 0;
+                for (int i = 0; i < hn && !known; i++)
+                    if (strcmp(d->name, heads[i]) == 0) known = 1;
+                if (!known && hn < 8)
+                    snprintf(heads[hn++], sizeof(heads[0]), "%s",
+                             d->name);
+                (void)added;
+            }
+            if (!added) break;
+        }
+        size_t tl = strlen(tok);
+        if (strstr(names, tok)) continue;
+        if (o + tl + 2 >= sizeof(names)) break;
+        if (o) names[o++] = ' ';
+        memcpy(names + o, tok, tl + 1);
+        o += tl;
+        saw = 1;
+    }
+    if (!saw) return;
+    /* rewrite the token list with the sibling names in place of
+     * ##definedSibling */
+    char out[2048];
+    size_t wo = 0;
+    const char* p = any->not_qname;
+    while (*p && wo + 1 < sizeof(out)) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        if (len == 16 && strncmp(start, "##definedSibling", 16) == 0) {
+            size_t nl = o;
+            if (wo + nl + 2 >= sizeof(out)) break;
+            if (wo) out[wo++] = ' ';
+            memcpy(out + wo, names, nl);
+            wo += nl;
+            continue;
+        }
+        if (wo + len + 2 >= sizeof(out)) break;
+        if (wo) out[wo++] = ' ';
+        memcpy(out + wo, start, len);
+        wo += len;
+    }
+    out[wo] = 0;
+    free(any->not_qname);
+    any->not_qname = xsd_strdup(out);
+}
+
+static void xsd_wc_expand_group(XsdCm* node,
+                                struct leptris_xsd_schema* s) {
+    if (!node) return;
+    switch (node->kind) {
+        case XSD_CM_SEQ:
+        case XSD_CM_CHOICE:
+        case XSD_CM_ALL:
+            for (XsdCm* c = node->first_child; c; c = c->next) {
+                if (c->kind == XSD_CM_ANY)
+                    xsd_wc_expand_defined_sibling(c, node, s);
+                else
+                    xsd_wc_expand_group(c, s);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+/* The post-capture expansion: every captured complexType's model
+ * tree (plus the type's open-content wildcard, whose "siblings"
+ * are the model's element particles). The schema-default wildcard
+ * is BORROWED (shared across the unit's types) — a type whose
+ * instance carries ##definedSibling privatizes it first, so the
+ * sibling expansion stays per-type. Runs after
+ * xsd_resolve_extension_bases so the fold-spliced copies carry
+ * their base's (already expanded) names. */
+void xsd_wc_expand_defined_sibling_pass(struct leptris_xsd_schema* s) {
+    for (XsdCm* t = s->complex_types; t; t = t->next) {
+        xsd_wc_expand_group(t, s);
+        XsdCm* model = t->first_child;
+        XsdCm* oc = model ? model->open_any : NULL;
+        if (oc && oc->not_qname &&
+            strstr(oc->not_qname, "##definedSibling") &&
+            !(model->oc_owned)) {
+            XsdCm* copy = xsd_cm_copy_list(oc);
+            if (copy) {
+                copy->next = NULL;
+                model->open_any = copy;
+                model->oc_owned = 1;
+                oc = copy;
+            }
+        }
+        if (oc)
+            xsd_wc_expand_defined_sibling(oc, model, s);
+    }
+}
+
+/* Is a namespace `uri` (NULL = absent) inside the admitted set of a
+ * canon wildcard row (grammar + not_ns)? */
+static int xsd_wc_row_admits_ns(const XsdTypeAttrs* ta,
+                                const char* uri) {
+    if (!xsd_any_attr_matches(ta->any_attr_ns, uri, NULL)) return 0;
+    if (xsd_wc_not_ns_hits(ta->any_attr_not_ns, uri, NULL)) return 0;
+    return 1;
+}
+
+/* The name a canon notQName token denotes, for the subset walk:
+ * 0 = concrete {uri}local (uri filled), 1 = ##defined family. */
+static int xsd_wc_nq_token(const char* tok, size_t len, char* uri,
+                           size_t cap) {
+    if (len > 0 && tok[0] == '#') return 1;
+    if (len > 0 && tok[0] == '{') {
+        const char* close = memchr(tok, '}', len);
+        if (close) {
+            size_t ul = (size_t)(close - tok - 1);
+            if (ul >= cap) ul = cap - 1;
+            memcpy(uri, tok + 1, ul);
+            uri[ul] = 0;
+            return 0;
+        }
+    }
+    uri[0] = 0; /* bare literal: the absent namespace */
+    return 0;
+}
+
+/* §3.10.6.3 + derivation-ok-restriction.4.1: the RESTRICTION's
+ * attribute wildcard must be a subset of the base's. With the canon
+ * forms: every namespace the derived admits, the base admits too;
+ * and every name the base disallows, the derived disallows as well
+ * (within the derived's admitted namespaces). */
+static int xsd_wc_attr_subset(const XsdTypeAttrs* sub,
+                              const XsdTypeAttrs* sup,
+                              const char* sup_name, char* msg,
+                              size_t cap) {
+    /* namespaces: witness set = both rows' grammar tokens +
+     * exclusion tokens */
+    const char* lists[4];
+    lists[0] = sub->any_attr_ns;
+    lists[1] = sub->any_attr_not_ns;
+    lists[2] = sup->any_attr_ns;
+    lists[3] = sup->any_attr_not_ns;
+    for (int li = 0; li < 4; li++) {
+        const char* p = lists[li];
+        while (p && *p) {
+            const char* start;
+            size_t len;
+            p = xsd_wc_next_tok(p, &start, &len);
+            if (len == 0) break;
+            char tok[512];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = 0;
+            const char* uri = strcmp(tok, "##local") == 0
+                                  ? NULL
+                                  : tok;
+            if (xsd_wc_row_admits_ns(sub, uri) &&
+                !xsd_wc_row_admits_ns(sup, uri)) {
+                snprintf(msg, cap,
+                         "derivation-ok-restriction-4.1: the "
+                         "attribute wildcard is not a valid subset "
+                         "of the base complex type definition "
+                         "'%s' (the namespace '%s' is admitted by "
+                         "the derivation but not the base)",
+                         sup_name, uri ? uri : "(no namespace)");
+                return 0;
             }
         }
     }
-    return NULL;
+    /* names: every name the base disallows must be disallowed by
+     * the derivation too (or fall outside the derivation's
+     * admitted namespaces) */
+    const char* p = sup->any_attr_not_qname;
+    while (p && *p) {
+        const char* start;
+        size_t len;
+        p = xsd_wc_next_tok(p, &start, &len);
+        if (len == 0) break;
+        char tok[600];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        if (xsd_wc_tok_in(sub->any_attr_not_qname, tok, strlen(tok)))
+            continue;
+        char turi[512];
+        int defined = xsd_wc_nq_token(tok, strlen(tok), turi,
+                                      sizeof(turi));
+        if (defined) {
+            /* the base excludes every globally declared name; the
+             * derivation must exclude them too */
+            snprintf(msg, cap,
+                     "derivation-ok-restriction-4.1: the attribute "
+                     "wildcard is not a valid subset of the base "
+                     "complex type definition '%s' (the base "
+                     "excludes the schema's declared names and the "
+                     "derivation does not)",
+                     sup_name);
+            return 0;
+        }
+        if (xsd_wc_row_admits_ns(sub, turi[0] ? turi : NULL)) {
+            snprintf(msg, cap,
+                     "derivation-ok-restriction-4.1: the attribute "
+                     "wildcard is not a valid subset of the base "
+                     "complex type definition '%s' (a name the "
+                     "base excludes stays admitted by the "
+                     "derivation)",
+                     sup_name);
+            return 0;
+        }
+    }
+    return 1;
 }
 
-/* moxml#460: the anyAttribute's XSD 1.1 @notQName (same walk as the
- * namespace capture). NULL when absent. */
-static char* xsd_capture_any_attr_not_qname(LeptrisElement container) {
-    for (LeptrisNodeRef ac = leptris_node_first_child(
-             leptris_element_as_node(container));
-         ac; ac = leptris_node_next_sibling(ac)) {
-        if (leptris_node_get_type(ac) != LEPTRIS_NODE_TYPE_ELEMENT)
-            continue;
-        LeptrisElement ae = (LeptrisElement)ac;
-        const char* al = NULL;
-        leptris_element_expanded_name(ae, &al, NULL, NULL);
-        if (al && strcmp(al, "anyAttribute") == 0)
-            return xsd_strdup(
-                leptris_element_attribute(ae, "notQName"));
+/* The post-capture sweep: surface wc_failed (the parked src-wildcard
+ * errors) and run the restriction subset law over the captured
+ * rows. Returns 0, or -1 with s->error set. */
+static int xsd_check_attr_wildcards(struct leptris_xsd_schema* s) {
+    if (s->wc_failed) {
+        if (!s->error)
+            xsd_set_error(s,
+                          "src-wildcard: the wildcard namespace set "
+                          "is invalid");
+        return -1;
     }
-    return NULL;
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        if (!c->res_base) continue;
+        const char* bns =
+            c->res_base_ns ? c->res_base_ns : c->ns;
+        XsdCm* base = xsd_find_complex_ns(s, c->res_base, bns);
+        if (!base) base = xsd_find_complex_ns(s, c->res_base, c->ns);
+        if (!base) continue;
+        const XsdTypeAttrs* bt =
+            xsd_find_type_attrs_ns(s, base->name,
+                                   base->ns ? base->ns : bns);
+        if (!bt) bt = xsd_find_type_attrs(s, base->name);
+        const XsdTypeAttrs* dt =
+            xsd_find_type_attrs_ns(s, c->name, c->ns);
+        if (!dt) dt = xsd_find_type_attrs(s, c->name);
+        if (!bt || !dt) continue;
+        int sub_wc = dt->any_attr_ns || dt->any_attr_not_qname ||
+                     dt->any_attr_not_ns;
+        int sup_wc = bt->any_attr_ns || bt->any_attr_not_qname ||
+                     bt->any_attr_not_ns;
+        if (!sub_wc || !sup_wc) continue;
+        char msg[512];
+        if (!xsd_wc_attr_subset(dt, bt, base->name, msg,
+                                sizeof(msg))) {
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
 }
+
 
 LEPTRIS_API int leptris_xsd_builtin_valid(const char* builtin,
                                           const char* lexical) {
