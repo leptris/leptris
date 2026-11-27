@@ -16,6 +16,9 @@
 #include "../dom/element.h" /* attribute walk for the clause checks */
 
 #define XSD_NS "http://www.w3.org/2001/XMLSchema"
+/* #2184 §4.2.2: the versioning namespace — its attributes are the
+ * version-controlled annotations (conditional inclusion). */
+#define XSD_VC_NS "http://www.w3.org/2007/XMLSchema-versioning"
 
 void xsd_capture_ics(struct leptris_xsd_schema* s,
                      LeptrisElement elem, const char* element_name);
@@ -100,6 +103,15 @@ struct leptris_xsd_schema {
      * can never admit (vacuous, wild031-039). Surfaced post-capture
      * like oc_failed / ct_failed. */
     int wc_failed;
+    /* #2184 (§4.2.2): a version-controlled annotation carried a
+     * malformed value (a three-part version, a non-QName token, an
+     * undeclared prefix — the vc90x .bad class). Surfaced
+     * post-capture. */
+    int vc_failed;
+    /* #2184 (src-element.2): one document declared the same global
+     * element (namespace, name) twice — s4_2_2si01's duplicate root
+     * pair after the vc: prune. Surfaced post-capture. */
+    int dup_globals_failed;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -4553,6 +4565,26 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
 
+    /* #2184 §4.2.2: the conditional-inclusion capture rejected the
+     * schema (a malformed version-controlled annotation value), or
+     * one document declared the same global element twice after the
+     * vc: prune (src-element.2 — s4_2_2si01's duplicate root pair).
+     * Surfaced post-capture like the other parked flags. */
+    if (s->vc_failed || s->dup_globals_failed) {
+        if (!s->error)
+            xsd_set_error(s,
+                          s->vc_failed
+                              ? "vc: the version-controlled "
+                                "annotation value is malformed "
+                                "(§4.2.2)"
+                              : "src-element.2: two global element "
+                                "declarations share one namespace "
+                                "and name");
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
     /* #2184: the alternative-table compile constraints — §3.12.2
      * XPath-valid tests, §3.3.6.1 cl.7 type substitutability,
      * cos-element-consistent table equality, the restriction
@@ -5522,8 +5554,358 @@ static int xsd_override_gate(struct leptris_xsd_schema* s,
     return !xsd_override_corresponds(s, local, nm);
 }
 
+/* ---- #2184 §4.2.2: conditional inclusion -------------------------- */
+
+/* A version lexical is TWO integers joined by one period (§4.2.2);
+ * "1.1.3" and "10g" are malformed. 0 ok, -1 malformed. */
+static int xsd_vc_version_parse(const char* v, long* maj, long* min) {
+    *maj = *min = 0;
+    if (!v) return -1;
+    const char* p = v;
+    if (*p < '0' || *p > '9') return -1;
+    while (*p >= '0' && *p <= '9') *maj = *maj * 10 + (*p++ - '0');
+    if (*p != '.') return -1;
+    p++;
+    if (*p < '0' || *p > '9') return -1;
+    while (*p >= '0' && *p <= '9') *min = *min * 10 + (*p++ - '0');
+    return *p ? -1 : 0;
+}
+
+/* Compare (maj,min) with the PROCESSOR's version (1.1): -1 less,
+ * 0 equal, 1 greater. */
+static int xsd_vc_version_cmp(long maj, long min) {
+    if (maj != 1) return maj < 1 ? -1 : 1;
+    if (min != 1) return min < 1 ? -1 : 1;
+    return 0;
+}
+
+static int xsd_vc_ws(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static int xsd_vc_ncname_start(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           c == '_' || (unsigned char)c >= 0x80;
+}
+
+static int xsd_vc_ncname_char(char c) {
+    return xsd_vc_ncname_start(c) || (c >= '0' && c <= '9') ||
+           c == '.' || c == '-';
+}
+
+/* Is the facet named by the token's LOCAL part one the 1.1
+ * processor implements? (vc020/vc021/vc022/vc023.) */
+static int xsd_vc_facet_known(const char* local) {
+    static const char* known[] = {
+        "length", "minLength", "maxLength", "pattern", "enumeration",
+        "whiteSpace", "totalDigits", "fractionDigits", "minInclusive",
+        "minExclusive", "maxInclusive", "maxExclusive", "minScale",
+        "maxScale", "explicitTimezone", "assertion", NULL};
+    for (int i = 0; known[i]; i++)
+        if (strcmp(local, known[i]) == 0) return 1;
+    return 0;
+}
+
+/* Is the type named by the resolved (uri, local) available to this
+ * processor? Builtins are; a top-level simpleType/complexType of
+ * THIS document with the same (name, tns) is. */
+static int xsd_vc_type_available(LeptrisElement root, const char* uri,
+                                 const char* local) {
+    if (uri && strcmp(uri, XSD_NS) == 0) {
+        char builtin[300];
+        if (snprintf(builtin, sizeof(builtin), "xs:%s", local) <
+                (int)sizeof(builtin) &&
+            xsd_builtin_known(builtin))
+            return 1;
+    }
+    const char* tns = leptris_element_attribute(root, "targetNamespace");
+    const char* du = (uri && uri[0]) ? uri : tns;
+    const char* dt = (tns && tns[0]) ? tns : NULL;
+    if ((du && !du[0])) du = NULL;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (!cl || !cu || strcmp(cu, XSD_NS) != 0 ||
+            (strcmp(cl, "simpleType") != 0 &&
+             strcmp(cl, "complexType") != 0))
+            continue;
+        const char* nm = leptris_element_attribute(c, "name");
+        if (!nm || strcmp(nm, local) != 0) continue;
+        /* namespace match against the declaring document's tns */
+        if ((du == NULL) == (dt == NULL) &&
+            (du == NULL || strcmp(du, dt) == 0))
+            return 1;
+    }
+    return 0;
+}
+
+/* Walk one whitespace list per the VCA's value grammar.
+ * mode 0: QName list (types); mode 1: facet tokens (a bare facet
+ * QName, or QName ',' NCName pairs). For every token the visitor
+ * learns (uri-or-NULL, local, facet-or-NULL); a syntactically
+ * invalid token or an unbound prefix reports malformed.
+ * Returns 0 ok, -1 malformed. */
+static int xsd_vc_list_walk(LeptrisElement e, const char* value,
+                            int mode,
+                            void (*visit)(void* ud, const char* uri,
+                                          const char* local,
+                                          const char* facet),
+                            void* ud) {
+    const char* p = value;
+    while (*p) {
+        while (*p && xsd_vc_ws(*p)) p++;
+        if (!*p) break;
+        if (!xsd_vc_ncname_start(*p)) return -1;
+        char qn[256];
+        size_t n = 0;
+        while (xsd_vc_ncname_char(*p) || *p == ':') {
+            if (n + 1 < sizeof(qn)) qn[n++] = *p;
+            p++;
+        }
+        qn[n] = 0;
+        /* mode 1: an optional ',' + facet NCName may follow the
+         * type QName (§4.2.2's {type, facet} pair form) */
+        const char* facet = NULL;
+        if (mode == 1) {
+            const char* q = p;
+            while (*q && xsd_vc_ws(*q)) q++;
+            if (*q == ',') {
+                q++;
+                while (*q && xsd_vc_ws(*q)) q++;
+                if (!xsd_vc_ncname_start(*q)) return -1;
+                facet = q;
+                while (xsd_vc_ncname_char(*q)) q++;
+                p = q;
+            }
+        }
+        char uri[512];
+        char local[256];
+        const char* colon = strchr(qn, ':');
+        if (colon) {
+            char prefix[64];
+            size_t pl = (size_t)(colon - qn);
+            if (pl >= sizeof(prefix)) return -1;
+            memcpy(prefix, qn, pl);
+            prefix[pl] = 0;
+            snprintf(local, sizeof(local), "%s", colon + 1);
+            xsd_ns_for_prefix(e, prefix, uri, sizeof(uri));
+            if (!uri[0]) return -1; /* undeclared prefix (vc904) */
+        } else {
+            snprintf(local, sizeof(local), "%s", qn);
+            xsd_ns_for_prefix(e, NULL, uri, sizeof(uri));
+        }
+        if (visit)
+            visit(ud, uri[0] ? uri : NULL, local, facet);
+    }
+    return 0;
+}
+
+/* Satisfaction accumulator state. */
+typedef struct xsd_vc_ctx {
+    LeptrisElement root;
+    int satisfied; /* all annotations so far */
+} XsdVcCtx;
+
+static void xsd_vc_visit_type_avail(void* udp, const char* uri,
+                                    const char* local,
+                                    const char* facet) {
+    XsdVcCtx* c = (XsdVcCtx*)udp;
+    (void)facet;
+    if (!xsd_vc_type_available(c->root, uri, local))
+        c->satisfied = 0;
+}
+
+static void xsd_vc_visit_type_unavail(void* udp, const char* uri,
+                                      const char* local,
+                                      const char* facet) {
+    XsdVcCtx* c = (XsdVcCtx*)udp;
+    (void)facet;
+    if (!xsd_vc_type_available(c->root, uri, local))
+        c->satisfied = 1; /* SOME unavailable: satisfied */
+}
+
+static void xsd_vc_visit_facet_avail(void* udp, const char* uri,
+                                     const char* local,
+                                     const char* facet) {
+    (void)uri;
+    XsdVcCtx* c = (XsdVcCtx*)udp;
+    const char* f = facet ? facet : local;
+    if (!xsd_vc_facet_known(f)) c->satisfied = 0;
+}
+
+static void xsd_vc_visit_facet_unavail(void* udp, const char* uri,
+                                       const char* local,
+                                       const char* facet) {
+    (void)uri;
+    XsdVcCtx* c = (XsdVcCtx*)udp;
+    const char* f = facet ? facet : local;
+    if (!xsd_vc_facet_known(f)) c->satisfied = 1;
+}
+
+/* Are ALL of the element's version-controlled annotations
+ * satisfied? 1 satisfied / 0 not. Malformed values park vc_failed
+ * and count as satisfied (the schema dies on the flag anyway). */
+static int xsd_vc_satisfied(struct leptris_xsd_schema* s,
+                            LeptrisElement root, LeptrisElement e) {
+    int satisfied = 1;
+    for (LeptrisAttribute at = leptris_element_first_attribute(e);
+         at; at = leptris_attribute_next(at)) {
+        const char* raw = leptris_attribute_get_name(at);
+        if (!raw) continue;
+        const char* au = leptris_attribute_namespace_uri(at);
+        if (!au || strcmp(au, XSD_VC_NS) != 0) continue;
+        const char* colon = strchr(raw, ':');
+        const char* local = colon ? colon + 1 : raw;
+        const char* val = leptris_attribute_get_value(e, at);
+        XsdVcCtx c;
+        memset(&c, 0, sizeof(c));
+        c.root = root;
+        /* *Available: satisfied vacuously (an empty list names only
+         * available types); *Unavailable: satisfied only when some
+         * named item IS unavailable — an empty list never satisfies
+         * (vc008: "empty facetUnavailable is an unconditional
+         * exclude"). */
+        c.satisfied = strstr(local, "Unavailable") == NULL;
+        if (strcmp(local, "minVersion") == 0) {
+            long maj, min;
+            if (xsd_vc_version_parse(val, &maj, &min) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            satisfied = satisfied && (xsd_vc_version_cmp(maj, min) <= 0);
+        } else if (strcmp(local, "maxVersion") == 0) {
+            long maj, min;
+            if (xsd_vc_version_parse(val, &maj, &min) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            /* satisfied iff P < V — the annotation names the first
+             * version the component is NOT for (vc006's 0.9 root
+             * gates the whole document off a 1.1 processor) */
+            satisfied = satisfied && (xsd_vc_version_cmp(maj, min) > 0);
+        } else if (strcmp(local, "typeAvailable") == 0) {
+            if (xsd_vc_list_walk(e, val, 0, xsd_vc_visit_type_avail,
+                                 &c) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            satisfied = satisfied && c.satisfied;
+        } else if (strcmp(local, "typeUnavailable") == 0) {
+            if (xsd_vc_list_walk(e, val, 0, xsd_vc_visit_type_unavail,
+                                 &c) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            satisfied = satisfied && c.satisfied;
+        } else if (strcmp(local, "facetAvailable") == 0) {
+            if (xsd_vc_list_walk(e, val, 1, xsd_vc_visit_facet_avail,
+                                 &c) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            satisfied = satisfied && c.satisfied;
+        } else if (strcmp(local, "facetUnavailable") == 0) {
+            if (xsd_vc_list_walk(e, val, 1, xsd_vc_visit_facet_unavail,
+                                 &c) != 0) {
+                s->vc_failed = 1;
+                continue;
+            }
+            satisfied = satisfied && c.satisfied;
+        }
+        /* any other versioning-namespace attribute is IGNORED
+         * (vc009: "Misspelt vc: attribute is simply ignored") */
+    }
+    return satisfied;
+}
+
+static void xsd_vc_prune_walk(struct leptris_xsd_schema* s,
+                              LeptrisElement root, LeptrisElement parent,
+                              LeptrisElement e, int depth) {
+    if (depth > 32) return;
+    if (!xsd_vc_satisfied(s, root, e)) {
+        /* the component (and its whole subtree) is as if not
+         * written — detach before any capture pass sees it */
+        leptris_element_remove_child(parent, e);
+        return;
+    }
+    /* collect children first: removing during iteration corrupts
+     * the sibling chain */
+    LeptrisElement kids[64];
+    int nk = 0;
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(e));
+         c && nk < 64; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        kids[nk++] = (LeptrisElement)c;
+    }
+    for (int i = 0; i < nk; i++)
+        xsd_vc_prune_walk(s, root, e, kids[i], depth + 1);
+}
+
+/* Returns 1 when the DOCUMENT itself is pruned (its root's own
+ * annotations failed): the unit contributes nothing, includes
+ * included. Also runs the same-document duplicate-global scan
+ * AFTER pruning (test5/test6 keep exactly one satisfied example). */
+static int xsd_vc_prepare(struct leptris_xsd_schema* s,
+                          LeptrisElement root) {
+    if (!root) return 0;
+    if (!xsd_vc_satisfied(s, root, root)) return 1;
+    LeptrisElement kids[256];
+    int nk = 0;
+    for (LeptrisNodeRef c =
+             leptris_node_first_child(leptris_element_as_node(root));
+         c && nk < 256; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        kids[nk++] = (LeptrisElement)c;
+    }
+    for (int i = 0; i < nk; i++)
+        xsd_vc_prune_walk(s, root, root, kids[i], 0);
+    /* duplicate global element declarations within THIS document
+     * (src-element.2): (name, doc tns) twice among the surviving
+     * direct xs:element children */
+    {
+        const char* names[256];
+        int nn = 0;
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(
+                     leptris_element_as_node(root));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+                continue;
+            LeptrisElement cel = (LeptrisElement)c;
+            const char* cl = NULL;
+            const char* cu = NULL;
+            leptris_element_expanded_name(cel, &cl, NULL, &cu);
+            if (!cl || !cu || strcmp(cu, XSD_NS) != 0 ||
+                strcmp(cl, "element") != 0)
+                continue;
+            const char* nm = leptris_element_attribute(cel, "name");
+            if (!nm) continue;
+            for (int i = 0; i < nn; i++)
+                if (strcmp(names[i], nm) == 0) {
+                    s->dup_globals_failed = 1;
+                    return 0;
+                }
+            if (nn < 256) names[nn++] = nm;
+        }
+    }
+    return 0;
+}
+
 static void xsd_capture_root(struct leptris_xsd_schema* s,
                              LeptrisElement root) {
+    /* #2184 §4.2.2: prune the vc:-gated components (and validate
+     * the annotations) before any capture pass sees them. A pruned
+     * DOCUMENT contributes nothing — includes included. */
+    if (xsd_vc_prepare(s, root)) return;
     /* pre-pass phase 1: register every top-level attributeGroup def
      * (name + element), document order — the symbol space is
      * order-free. Phase 2 captures the rows once ALL defs are
