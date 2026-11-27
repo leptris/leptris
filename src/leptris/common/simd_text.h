@@ -78,6 +78,23 @@ int leptris_utf8_valid(const char* s, size_t len);
  * the shared tail anchor for the ISA cores. */
 int leptris_utf8_valid_scalar(const char* s, size_t len);
 
+/* Copy [src, src+len) to dst while reporting the parse census flags
+ * (#2132): any byte >= 0x80, any '&', and any control byte (< 0x20 —
+ * a deliberate superset of tab/LF/CR; valid XML carries no other
+ * controls, so the conservatism is unobservable on parseable input).
+ * One fused memory pass: the bounded lane's scratch copy IS the
+ * census — the standalone whole-document count3_high pre-scan
+ * disappears for this class. The flags are ANY-detections (1/0), not
+ * counts; callers only branch on them. */
+void leptris_copy_census(char* dst, const char* src, size_t len,
+                         int* saw_high, int* amp_any, int* ctlws_any);
+
+/* The scalar fallback (and the ISA cores' shared oracle + tail
+ * anchor) — exported for the cross-arch equivalence specs. */
+void leptris_copy_census_scalar(char* dst, const char* src, size_t len,
+                                int* saw_high, int* amp_any,
+                                int* ctlws_any);
+
 /* Copy [src, src+len) to dst while counting c0/c1/c2 occurrences —
  * one fused memory pass (falls back to memcpy + count3 where no
  * SIMD path is compiled). The parser's owns-copy path gets its
@@ -173,6 +190,10 @@ void leptris_text_count3_high_avx2(const char* s, size_t len,
 void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
                               char a, char b, char c,
                               size_t* ca, size_t* cb, size_t* cc);
+void leptris_copy_census_neon(char* dst, const char* src, size_t len,
+                              int* saw_high, int* amp_any, int* ctlws_any);
+void leptris_copy_census_avx2(char* dst, const char* src, size_t len,
+                              int* saw_high, int* amp_any, int* ctlws_any);
 size_t leptris_text_scan_events_neon(const char* buf, size_t len,
                                      LeptrisScanEvent* events, size_t max);
 ptrdiff_t leptris_text_scan_run_avx2(const char* s, size_t len, char term,

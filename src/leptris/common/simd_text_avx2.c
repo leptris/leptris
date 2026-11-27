@@ -174,6 +174,49 @@ void leptris_text_count3_high_avx2(const char* s, size_t len,
     *valws_count = vws;
 }
 
+/* Fused copy + census ANY-flags (#2132): the x86 mirror of
+ * leptris_copy_census_neon. The bounded lane's scratch copy carries
+ * the census: '&' cmpeq mask, control (< 0x20 signed compare — the
+ * class is entirely below 0x80) mask, high-byte via the sign-bit
+ * movemask trick; masks OR-accumulate across chunks, one branch per
+ * class at the end. */
+void leptris_copy_census_avx2(char* dst, const char* src, size_t len,
+                              int* saw_high, int* amp_any,
+                              int* ctlws_any) {
+    const char* p = src;
+    const char* end = src + len;
+    char* q = dst;
+    const __m256i kamp = _mm256_set1_epi8('&');
+    const __m256i kctl = _mm256_set1_epi8(0x20);
+    const __m256i zero = _mm256_setzero_si256();
+    uint32_t acc_a = 0, acc_w = 0;
+    int h = 0;
+
+    while (end - p >= 32) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)p);
+        _mm256_storeu_si256((__m256i*)q, v);
+        acc_a |= (uint32_t)_mm256_movemask_epi8(
+            _mm256_cmpeq_epi8(v, kamp));
+        acc_w |= (uint32_t)_mm256_movemask_epi8(
+            _mm256_cmpgt_epi8(kctl, v));
+        h |= (_mm256_movemask_epi8(_mm256_cmpgt_epi8(zero, v)) != 0);
+        p += 32;
+        q += 32;
+    }
+    while (p < end) {
+        unsigned char ch = (unsigned char)*p;
+        *q = (char)ch;
+        if (ch >= 0x80) h = 1;
+        if (ch == '&') acc_a |= 1;
+        if (ch < 0x20) acc_w |= 1;
+        p++;
+        q++;
+    }
+    *saw_high = h;
+    *amp_any = acc_a != 0;
+    *ctlws_any = acc_w != 0;
+}
+
 #endif /* LEPTRIS_ARCH_X86 && __AVX2__ */
 
 /* #1842: one-pass text-run scan — AVX2 mirror of the NEON kernel:
