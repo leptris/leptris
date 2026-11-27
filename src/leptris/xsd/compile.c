@@ -112,6 +112,10 @@ struct leptris_xsd_schema {
      * element (namespace, name) twice — s4_2_2si01's duplicate root
      * pair after the vc: prune. Surfaced post-capture. */
     int dup_globals_failed;
+    /* #2184 (src-import.1/.2): an xs:import's @namespace and the
+     * imported document's targetNamespace disagree (target007).
+     * Surfaced post-capture. */
+    int import_failed;
     /* #2184: the xs:notation symbol table — the enumeration values of
      * a NOTATION-typed component must name these (simple095). */
     char** notations;
@@ -4755,6 +4759,95 @@ static int xsd_check_schema_source(struct leptris_xsd_schema* s,
     return bad;
 }
 
+/* #2184 (§3.2.3.2/§3.3.3.2 — the targetNamespace placement rules):
+ * a TOP-LEVEL declaration's targetNamespace must equal the schema's
+ * own; a LOCAL declaration may carry targetNamespace only inside a
+ * complexType RESTRICTION (the derivation context that redeclares
+ * base particles) and never together with @form (target001 legal vs
+ * target002/004/s3_2_3si01-si07). depth 0 = the xs:schema root's own
+ * child level (its element/attribute children are the top-level
+ * declarations). */
+static int xsd_check_tns_placement(struct leptris_xsd_schema* s,
+                                   LeptrisElement e, int depth,
+                                   int in_restriction, int has_ct) {
+    if (!e || depth > 32) return 0;
+    int top_level = (depth == 0);
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (!cl || !cu || strcmp(cu, XSD_NS) != 0) {
+            /* non-xs content: recurse without touching the context */
+            if (xsd_check_tns_placement(s, c, depth + 1, in_restriction,
+                                        has_ct) != 0)
+                return -1;
+            continue;
+        }
+        if (strcmp(cl, "element") == 0 || strcmp(cl, "attribute") == 0) {
+            const char* tns =
+                leptris_element_attribute(c, "targetNamespace");
+            if (tns && *tns) {
+                int bad = 0;
+                char why[160];
+                if (top_level) {
+                    /* §3.3.3.2/§3.2.3.2 cl. 2: equal to the schema's */
+                    const char* own = s->target_ns;
+                    bad = (!own || strcmp(own, tns) != 0);
+                    snprintf(why, sizeof(why),
+                             "a top-level declaration's "
+                             "targetNamespace must equal the "
+                             "schema's");
+                } else if (leptris_element_attribute(c, "form")) {
+                    bad = 1;
+                    snprintf(why, sizeof(why),
+                             "the form attribute is not allowed "
+                             "beside targetNamespace");
+                } else if (!in_restriction &&
+                           (!s->target_ns ||
+                            strcmp(s->target_ns, tns) != 0)) {
+                    /* outside a restriction the local declaration's
+                     * targetNamespace must equal the schema's own —
+                     * s3_2_3v01's equal form compiles, si01's
+                     * foreign one fails, target001 rides the
+                     * restriction context */
+                    bad = 1;
+                    snprintf(why, sizeof(why),
+                             "a local declaration's targetNamespace "
+                             "must equal the schema's or ride a "
+                             "restriction");
+                }
+                (void)has_ct;
+                if (bad) {
+                    char msg[400];
+                    const char* nm =
+                        leptris_element_attribute(c, "name");
+                    snprintf(msg, sizeof(msg),
+                             "src-%s.3: the %s '%s' carries "
+                             "targetNamespace '%s' but %s",
+                             cl, cl, nm ? nm : "?", tns, why);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+        }
+        int next_restriction = in_restriction;
+        int next_ct = has_ct;
+        if (strcmp(cl, "complexType") == 0) next_ct = 1;
+        if (strcmp(cl, "restriction") == 0 && next_ct)
+            next_restriction = 1;
+        else if (strcmp(cl, "extension") == 0) next_restriction = 0;
+        if (xsd_check_tns_placement(s, c, depth + 1, next_restriction,
+                                    next_ct) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                                          size_t len,
                                          const char* base_dir,
@@ -5003,16 +5096,21 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * one document declared the same global element twice after the
      * vc: prune (src-element.2 — s4_2_2si01's duplicate root pair).
      * Surfaced post-capture like the other parked flags. */
-    if (s->vc_failed || s->dup_globals_failed) {
+    if (s->vc_failed || s->dup_globals_failed || s->import_failed) {
         if (!s->error)
             xsd_set_error(s,
                           s->vc_failed
                               ? "vc: the version-controlled "
                                 "annotation value is malformed "
                                 "(§4.2.2)"
-                              : "src-element.2: two global element "
-                                "declarations share one namespace "
-                                "and name");
+                              : s->import_failed
+                                    ? "src-import: the import's "
+                                      "namespace and the imported "
+                                      "document's targetNamespace "
+                                      "disagree"
+                                    : "src-element.2: two global "
+                                      "element declarations share "
+                                      "one namespace and name");
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -5029,6 +5127,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
     if (root && xsd_check_schema_source(s, root, 0) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: the targetNamespace placement rules — a top-level
+     * declaration's tns must equal the schema's; a local one rides a
+     * restriction and never @form (target002/004, s3_2_3si01-si07). */
+    if (root && xsd_check_tns_placement(s, root, 0, 0, 0) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -6654,6 +6761,39 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                          * compiler had its own targetNamespace). */
                         int same_ns = subroot && (!tns || !s->target_ns ||
                                                   strcmp(tns, s->target_ns) == 0);
+                        /* #2184 (src-import.1/§4.2.3): the import's
+                         * @namespace and the imported document's own
+                         * targetNamespace must AGREE — an import
+                         * without @namespace references a
+                         * no-targetNamespace document, and an import
+                         * with @namespace references a document whose
+                         * tns is exactly it (target007). */
+                        if (subroot && strcmp(local, "import") == 0) {
+                            const char* want = leptris_element_attribute(
+                                (LeptrisElement)n, "namespace");
+                            if (!want || !*want) {
+                                if (tns && *tns) {
+                                    xsd_set_error(
+                                        s,
+                                        "src-import.1: the import "
+                                        "carries no namespace but the "
+                                        "imported document declares "
+                                        "one");
+                                    s->import_failed = 1;
+                                }
+                            } else if (!tns || strcmp(tns, want) != 0) {
+                                char msg[512];
+                                snprintf(msg, sizeof(msg),
+                                         "src-import.2: the import "
+                                         "names '%s' but the imported "
+                                         "document's targetNamespace "
+                                         "%s", want,
+                                         tns ? "differs"
+                                             : "is absent");
+                                xsd_set_error(s, msg);
+                                s->import_failed = 1;
+                            }
+                        }
                         /* #2208: an already-captured override/redefine
                          * target re-parses only to feed the directive
                          * arm below — its components are in the tables

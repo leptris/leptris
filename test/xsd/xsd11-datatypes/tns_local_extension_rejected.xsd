@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- target002: targetNamespace on a local element inside an
+     EXTENSION fails the schema. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:complexType name="B" abstract="true">
+    <xs:sequence>
+      <xs:any namespace="http://www.tns-ext.com/" processContents="lax"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="R">
+    <xs:complexContent>
+      <xs:extension base="B">
+        <xs:sequence>
+          <xs:element name="child" targetNamespace="http://www.tns-ext.com/" type="xs:integer"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="parent" type="R"/>
+</xs:schema>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- target004: targetNamespace on a local ATTRIBUTE inside an
+     extension fails the schema. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="B" abstract="true">
+    <xs:anyAttribute namespace="http://www.tns-attr.com/" processContents="lax"/>
+  </xs:complexType>
+  <xs:complexType name="R">
+    <xs:complexContent>
+      <xs:extension base="B">
+        <xs:attribute name="att" targetNamespace="http://www.tns-attr.com/" type="xs:integer"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="parent" type="R"/>
+</xs:schema>
