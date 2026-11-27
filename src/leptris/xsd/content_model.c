@@ -376,10 +376,22 @@ static int cm_not_ns_hits(XsdCm* any, const char* uri,
 }
 
 /* The open-content wildcard's admission for one child (positive
- * filter + notNamespace + notQName). */
+ * filter + notNamespace + notQName). #2184 (§3.10.4.1): the
+ * XML Schema namespace and the xsi namespace are RESERVED — a
+ * wildcard's namespace set never admits them, so an instance that
+ * smuggles schema-namespace elements past a lax wildcard fails
+ * (s3_4_6ii03's default-xmlns trick). */
+#define XSD_RESERVED_NS 2
+static const char* const k_xsd_reserved_ns[XSD_RESERVED_NS] = {
+    "http://www.w3.org/2001/XMLSchema",
+    "http://www.w3.org/2001/XMLSchema-instance"};
+
 static int oc_wildcard_admits(struct leptris_xsd_schema* s, XsdCm* w,
                               const char* uri, const char* names_c,
                               const char* tns) {
+    if (uri)
+        for (int i = 0; i < XSD_RESERVED_NS; i++)
+            if (strcmp(uri, k_xsd_reserved_ns[i]) == 0) return 0;
     if (!any_ns_matches(w, uri, w->any_unit_tns ? w->any_unit_tns
                                                 : tns))
         return 0;

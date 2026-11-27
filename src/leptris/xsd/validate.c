@@ -1086,6 +1086,36 @@ static void validate_children(struct xsd_validator* v,
                       "content model is empty");
         }
     }
+    /* #2184 §3.4.2.3 (cos-ct): an ELEMENT-ONLY content type admits
+     * whitespace between particles but no character content — the
+     * all-extension merge lets interleaved instances reach the
+     * counting match (all306.v01 against the element-only all307),
+     * so the text walk must run for every non-mixed particle model,
+     * not only the empty-content variety. */
+    if (!model->empty_content && !model->empty_upgraded && !ct->mixed &&
+        !ct->text_type) {
+        for (LeptrisNodeRef c =
+                 leptris_node_first_child(leptris_element_as_node(elem));
+             c; c = leptris_node_next_sibling(c)) {
+            if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_TEXT &&
+                leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_CDATA)
+                continue;
+            const char* t = leptris_text_node_get_content(c);
+            if (!t) continue;
+            int ws_only = 1;
+            for (const char* q = t; *q; q++)
+                if (*q != ' ' && *q != '\t' && *q != '\n' && *q != '\r')
+                    ws_only = 0;
+            if (ws_only) continue;
+            const char* pn = NULL;
+            leptris_element_expanded_name(elem, &pn, NULL, NULL);
+            verrf_atk(v, elem, "content-model", pn ? pn : "", "element",
+                      "#text",
+                      "character content is not allowed: the content "
+                      "type is element-only");
+            break;
+        }
+    }
     /* collect child names + uris */
     size_t n = 0;
     for (LeptrisNodeRef c =
