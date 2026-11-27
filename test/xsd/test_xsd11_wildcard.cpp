@@ -326,12 +326,16 @@ TEST(Xsd11Wildcard, ExtensionUnionCarriesBaseNotNamespace) {
         " processContents='skip'/></xs:extension>"
         "</xs:complexContent></xs:complexType>"
         "</xs:schema>";
-    /* devil-ns: the derived arm excludes; no-ns a: the base arm
-     * excludes -> both rejected by the union */
+    /* devil-ns: the derived arm excludes it and the base's
+     * positive set never admits it -> rejected; no-ns a: the
+     * derived (##any minus devil) arm ADMITS it, so the union
+     * admits (a name enters the union's disallowed set only when
+     * EVERY arm rejects it — the wild045.v1/wild046 manifest rows
+     * are the oracle) */
     EXPECT_EQ(0, verdict_text(
                      xsd, "<comp evil:eve='f'"
                           " xmlns:evil='http://devil.com/'/>"));
-    EXPECT_EQ(0, verdict_text(xsd, "<comp a='1'/>"));
+    EXPECT_EQ(1, verdict_text(xsd, "<comp a='1'/>"));
     EXPECT_EQ(1, verdict_text(xsd, "<comp ok='1'/>"));
 }
 
@@ -650,6 +654,13 @@ TEST(Xsd11Wildcard, CorpusInvalidRowsFlip) {
                                 "saxonData/Wild/wild025.n3.xml"));
     EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild026.xsd",
                                 "saxonData/Wild/wild025.n3.xml"));
+    /* wild046 pairs with wild045's instances in the manifest:
+     * c and xml:lang are rejected by BOTH arms; a and d stay
+     * valid (each admitted by one arm) */
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild046.xsd",
+                                "saxonData/Wild/wild045.n1.xml"));
+    EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild046.xsd",
+                                "saxonData/Wild/wild045.n2.xml"));
     EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild027.xsd",
                                 "saxonData/Wild/wild027.n1.xml"));
     EXPECT_EQ(0, corpus_verdict("saxonData/Wild/wild028.xsd",
