@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- #2206: the restriction LADDER with the bare builtin spelling —
+     the derived type's own assertion and the inherited base
+     assertion both name `double` unprefixed (no
+     xpathDefaultNamespace). Both levels must evaluate (§3.16.6). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" vc:minVersion="1.1"
+  xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning">
+  <xs:simpleType name="base_t">
+    <xs:restriction base="xs:string">
+      <xs:assertion test="$value castable as double"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="derived_t">
+    <xs:restriction base="base_t">
+      <xs:assertion test="string-length($value) le 12"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element name="n" type="derived_t"/>
+</xs:schema>
