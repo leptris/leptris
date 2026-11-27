@@ -345,11 +345,13 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * uninitialized ##definedSibling expansion buffer — is fixed in the
  * same wave, so the 1909-vs-1908 platform delta it carried should
  * be gone; re-pin on the first cross-platform measure if any row
- * still straddles. */
-    EXPECT_GE(pass, 1926) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1212);
-    EXPECT_GE(pass_invalid, 492);
-    EXPECT_GE(pass_schema_error, 161);
+ * still straddles. Re-measured on the MERGED base (the wave-3
+ * xitype class + this wave): **1984/2206** — 1252 valid / 543
+ * invalid / 189 schema-error (measured 2026-11-27). */
+    EXPECT_GE(pass, 1984) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1252);
+    EXPECT_GE(pass_invalid, 543);
+    EXPECT_GE(pass_schema_error, 189);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
