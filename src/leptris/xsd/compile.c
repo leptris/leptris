@@ -35,7 +35,7 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
-                             int* oc_from);
+                             int* oc_from, unsigned char* oc_attr);
 
 struct leptris_xsd_schema {
     size_t declaration_count;
@@ -10217,7 +10217,7 @@ LEPTRIS_API int leptris_xsd_content_valid(
     if (!model) return child_count == 0;
 
     int ok = xsd_content_valid(s, model, s->target_ns, child_names,
-                               child_ns, child_count, NULL);
+                               child_ns, child_count, NULL, NULL);
     /* #1894: -2 = the model crosses the automaton size cap — surface
      * the loud structured row and keep the public contract's -1 for
      * "not evaluable". */

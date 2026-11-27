@@ -655,7 +655,7 @@ static int all_oc_interleave(XsdCm* all, XsdCm* w,
 int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
                       const char* const* ns_uris, size_t count,
-                      int* oc_from) {
+                      int* oc_from, unsigned char* oc_attr) {
     if (!model) return -1;
     if (model->kind == XSD_CM_ALL && model->first_child) {
         /* #2151: an open content over an xs:all model — the all's
@@ -708,14 +708,17 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
         }
     }
 
-    /* #2151: the greedy-attribution trace (§3.4.4.3 cl. 2.3/3.3).
-     * Children before `oc_from` are attributed to the model's
-     * particles; children at/after it may be attributed to the open
-     * content — a particle-only re-run (oc loops suppressed) finds
-     * where the model stops matching: the first index its live set
-     * dies. -1 = the model alone accepts everything (no divergence). */
-        if (oc_from) {
-        *oc_from = -1;
+    /* #2151: the attribution trace (§3.4.4.3 cl. 2.3/3.3). Children
+     * attributed to the open content type by the wildcard's
+     * processContents instead of the name-matched particle; children
+     * governed by a particle keep facing their declared type
+     * (open025.n1: the mis-typed integer is caught). The per-child
+     * verdict lands in oc_attr (1 = wildcard-attributed, 0 =
+     * governed); oc_from keeps the first wildcard-attributed index
+     * (or -1) for the reporting path. */
+    if (oc_from || oc_attr) {
+        if (oc_from) *oc_from = -1;
+        if (oc_attr && count) memset(oc_attr, 0, count);
         if (model->open_any && model->oc_mode) {
             CmNfa p;
             memset(&p, 0, sizeof(p));
@@ -741,10 +744,15 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
             ss_add(&plive, p.start);
             ss_close(&plive, &p);
             int died = -1;
-            for (size_t c = 0; c < count && died < 0; c++) {
+            for (size_t c = 0; c < count; c++) {
                 StateSet next;
                 memset(&next, 0, sizeof(next));
                 const char* uri = ns_uris ? ns_uris[c] : NULL;
+                /* greedy particle-first (§3.4.4.3 cl. 3.3): when a
+                 * model particle can match the child, the child is
+                 * the particle's instance — the wildcard span may
+                 * not claim it (open025.n1's mis-typed second <i>). */
+                int hit_any = 0;
                 for (size_t i = 0; i < plive.count; i++) {
                     for (size_t t = 0; t < p.count; t++) {
                         CmTrans* tr = &p.trans[t];
@@ -794,13 +802,36 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                                                     names[c], uri)))
                                 hit = 1;
                         }
-                        if (hit) ss_add(&next, tr->to);
+                        if (hit) {
+                            ss_add(&next, tr->to);
+                            hit_any = 1;
+                        }
                     }
                 }
-                free(plive.states);
-                plive = next;
-                ss_close(&plive, &p);
-                if (plive.count == 0) died = (int)c;
+                if (hit_any) {
+                    free(plive.states);
+                    plive = next;
+                    ss_close(&plive, &p);
+                    continue;
+                }
+                free(next.states);
+                /* no particle matches: the interleave wildcard may
+                 * absorb the child in place (the walk stays); suffix
+                 * mode ends the model's participation here — the old
+                 * prefix-cut law (children from the divergence ride
+                 * the wildcard) applies. */
+                if (model->oc_mode == 2 &&
+                    oc_wildcard_admits(s, model->open_any, uri,
+                                       names[c],
+                                       model->open_any->any_unit_tns
+                                           ? model->open_any->any_unit_tns
+                                           : target_ns)) {
+                    if (oc_attr) oc_attr[c] = 1;
+                    if (oc_from && *oc_from < 0) *oc_from = (int)c;
+                    continue;
+                }
+                died = (int)c;
+                break;
             }
             if (died < 0) {
                 int paccept = 0;
@@ -808,9 +839,21 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                     if (plive.states[i] == p.accept) paccept = 1;
                 if (!paccept) died = (int)count;
             }
+            if (died >= 0 && model->oc_mode == 1) {
+                /* suffix: extras trail — everything from the
+                 * divergence on is the wildcard's (open047.v3's
+                 * second <b> in a suffix shape) */
+                if (oc_from) *oc_from = died;
+                if (oc_attr && count)
+                    for (size_t i = (died > 0 ? (size_t)died : 0);
+                         i < count; i++)
+                        oc_attr[i] = 1;
+            }
+            /* interleave with a dead walk: the content is invalid —
+             * the walk's own attribution stands (the absorbed prefix
+             * stays attributed, the killer child is governed). */
             free(plive.states);
             free(p.trans);
-            if (died >= 0) *oc_from = died;
         }
     }
 

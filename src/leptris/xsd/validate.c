@@ -22,7 +22,7 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
-                             int* oc_from);
+                             int* oc_from, unsigned char* oc_attr);
 extern int xsd_builtin_valid(const char* type, const char* v);
 extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
@@ -1151,16 +1151,26 @@ static void validate_children(struct xsd_validator* v,
      * never failed. Zero children still walks: the NFA accepts the
      * empty string only when every particle reaches accept with
      * min == 0. names/uris stay NULL (never dereferenced at n==0). */
-    /* #2151: the greedy-attribution trace — children from `oc_from`
-     * on may be attributed to the open content (the model's particle
-     * path diverged there), so they type by the wildcard's
-     * processContents instead of the name-matched particle
-     * (open047.v3: the second <b> rides the skip wildcard and is
-     * NOT type-checked; open025.n1: the first <i> still faces its
-     * declared type). */
+    /* #2151: the attribution trace — children attributed to the open
+     * content (oc_attr[i]) type by the wildcard's processContents
+     * instead of the name-matched particle (open047.v3: the second
+     * <b> rides the skip wildcard and is NOT type-checked;
+     * open025.n1: the first <i> still faces its declared type). The
+     * interleaved walk attributes per child (§3.4.4.3 cl. 3.3 greedy
+     * particle-first), so a declared particle after a wildcard span
+     * still governs its own instance. */
     int oc_from = -1;
+    unsigned char* oc_attr = NULL;
+    if (n > 0) {
+        oc_attr = (unsigned char*)calloc(n, 1);
+        if (!oc_attr) {
+            free(names);
+            free(uris);
+            return;
+        }
+    }
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
-                               n, &oc_from);
+                               n, &oc_from, oc_attr);
     if (ok == -2) {
         /* #1894/#514: pathological occurrence product — the automaton
          * exceeds the compile-time size cap. The cap is a resource
@@ -1171,6 +1181,7 @@ static void validate_children(struct xsd_validator* v,
          * and the walk continues; under-report, never false-report. */
         free(names);
         free(uris);
+        free(oc_attr);
         return;
     }
     if (ok) {
@@ -1243,13 +1254,15 @@ static void validate_children(struct xsd_validator* v,
         const char* cl = NULL, *cp = NULL, *cu = NULL;
         leptris_element_expanded_name(ce, &cl, &cp, &cu);
         if (!cl) continue;
-        /* #2151: children from the trace's divergence point on may be
-         * attributed to the open content — their processContents is
-         * the OC wildcard's own, and the name-matched particle does
-         * NOT govern them (the model's particle path already
-         * diverged). */
+        /* #2151: children attributed to the open content (the
+         * trace's per-child walk — §3.4.4.3 cl. 3.3) type by the
+         * wildcard's processContents, and the name-matched particle
+         * does NOT govern them; a governed child keeps facing its
+         * declared type even after a wildcard span (interleave). */
         int oc_attributed =
-            oc_from >= 0 && (int)child_i >= oc_from && model->open_any;
+            oc_attr ? oc_attr[child_i] != 0
+                    : (oc_from >= 0 && (int)child_i >= oc_from &&
+                       model->open_any);
         child_i++;
         /* #1879: wildcard processContents gates the child — skip
          * imposes no constraint at all (even a declared child);
@@ -1399,6 +1412,7 @@ static void validate_children(struct xsd_validator* v,
          * strict and lax alike admit undeclared names (the pinned
          * moxml#460 notQName semantics — tier-1 lax direction) */
     }
+    free(oc_attr);
 }
 
 /* $value binds typed: a numeric-derived simple type binds the
