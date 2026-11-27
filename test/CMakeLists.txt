@@ -203,7 +203,8 @@ target_compile_definitions(test_xsd11_datatypes PRIVATE
 # vacuous tables).
 leptris_add_test(test_xsd11_ic xsd/test_xsd11_ic.cpp)
 target_compile_definitions(test_xsd11_ic PRIVATE
-    LEPTRIS_XSD11_IC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-ic")
+    LEPTRIS_XSD11_IC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-ic"
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 # #2150: xs:override (XSD 1.1 §4.3) spec tests.
 leptris_add_test(test_xsd11_override xsd/test_xsd11_override.cpp)
 target_compile_definitions(test_xsd11_override PRIVATE
