@@ -282,6 +282,12 @@ XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
 struct xsd_alternative {
     char* test;             /* wire text, for reporting */
     LeptrisXQuery compiled; /* NULL when compilation failed */
+    /* #2184 (§3.13.2): the test's {namespace bindings} +
+     * {xpathDefaultNamespace} as an XQuery prolog — prefixes bind
+     * in the SCHEMA document (cta0002's @c2:min over the
+     * instance's c: spelling), captured at the alternative
+     * element like the assert/assertion lane. */
+    char* ns_prolog;
     char* type;             /* the selected type name */
     int xs_error;           /* the selection is xs:error (no valid
                              * instances — always invalid, §2.2.1.1) */
