@@ -7012,7 +7012,7 @@ static void xsd_cta_test_attrs(const char* test, char*** out,
  * resolved like the IC lane — prefixed against the host's in-scope
  * bindings, unprefixed through xpathDefaultNamespace (§3.13.2).
  * Unresolved names stay posture (the parse gate owns syntax). */
-static int xsd_ncname_char(char c) {
+static int xsd_ncname_char_compile(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '_' || c == '.' ||
            c == '-' || (unsigned char)c >= 0x80;
@@ -7038,9 +7038,9 @@ static void xsd_cta_scan_cast_targets(struct leptris_xsd_schema* s,
             if (*p) p++;
             continue;
         }
-        if (xsd_ncname_char(*p)) {
+        if (xsd_ncname_char_compile(*p)) {
             size_t n = 0;
-            while (*p && xsd_ncname_char(*p)) {
+            while (*p && xsd_ncname_char_compile(*p)) {
                 if (n + 1 < sizeof(tok)) tok[n++] = *p;
                 p++;
             }
@@ -7051,17 +7051,17 @@ static void xsd_cta_scan_cast_targets(struct leptris_xsd_schema* s,
                 strncmp(p, " as", 3) != 0 ||
                 (p[3] && p[3] != ' ' && p[3] != '\t' &&
                  p[3] != '\n' && p[3] != '\r' &&
-                 !xsd_ncname_char(p[3])))
+                 !xsd_ncname_char_compile(p[3])))
                 continue;
             p += 3;
             while (*p == ' ' || *p == '\t' || *p == '\n' ||
                    *p == '\r')
                 p++;
             /* the SequenceType's QName (+ optional '?') */
-            if (!xsd_ncname_char(*p)) continue;
+            if (!xsd_ncname_char_compile(*p)) continue;
             char qn[256];
             size_t qn_n = 0;
-            while ((*p && xsd_ncname_char(*p)) || *p == ':') {
+            while ((*p && xsd_ncname_char_compile(*p)) || *p == ':') {
                 if (qn_n + 1 < sizeof(qn)) qn[qn_n++] = *p;
                 p++;
             }
