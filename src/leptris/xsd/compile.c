@@ -2925,9 +2925,24 @@ static int xsd_check_refs_walk(LeptrisElement root,
          * loaded declaration — a locationless
          * <xs:import namespace="...XML/1998/namespace"/> provides
          * nothing by design (leptris-ruby#478). */
-        if (!(strcmp(ruri, "http://www.w3.org/XML/1998/namespace") == 0 &&
-              (strcmp(rlocal, "lang") == 0 || strcmp(rlocal, "space") == 0 ||
-               strcmp(rlocal, "base") == 0 || strcmp(rlocal, "id") == 0)) &&
+        int xml_builtin =
+            strcmp(ruri, "http://www.w3.org/XML/1998/namespace") == 0 &&
+            (strcmp(rlocal, "lang") == 0 || strcmp(rlocal, "space") == 0 ||
+             strcmp(rlocal, "base") == 0 || strcmp(rlocal, "id") == 0);
+        /* #2184: the xsi namespace's four attribute declarations are
+         * BUILT IN to every schema (XSD 1.1 §3.2.7) and resolve
+         * without a loaded declaration (§3.17.6.2 cl. 4.2.4; G.1.15
+         * #5 — no xs:import of the instance namespace is needed).
+         * Attribute USES referencing them are legal schema syntax
+         * (§3.2.6.4 Note) — the complex003-010 ref gates. */
+        int xsi_builtin =
+            strcmp(l, "attribute") == 0 &&
+            strcmp(ruri,
+                   "http://www.w3.org/2001/XMLSchema-instance") == 0 &&
+            (strcmp(rlocal, "type") == 0 || strcmp(rlocal, "nil") == 0 ||
+             strcmp(rlocal, "schemaLocation") == 0 ||
+             strcmp(rlocal, "noNamespaceSchemaLocation") == 0);
+        if (!xml_builtin && !xsi_builtin &&
             !xsd_decls_contain(decls, ndecls, ruri, rlocal)) {
             char msg[512];
             snprintf(msg, sizeof(msg),
@@ -7725,8 +7740,56 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                 }
             } else {
                 /* ref to a top-level attribute declaration */
-                const char* ref = xsd_local_name(
-                    leptris_element_attribute(ae, "ref"));
+                const char* refattr =
+                    leptris_element_attribute(ae, "ref");
+                const char* ref = xsd_local_name(refattr);
+                /* #2184: the four BUILT-IN xsi declarations
+                 * (§3.2.7) resolve without any schema document
+                 * (§3.17.6.2 cl. 4.2.4) — ref="xsi:type" must never
+                 * bind a same-local-name declaration in the schema's
+                 * own namespace. The {value constraint} rides the
+                 * USE (§3.2.2.3: the use element's own default/
+                 * fixed attribute; the built-in declaration has
+                 * none), and the built-in type stays uninterpreted
+                 * (NULL = anySimple posture: text_valid accepts any
+                 * lexical, and §3.4.4.2 cl. 2 excepts xsi
+                 * attributes from the strict walk). The use has NO
+                 * defaulting effect at assessment (§3.4.4.2 cl. 4
+                 * of the defaulted-attribute definition: a use whose
+                 * declaration is one of the built-ins is excluded),
+                 * but its occurrence constraint bites (cl. 3:
+                 * use="required" — complex009/complex010) and its
+                 * fixed value checks a PRESENT attribute
+                 * (§3.5.4 — complex007). */
+                char refuri[256], reflocal[128];
+                refuri[0] = 0;
+                reflocal[0] = 0;
+                if (refattr)
+                    xsd_resolve_qname(ae, refattr, refuri,
+                                      sizeof(refuri), reflocal,
+                                      sizeof(reflocal));
+                if (reflocal[0]) ref = reflocal;
+                int xsi_builtin =
+                    strcmp(refuri,
+                           "http://www.w3.org/2001/XMLSchema-instance") ==
+                        0 &&
+                    ref && ref[0] &&
+                    (strcmp(ref, "type") == 0 ||
+                     strcmp(ref, "nil") == 0 ||
+                     strcmp(ref, "schemaLocation") == 0 ||
+                     strcmp(ref, "noNamespaceSchemaLocation") == 0);
+                if (xsi_builtin) {
+                    d->name = xsd_strdup(ref);
+                    d->ns = xsd_strdup(
+                        "http://www.w3.org/2001/XMLSchema-instance");
+                    d->fixed = xsd_strdup(
+                        leptris_element_attribute(ae, "fixed"));
+                    d->required =
+                        (use && strcmp(use, "required") == 0);
+                    d->prohibited =
+                        (use && strcmp(use, "prohibited") == 0);
+                    d->inheritable = inh >= 0 ? inh : 0;
+                } else {
                 const XsdAttrDecl* src =
                     ref ? xsd_find_top_attr(s, ref) : NULL;
                 if (!src && !ref) {
@@ -7765,6 +7828,7 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                                            0)
                                         : src->prohibited;
                     if (inh < 0) d->inheritable = src->inheritable;
+                }
                 }
             }
             if (tail)
