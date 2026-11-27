@@ -240,6 +240,13 @@ leptris_add_test(test_xsd11_all xsd/test_xsd11_all.cpp)
 target_compile_definitions(test_xsd11_all PRIVATE
     LEPTRIS_XSD11_ALL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-all"
     LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
+# #2184: the ID bookkeeping wave — the 1.1 one-ID relaxation (the
+# declared multi-ID table is 1.1 evidence) and the ID/IDREF register +
+# resolve integrity; the saxon Id / ibm S3_3_4 fixtures ride the
+# pinned xsd11-cases corpus.
+leptris_add_test(test_xsd11_multid xsd/test_xsd11_multid.cpp)
+target_compile_definitions(test_xsd11_multid PRIVATE
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
