@@ -305,9 +305,25 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * stable minimum **1908**: CI measures 1908 uniformly on every
  * platform (linux amd64/arm64, s390x qemu, windows, amalgamated);
  * a local macOS run passes at 1909 — the one-row delta is the
- * #2214 process-context quirk, tracked there. */
-    EXPECT_GE(pass, 1908) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1194);
+ * #2214 process-context quirk, tracked there. Raised by #2184 wave 3
+ * (the defaulted-xsi:type class: the four BUILT-IN xsi declarations
+ * resolve for attribute uses without an import (§3.17.6.2 cl. 4.2.4
+ * — the src-element.2 artifact retires for complex003-010) and
+ * capture with their {value constraint} riding the USE (§3.2.2.3);
+ * the default has NO effect at assessment (§3.4.4.2 cl. 4 of the
+ * defaulted-attribute definition — §3.2.6.4's "would have no effect"
+ * note) so the defaulted forms judge against the declared type; the
+ * use's occurrence constraint bites (cl. 3 — complex009/complex010
+ * use="required"); and an explicit xsi:type must OVERRIDE the
+ * selected type (§3.3.4.3 cl. 4) — a SIMPLE named type is never
+ * substitutable for a COMPLEX selected type (§3.3.4.2 has no such
+ * arm), so the complex005 explicit forms are invalid with assessment
+ * falling back to the selected type (§3.3.4.3 Note), complex-over-
+ * complex keeping the pinned lax direction; spec tests
+ * test/xsd/test_xsd11_xitype.cpp (10 specs, red-first)): +18 rows on
+ * the wildcard-union base, disjoint classes → **1926/2206**. */
+    EXPECT_GE(pass, 1926) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1212);
     EXPECT_GE(pass_invalid, 492);
     EXPECT_GE(pass_schema_error, 161);
     RecordProperty("pass_valid", std::to_string(pass_valid));

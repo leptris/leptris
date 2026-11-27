@@ -347,7 +347,10 @@ weakened-UPA sequences (`s3_10_1v04/05/06`), restriction of `xs:all`
 (`s3_8_6v01`), xsi:type-with-default (`complex003+`), override
 (`s3_12v09`, `s3_12ii04`). (#2155 retired the two datatype members of
 this list: `xs:dateTimeStamp` (`zone101`) and `xs:precisionDecimal`
-(`pdecimal001`) now compile and type.) Treat the status artifact as
+(`pdecimal001`) now compile and type. #2184 wave 3 retired the
+xsi:type-with-default member: the built-in xsi declarations resolve
+for attribute uses — `complex003/004/005/006/007/009/010.xsd` compile
+clean.) Treat the status artifact as
 part of each construct class below, not a separate lane.
 
 A second quirk, pre-existing and address-layout dependent (surfaced
@@ -377,7 +380,11 @@ assertion-facet rows invalid-side — the gate split moves
 132 invalid / 166 schema-error reds; #2184 flips 15 cta
 schema-error rows: 101 valid / 89 invalid / 177 schema-error reds;
 #2184 wave 2 flips 4 override schema-error rows + 2 override/core
-invalid rows: 101 valid / 87 invalid / 173 schema-error reds).
+invalid rows: 101 valid / 87 invalid / 173 schema-error reds;
+#2184 wave 3 flips 18 defaulted-xsi:type rows valid-side (7 schema
++ 11 instance): 83 valid / 118 invalid / 142 schema-error reds
+(re-measured split, manifest expectation field — the wave-2 line's
+87/173 came from the pre-suite_rejected accounting)).
 
 ## valid rejected by the engine (153)
 
@@ -386,7 +393,7 @@ invalid rows: 101 valid / 87 invalid / 173 schema-error reds).
 | 41 | saxon Open: openContent — allowed extra elements after (and with `mode="interleaved"`, among) the declared particles rejected ("children do not match the content model") | CLOSED by #2151 — suffix + interleave absorption over sequence/all/choice models (§3.4.4.3: the wildcard absorbs before ANY model element step), defaultOpenContent capture with per-document unit scoping, the empty-variety rules, extension inheritance/union; the family's only remaining reds are the defaultAttributes sub-family (new row in the invalid table) |
 | 17 | saxon Wild valid: instances exercising 1.1 wildcard namespace sets (`notNamespace`, `notQName`, `namespace="a b"`) wrongly excluded ("excluded by notQName") | OPEN — partially closed by #2184's negative-set wiring (wild083.v1 flipped); the remaining rows are the derived/union valid shapes (wild030/wild047/wild052/wild072) plus the four `##definedSibling` repeated-sibling `.n1` rows that FAIL ONLY in the conformance runner and pass standalone (see the runner quirk below) |
 | 19 | saxon All + ibm S3_3_6/S3_4_6: `xs:all` with relaxed occurrences (min/max > 1) and RESTRICTION of xs:all rejected | OPEN — content model for relaxed xs:all (1.1 allows 0..N particles) not built |
-| 18 | saxon Complex: `<xs:attribute ref="xsi:type" default="..."/>` — instance-determined type via a DEFAULTED xsi:type attribute | OPEN — xsi:type honoring missing wholesale (same class as the 1.0 lane's complex-type-extension row); the defaulted form is 1.1-only syntax |
+| 18 | saxon Complex: `<xs:attribute ref="xsi:type" default="..."/>` — instance-determined type via a DEFAULTED xsi:type attribute | CLOSED by #2184 wave 3 — the four BUILT-IN xsi declarations (§3.2.7) resolve for attribute uses without an import (§3.17.6.2 cl. 4.2.4: the `src-element.2` artifact — complex003/004/005/006/007/009/010.xsd compile clean) and capture as uses whose {value constraint} rides the USE (§3.2.2.3); the DEFAULT has NO effect at assessment (§3.4.4.2 cl. 4 of the defaulted-attribute definition excludes the built-in declarations — "the attribute uses would have no effect", §3.2.6.4 Note), so complex003/004 judge the instance against the declared decimal content type and complex006's defaulted xsi:nil never substitutes (n3's bare `<root/>` fails the lexical); the use's occurrence constraint still bites (§3.4.4.2 cl. 3 — complex009/complex010's use="required"); and an EXPLICIT xsi:type must override the selected type (§3.3.4.3 cl. 4) — a SIMPLE type is never substitutable for a COMPLEX selected type (§3.3.4.2 has no such arm), so every complex005 instance naming xs:integer/xs:short is invalid with assessment falling back to the selected type; complex-over-complex keeps the pinned lax direction (derivation-ok walking unentered) |
 | 17 | saxon Id + ibm S3_3_4: multiple ID-typed attributes on one type — legal since 1.1, engine still enforces the 1.0 one-ID-per-element rule | OPEN — the one-ID gate needs an engine version flip (gate exists: "more than one ID-typed attribute (XSD 1.0 one-ID-per-element)") |
 | 14 | saxon/oracle Zone: valid timezone-bearing dateTime/time lexicals (±14:00, explicitTimezone-compliant) rejected as "lexical value does not match its type" | CLOSED by #2155 — the ±14:00 lexical rows, the timezone-bound d3_3_9..14 rows and zone202's year-zero enumeration flipped (the temporal-key enumeration equality now admits "-0000-02" over the enumerated "0000-02") |
 | 4 | saxon Zone zone206/301/302: time enumerations with instant-equal timezone-distinct values, and the keyref `t` failing to resolve ("keyref 't': reference does not resolve to any key") | OPEN — zone206's enumeration equality is in place; the remaining blocker for the keyref rows is VALUE-space tuple comparison (§3.11.4: "equal or identical ... on the values") — the constraint now RUNS (#2156 fixed the capture + scoping) but tuple equality is still string-based, so PT29H never equals P1DT5H |
