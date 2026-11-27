@@ -149,6 +149,33 @@ static char* mut_str_carve(struct leptris_document* doc, const char* s,
     return p;
 }
 
+/* #2132 mutcycle: the field-init half of assign-instead-of-clear.
+ * Assigns EVERY leptris_element field the create branches do not
+ * themselves set, so a carved slot — recycled from a previous
+ * document or freshly malloc'd — never carries stale bits into a new
+ * element. The branches assign base.type, header.flags (NAMEBP),
+ * name_off (elem_set_name_doc), name_hash, and name_len; everything
+ * else lands here. 44 bytes of plain stores, one write pass over the
+ * element, no memset call (the old bulk memset rewrote the same cache
+ * lines create was about to write). Pin: MutCarve.
+ * RecycledBlocksYieldFullyInitializedElements. */
+static inline void mut_elem_init_fields(LeptrisElement e) {
+    e->base.frozen = 0u;
+    e->base.raw = 0u;
+    e->base.version = 0u;
+    e->base.line = 0u;
+    e->header.page_offset = 0u;
+    e->header.flags = 0u;
+    e->attr_count = 0u;
+    e->child_count = 0u;
+    e->ns_cache_off = 0;
+    e->parent_off = 0;
+    e->first_child_off = 0;
+    e->next_sibling_off = 0;
+    e->first_attribute_off = 0;
+    e->name_off = 0;
+}
+
 /* Round 18: carve mutation elements from a per-document contiguous
  * bump block. The pool extension path malloc'd each element
  * separately, scattering them across heap regions — sibling edges
@@ -156,6 +183,18 @@ static char* mut_str_carve(struct leptris_document* doc, const char* s,
  * every fresh malloc paid allocator + page costs. Contiguous
  * carving keeps sequential-append elements cache-adjacent. Blocks
  * chain via ->next and are freed with the document. */
+/* #2132 mutcycle (2nd lever, ~6.3% of the row): the block-acquire
+ * bulk memset is GONE — create assigns every field instead. The
+ * memset wrote all 44 bytes per element in one pass and create then
+ * rewrote its fields: double the write bandwidth over the same
+ * cache lines, plus the libc call per block. leptris_element_create
+ * now runs mut_elem_init_fields (plain stores of the fields it does
+ * not otherwise set), so each carved element is written exactly
+ * once. Recycled blocks hold a previous document's values and fresh
+ * mallocs hold garbage — both need the full assignment set, which is
+ * what makes the skip sound (spec: MutCarve.RecycledBlocksYield-
+ * FullyInitializedElements). mut_attr_carve / mut_str_carve have
+ * always lived assign-only; the elem block was the odd one out. */
 static LeptrisElement mut_elem_carve(struct leptris_document* doc) {
     if (doc->mut_elem_cursor && doc->mut_elem_cursor < doc->mut_elem_end) {
         return doc->mut_elem_cursor++;
@@ -168,14 +207,6 @@ static LeptrisElement mut_elem_carve(struct leptris_document* doc) {
             (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
         if (!blk) return NULL;
     }
-    /* Zero ONCE per block, in one bulk pass, instead of per element
-     * at carve (#2132): the per-element memset's call overhead sat in
-     * the create hot path. Fresh-malloc blocks are NOT guaranteed
-     * zeroed (ISO C) and recycled blocks hold a previous document's
-     * field values — both need the pass. */
-    memset(blk->bytes, 0,
-           (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
-
     blk->next = doc->mut_elem_blocks;
     doc->mut_elem_blocks = blk;
     doc->mut_elem_cursor = (LeptrisElement)blk->bytes;
@@ -227,6 +258,14 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
         if (name_len == 255 && name[255]) name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
+            /* #2132 mutcycle: assign-instead-of-clear — the block
+             * acquire no longer bulk-zeroes, so every field the
+             * branches below do not set is assigned here (recycled
+             * storage holds the previous document's values; fresh
+             * mallocs hold garbage). Plain stores fold into the
+             * branch assignments' cache lines: one write pass over
+             * the element, no memset call. */
+            mut_elem_init_fields(elem);
             /* #2132 phase 2: per-document name interning — the
              * default create path for colon-free names. The table
              * maps name bytes -> one shared mut-block slot (doc-
@@ -278,9 +317,8 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
                 }
             }
             if (shared) {
-                /* mut_elem_carve bulk-zeroed the block at acquire —
-                 * the unassigned fields are zero from that pass. No
-                 * split_qname here: the name is colon-free by the
+                /* mut_elem_init_fields assigned the rest at carve —
+                 * no split_qname here: the name is colon-free by the
                  * gate AND the slot is shared — #846's in-place
                  * split must never see an interned slot. */
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
@@ -293,10 +331,8 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
             }
             char* name_copy = leptris_dom_name_slot_carve(doc, name, name_len);
             if (name_copy) {
-                /* mut_elem_carve bulk-zeroed the block at acquire —
-                 * the per-element memset is gone (#2132). The fields
-                 * not assigned below (parent/child/sibling/attr/ns
-                 * offsets, counts) are zero from that pass. */
+                /* mut_elem_init_fields assigned the fields not set
+                 * below (#2132: the block-acquire memset is gone). */
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
                 elem->header.flags |= LEPTRIS_NAMEBP_FLAG;
                 elem_set_name_doc(elem, name_copy, doc);
@@ -330,8 +366,9 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
             } else {
                 /* Long name or block alloc failure: fall through to
                  * the pool path (registration follows below — pool
-                 * names carry no backpointer). */
-                memset(elem, 0, sizeof(struct leptris_element));
+                 * names carry no backpointer). mut_elem_init_fields
+                 * already assigned every field at carve; flags stay 0
+                 * (pool names carry no NAMEBP). */
                 char* pooled = leptris_pool_strdup(doc->pool, name);
                 if (!pooled) return NULL;
                 elem->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
@@ -379,7 +416,10 @@ LeptrisElement leptris_element_new_with_attributes(
  * one public frame instead of two of each. */
 LeptrisElement leptris_element_create_child(LeptrisElement parent, const char* name) {
     if (!parent || !name) return NULL;
-    struct leptris_document* doc = leptris_element_get_document(parent);
+    /* #2132: inline first-tier resolve — see
+     * leptris_element_get_document_mutation. */
+    struct leptris_document* doc =
+        leptris_element_get_document_mutation(parent);
     if (!doc || !doc->pool) return NULL;
     LeptrisElement elem = leptris_element_create(doc, name);
     if (!elem) return NULL;
@@ -562,15 +602,18 @@ LeptrisStatus leptris_element_add_child_addr_installed(
      * foreign original, which dies with its document (#1636).
      * This face always reports the effective node. */
     LeptrisElement original = (LeptrisElement)child_addr;
-    if (leptris_element_get_document(original) ==
-        leptris_element_get_document((LeptrisElement)parent_addr)) {
+    /* #2132: inline first-tier resolves (same face family as
+     * append_child — the binding fragment loop rides this). */
+    if (leptris_element_get_document_mutation(original) ==
+        leptris_element_get_document_mutation(
+            (LeptrisElement)parent_addr)) {
         return leptris_element_append_child(
             (LeptrisElement)parent_addr, original);
     }
 
     LeptrisElement installed =
         (LeptrisElement)adopt_for_splice((LeptrisNode*)original,
-                                         leptris_element_get_document(
+                                         leptris_element_get_document_mutation(
                                              (LeptrisElement)parent_addr));
     if (!installed) return LEPTRIS_ERROR_MEMORY;
 
@@ -587,8 +630,12 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
 
     /* Single document resolution per mutation (TODO 195c): the
      * root walk + map lookup was paid three times per append
-     * (twice here, once inside the internal for the tail cache). */
-    struct leptris_document* doc = leptris_element_get_document(parent);
+     * (twice here, once inside the internal for the tail cache).
+     * #2132: the builder-loop shape answers through the inlined
+     * first tier (leptris_element_get_document_mutation) — the
+     * out-of-line call was ~11% of the profiled mutcycle row. */
+    struct leptris_document* doc =
+        leptris_element_get_document_mutation(parent);
 
     /* #1636: appending a node into its own descendant subtree
      * builds a parent cycle — every tree walker (serializer
@@ -610,9 +657,20 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
      * own descendant must keep rejecting. parent == child stays
      * unconditional and the walk still sees the ORIGINAL child
      * before any #1528 adoption, so accept/reject decisions are
-     * identical to the unconditioned guard. */
+     * identical to the unconditioned guard.
+     *
+     * #2132 (spec: SameDocAppendOfAttachedChildMoves Case B): the
+     * splice below also assumes the child has NO parent — the
+     * create-time zeroed parent edge, "no unlink". A fresh childless
+     * child that was already appended elsewhere is still in the
+     * extent, and splicing it under a second parent left the old
+     * parent counting it (double parentage). The parentless leg
+     * completes the proof chain; attached children take the general
+     * path, whose unlink gives the move contract the non-fresh path
+     * already defined. */
     int child_fresh = node_in_current_mut_block(doc, child) &&
-                      (leptris_elem_first_child(child) == NULL);
+                      (leptris_elem_first_child(child) == NULL) &&
+                      (leptris_elem_parent(child) == NULL);
 
     if (parent == child) return LEPTRIS_ERROR_INVALID_ARG;
 
@@ -621,10 +679,10 @@ LeptrisStatus leptris_element_append_child(LeptrisElement parent, LeptrisElement
      * chain collapse to the chain fixup. The mut-block extent
      * proves same-document (no adoption, #1528); the empty child
      * list proves the child cannot be an ancestor of parent (no
-     * cycle walk, #1636); the create-time memset zeroed the
-     * child's parent edge (no unlink). The type gate holds by
-     * construction — our own create made it an element. Every
-     * revalidation the wrapper/internal/hint chain performs is
+     * cycle walk, #1636); the parentless probe above proves the
+     * create-time zeroed parent edge (no unlink). The type gate
+     * holds by construction — our own create made it an element.
+     * Every revalidation the wrapper/internal/hint chain performs is
      * already proven by the time this branch runs. */
     if (child_fresh) {
         struct leptris_mut_tail* s =

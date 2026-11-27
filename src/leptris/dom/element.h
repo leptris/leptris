@@ -536,6 +536,28 @@ static inline struct leptris_document* leptris_elem_namebp_doc(
     return ((struct leptris_document* const*)elem_name(e))[-1];
 }
 
+/* #2132 mutcycle: the mutation entry points resolve the parent's
+ * document once per operation, and the builder-loop shape (create-
+ * then-append under an unattached-at-root namebp element) always
+ * answers through get_document's own first tier — the R3 fast-out.
+ * The out-of-line call plus the double name decode cost ~11% of the
+ * row. This inline answers EXACTLY that tier — same condition, same
+ * answer — and delegates to the full resolver for everything else.
+ * Answers are identical by construction: the condition below is
+ * copied from leptris_element_get_document's fast-out (name_off
+ * non-zero is elem_name non-NULL: decode_inline returns NULL only
+ * for the 0 offset), so callers observe no behavior change. */
+static inline struct leptris_document* leptris_element_get_document_mutation(
+    LeptrisElement elem) {
+    if (elem &&
+        ((LeptrisNodeRef)elem)->type == LEPTRIS_NODE_TYPE_ELEMENT &&
+        (elem->header.flags & LEPTRIS_NAMEBP_FLAG) &&
+        elem->name_off != 0 &&
+        elem->parent_off == 0)
+        return ((struct leptris_document* const*)elem_name(elem))[-1];
+    return leptris_element_get_document(elem);
+}
+
 /* Compute 16-bit FNV-1a hash of an element name string. Used
  * together with elem->name_hash for fast pre-filtering in child-
  * axis lookups. TODO 159: fast child-name matching. */static inline uint16_t leptris_name_hash_compute(const char* name) {
