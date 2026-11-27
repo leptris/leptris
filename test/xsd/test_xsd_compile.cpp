@@ -2120,10 +2120,15 @@ TEST(XsdValidate, LocalAnonymousTypeShadowsGlobalSameNameElement) {
         "</xs:sequence></xs:complexType>"
         "<xs:element name=\"holder\" type=\"t:holder\"/>"
         "</xs:schema>";
-    /* the issue's instance: the local empty-content type accepts it */
+    /* the issue's instance: the local empty-content type still admits
+     * the attribute-only shape — the shadowing verdict is unchanged;
+     * the document is now INVALID only because #2184 enforces the
+     * §C.4 ID/IDREF integrity the type declares (ref is xs:IDREF and
+     * no ID w1 exists anywhere; libxml2 rejects the same shape). The
+     * shadowing pins below are untouched. */
     EXPECT_EQ(validate_doc(
                   sch, "<t:holder xmlns:t=\"urn:t\">"
-                       "<widget ref=\"w1\"/></t:holder>"), 1);
+                       "<widget ref=\"w1\"/></t:holder>"), 0);
     /* the local type forbids children the global type would allow */
     EXPECT_EQ(validate_doc(
                   sch, "<t:holder xmlns:t=\"urn:t\">"
