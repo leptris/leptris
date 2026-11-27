@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- s3_3_4si04: the fixed value violates the type's enumeration. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:attribute name="id1" type="valueConstr" fixed="zxc"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="valueConstr">
+    <xs:restriction base="xs:ID">
+      <xs:enumeration value="asd"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

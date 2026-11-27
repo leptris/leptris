@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The guard: valid defaults/fixed values — builtin atomics, the
+     list builtins, and enumerated locals whose value matches —
+     compile clean. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="a" type="okEnum" default="asd qwe"/>
+      </xs:sequence>
+      <xs:attribute name="b" type="xs:NMTOKENS" default="a b c"/>
+      <xs:attribute name="c" type="xs:integer" default="42"/>
+      <xs:attribute name="d" type="okEnum" fixed="asd qwe"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="okEnum">
+    <xs:restriction base="xs:ENTITIES">
+      <xs:enumeration value="asd qwe"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

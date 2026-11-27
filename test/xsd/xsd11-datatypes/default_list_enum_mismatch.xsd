@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- s3_3_4si07: an element default violates the list item type's
+     enumeration. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="list_of_ids" type="listOfIDs" default="aka"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="listOfIDs">
+    <xs:list itemType="listTypeA"/>
+  </xs:simpleType>
+  <xs:simpleType name="listTypeA">
+    <xs:restriction base="xs:ID">
+      <xs:enumeration value="ala"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
