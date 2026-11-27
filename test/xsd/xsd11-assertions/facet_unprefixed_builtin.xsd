@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- #2206 (moxml#585): the consumer's repro — an assertion naming a
+     builtin datatype UNPREFIXED with no xpathDefaultNamespace in
+     force ("$value castable as double"). `double` resolves to the
+     XML Schema namespace: 42.5 is castable, not-a-number is not. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" vc:minVersion="1.1"
+  xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning">
+  <xs:element name="n">
+    <xs:simpleType>
+      <xs:restriction base="xs:string">
+        <xs:assertion test="$value castable as double"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

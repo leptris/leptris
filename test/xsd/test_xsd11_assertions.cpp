@@ -91,6 +91,38 @@ TEST(Xsd11Assertions, FacetOnAttributeType) {
               1);
 }
 
+/* #2206 (moxml#585): the consumer's repro — an assertion naming a
+ * builtin datatype UNPREFIXED with no xpathDefaultNamespace in
+ * force. `double` resolves to the XML Schema namespace: 42.5 is
+ * castable, not-a-number is not (both validated clean before the
+ * fix — the unresolvable name rode the permissive castable path). */
+TEST(Xsd11Assertions, UnprefixedBuiltinWithoutXdn) {
+    EXPECT_EQ(verdict_of("facet_unprefixed_builtin.xsd",
+                         "facet_unprefixed_builtin_v.xml"),
+              1);
+    EXPECT_NE(verdict_of("facet_unprefixed_builtin.xsd",
+                         "facet_unprefixed_builtin_n.xml"),
+              1);
+}
+
+/* #2206: the bare builtin spelling on the restriction LADDER — the
+ * derived type's own assertion and the inherited base assertion
+ * both evaluate (§3.16.6). Each negative isolates one lane: n1 is
+ * 12 chars (the derived length holds) but is not a double (the
+ * BASE assertion rejects it); n2 is a double (the base holds) but
+ * breaks the derived length. */
+TEST(Xsd11Assertions, LadderUnprefixedBuiltinsEvaluate) {
+    EXPECT_EQ(verdict_of("facet_ladder_unprefixed.xsd",
+                         "facet_ladder_unprefixed_v.xml"),
+              1);
+    EXPECT_NE(verdict_of("facet_ladder_unprefixed.xsd",
+                         "facet_ladder_unprefixed_n1.xml"),
+              1);
+    EXPECT_NE(verdict_of("facet_ladder_unprefixed.xsd",
+                         "facet_ladder_unprefixed_n2.xml"),
+              1);
+}
+
 /* complexType xs:assert captured on assert syntax alone (no
  * @version="1.1", no alternatives). */
 TEST(Xsd11Assertions, AssertCapturedOnSyntaxPresence) {
