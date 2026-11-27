@@ -2207,6 +2207,57 @@ static void validate_element(struct xsd_validator* v,
     validate_element_decl(v, s, elem, depth, NULL);
 }
 
+/* #2184 (§3.3.4.3 cl. 4): an instance-specified type definition must
+ * OVERRIDE the selected type definition — S ·validly substitutable·
+ * for T (§3.3.4.2). Tier-1 direction: a SIMPLE instance-specified
+ * type is substitutable only for a SIMPLE selected type
+ * (§3.3.4.2's third arm); there is no simple-for-complex arm, so a
+ * simple xsi:type against a COMPLEX selected type never overrides —
+ * the element is locally invalid (cl. 4 fails) and assessment falls
+ * back to the selected type (§3.3.4.3 Note, [type fallback]).
+ * Complex-over-complex keeps the pinned lax direction (derivation-ok
+ * walking is not entered here). The name-resolution ladder mirrors
+ * validate_local_uri's (tns hint, free-first, ref-uri, plain). */
+static int xsi_type_override_fails(struct leptris_xsd_schema* s,
+                                   const char* xlocal, const char* xuri,
+                                   const char* sel_type,
+                                   const char* euri,
+                                   const char* tns_hint) {
+    if (!xlocal || !xlocal[0]) return 0;
+    /* the named type must resolve SIMPLE */
+    int named_simple = 0;
+    if (xuri && strcmp(xuri, "http://www.w3.org/2001/XMLSchema") == 0) {
+        /* the XSD namespace: only the builtin table answers (an
+         * unknown builtin name is the complex008 unresolvable
+         * class — the downstream resolution path reports it) */
+        char builtin[300];
+        if (snprintf(builtin, sizeof(builtin), "xs:%s", xlocal) <
+            (int)sizeof(builtin))
+            named_simple = xsd_builtin_known(builtin);
+    } else if (!xuri || !xuri[0]) {
+        /* unprefixed: the §1691 canon — builtin local names
+         * resolve; a user simpleType of the same name is next */
+        char builtin[300];
+        if (snprintf(builtin, sizeof(builtin), "xs:%s", xlocal) <
+            (int)sizeof(builtin))
+            named_simple = xsd_builtin_known(builtin);
+        if (!named_simple)
+            named_simple = xsd_find_simple_pub(s, xlocal) != NULL;
+    } else {
+        named_simple = xsd_find_simple_ns_pub(s, xlocal, xuri) != NULL;
+    }
+    if (!named_simple) return 0;
+    /* the selected type must resolve COMPLEX */
+    if (!sel_type || !sel_type[0]) return 0;
+    XsdCm* sel = tns_hint ? xsd_find_complex_ns(s, sel_type, tns_hint)
+                          : NULL;
+    if (!sel && (!euri || !euri[0]))
+        sel = xsd_find_complex_ns_free_first(s, sel_type);
+    if (!sel) sel = xsd_find_complex_ref(s, sel_type, euri);
+    if (!sel) sel = xsd_find_complex(s, sel_type);
+    return sel != NULL;
+}
+
 /* decl_override: the CALLER's ns-free declaration find (the content
  * model child loop's leptris#1958 semantics) — NULL = resolve here. */
 static void validate_element_decl(struct xsd_validator* v,
@@ -2320,9 +2371,24 @@ static void validate_element_decl(struct xsd_validator* v,
                       "xsi:type prefix is not bound in the instance");
             return;
         }
-        validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q,
-                           fill, NULL);
-        return;
+        /* #2184 (§3.3.4.3 cl. 4): the instance-specified type must
+         * OVERRIDE the selected type definition. A SIMPLE named type
+         * against a COMPLEX selected type never overrides
+         * (§3.3.4.2's substitutability has no such arm): the element
+         * is locally invalid, and — per the cl. 4 Note — assessment
+         * falls back to the selected type instead of returning. The
+         * complex005 shapes pin the verdict. */
+        if (xsi_type_override_fails(s, xlocal, xuri, eff_type, guri,
+                                    NULL)) {
+            verrf_atk(v, elem, "type-resolution", local, "element",
+                      local,
+                      "xsi:type does not override the selected type "
+                      "definition");
+        } else {
+            validate_local_uri(v, s, elem, local, xlocal, xuri, xsi_q,
+                               fill, NULL);
+            return;
+        }
     }
     /* §3.3.4.3 cl.4: the instance-specified type definition above
      * overrides the conditionally selected one; only without it does
