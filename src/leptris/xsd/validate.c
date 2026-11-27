@@ -1748,14 +1748,15 @@ static int assertions_hold(struct xsd_validator* v,
     return 1;
 }
 
-/* XSD 1.1 xs:anyAttribute/@notQName hit test (moxml#460):
+/* XSD 1.1 xs:anyAttribute/@notQName hit test (moxml#460, #2184):
  * ##defined resolves against the schema's top-level attribute
  * declarations; prefix-less literals match no-namespace attribute
- * names; prefixed QNames are deferred (instance-side prefix
- * resolution). */
+ * names; the capture-canon "{uri}local" form matches the instance
+ * attribute's (namespace, local) pair directly; legacy raw prefixed
+ * spellings are skipped (capture resolves them). */
 static int attr_not_qname_hits(const char* tokens,
                                struct leptris_xsd_schema* s,
-                               const char* local) {
+                               const char* local, const char* uri) {
     const char* p = tokens;
     while (*p) {
         while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
@@ -1770,12 +1771,83 @@ static int attr_not_qname_hits(const char* tokens,
             if (xsd_attr_name_defined(s, local)) return 1;
             continue;
         }
-        if (memchr(start, ':', len)) continue; /* prefixed: deferred */
-        if (strlen(local) == len && strncmp(local, start, len) == 0)
+        /* capture-canon "{uri}local": exact (namespace, local) */
+        if (start[0] == '{') {
+            const char* close = memchr(start, '}', len);
+            if (close) {
+                size_t ulen = (size_t)(close - start - 1);
+                size_t llen = len - ulen - 2;
+                if (uri && strlen(uri) == ulen &&
+                    strncmp(start + 1, uri, ulen) == 0 &&
+                    strlen(local) == llen &&
+                    strncmp(close + 1, local, llen) == 0)
+                    return 1;
+            }
+            continue;
+        }
+        if (memchr(start, ':', len)) continue; /* prefixed: legacy */
+        if (uri == NULL && strlen(local) == len &&
+            strncmp(local, start, len) == 0)
             return 1;
     }
     return 0;
 }
+
+/* #2184: the @notNamespace exclusion hit test over a canon list
+ * (URIs + ##local; ##targetNamespace defends legacy raw captures).
+ * target_ns may be NULL. */
+static int attr_not_ns_hits(const char* tokens, const char* uri,
+                            const char* target_ns) {
+    if (!tokens) return 0;
+    const char* p = tokens;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+               *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        if (len == 7 && strncmp(start, "##local", 7) == 0) {
+            if (uri == NULL) return 1;
+            continue;
+        }
+        if (len == 17 &&
+            strncmp(start, "##targetNamespace", 17) == 0) {
+            if (target_ns && uri && strcmp(uri, target_ns) == 0)
+                return 1;
+            continue;
+        }
+        if (uri && strlen(uri) == len &&
+            strncmp(start, uri, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* #2184: the effective attribute wildcard's admission for one
+ * instance attribute — positive grammar minus the notNamespace and
+ * notQName exclusions. One canon wildcard per row: the extension
+ * union and the attributeGroup intersection fold at capture. */
+static int attr_wc_admits(struct leptris_xsd_schema* s,
+                          const XsdTypeAttrs* ta, const char* uri,
+                          const char* local,
+                          const char* tns_fallback) {
+    if (!ta->any_attr_ns && !ta->any_attr_not_qname &&
+        !ta->any_attr_not_ns)
+        return 0;
+    if (!xsd_any_attr_matches(ta->any_attr_ns, uri, tns_fallback))
+        return 0;
+    if (ta->any_attr_not_ns &&
+        attr_not_ns_hits(ta->any_attr_not_ns, uri, tns_fallback))
+        return 0;
+    if (ta->any_attr_not_qname &&
+        attr_not_qname_hits(ta->any_attr_not_qname, s, local, uri))
+        return 0;
+    return 1;
+}
+
 
 /* xs:anyAttribute grammar: ##any (or an absent attribute),
  * ##other, ##targetNamespace, ##local, or a space-separated URI
@@ -2035,31 +2107,24 @@ static void validate_attributes(struct xsd_validator* v,
         if (auri && strcmp(auri, "http://www.w3.org/2001/XMLSchema-instance") == 0)
             continue;
         if (ta && ta->any_attr_not_qname &&
-            attr_not_qname_hits(ta->any_attr_not_qname, s, local)) {
+            attr_not_qname_hits(ta->any_attr_not_qname, s, local,
+                                auri)) {
             /* XSD 1.1 notQName: the wildcard never admits this
              * name, declared or not (moxml#460). */
             verrf_atk(v, elem, "attribute-use", local, "attribute",
                       local, "excluded by notQName");
             continue;
         }
-        /* extension union: an attribute is allowed when it matches the
-         * derived type's wildcard OR the base type's (the spec's
-         * attribute-wildcard union; #1691 anyAttr-derive family) */
-        /* #1735: each wildcard resolves against its DECLARING
-         * unit's tns (recorded at capture); the merged schema's tns
-         * is the fallback */
-        /* moxml#460: a notQName-only wildcard (no @namespace) is
-         * still a live wildcard — absent @namespace means ##any. */
-        if ((ta && (ta->any_attr_ns || ta->any_attr_not_qname) &&
-             xsd_any_attr_matches(ta->any_attr_ns, auri,
-                              ta->any_attr_unit_ns
-                                  ? ta->any_attr_unit_ns
-                                  : xsd_target_ns(s))) ||
-            (ta && ta->any_attr_base_ns &&
-             xsd_any_attr_matches(ta->any_attr_base_ns, auri,
-                              ta->any_attr_base_unit_ns
-                                  ? ta->any_attr_base_unit_ns
-                                  : xsd_target_ns(s))))
+        /* #2184: ONE effective wildcard per row — the canon grammar
+         * minus its notNamespace/notQName exclusions. The extension
+         * union and the attributeGroup intersection fold at
+         * capture; each wildcard resolves against its DECLARING
+         * unit's tns (recorded at capture), the merged schema's tns
+         * is the fallback. */
+        if (ta && attr_wc_admits(s, ta, auri, local,
+                                 ta->any_attr_unit_ns
+                                     ? ta->any_attr_unit_ns
+                                     : xsd_target_ns(s)))
             continue;
         /* moxml#579 (§3.12.4): the attribute references of the CTA
          * test in force pass undeclared — the alternative's selector
@@ -2098,19 +2163,14 @@ static void validate_attributes(struct xsd_validator* v,
                     == 0)
                 continue;
             if (ta->any_attr_not_qname &&
-                attr_not_qname_hits(ta->any_attr_not_qname, s, local))
+                attr_not_qname_hits(ta->any_attr_not_qname, s, local,
+                                    auri))
                 continue;
             int admitted =
-                ((ta->any_attr_ns || ta->any_attr_not_qname) &&
-                 xsd_any_attr_matches(ta->any_attr_ns, auri,
-                                  ta->any_attr_unit_ns
-                                      ? ta->any_attr_unit_ns
-                                      : xsd_target_ns(s))) ||
-                (ta->any_attr_base_ns &&
-                 xsd_any_attr_matches(ta->any_attr_base_ns, auri,
-                                  ta->any_attr_base_unit_ns
-                                      ? ta->any_attr_base_unit_ns
-                                      : xsd_target_ns(s)));
+                attr_wc_admits(s, ta, auri, local,
+                               ta->any_attr_unit_ns
+                                   ? ta->any_attr_unit_ns
+                                   : xsd_target_ns(s));
             if (!admitted) continue;
             const XsdAttrDecl* g =
                 xsd_find_top_attr(s, local);

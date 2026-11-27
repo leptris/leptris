@@ -709,6 +709,20 @@ const char* leptris_element_lookup_namespace(LeptrisElement elem,
                                              const char* prefix) {
     if (!elem) return NULL;
 
+    /* XML Namespaces 1.0: the xml prefix is PREBOUND to the XML
+     * namespace in every document — it resolves with no xmlns:xml
+     * declaration spelled anywhere (the XSD wildcard suite binds
+     * notQName='xml:space' against undeclared instances). xmlns
+     * itself declares no namespace. The attribute accessors already
+     * prebind (elem_resolve_attr_prefix); elements resolve through
+     * this shared walk, so the reserved prefixes live here. */
+    if (prefix) {
+        if (strcmp(prefix, "xml") == 0)
+            return "http://www.w3.org/XML/1998/namespace";
+        if (strcmp(prefix, "xmlns") == 0)
+            return NULL;
+    }
+
     /* Search namespaces linked list on current element */
     struct leptris_namespace* ns = leptris_elem_namespaces(elem);
     while (ns) {
