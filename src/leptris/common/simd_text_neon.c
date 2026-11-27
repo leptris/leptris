@@ -283,6 +283,53 @@ void leptris_copy_count3_neon(char* dst, const char* src, size_t len,
     *n2 = c;
 }
 
+/* Fused copy + census ANY-flags (#2132): the bounded lane's scratch
+ * copy IS the census — high-byte, '&' and control (< 0x20, a
+ * conservative superset of tab/LF/CR with no false negatives on
+ * parseable XML) detected from the same registers the copy stores
+ * from. No u16 accumulators: three OR-chains and one vmax each at
+ * the end. Per 32 bytes: 2 loads + 2 stores + 2 cmp + 2 clt + 2 shr
+ * + 6 orr — the copy rides at near-memcpy cost. */
+void leptris_copy_census_neon(char* dst, const char* src, size_t len,
+                              int* saw_high, int* amp_any,
+                              int* ctlws_any) {
+    const char* p = src;
+    const char* end = src + len;
+    char* q = dst;
+    const uint8x16_t kamp = vdupq_n_u8('&');
+    const uint8x16_t kctl = vdupq_n_u8(0x20);
+    uint8x16_t acc_h = vdupq_n_u8(0);
+    uint8x16_t acc_a = vdupq_n_u8(0);
+    uint8x16_t acc_w = vdupq_n_u8(0);
+
+    while (end - p >= 32) {
+        uint8x16_t v0 = vld1q_u8((const uint8_t*)p);
+        uint8x16_t v1 = vld1q_u8((const uint8_t*)p + 16);
+        vst1q_u8((uint8_t*)q, v0);
+        vst1q_u8((uint8_t*)q + 16, v1);
+        acc_a = vorrq_u8(acc_a, vceqq_u8(v0, kamp));
+        acc_a = vorrq_u8(acc_a, vceqq_u8(v1, kamp));
+        acc_w = vorrq_u8(acc_w, vcltq_u8(v0, kctl));
+        acc_w = vorrq_u8(acc_w, vcltq_u8(v1, kctl));
+        acc_h = vorrq_u8(acc_h, vshrq_n_u8(v0, 7));
+        acc_h = vorrq_u8(acc_h, vshrq_n_u8(v1, 7));
+        p += 32;
+        q += 32;
+    }
+    *saw_high = vmaxvq_u8(acc_h) != 0;
+    *amp_any = vmaxvq_u8(acc_a) != 0;
+    *ctlws_any = vmaxvq_u8(acc_w) != 0;
+    while (p < end) {
+        unsigned char ch = (unsigned char)*p;
+        *q = (char)ch;
+        if (ch >= 0x80) *saw_high = 1;
+        if (ch == '&') *amp_any = 1;
+        if (ch < 0x20) *ctlws_any = 1;
+        p++;
+        q++;
+    }
+}
+
 #endif /* LEPTRIS_ARCH_ARM && __aarch64__ */
 
 /* Structural span scan (TODO 193 Phase 1). Marker detection is 8

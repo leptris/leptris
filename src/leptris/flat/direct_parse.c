@@ -1584,6 +1584,11 @@ static inline LeptrisTextNode* dp_text_create_norm(DParser* p,
 /* §3.3.2 defaults pass: walk the finished tree; for every default-
  * bearing declaration whose element matches, materialize the value
  * when the element does not carry the attribute. */
+/* #2132: encoding helpers defined below the internal — the bounded
+ * lane's fused-census gate runs inside the internal. */
+static int dp_declares_non_utf8(const char* s, size_t len);
+static int dp_utf8_valid(const char* s, size_t len);
+
 static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                       unsigned skip_flags,
                                                      int owns_buffer,
@@ -1595,7 +1600,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
                                                      size_t dq_count_in,
                                                      size_t sq_count_in,
                                                      size_t amp_count_in,
-                                                     size_t valws_count_in) {
+                                                     size_t valws_count_in,
+                                                     int census_in_copy) {
 
     /* 2. Create arena-backed pool (TODO 183 Phase 3).
      *
@@ -1635,7 +1641,15 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
     char* pristine;
     int const_input = (owns_buffer == 2);   /* needs a pristine carve */
     /* Counts arrive precomputed by the entry (the count3_high fused
-     * pre-scan doubles as the UTF-8 fast gate there — #1842). */
+     * pre-scan doubles as the UTF-8 fast gate there — #1842).
+     * census_in_copy (#2132): the entry skipped the standalone
+     * pre-scan and passed LEN-DERIVED BOUNDS instead — lt/quote are
+     * upper bounds the overflow fallbacks cover (element density ≤
+     * 1 per 4 bytes legally, 1 per 3 under RECOVER; every quote
+     * pairs inside a ≥4-byte attribute, so quotes ≤ len), and the
+     * amp/valws inputs are the conservative "present" assumption
+     * until the fused census below refines them from the scratch
+     * copy. */
     size_t lt_count = lt_count_in, dq_count = dq_count_in,
            sq_count = sq_count_in;
     /* Track D: '&' and literal tab/LF/CR are the ONLY sources of
@@ -1653,7 +1667,8 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * tab/LF/CR in the whole buffer — text runs cannot carry the
      * f1/f2 flags, so the term-only kernel drops the accumulator
      * chains. The entity/CR branches downstream are unreachable on
-     * this class by the same census. */
+     * this class by the same census. The bounded lane starts this
+     * at 0 and lets the fused census arm it. */
     int pristine_text = (amp_count_in == 0 && valws_count_in == 0);
     /* Track D A3d: the pristine copy exists so doc->xml_buffer stays
      * byte-identical to the input — the lazy line table (#223)
@@ -1666,6 +1681,9 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
      * heap-strdup'd at finalize (the comment below was stale — they
      * never borrow xml_buffer at rest), so nothing else reads it. */
     int can_skip_pristine = (valws_count_in == 0);
+    /* #2132: fused-copy census verdicts (bounded lane only). */
+    int census_saw_high = 0;
+    int census_amp = 0, census_valws = 0;
     pristine = buf;   /* owns_buffer == 0: caller's buffer — never
                        * written, never freed. const_input overwrites
                        * this below with the arena-carved copy. */
@@ -1737,7 +1755,28 @@ static struct leptris_document* direct_parse_internal(char* buf, size_t len,
         leptris_pool_destroy(pool);
         return NULL;
     }
-    memcpy(scratch, buf, len);
+    if (census_in_copy) {
+        /* #2132 bounded lane: the mandatory scratch copy IS the
+         * census — one memory pass instead of the standalone
+         * count3_high walk the entry used to pay. The encoding gate
+         * rides the verdict (same contract as the entry gate: a
+         * declared non-UTF-8 encoding is exempt — leptris-ruby#514 —
+         * and RECOVER keeps the #1660 best-effort contract by
+         * skipping the fatal check entirely). Silent NULL: the entry
+         * gate never set an error either. */
+        leptris_copy_census(scratch, buf, len, &census_saw_high,
+                            &census_amp, &census_valws);
+        if (!recover && !dp_declares_non_utf8(buf, len) &&
+            census_saw_high && !dp_utf8_valid(buf, len)) {
+            leptris_pool_destroy(pool);
+            return NULL;
+        }
+        has_copy_sources = (census_amp != 0 || census_valws != 0);
+        pristine_text = (census_amp == 0 && census_valws == 0);
+        can_skip_pristine = (census_valws == 0);
+    } else {
+        memcpy(scratch, buf, len);
+    }
     scratch[len] = '\0';
     memset(scratch + len + 1, 0, 64);
     if (const_input && !can_skip_pristine) {
@@ -3704,6 +3743,17 @@ static void dp_env_memo_ensure(void) {
     LEPTRIS_MUTEX_UNLOCK(&g_dp_env_lock);
 }
 
+/* #2132: cheap IL-eligibility probe mirroring dp_il_try's env gate.
+ * The bounded-census lane must not swallow documents the interleaved
+ * lane would take: IL needs the encoding verdict BEFORE it scans,
+ * and only the classic entry path runs that gate today. */
+static int dp_il_eligible(size_t len) {
+    if (!dp_env_ready_load()) dp_env_memo_ensure();
+    if (!dp_env_memo.interleaved) return 0;
+    if (len == 0 || len >= 0x7FFFFFFFu) return 0;
+    return len >= dp_env_memo.min_len;
+}
+
 static struct leptris_document* dp_il_try(const char* xml, size_t len,
                                           int drop_ws, int keep_ent,
                                           int dtd_attrs) {
@@ -3860,9 +3910,30 @@ static int dp_input_encoding_ok(const char* s, size_t len) {
  * into a separately-malloc'd buffer (TODO 188) — the old design
  * streamed the input twice (count3 pre-scan + pool memcpy). The
  * document owns the malloc via doc->xml_buffer_needs_free; the
- * arena holds only nodes and strings. */
+ * arena holds only nodes and strings.
+ *
+ * #2132 bounded-census lane: documents at or under
+ * DP_CENSUS_COPY_MAX_LEN that the interleaved lane would not take
+ * skip the standalone whole-document count3_high pre-scan entirely
+ * (the attrparse row's 9.3%). The internal sizing falls back to
+ * len-derived upper bounds with the existing per-node overflow
+ * fallbacks, and the fused copy carries the census + UTF-8 gate
+ * (direct_parse_internal, census_in_copy=1). Larger documents keep
+ * the exact-count path: their reservation stays census-lean, and
+ * the pass is noise at that scale. */
+#define DP_CENSUS_COPY_MAX_LEN (128u * 1024u)
+
 struct leptris_document* direct_parse(const char* xml, size_t len) {
     if (!xml || len == 0) return NULL;
+    if (len <= DP_CENSUS_COPY_MAX_LEN && !dp_il_eligible(len)) {
+        /* Bounds: lt ≤ len/3 (+margin) — a legal element costs ≥ 4
+         * bytes (`<a/>`), RECOVER fragments ≥ 3; quotes ≤ len (each
+         * pair lives inside a ≥4-byte attribute); amp/valws start
+         * conservative (copy budget + pristine carve armed) until
+         * the fused census refines them. */
+        return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0,
+                                     len / 3 + 16, len, 0, 1, 1, 1);
+    }
     size_t lt_count, dq_count, sq_count;
     int saw_high = 0;
     size_t amp_count, valws_count;
@@ -3882,13 +3953,34 @@ struct leptris_document* direct_parse(const char* xml, size_t len) {
     }
     return direct_parse_internal((char*)xml, len, 0, 2, 0, 0, 0, 0,
                                  lt_count, dq_count, sq_count,
-                                 amp_count, valws_count);
+                                 amp_count, valws_count, 0);
 }
 
 /* Public flagged entry (LEPTRIS_PARSE_DROP_WS_TEXT et al.). */
 struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                            unsigned parse_flags) {
     if (!xml || len == 0) return NULL;
+    /* #2132 bounded-census lane (see direct_parse): keep_ent/dtdattr
+     * docs bail dp_il_try, so they are fast-lane eligible; RECOVER is
+     * too (the lane's internal gate honors it). */
+    int il_maybe = dp_il_eligible(len) &&
+        !(parse_flags & (LEPTRIS_PARSE_KEEP_ENTITY_REFS |
+                         LEPTRIS_PARSE_DTDATTR));
+    if (len <= DP_CENSUS_COPY_MAX_LEN && !il_maybe) {
+        return direct_parse_internal((char*)xml, len,
+                                     parse_flags & (LEPTRIS_PARSE_SKIP_DUP_DETECTION |
+                                         LEPTRIS_PARSE_SKIP_SOURCE_POSITIONS),
+                                     2,
+                                     (parse_flags & LEPTRIS_PARSE_DROP_WS_TEXT)
+                                         ? 1 : 0,
+                                     (parse_flags & LEPTRIS_PARSE_DTDATTR)
+                                         ? 1 : 0,
+                                     (parse_flags & LEPTRIS_PARSE_KEEP_ENTITY_REFS)
+                                         ? 1 : 0,
+                                     (parse_flags & LEPTRIS_PARSE_RECOVER)
+                                         ? 1 : 0,
+                                     len / 3 + 16, len, 0, 1, 1, 1);
+    }
     size_t lt_count, dq_count, sq_count;
     int saw_high = 0;
     size_t amp_count, valws_count;
@@ -3925,7 +4017,7 @@ struct leptris_document* direct_parse_flags(const char* xml, size_t len,
                                  (parse_flags & LEPTRIS_PARSE_RECOVER)
                                      ? 1 : 0,
                                  lt_count, dq_count, sq_count,
-                                 amp_count, valws_count);
+                                 amp_count, valws_count, 0);
 }
 
 /* Public: parse a caller-owned writable buffer without copying. */
@@ -3945,7 +4037,10 @@ struct leptris_document* direct_parse_inplace(char* buf, size_t len) {
      * writable bytes (the header contract promises NULL terminators
      * INSIDE the buffer; an exactly-sized caller trips ASAN, and
      * bindings hand read-only views). The scanner takes `len`. */
+    /* No bounded lane here: the inplace entry has no scratch copy to
+     * fuse the census into — the standalone pre-scan IS its single
+     * whole-buffer pass. */
     return direct_parse_internal(buf, len, 0, 0, 0, 0, 0, 0,
                                  lt_count, dq_count, sq_count,
-                                 amp_count, valws_count);
+                                 amp_count, valws_count, 0);
 }

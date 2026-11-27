@@ -97,6 +97,26 @@ int leptris_utf8_valid_scalar(const char* s_, size_t len) {
     return 1;
 }
 
+/* #2132 scalar census anchor: copy + the three ANY-flags. Same
+ * conservative control rule as the ISA cores (any byte < 0x20 — no
+ * false negatives for the tab/LF/CR trio the parser keys on). Also
+ * the exported oracle the cross-arch equivalence specs pin against. */
+void leptris_copy_census_scalar(char* dst, const char* src, size_t len,
+                                int* saw_high, int* amp_any,
+                                int* ctlws_any) {
+    int h = 0, a = 0, w = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)src[i];
+        dst[i] = (char)ch;
+        if (ch >= 0x80) h = 1;
+        if (ch == '&') a = 1;
+        if (ch < 0x20) w = 1;
+    }
+    *saw_high = h;
+    *amp_any = a;
+    *ctlws_any = w;
+}
+
 /* ---- Dispatch ---------------------------------------------------------- */
 
 /* Resolved pointer — initialized on first use (thread-safe enough:
@@ -111,6 +131,8 @@ static void (*g_count3_high_fn)(const char*, size_t, char, char, char,
                                 int*, size_t*, size_t*) = NULL;
 static void (*g_copy3_fn)(char*, const char*, size_t, char, char, char,
                           size_t*, size_t*, size_t*) = NULL;
+static void (*g_copy_census_fn)(char*, const char*, size_t,
+                                int*, int*, int*) = NULL;
 static int (*g_utf8_fn)(const char*, size_t) = NULL;
 static ptrdiff_t (*g_scan_run_fn)(const char*, size_t, char, char, char,
                                   int*, int*) = NULL;
@@ -193,6 +215,7 @@ static void dispatch_init(void) {
         g_find3_fn = leptris_text_find3_avx2;
         g_count_fn = leptris_text_count_char_avx2;
         g_count3_high_fn = leptris_text_count3_high_avx2;
+        g_copy_census_fn = leptris_copy_census_avx2;
         g_scan_run_fn = leptris_text_scan_run_avx2;
         g_pristine_fn = leptris_text_scan_run_pristine_avx2;
         g_utf8_fn = leptris_utf8_valid_avx2;
@@ -207,6 +230,7 @@ static void dispatch_init(void) {
         g_count3_fn = leptris_text_count3_neon;
         g_count3_high_fn = leptris_text_count3_high_neon;
         g_copy3_fn = leptris_copy_count3_neon;
+        g_copy_census_fn = leptris_copy_census_neon;
         g_scan_run_fn = leptris_text_scan_run_neon;
         g_pristine_fn = leptris_text_scan_run_pristine_neon;
         g_utf8_fn = leptris_utf8_valid_neon;
@@ -218,6 +242,7 @@ static void dispatch_init(void) {
     g_find3_fn = find3_scalar;
     g_count_fn = count_scalar;
     g_count3_high_fn = count3_high_scalar;
+    g_copy_census_fn = leptris_copy_census_scalar;
     g_scan_run_fn = scan_run_scalar;
     g_pristine_fn = pristine_scalar;
     g_utf8_fn = leptris_utf8_valid_scalar;
@@ -319,6 +344,13 @@ int leptris_utf8_valid(const char* s, size_t len) {
     if (!g_utf8_fn) dispatch_init();
     if (!g_utf8_fn) g_utf8_fn = leptris_utf8_valid_scalar;
     return g_utf8_fn(s, len);
+}
+
+void leptris_copy_census(char* dst, const char* src, size_t len,
+                         int* saw_high, int* amp_any, int* ctlws_any) {
+    if (!g_copy_census_fn) dispatch_init();
+    if (!g_copy_census_fn) g_copy_census_fn = leptris_copy_census_scalar;
+    g_copy_census_fn(dst, src, len, saw_high, amp_any, ctlws_any);
 }
 
 ptrdiff_t leptris_text_scan_run(const char* s, size_t len, char term,
