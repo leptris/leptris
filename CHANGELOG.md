@@ -1,10 +1,20 @@
 ## [Unreleased]
 
-## [1.9.450] - 2026-11-27
+## [1.9.450] - 2026-11-28
+
+The XSD 1.1 campaign continues: the official W3C suite floor moves **1984 → 2047 / 2206 (89.9% → 92.8%)**, zero regressions at every step.
+
+### XSD 1.1 (leptris/leptris#2181 umbrella, #2184 slices)
+- **CTA/IC residues** (#2226, +22 rows; the cta family closes 125/125): a simpleContent derivation's inline `<xs:simpleType>` child is the text type (§3.4.3.3); CTA test prefixes bind in the schema document (the §3.13.2 prolog at the alternative element); a cast/castable target resolving to a complex type fails the schema (XPST0080); §4.2.2 conditional inclusion — VCA validation, detach-at-capture, unknown-vc: ignored, src-element.2 post-prune; IC keyref tuples compare in the VALUE space — xs:time timezone-normalized with 24:00 ≡ 00:00, tz-absent ≠ tz-carrying, durations/instants/numerics dispatched through the #2155 table.
+- **multi-ID** (#2227, +41 rows): the 1.1 multi-ID relaxation — version-gated (a table carrying ≥2 ID-typed uses is 1.1-syntax evidence; `@version`/`vc:maxVersion="1.0"` keeps the 1.0 gate) — plus §C.4 ID/IDREF integrity end to end: document-scoped attribute IDs, parent-scoped content IDs, list-of-ID itemization, unions registering only through ID-derived first members, defaulted/fixed constraints joining, every IDREF resolved at end of run.
+- **The openContent interleaved governance law** (#2225): the #2151 attribution trace was a coarse prefix cut; the walk is now particle-first greedy per child (§3.4.4.3 cl. 3.3) — a mis-typed element of a still-open particle fails through its own type even after a wildcard span. Spec-pinned; also fixes a prototype-sync SEGV the full ctest caught.
 
 ### Fixed
+- A stack-use-after-scope in the new ID collapse path (#2227, caught by the ASAN leg).
+- An amalgamation collision in the CTA lane's ncname static (#2226).
 
-- rename the cta lane's ncname static (#2184) (amalgam)
+### Floors
+XSD 1.0: **1044/1056 (98.9%)**. XSD 1.1: **2047/2206 (92.8%)** — the campaign continues via #2181 (remaining: the deepest residue classes and the dispositioned owner-decision rows).
 
 
 
