@@ -1273,6 +1273,39 @@ TEST(RngInclude, ExternalRefLoadsForeignGrammar) {
     leptris_rng_free(rng);
 }
 
+/* RELAX NG 4.5/4.7: an externalRef href resolves against the base
+ * URI of the externalRef element itself — the file it was written
+ * in — not the top schema's directory. An externalRef inside an
+ * included grammar used to resolve against the top schema's
+ * directory ("externalRef b.rng: cannot open"). The xbase/ fixtures
+ * keep each referenced file out of the top schema's directory. */
+TEST(RngInclude, ExternalRefInIncludedGrammarResolvesAgainstItsFile) {
+    /* include href with a subdirectory */
+    EXPECT_EQ(file_validates("xbase/top.rng", "<r><b/></r>"), 1)
+        << leptris_last_error();
+    EXPECT_EQ(file_validates("xbase/top.rng", "<r><c/></r>"), 0);
+    /* include href climbing out of the top schema's directory */
+    EXPECT_EQ(file_validates("xbase/other/top-up.rng", "<r><b/></r>"), 1)
+        << leptris_last_error();
+}
+
+TEST(RngInclude, ExternalRefResolvesPerLevelInNestedIncludes) {
+    /* top -> mid/m.rng -> ../lib/a.rng: mid's externalRef resolves
+     * against mid/, lib's against lib/. */
+    EXPECT_EQ(file_validates("xbase/top-nested.rng", "<r><b/></r>"), 1)
+        << leptris_last_error();
+    EXPECT_EQ(file_validates("xbase/top-nested.rng", "<m><c/></m>"), 1)
+        << leptris_last_error();
+    EXPECT_EQ(file_validates("xbase/top-nested.rng", "<m><b/></m>"), 0);
+}
+
+TEST(RngInclude, ExternalRefInIncludeOverrideResolvesAgainstIncluder) {
+    /* A define nested in <include> is written in the INCLUDING file,
+     * so its externalRef resolves against that file's directory. */
+    EXPECT_EQ(file_validates("xbase/top-override.rng", "<r><b/></r>"), 1)
+        << leptris_last_error();
+}
+
 TEST(RngInclude, FileSchemaErrorsPublishDetail) {
     /* The FILE entry must publish schema-parse detail to
      * leptris_last_error like the string entry — it used to free

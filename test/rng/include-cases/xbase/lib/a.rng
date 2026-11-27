@@ -1,0 +1,6 @@
+<grammar xmlns='http://relaxng.org/ns/structure/1.0'>
+  <start><ref name='r'/></start>
+  <define name='r'>
+    <element name='r'><externalRef href='b.rng'/></element>
+  </define>
+</grammar>

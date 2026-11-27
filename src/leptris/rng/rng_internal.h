@@ -52,7 +52,8 @@ struct RngPattern {
     char* ns;            /* ELEMENT/ATTRIBUTE namespace URI */
     char* datatype;      /* DATA type local name, VALUE datatype */
     char* datatype_lib;  /* DATA/VALUE datatypeLibrary */
-    char* value;         /* VALUE text, PARAM value */
+    char* value;         /* VALUE text, PARAM value; EXTERNAL_REF:
+                          * href pinned to its own file's dir */
     RngDefine* define;   /* resolved target for REF (phase 2 link) */
     int any_name;        /* ELEMENT/ATTRIBUTE with an <anyName> name
                           * class - matches any name (RELAX NG 4.14,
