@@ -336,6 +336,33 @@ rejects — re-pinned to the substitutable xs:string/xs:token pair (the
 specs' valid/invalid verdicts ride the strict-attribute gate and are
 unchanged).
 
+Re-measured 2026-11-27 (branch `xsd11-oc-interleave` — the
+interleaved-mode GOVERNANCE refinement of the #2151 open-content
+absorption, the residue the row-41 class closed with: the #2151
+attribution trace was a single prefix cut — every child from the
+particle path's first divergence rode the wildcard — which is exact
+for SUFFIX mode but coarse for INTERLEAVED mode, where the walk
+resumes after a wildcard span; §3.4.4.3 cl. 3.3's greedy law is
+particle-first per child: a declared particle still available to the
+model governs its own instance even across a span (a mis-typed
+element of a still-open particle fails through its own type, not the
+skip wildcard), while a name whose particle is past the model's
+horizon (already consumed, or the model has moved on) rides the
+wildcard untyped exactly as open025.v1/open047.v3 pin); the
+attribution channel is per child (`oc_attr`), the suffix prefix-cut
+law unchanged, the public `leptris_xsd_content_valid` path passes no
+attribution and keeps its contract; re-measured: **1984/2206** —
+zero corpus-row flips (the suite never exercises the
+span-then-mistyped-declared shape; the refinement is spec-pinned) —
+valid 1252 / invalid 543 / schema-error 189, families
+assertions 282/296 · cta 118/125 · override 87/87 · openContent
+205/205 · core 1292/1493; the pinned 1.0 corpus holds at 1044. Spec
+tests: test/xsd/test_xsd11_opencontent.cpp
+(InterleaveSpanBeforeParticleStillGoverned /
+InterleaveConsumedParticleDoesNotGovern / InterleaveChoiceGoverned —
+red-first: both mis-typed-after-span shapes false-validated under
+the prefix cut).
+
 ## Engine quirk worth knowing while reading the tables
 
 `leptris_xsd_compile_file` on some schema-valid-in-the-suite documents
