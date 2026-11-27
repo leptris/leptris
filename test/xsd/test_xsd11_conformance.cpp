@@ -398,11 +398,26 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * Zero regressions by red-set diff against the base engine (1.0 red
  * set byte-identical). Union re-measure on the #2226-merged base:
  * **2047/2206** — 1265 valid / 587 invalid / 195 schema-error
- * (measured 2026-11-28). */
-    EXPECT_GE(pass, 2047) << "conformance floor regressed - re-measure the union";
+ * (measured 2026-11-28). Raised by the #2184 final-consolidation
+ * wave (branch `xsd11-final`): the duplicate-facet law (a
+ * single-occurrence facet repeated in one restriction fails the
+ * schema — simple060-084's 25 rows; the capture used to overwrite
+ * silently), the explicitTimezone posture law (required/prohibited
+ * LOCK the chain posture — zone004/005/408/409; "optional" stays
+ * open, the reading IBM's D4_3_16 v05/ii05 valid derivations force;
+ * the facet is not applicable to a union base — zone008), and the
+ * NOTATION/xs:anyAtomicType placement laws (the abstract builtin in
+ * no base/list-item/union-member slot — simple051-053; the bare
+ * NOTATION element type — simple090; NOTATION as list item —
+ * simple092 — and union member — simple093; the NOTATION-terminal
+ * enumeration names only DECLARED notations — simple095, with the
+ * xs:notation symbol table captured for the check). 40 rows flip,
+ * zero regressions by red-set diff: **2087/2206** — 1265 valid /
+ * 587 invalid / 235 schema-error (measured 2026-11-28). */
+    EXPECT_GE(pass, 2087) << "conformance floor regressed - re-measure the union";
     EXPECT_GE(pass_valid, 1265);
     EXPECT_GE(pass_invalid, 587);
-    EXPECT_GE(pass_schema_error, 195);
+    EXPECT_GE(pass_schema_error, 235);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
