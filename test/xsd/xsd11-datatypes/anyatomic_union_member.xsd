@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple053: xs:anyAtomicType is not a legal union member type. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="e">
+    <xs:simpleType>
+      <xs:restriction>
+        <xs:simpleType>
+          <xs:union memberTypes="xs:anyAtomicType xs:string"/>
+        </xs:simpleType>
+        <xs:assertion test="not($value instance of xs:string)"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

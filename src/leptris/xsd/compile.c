@@ -112,6 +112,10 @@ struct leptris_xsd_schema {
      * element (namespace, name) twice — s4_2_2si01's duplicate root
      * pair after the vc: prune. Surfaced post-capture. */
     int dup_globals_failed;
+    /* #2184: the xs:notation symbol table — the enumeration values of
+     * a NOTATION-typed component must name these (simple095). */
+    char** notations;
+    size_t notation_count, notation_cap;
     XsdAttrGroupDef* attr_groups;
     XsdAttrDecl* top_attrs; /* top-level xs:attribute declarations */
     XsdTypeAttrs* type_attrs;
@@ -750,6 +754,7 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                 simple->member_defs[simple->member_def_count++] = def;
             }
         } else if (strcmp(local, "restriction") == 0) {
+            unsigned dup_mask = 0;
             simple->base = xsd_strdup(xsd_local_name(
                 leptris_element_attribute(e, "base")));
             /* #1936 (stG/stH): an inline anonymous BASE rides this
@@ -779,6 +784,26 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                 if (!fl || (fu && strcmp(fu, XSD_NS) != 0)) continue;
                 const char* val =
                     leptris_element_attribute(fe, "value");
+                /* §4.3 XML representation: a single-occurrence facet
+                 * may appear at most once in one restriction — a
+                 * repetition fails the schema (#2184 residue,
+                 * simple060-084). The mask rides the loop; the flag
+                 * is judged in xsd_simple_facets_ok. */
+                {
+                    static const char* const single[] = {
+                        "length",    "minLength",     "maxLength",
+                        "totalDigits", "fractionDigits", "minScale",
+                        "maxScale",  "minInclusive",  "minExclusive",
+                        "maxInclusive", "maxExclusive", "whiteSpace",
+                        "explicitTimezone", NULL};
+                    for (int si = 0; single[si]; si++) {
+                        if (strcmp(fl, single[si]) != 0) continue;
+                        unsigned bit = 1u << si;
+                        if (dup_mask & bit) simple->dup_facet = 1;
+                        dup_mask |= bit;
+                        break;
+                    }
+                }
                 /* §4.3: the facet's fixed flag — a fixed base
                  * facet cannot be re-specified with a different
                  * value down the ladder (#2155). */
@@ -1169,6 +1194,38 @@ static int xsd_restriction_facets_ok(struct leptris_xsd_schema* s,
     const char* term = xsd_chain_terminal(s, t);
     int tclass = term ? xsd_terminal_class(term) : 7 /* OTHER */;
     int checkable = chain_is_list || tclass != 7;
+    /* #2184 residue: the timezone facet's posture laws ride even the
+     * chains the applicability sweep skips (unions posture here).
+     * explicitTimezone is applicable only to the date/time family —
+     * a UNION base admits only the common facets (zone008); and once
+     * set anywhere up the chain the value is LOCKED — the derived
+     * restriction carries the same posture (zone004/005/408/409). */
+    if (t->explicit_timezone) {
+        int hops = 0;
+        for (const XsdSimple* b = facet_base_next(s, t); b && hops < 64;
+             b = facet_base_next(s, b), hops++) {
+            if (b->deriv == XSD_SIMPLE_UNION) {
+                snprintf(msg, cap,
+                         "facet-applicability: explicitTimezone is "
+                         "not applicable to a union base");
+                return 0;
+            }
+            if (b->explicit_timezone &&
+                strcmp(b->explicit_timezone, "optional") != 0 &&
+                strcmp(b->explicit_timezone, t->explicit_timezone) != 0) {
+                /* required/prohibited LOCK the posture (zone004/005/
+                 * 408/409); "optional" is the open posture — IBM's
+                 * D4_3_16 v05/ii05 derive prohibited/required FROM
+                 * optional as VALID, so only the committed postures
+                 * restrict to themselves. */
+                snprintf(msg, cap,
+                         "facet-derivation: explicitTimezone is fixed "
+                         "at '%s' in the base",
+                         b->explicit_timezone);
+                return 0;
+            }
+        }
+    }
     if (!checkable) return 1; /* unions / anyAtomic chains: posture */
     int is11 = term && xsd_builtin_is_11(term);
 
@@ -1594,6 +1651,12 @@ static int xsd_simple_facets_ok(struct leptris_xsd_schema* s,
                                 const XsdSimple* t, int depth, char* msg,
                                 size_t cap) {
     if (!t || depth > 32) return 1;
+    if (t->dup_facet) {
+        snprintf(msg, cap,
+                 "facet-count: a single-occurrence facet appears more "
+                 "than once in one restriction");
+        return 0;
+    }
     if (t->deriv == XSD_SIMPLE_RESTRICT &&
         !xsd_restriction_facets_ok(s, t, msg, cap))
         return 0;
@@ -4004,29 +4067,185 @@ static int xsd_attr_row_notation_ok(struct leptris_xsd_schema* s,
     return 1;
 }
 
+/* #2184: the resolved-NOTATION helpers (declared below the attr
+ * gate; forward here). */
+static int xsd_chain_terminal_notation(struct leptris_xsd_schema* s,
+                                       const XsdSimple* t);
+static int xsd_notation_enum_symbols_ok(struct leptris_xsd_schema* s,
+                                        const XsdSimple* t);
+
 static int xsd_check_notation_attrs(struct leptris_xsd_schema* s) {
     for (const XsdAttrDecl* a = s->top_attrs; a; a = a->next) {
-        if (xsd_attr_row_notation_ok(s, a)) continue;
-        char msg[512];
-        snprintf(msg, sizeof(msg),
-                 "a-props-correct: the attribute '%s' is typed "
-                 "NOTATION without an enumeration",
-                 a->name ? a->name : "?");
-        xsd_set_error(s, msg);
-        return -1;
-    }
-    for (const XsdTypeAttrs* ta = s->type_attrs; ta; ta = ta->next)
-        for (const XsdAttrDecl* a = ta->attrs; a; a = a->next) {
-            if (xsd_attr_row_notation_ok(s, a)) continue;
+        if (!xsd_attr_row_notation_ok(s, a)) {
             char msg[512];
             snprintf(msg, sizeof(msg),
-                     "a-props-correct: the attribute '%s' of type "
-                     "'%s' is typed NOTATION without an enumeration",
-                     a->name ? a->name : "?",
-                     ta->type_name ? ta->type_name : "?");
+                     "a-props-correct: the attribute '%s' is typed "
+                     "NOTATION without an enumeration",
+                     a->name ? a->name : "?");
             xsd_set_error(s, msg);
             return -1;
         }
+        /* #2184: the RESOLVED shape — an enumerated NOTATION
+         * restriction names only declared notations (simple095). */
+        const XsdSimple* t = a->type ? xsd_find_simple(s, a->type) : NULL;
+        if (t && xsd_chain_terminal_notation(s, t)) {
+            if (!t->enum_values) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "a-props-correct: the attribute '%s' is "
+                         "typed NOTATION without an enumeration",
+                         a->name ? a->name : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            if (!xsd_notation_enum_symbols_ok(s, t)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "a-props-correct: the attribute '%s' "
+                         "enumerates a value that does not name a "
+                         "declared notation",
+                         a->name ? a->name : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    }
+    for (const XsdTypeAttrs* ta = s->type_attrs; ta; ta = ta->next)
+        for (const XsdAttrDecl* a = ta->attrs; a; a = a->next) {
+            if (!xsd_attr_row_notation_ok(s, a)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "a-props-correct: the attribute '%s' of type "
+                         "'%s' is typed NOTATION without an "
+                         "enumeration",
+                         a->name ? a->name : "?",
+                         ta->type_name ? ta->type_name : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    return 0;
+}
+
+/* #2184 (bug 11103 + the NOTATION placement rules): xs:anyAtomicType
+ * is abstract — it cannot be a restriction base, a list item type,
+ * or a union member; xs:NOTATION is never a bare element type, a
+ * list item type, or a union member, and an enumerated NOTATION
+ * type names only DECLARED notations (simple051-053 / simple090 /
+ * simple092 / simple093 / simple095). The capture strips prefixes on
+ * some fields and keeps the token on others, so both spellings
+ * match. */
+static int xsd_ref_names(const char* ref, const char* local) {
+    if (!ref) return 0;
+    return strcmp(ref, local) == 0 ||
+           (strncmp(ref, "xs:", 3) == 0 && strcmp(ref + 3, local) == 0);
+}
+
+static int xsd_schema_has_notation(struct leptris_xsd_schema* s,
+                                   const char* local) {
+    if (!local) return 0;
+    for (size_t i = 0; i < s->notation_count; i++)
+        if (s->notations[i] && strcmp(s->notations[i], local) == 0)
+            return 1;
+    return 0;
+}
+
+/* The NOTATION-terminal walk — the capture strips prefixes on base
+ * references, so both spellings match; inline bases ride base_def. */
+static int xsd_chain_terminal_notation(struct leptris_xsd_schema* s,
+                                       const XsdSimple* t) {
+    int depth = 0;
+    while (t && depth < 32) {
+        if (t->base_def) {
+            t = t->base_def;
+            depth++;
+            continue;
+        }
+        if (t->base && xsd_ref_names(t->base, "NOTATION")) return 1;
+        if (!t->base) return 0;
+        t = xsd_find_simple(s, t->base);
+        depth++;
+    }
+    return 0;
+}
+
+/* Every enumeration value of a NOTATION-typed component names a
+ * DECLARED notation (simple095 — "png" against jpeg-only). */
+static int xsd_notation_enum_symbols_ok(struct leptris_xsd_schema* s,
+                                        const XsdSimple* t) {
+    for (const XsdFacetValue* e = t->enum_values; e; e = e->next) {
+        char local[256];
+        const char* colon = strchr(e->text, ':');
+        snprintf(local, sizeof(local), "%s",
+                 colon ? colon + 1 : e->text);
+        if (!xsd_schema_has_notation(s, local)) return 0;
+    }
+    return 1;
+}
+
+/* The per-type placement walk — recurses the inline def chains so
+ * anonymous list/union members are covered too. */
+static int xsd_simple_type_refs_walk(struct leptris_xsd_schema* s,
+                                     const XsdSimple* t, int depth) {
+    if (!t || depth > 32) return 1;
+    if (xsd_ref_names(t->base, "anyAtomicType")) {
+        xsd_set_error(s,
+                      "type-ref: xs:anyAtomicType cannot be the "
+                      "base of a user-defined type");
+        return 0;
+    }
+    if (xsd_ref_names(t->item_type, "anyAtomicType") ||
+        xsd_ref_names(t->item_type, "NOTATION")) {
+        xsd_set_error(s,
+                      "type-ref: the list item type is an "
+                      "abstract or non-instantiable builtin");
+        return 0;
+    }
+    for (size_t i = 0; i < t->member_count; i++) {
+        if (xsd_ref_names(t->members[i], "anyAtomicType") ||
+            xsd_ref_names(t->members[i], "NOTATION")) {
+            xsd_set_error(s,
+                          "type-ref: the union member is an "
+                          "abstract or non-instantiable builtin");
+            return 0;
+        }
+    }
+    if (!xsd_simple_type_refs_walk(s, t->base_def, depth + 1))
+        return 0;
+    if (!xsd_simple_type_refs_walk(s, t->item_def, depth + 1))
+        return 0;
+    for (size_t i = 0; i < t->member_def_count; i++)
+        if (!xsd_simple_type_refs_walk(s, t->member_defs[i],
+                                       depth + 1))
+            return 0;
+    return 1;
+}
+
+static int xsd_simple_type_refs_ok(struct leptris_xsd_schema* s) {
+    for (const XsdSimple* t = s->simple_types; t; t = t->next)
+        if (!xsd_simple_type_refs_walk(s, t, 0)) return -1;
+    for (const XsdElementDecl* d = s->elements; d; d = d->next) {
+        if (!xsd_ref_names(d->type, "NOTATION")) continue;
+        const XsdSimple* t = xsd_find_simple(s, d->type);
+        if (!t || !t->enum_values) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "e-props-correct: the element '%s' is typed "
+                     "NOTATION without an enumeration",
+                     d->name ? d->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        if (!xsd_notation_enum_symbols_ok(s, t)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "e-props-correct: the element '%s' enumerates a "
+                     "value that does not name a declared notation",
+                     d->name ? d->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -4617,6 +4836,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     /* #2184 a-props-correct: NOTATION-typed attributes must be
      * enumerated. */
     if (xsd_check_notation_attrs(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: the NOTATION / xs:anyAtomicType placement rules — the
+     * abstract builtin in base/list/union slots, the bare NOTATION
+     * element type, and the declared-notation enumeration law. */
+    if (xsd_simple_type_refs_ok(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -6633,6 +6861,28 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                 captured->next = s->simple_types;
                 s->simple_types = captured;
             }
+        } else if (strcmp(local, "notation") == 0 && uri &&
+                   !strcmp(uri, XSD_NS)) {
+            /* #2184: the symbol table the NOTATION enumeration
+             * checks match against (simple095). */
+            const char* nm =
+                leptris_element_attribute((LeptrisElement)n, "name");
+            if (nm && *nm) {
+                if (s->notation_count == s->notation_cap) {
+                    size_t nc = s->notation_cap
+                                    ? s->notation_cap * 2
+                                    : 8;
+                    char** grown = (char**)realloc(
+                        s->notations, nc * sizeof(char*));
+                    if (grown) {
+                        s->notations = grown;
+                        s->notation_cap = nc;
+                    }
+                }
+                if (s->notation_count < s->notation_cap)
+                    s->notations[s->notation_count++] =
+                        xsd_strdup(nm);
+            }
         }
     }
     if (oc_misplaced) {
@@ -6704,6 +6954,10 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
     }
     for (size_t i = 0; i < s->ro_len; i++) free(s->ro_stack[i]);
     free(s->ro_stack);
+    /* #2184: the xs:notation symbol table */
+    for (size_t i = 0; i < s->notation_count; i++)
+        free(s->notations[i]);
+    free(s->notations);
     free(s->report);
     xsd_cm_free(s->complex_types);
     XsdElementIcs* slot = s->element_ics;

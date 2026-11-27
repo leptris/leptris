@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- zone004: explicitTimezone cannot derive "optional" from "required". -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc" type="timeStampOptional"/>
+  <xs:simpleType name="timeStamp">
+    <xs:restriction base="xs:time">
+      <xs:explicitTimezone value="required"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="timeStampOptional">
+    <xs:restriction base="timeStamp">
+      <xs:explicitTimezone value="optional"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

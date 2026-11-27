@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One simpleType per single-occurrence facet, each with the facet
+     repeated in one restriction — the suite's simple060-083 class
+     (saxonData/Simple, "Facet must not appear more than once"): the
+     schema is a schema error. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="a" type="t-length"/>
+        <xs:element name="b" type="t-minLength"/>
+        <xs:element name="c" type="t-maxLength"/>
+        <xs:element name="d" type="t-totalDigits"/>
+        <xs:element name="e" type="t-fractionDigits"/>
+        <xs:element name="f" type="t-minScale"/>
+        <xs:element name="g" type="t-maxScale"/>
+        <xs:element name="h" type="t-minInclusive"/>
+        <xs:element name="i" type="t-minExclusive"/>
+        <xs:element name="j" type="t-maxInclusive"/>
+        <xs:element name="k" type="t-maxExclusive"/>
+        <xs:element name="l" type="t-explicitTimezone"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="t-length">
+    <xs:restriction base="xs:string">
+      <xs:length value="2"/>
+      <xs:length value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-minLength">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="2"/>
+      <xs:minLength value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-maxLength">
+    <xs:restriction base="xs:string">
+      <xs:maxLength value="2"/>
+      <xs:maxLength value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-totalDigits">
+    <xs:restriction base="xs:integer">
+      <xs:totalDigits value="2"/>
+      <xs:totalDigits value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-fractionDigits">
+    <xs:restriction base="xs:decimal">
+      <xs:fractionDigits value="2"/>
+      <xs:fractionDigits value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-minScale">
+    <xs:restriction base="xs:decimal">
+      <xs:minScale value="0"/>
+      <xs:minScale value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-maxScale">
+    <xs:restriction base="xs:decimal">
+      <xs:maxScale value="2"/>
+      <xs:maxScale value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-minInclusive">
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="2"/>
+      <xs:minInclusive value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-minExclusive">
+    <xs:restriction base="xs:integer">
+      <xs:minExclusive value="2"/>
+      <xs:minExclusive value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-maxInclusive">
+    <xs:restriction base="xs:integer">
+      <xs:maxInclusive value="2"/>
+      <xs:maxInclusive value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-maxExclusive">
+    <xs:restriction base="xs:integer">
+      <xs:maxExclusive value="2"/>
+      <xs:maxExclusive value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="t-explicitTimezone">
+    <xs:restriction base="xs:dateTime">
+      <xs:explicitTimezone value="required"/>
+      <xs:explicitTimezone value="required"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

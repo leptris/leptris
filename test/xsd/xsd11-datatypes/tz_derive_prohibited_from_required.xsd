@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- zone409: explicitTimezone cannot derive "prohibited" from "required". -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc" type="timeStampProhibited"/>
+  <xs:simpleType name="timeStampRequired">
+    <xs:restriction base="xs:time">
+      <xs:explicitTimezone value="required"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="timeStampProhibited">
+    <xs:restriction base="timeStampRequired">
+      <xs:explicitTimezone value="prohibited"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
