@@ -2,7 +2,7 @@
 
 ## [1.9.449] - 2026-11-27
 
-The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1926 / 2206 (65.2% → 87.3%)** in one train, with zero regressions at every step (per-row red-set diffs, monotonic CI pins at the cross-platform stable values).
+The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1984 / 2206 (65.2% → 89.9%)** in one train, with zero regressions at every step (per-row red-set diffs, monotonic CI pins at the cross-platform stable values).
 
 ### XSD 1.1 (leptris/leptris#2181 umbrella, #2184 slices)
 - **Default attribute groups** (#2182): `xs:schema/@defaultAttributes` capture + §3.4.2.4 application, `defaultAttributesApply` opt-out, per-document scoping, derivation collisions.
@@ -12,7 +12,9 @@ The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1926
 - **The Override tails** (#2205): redefine/override location-graph cycles, a-props-correct NOTATION, document-scoped ID uniqueness — the override family closes 87/87.
 - **Wildcard negative namespace/name sets** (#2213, +64 rows): fold-at-capture canonization, §3.10.6.3 intersection/union algebra, notNamespace/notQName with the xml prefix prebound, ##definedSibling expansion, the restriction-subset law, UPA-relaxation arming.
 - **Defaulted-xsi:type class** (#2216, +18 rows): built-in xsi declarations resolve and capture without import; §3.4.4.2 cl.4 (the default has no assessment effect) + the §3.3.4.3 cl.4 simple-for-complex override rule.
+- **The relaxed xs:all lane** (#2220, +55 rows): the order-free all matcher (per-child windows, wildcard children with weak-wildcard precedence, substitution members, group-ref flattening), relaxed-all UPA evidence, all+all extension merge + cos-ct-extends particle grammar with merged-wildcard disjointness, the §3.9.6 restriction sweep — 1.1's relaxed occurrences and all-vs-all restriction are enforced, and 1.0's at-most-one stays pinned.
 - **Consumer fixes** (via moxml): restriction-lane `castable as` now qualifies bare builtin names (#2212/#2206 — was always-true), float/double fixed-value compares in the value space — INF/+INF and overflow forms (#2210/#2207), override via schemaLocation works on the set path (#2211/#2208).
+- **The conformance oracle is deterministic again** (#2220/#2214): the ##definedSibling expansion read an uninitialized stack buffer — verdicts rode stack garbage per binary (four saxon Wild rows flipped by process context, and the floor differed by one between platforms). Zero-initialized with a determinism regression spec; all four rows stabilized.
 
 ### Performance
 - **append-uniq 2.13x → 1.45x vs pugixml** (#2203): one fused pass replaces four serial byte scans in element_create; the S8 name-slot copy drops its per-create libc call.
@@ -25,7 +27,7 @@ The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1926
 - The windows legs fix chain from 1.9.448's first PGO release: pgomgr PATH, the libleptris.dll name, shared-only dll training (#2189/#2198).
 
 ### Floors
-XSD 1.0: **1041/1056 (98.6%)** — unchanged. XSD 1.1: **1926/2206 (87.3%)** — driving to 100% via #2181 (remaining: openContent interleaved, relaxed xs:all, multi-ID, CTA/IC residues).
+XSD 1.0: **1044/1056 (98.9%)**. XSD 1.1: **1984/2206 (89.9%)** — driving to 100% via #2181 (remaining: openContent interleaved, multi-ID, CTA/IC residues).
 
 
 
