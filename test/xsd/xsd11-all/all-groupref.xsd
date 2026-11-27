@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- a group reference inside xs:all whose group is an xs:all group
+     flattens its particles into the parent (all007 vs all001's
+     instances) -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:all>
+        <xs:element name="a" minOccurs="0" maxOccurs="5"/>
+        <xs:group ref="allgroup"/>
+      </xs:all>
+    </xs:complexType>
+  </xs:element>
+  <xs:group name="allgroup">
+    <xs:all>
+      <xs:element name="b" minOccurs="1" maxOccurs="5"/>
+      <xs:element name="c" minOccurs="2" maxOccurs="unbounded"/>
+    </xs:all>
+  </xs:group>
+</xs:schema>

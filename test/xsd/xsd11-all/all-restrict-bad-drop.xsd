@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- invalid restriction: a required base particle is DROPPED
+     (all204 shape: c min=2 missing from the derived all) -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:complexType name="b">
+    <xs:all>
+      <xs:element name="x" minOccurs="1" maxOccurs="2"/>
+      <xs:element name="c" minOccurs="2" maxOccurs="unbounded"/>
+    </xs:all>
+  </xs:complexType>
+  <xs:complexType name="r">
+    <xs:complexContent>
+      <xs:restriction base="b">
+        <xs:all>
+          <xs:element name="x" minOccurs="1" maxOccurs="2"/>
+        </xs:all>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="root" type="r"/>
+</xs:schema>

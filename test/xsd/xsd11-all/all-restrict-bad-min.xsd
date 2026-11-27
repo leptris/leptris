@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- invalid restriction: minOccurs LOWERED under the base (all202
+     shape: b's min 1 drops to 0) -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:complexType name="b">
+    <xs:all>
+      <xs:element name="x" minOccurs="1" maxOccurs="2"/>
+    </xs:all>
+  </xs:complexType>
+  <xs:complexType name="r">
+    <xs:complexContent>
+      <xs:restriction base="b">
+        <xs:all>
+          <xs:element name="x" minOccurs="0" maxOccurs="2"/>
+        </xs:all>
+      </xs:restriction>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="root" type="r"/>
+</xs:schema>
