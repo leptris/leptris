@@ -359,6 +359,7 @@ static void xsd_cm_free(XsdCm* cm) {
             XsdAlternative* an = alt->next;
             if (alt->compiled) leptris_xquery_free(alt->compiled);
             free(alt->test);
+            free(alt->ns_prolog);
             free(alt->type);
             for (int i = 0; i < alt->test_attr_n; i++)
                 free(alt->test_attrs[i]);
@@ -6366,6 +6367,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             XsdAlternative* an = a->next;
             if (a->compiled) leptris_xquery_free(a->compiled);
             free(a->test);
+            free(a->ns_prolog);
             free(a->type);
             for (int i = 0; i < a->test_attr_n; i++)
                 free(a->test_attrs[i]);
@@ -6623,7 +6625,32 @@ static XsdAlternative* xsd_capture_alternatives(
         if (!a) break;
         if (test && test[0]) {
             a->test = xsd_strdup(test);
-            a->compiled = leptris_xquery_parse(test, strlen(test));
+            /* #2184 (§3.13.2): the test's prefixes and unprefixed
+             * names resolve under the SCHEMA document's bindings
+             * + xpathDefaultNamespace — captured at the
+             * alternative element like the assert lane, and the
+             * compiled form carries the prolog (cta0002: the
+             * instance binds the namespace with a DIFFERENT
+             * prefix; the test must still see the schema's). */
+            a->ns_prolog = xsd_capture_ns_prolog(e, s->base_dir);
+            {
+                size_t pl = a->ns_prolog ? strlen(a->ns_prolog) : 0;
+                size_t tl = strlen(test);
+                char* wrapped = (char*)malloc(pl + tl + 8);
+                if (wrapped) {
+                    size_t o = 0;
+                    if (pl) {
+                        memcpy(wrapped + o, a->ns_prolog, pl);
+                        o += pl;
+                        wrapped[o++] = ' ';
+                    }
+                    memcpy(wrapped + o, test, tl + 1);
+                    a->compiled = leptris_xquery_parse(wrapped, o + tl);
+                    free(wrapped);
+                } else {
+                    a->compiled = leptris_xquery_parse(test, tl);
+                }
+            }
             xsd_cta_test_attrs(a->test, &a->test_attrs,
                                &a->test_attr_n);
         }
