@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- invalid restriction: the wildcard's namespace set WIDENS
+     (base excludes 'hi', derived excludes nothing) — s3_3_6si02 d -->
+<xs:schema xmlns="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="a" xmlns:a="a">
+  <complexType name="c">
+    <all>
+      <any notQName="hi" processContents="lax"/>
+    </all>
+  </complexType>
+  <complexType name="d">
+    <complexContent>
+      <restriction base="a:c">
+        <all>
+          <any processContents="lax"/>
+        </all>
+      </restriction>
+    </complexContent>
+  </complexType>
+  <element name="root" type="integer"/>
+</schema>

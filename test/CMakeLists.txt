@@ -232,6 +232,13 @@ target_compile_definitions(test_xsd11_wildcard PRIVATE
 leptris_add_test(test_xsd11_xitype xsd/test_xsd11_xitype.cpp)
 target_compile_definitions(test_xsd11_xitype PRIVATE
     LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
+# #2184: relaxed xs:all (XSD 1.1 §3.8.3) — order-free per-child
+# counting, wildcard/group children, all-to-all extension merge and
+# restriction; the suite fixtures ride the pinned corpus.
+leptris_add_test(test_xsd11_all xsd/test_xsd11_all.cpp)
+target_compile_definitions(test_xsd11_all PRIVATE
+    LEPTRIS_XSD11_ALL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-all"
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)

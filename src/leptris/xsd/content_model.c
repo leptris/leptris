@@ -305,8 +305,17 @@ static int any_ns_matches(XsdCm* any, const char* uri,
     const char* f = any->any_ns ? any->any_ns : "##any";
     if (strcmp(f, "##any") == 0) return 1;
     if (strcmp(f, "##local") == 0) return uri == NULL;
-    if (strcmp(f, "##targetNamespace") == 0)
-        return target_ns && uri && strcmp(uri, target_ns) == 0;
+    /* #2184: a schema without a targetNamespace has {target
+     * namespace} = absent — ##targetNamespace then names the
+     * ABSENT namespace, so unqualified children match (all006).
+     * The qualified reading is untouched: the declaring unit's tns
+     * still admits its own qualified children (t1735 — the
+     * imported-unit shape regressed when the branch was replaced
+     * instead of extended). */
+    if (strcmp(f, "##targetNamespace") == 0) {
+        if (uri == NULL) return !target_ns || !target_ns[0];
+        return target_ns && strcmp(uri, target_ns) == 0;
+    }
     if (strcmp(f, "##other") == 0)
         return uri != NULL &&
                !(target_ns && strcmp(uri, target_ns) == 0);
@@ -325,6 +334,8 @@ static int any_ns_matches(XsdCm* any, const char* uri,
             continue;
         }
         if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            /* #2184: no targetNamespace → the absent namespace */
+            if (uri == NULL && (!target_ns || !target_ns[0])) return 1;
             if (target_ns && uri && strcmp(uri, target_ns) == 0) return 1;
             continue;
         }
@@ -358,6 +369,8 @@ static int cm_not_ns_hits(XsdCm* any, const char* uri,
             continue;
         }
         if (strncmp(start, "##targetNamespace", len) == 0 && len == 17) {
+            /* #2184: no targetNamespace → the absent namespace */
+            if (uri == NULL && (!target_ns || !target_ns[0])) return 1;
             if (target_ns && uri && strcmp(uri, target_ns) == 0)
                 return 1;
             continue;
@@ -369,10 +382,22 @@ static int cm_not_ns_hits(XsdCm* any, const char* uri,
 }
 
 /* The open-content wildcard's admission for one child (positive
- * filter + notNamespace + notQName). */
+ * filter + notNamespace + notQName). #2184 (§3.10.4.1): the
+ * XML Schema namespace and the xsi namespace are RESERVED — a
+ * wildcard's namespace set never admits them, so an instance that
+ * smuggles schema-namespace elements past a lax wildcard fails
+ * (s3_4_6ii03's default-xmlns trick). */
+#define XSD_RESERVED_NS 2
+static const char* const k_xsd_reserved_ns[XSD_RESERVED_NS] = {
+    "http://www.w3.org/2001/XMLSchema",
+    "http://www.w3.org/2001/XMLSchema-instance"};
+
 static int oc_wildcard_admits(struct leptris_xsd_schema* s, XsdCm* w,
                               const char* uri, const char* names_c,
                               const char* tns) {
+    if (uri)
+        for (int i = 0; i < XSD_RESERVED_NS; i++)
+            if (strcmp(uri, k_xsd_reserved_ns[i]) == 0) return 0;
     if (!any_ns_matches(w, uri, w->any_unit_tns ? w->any_unit_tns
                                                 : tns))
         return 0;
@@ -417,11 +442,111 @@ static void ss_close(StateSet* ss, CmNfa* n) {
     }
 }
 
-/* XSD xs:all at the model root: order-free, each particle at
- * most maxOccurs times, minOccurs floors — a counting check over
- * the particle list (XSD 1.0 restricts xs:all to the model root,
- * each child a particle, maxOccurs <= 1). */
-static int all_root_valid(XsdCm* all, const char* target_ns,
+/* #2184: flatten the all's particle list — group references whose
+ * group is an xs:all group splice their particles in (1.1 lifted
+ * the elements-only restriction on xs:all's children); depth guards
+ * the cyclic-ref case. Returns the particle count, or -1 when a
+ * referenced group is missing, non-all, or the list overflows. */
+#define XSD_ALL_PARTICLES_MAX 512
+
+static long all_flatten_particles(struct leptris_xsd_schema* s,
+                                  XsdCm* head, XsdCm** out, long* n,
+                                  int depth) {
+    for (XsdCm* p = head; p; p = p->next) {
+        if (*n >= XSD_ALL_PARTICLES_MAX) return -1;
+        if (p->kind == XSD_CM_GROUP_REF) {
+            /* resolved at match time so forward references need no
+             * capture order; a missing or non-all group leaves the
+             * schema's own constraint check to reject it */
+            if (depth > 32 || !s) return -1;
+            XsdGroupDef* g = xsd_find_group(s, p->name);
+            if (!g || !g->model || g->model->kind != XSD_CM_ALL)
+                return -1;
+            if (all_flatten_particles(s, g->model->first_child, out,
+                                      n, depth + 1) < 0)
+                return -1;
+            continue;
+        }
+        out[(*n)++] = p;
+    }
+    return *n;
+}
+
+static long all_flatten_resolve(struct leptris_xsd_schema* s, XsdCm* all,
+                                XsdCm** out, long* n) {
+    return all_flatten_particles(s, all->first_child, out, n, 0);
+}
+
+/* #2184: claim one particle's instance matches from the unclaimed
+ * pool and count them against the particle's occurrence window.
+ * Weak wildcards (§3.8.6): element particles claim first — a
+ * wildcard particle absorbs only the children no element particle
+ * matched, whichever order the schema wrote them in. Returns the
+ * claimed count, or -1 when the particle's window is violated. */
+static long all_claim_particle(XsdCm* p, struct leptris_xsd_schema* s,
+                               const char* target_ns,
+                               const char* const* names,
+                               const char* const* ns_uris, size_t count,
+                               unsigned char* claimed) {
+    if (p->kind == XSD_CM_ANY) {
+        long hits = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (claimed[i]) continue;
+            const char* uri = ns_uris ? ns_uris[i] : NULL;
+            if (!oc_wildcard_admits(s, p, uri, names[i],
+                                    p->any_unit_tns ? p->any_unit_tns
+                                                    : target_ns))
+                continue;
+            claimed[i] = 1;
+            hits++;
+        }
+        if (hits < p->min) return -1;
+        if (p->max >= 0 && hits > p->max) return -1;
+        return hits;
+    }
+    if (p->kind != XSD_CM_ELEMENT || !p->name) return 0;
+    long hits = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (claimed[i]) continue;
+        if (p->max >= 0 && hits >= p->max) break;
+        const char* uri = ns_uris ? ns_uris[i] : NULL;
+        int child_qualified = uri && uri[0];
+        int ns_ok = p->ns ? (!child_qualified || strcmp(uri, p->ns) == 0)
+                          : !child_qualified;
+        int named = strcmp(p->name, names[i]) == 0;
+        const char* mns = NULL;
+        if (!named && s) {
+            /* #2184: substitution-group members count toward the
+             * head's window (all002's <C/> under ref="c") */
+            const XsdElementDecl* m =
+                xsd_substitute_member(s, names[i], p->name);
+            if (m) {
+                named = 1;
+                mns = m->ns;
+            }
+        }
+        if (named && mns) {
+            /* a substituting member matches in ITS OWN namespace */
+            ns_ok = child_qualified ? (mns[0] && strcmp(uri, mns) == 0)
+                                    : !mns[0];
+        }
+        if (!named || !ns_ok) continue;
+        claimed[i] = 1;
+        hits++;
+    }
+    if (hits < p->min) return -1;
+    if (p->max >= 0 && hits > p->max) return -1;
+    return hits;
+}
+
+/* XSD xs:all at the model root: order-free, each particle within
+ * its own occurrence window — a counting check over the particle
+ * list (1.0: xs:all at the model root, each child a particle,
+ * maxOccurs <= 1; 1.1 relaxes the windows, admits wildcard and
+ * group-ref children, and substitution-group members count toward
+ * their head's window). */
+static int all_root_valid(struct leptris_xsd_schema* s, XsdCm* all,
+                          const char* target_ns,
                           const char* const* names,
                           const char* const* ns_uris, size_t count) {
     /* the whole all is ABSENT (moxml#466, mgAa003/mgD013): with
@@ -429,36 +554,39 @@ static int all_root_valid(XsdCm* all, const char* target_ns,
      * particles carry min=1 — their bounds apply only when the all
      * is present */
     if (count == 0 && all->min == 0) return 1;
-    for (XsdCm* p = all->first_child; p; p = p->next) {
-        size_t hits = 0;
-        for (size_t i = 0; i < count; i++) {
-            const char* uri = ns_uris ? ns_uris[i] : NULL;
-            int child_qualified = uri && uri[0];
-            int ns_ok = p->ns ? (!child_qualified ||
-                                 strcmp(uri, p->ns) == 0)
-                              : !child_qualified;
-            if (p->name && strcmp(p->name, names[i]) == 0 && ns_ok)
-                hits++;
-        }
-        if ((long)hits < p->min) return 0;
-        if (p->max >= 0 && (long)hits > p->max) return 0;
+    XsdCm* particles[XSD_ALL_PARTICLES_MAX];
+    long n = 0;
+    if (all_flatten_resolve(s, all, particles, &n) < 0) return 0;
+    unsigned char stack_claimed[256];
+    unsigned char* claimed = stack_claimed;
+    if (count > sizeof(stack_claimed)) {
+        claimed = (unsigned char*)calloc(count, 1);
+        if (!claimed) return 0;
+    } else {
+        memset(claimed, 0, count);
+    }
+    int ok = 1;
+    /* pass 1: element particles claim their matches */
+    for (long i = 0; i < n && ok; i++) {
+        XsdCm* p = particles[i];
+        if (p->kind != XSD_CM_ELEMENT) continue;
+        if (all_claim_particle(p, s, target_ns, names, ns_uris, count,
+                               claimed) < 0)
+            ok = 0;
+    }
+    /* pass 2: wildcards absorb what no element particle claimed */
+    for (long i = 0; i < n && ok; i++) {
+        XsdCm* p = particles[i];
+        if (p->kind == XSD_CM_ELEMENT) continue;
+        if (all_claim_particle(p, s, target_ns, names, ns_uris, count,
+                               claimed) < 0)
+            ok = 0;
     }
     /* every instance child must belong to a particle */
-    for (size_t i = 0; i < count; i++) {
-        int matched = 0;
-        const char* uri = ns_uris ? ns_uris[i] : NULL;
-        for (XsdCm* p = all->first_child; p && !matched; p = p->next) {
-            int child_qualified2 = uri && uri[0];
-            int ns_ok2 = p->ns ? (!child_qualified2 ||
-                                  strcmp(uri, p->ns) == 0)
-                               : !child_qualified2;
-            if (p->name && strcmp(p->name, names[i]) == 0 && ns_ok2)
-                matched = 1;
-        }
-        if (!matched) return 0;
-    }
-    (void)target_ns;
-    return 1;
+    for (size_t i = 0; i < count && ok; i++)
+        if (!claimed[i]) ok = 0;
+    if (claimed != stack_claimed) free(claimed);
+    return ok;
 }
 
 /* ---- xs:all with open content (XSD 1.1 §3.4.4.3) ------------------ */
@@ -475,7 +603,8 @@ static int all_oc_suffix(XsdCm* all, XsdCm* w,
      * split (instances are small; cap the quadratic walk) */
     if (count > 512) return 0;
     for (size_t k = 0; k <= count; k++) {
-        if (!all_root_valid(all, target_ns, names, ns_uris, k))
+        if (!all_root_valid(s, all, target_ns, names, ns_uris,
+                             k))
             continue;
         int ok = 1;
         for (size_t i = k; i < count && ok; i++) {
@@ -518,7 +647,7 @@ static int all_oc_interleave(XsdCm* all, XsdCm* w,
             }
         }
         if (!ok || m > 24) continue;
-        if (all_root_valid(all, target_ns, rn, ru, m)) return 1;
+        if (all_root_valid(s, all, target_ns, rn, ru, m)) return 1;
     }
     return 0;
 }
@@ -540,7 +669,8 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                                        target_ns, names, ns_uris,
                                        count);
         }
-        return all_root_valid(model, target_ns, names, ns_uris, count);
+        return all_root_valid(s, model, target_ns, names, ns_uris,
+                              count);
     }
     CmNfa n;
     memset(&n, 0, sizeof(n));
