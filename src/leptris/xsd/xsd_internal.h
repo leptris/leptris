@@ -451,15 +451,36 @@ typedef struct xsd_unit_defattrs {
     struct xsd_unit_defattrs* next;
 } XsdUnitDefAttrs;
 
+/* #2184 §3.10.6.3: one wildcard GATHERED into a complexType from
+ * its attributeGroup refs (or a direct xs:anyAttribute). A type
+ * gathering several wildcard-carrying groups admits a name only when
+ * EVERY member admits (the §3.10.6.3 intersection); the derived
+ * wildcard and its base's union across a derivation instead.
+ * not_qname carries the CAPTURE-CANON form: prefixed tokens already
+ * resolved to "{uri}local" against the declaring element's scope. */
+typedef struct xsd_attr_wc {
+    char* ns;        /* @namespace grammar; NULL = absent (##any) */
+    char* unit_ns;   /* declaring unit's tns (##targetNamespace/##other) */
+    char* not_ns;    /* @notNamespace exclusions */
+    char* not_qname; /* canon @notQName exclusions */
+    struct xsd_attr_wc* next;
+} XsdAttrWc;
+
 typedef struct xsd_type_attrs {
     char* type_name;
     char* ns;           /* leptris-ruby#440: declaring schema's tns */
     char* any_attr_ns; /* xs:anyAttribute grammar (NULL = absent) */
     char* any_attr_not_qname; /* XSD 1.1 xs:anyAttribute/@notQName */
+    char* any_attr_not_ns;    /* XSD 1.1 xs:anyAttribute/@notNamespace */
     char* any_attr_base_ns; /* extension: the base type's wildcard (union) */
+    char* any_attr_base_not_qname; /* #2184: the base wildcard's exclusions */
+    char* any_attr_base_not_ns;
     /* #1735: declaring unit's tns for each wildcard above */
     char* any_attr_unit_ns;
     char* any_attr_base_unit_ns;
+    /* #2184: the OTHER wildcards the type's attributeGroup refs
+     * gather — the §3.10.6.3 intersection over every member. */
+    XsdAttrWc* any_attr_int;
     XsdAttrDecl* attrs;
     struct xsd_type_attrs* next;
 } XsdTypeAttrs;
