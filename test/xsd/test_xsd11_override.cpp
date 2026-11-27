@@ -142,3 +142,82 @@ TEST(Xsd11Override, LegalRedefineExtensionStillFoldsBase) {
     EXPECT_EQ(verdict_of("M_a.xsd", "M_v.xml"), 1);
     EXPECT_NE(verdict_of("M_a.xsd", "M_n.xml"), 1);
 }
+
+/* ---- #2184: the Override tails (fixtures ride the pinned
+ * xsd11-cases corpus; oracle = the suite metadata) ----------------- */
+
+namespace {
+
+/* verdict against a pinned-corpus schema: 1 valid, 0 invalid,
+ * -1 schema/parse failure. */
+int cases_verdict_of(const char* schema, const char* instance) {
+    std::string sp =
+        std::string(LEPTRIS_XSD11_CASES_DIR) + "/" + schema;
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << schema << " must compile";
+    EXPECT_EQ(st, LEPTRIS_OK) << schema << " compile status";
+    if (!s) return -1;
+    std::string ip =
+        std::string(LEPTRIS_XSD11_CASES_DIR) + "/" + instance;
+    LeptrisStatus pst = (LeptrisStatus)0;
+    LeptrisDocument d = leptris_parse_file(ip.c_str(), &pst);
+    EXPECT_NE(d, (LeptrisDocument)0) << instance << " must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
+}  // namespace
+
+/* s4_2_4si02c (IBM "Cyclic dependencies redefine_2"): the redefine
+ * location graph must not close back on itself — si02c redefines
+ * si02, si02 redefines si02b, si02b redefines si02c. The pinned
+ * snapshot's closing document s4_2_4si02b.xsd is now in the corpus
+ * (it was missing, so the cycle the oracle judged was not
+ * reconstructible). */
+TEST(Xsd11Override, RedefineLocationCycleIsSchemaError) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string sp = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                     "/ibmData/schema_invalid/S4_2_4/s4_2_4si02c.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    if (s) leptris_xsd_free(s);
+    EXPECT_TRUE(s == (LeptrisXsdSchema)0 || st != LEPTRIS_OK)
+        << "the cyclic redefine must be rejected";
+}
+
+/* over027 (§3.2.2.1 a-props-correct): an attribute typed
+ * xs:NOTATION — or any type derived from NOTATION — must carry an
+ * enumeration (the NOTATION symbols are declared by enumeration
+ * only). The suite's revised reading (w3c/xsdtests issue 12) keeps
+ * this a schema constraint; the schema must be rejected. */
+TEST(Xsd11Override, NotationAttributeWithoutEnumerationIsSchemaError) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    std::string sp =
+        std::string(LEPTRIS_XSD11_CASES_DIR) +
+        "/saxonData/Override/over027.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    if (s) leptris_xsd_free(s);
+    EXPECT_TRUE(s == (LeptrisXsdSchema)0 || st != LEPTRIS_OK)
+        << "an un-enumerated NOTATION attribute must fail the schema";
+}
+
+/* over008 (§3.3.5): ID-typed attribute values are unique within the
+ * document — the overridden attributeGroup's required @id is no
+ * exception. The .v01 instance (distinct ids) stays valid. */
+TEST(Xsd11Override, DocumentScopedIdUniqueness) {
+    EXPECT_NE(cases_verdict_of("saxonData/Override/over008.xsd",
+                               "saxonData/Override/over008.n01.xml"),
+              1);
+    EXPECT_NE(cases_verdict_of("saxonData/Override/over008.xsd",
+                               "saxonData/Override/over008.n02.xml"),
+              1);
+    EXPECT_EQ(cases_verdict_of("saxonData/Override/over008.xsd",
+                               "saxonData/Override/over008.v01.xml"),
+              1);
+}
