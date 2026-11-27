@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- xsi:nil="1" is the boolean spelling of true (all004): the nil
+     value replaces the content -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc" nillable="1">
+    <xs:complexType mixed="1">
+      <xs:all>
+        <xs:element name="a" minOccurs="2" maxOccurs="5"/>
+        <xs:element name="b" minOccurs="2" maxOccurs="5"/>
+      </xs:all>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

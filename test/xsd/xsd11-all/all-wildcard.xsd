@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 1.1: an xs:any child inside xs:all (§3.8.3); the wildcard counts
+     occurrences like any particle (weak wildcards defer to element
+     particles, so the element/wildcard FIRST-set overlap is legal) -->
+<xs:schema xmlns="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="a" xmlns:a="a">
+  <complexType name="c">
+    <all>
+      <element name="e1" type="integer"/>
+      <element name="e2" type="integer" minOccurs="0"/>
+      <any maxOccurs="3" processContents="lax"/>
+    </all>
+  </complexType>
+  <element name="root" type="a:c"/>
+</schema>

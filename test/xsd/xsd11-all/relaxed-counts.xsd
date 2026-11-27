@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- relaxed xs:all: per-child min/max > 1, order-free counting -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="doc">
+    <xs:complexType>
+      <xs:all>
+        <xs:element name="a" minOccurs="0" maxOccurs="5"/>
+        <xs:element name="b" minOccurs="1" maxOccurs="5"/>
+        <xs:element name="c" minOccurs="2" maxOccurs="unbounded"/>
+        <xs:element name="d" minOccurs="1" maxOccurs="1"/>
+      </xs:all>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
