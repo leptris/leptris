@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.449] - 2026-11-27
+
+### Performance
+
+- pin the evaluator hot set to cache lines (#2194) (xpath)
+
+
+
 ## [1.9.448] - 2026-11-26
 
 <!-- Edit this section with the actual release notes. -->
