@@ -291,6 +291,10 @@ struct xsd_alternative {
     char* type;             /* the selected type name */
     int xs_error;           /* the selection is xs:error (no valid
                              * instances — always invalid, §2.2.1.1) */
+    /* #2184 (XPST0080): the test's cast/castable target resolved to
+     * a COMPLEX type of the schema — a static error (the cast target
+     * must be a simple type); the gate rejects the schema. */
+    char* cast_target;
     /* moxml#579: the attribute names the test references (@kind /
      * attribute::kind forms, string literals skipped) — the SELECTED
      * alternative's set is exempt from strict attribute assessment
