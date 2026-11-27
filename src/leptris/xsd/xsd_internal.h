@@ -189,6 +189,11 @@ typedef struct xsd_cm {
     struct xsd_cm* first_child; /* group children list */
     struct xsd_cm* next;        /* sibling link within the parent group */
     char* text_type; /* simpleContent wrapper: the text's type ref */
+    /* #2184 §3.2.2.3: a simpleContent EXTENSION's base simple type —
+     * the ID bookkeeping's content classification reads it beside
+     * text_type (whose synth-slot posture is pinned for the lexical
+     * lane). NULL elsewhere. */
+    char* text_ext_base;
     XsdAssert* asserts; /* XSD 1.1: the type's xs:assert list */
     struct xsd_cm* open_any; /* XSD 1.1: xs:openContent wildcard */
     int oc_mode;        /* 0 none/unset, 1 suffix, 2 interleave */
@@ -265,6 +270,11 @@ typedef struct xsd_group_def {
 /* XSD 1.1 (xs:schema @version="1.1") gates 1.1 enforcement. */
 int xsd_schema_version_11(struct leptris_xsd_schema* s);
 
+/* #2184: the author's explicit 1.0 pin (@version="1.0" /
+ * vc:maxVersion="1.0") — 1.0-only rules stay armed for such a schema
+ * whatever 1.1-only syntax it carries. */
+int xsd_schema_pinned_10(struct leptris_xsd_schema* s);
+
 /* #2183: the schema document's directory (file compile) — the
  * assertion lane anchors fn:doc's relative URIs here. */
 const char* xsd_schema_base_dir(struct leptris_xsd_schema* s);
@@ -334,6 +344,10 @@ typedef struct xsd_attr_decl {
     char* name;  /* attribute local name */
     char* type;  /* builtin ref or local simpleType name (NULL=anySimple) */
     char* fixed; /* #FIXED value: present values must string-equal it */
+    /* #2184 §3.2.2.3: the row's {value constraint} default — applies
+     * to absent attributes and joins the ID bookkeeping (id010's
+     * defaulted para001, id016's defaulted idref). */
+    char* def;
     int required;
     /* #2185: use="prohibited" — the row REMOVES the attribute from
      * the type's {attribute uses} (XSD 1.0 §3.4.2/§3.4.3): an

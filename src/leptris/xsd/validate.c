@@ -88,9 +88,12 @@ struct xsd_validator {
      * GCC. */
     char** cta_exempt;
     int cta_exempt_n;
-    /* #2184 §3.3.5: ID-typed attribute values seen this run —
-     * uniqueness is document-scoped (over008.n01). Chaining hash. */
+    /* #2184 §3.3.5 / §C.4: the ID bookkeeping — TableA (the
+     * uniqueness entries) and the pool (every ID and IDREF value seen
+     * this run). Chaining hash; carriers are borrowed DOM pointers. */
     struct id_seen* id_buckets[128];
+    struct id_ref* id_pool;
+    struct id_ref* id_pool_tail;
     /* #2184 §3.11.4: the type each validated element was ASSESSED
      * against (validate_local_uri is the chokepoint) — the keyref
      * tuple comparison reads the field terminal's type from here to
@@ -145,23 +148,51 @@ static const char* xsd_recorded_type(struct xsd_validator* v,
     return NULL;
 }
 
+/* One TableA entry: a value that participates in ID uniqueness.
+ * Attribute-carried IDs scope to the document (id010.n01: the
+ * defaulted para001 and the explicit para001 on two paras conflict);
+ * content-carried IDs scope to the carrier's PARENT (id003.v01:
+ * sibling <id>zzz</id> twins are one denotation; id008.v02: the same
+ * value under two different parents is a duplicate). */
 struct id_seen {
     char* v;
+    LeptrisElement carrier;
+    int is_content;
     struct id_seen* next;
 };
 
-/* #2184 §3.3.5: record an ID value; 1 = new (recorded), 0 = the
- * value repeats — the document is invalid. */
-static int xsd_id_value_record(struct xsd_validator* v, const char* val) {
+/* One pool entry: every ID or IDREF value seen this run, in
+ * document order. At the end of the run every is_ref entry must
+ * match some !is_ref entry (§C.4 integrity — ii04-ii18, id005-008). */
+struct id_ref {
+    char* v;
+    int is_ref;
+    LeptrisElement carrier;
+    struct id_ref* next;
+};
+
+/* #2184: record an ID value in TableA; 1 = ok, 0 = the value
+ * repeats from a different scope (the document is invalid). A repeat
+ * from the SAME scope (one element's two attributes, one parent's
+ * sibling content) is the same denotation — legal. */
+static int xsd_id_value_record(struct xsd_validator* v, const char* val,
+                               LeptrisElement carrier, int via_content) {
     if (!v || !val || !val[0]) return 1;
+    LeptrisElement scope = carrier;
+    if (via_content && carrier)
+        scope = leptris_element_parent(carrier);
     unsigned h = 2166136261u;
     for (const char* p = val; *p; p++) {
         h ^= (unsigned char)*p;
         h *= 16777619u;
     }
     struct id_seen** b = &v->id_buckets[h % 128];
-    for (struct id_seen* n = *b; n; n = n->next)
-        if (strcmp(n->v, val) == 0) return 0;
+    for (struct id_seen* n = *b; n; n = n->next) {
+        if (strcmp(n->v, val) != 0) continue;
+        if (n->is_content != via_content) continue;
+        if (n->carrier == scope) return 1; /* the same denotation */
+        return 0; /* a different scope carried the same ID */
+    }
     struct id_seen* n = (struct id_seen*)malloc(sizeof(*n));
     if (!n) return 1;
     n->v = strdup(val);
@@ -169,9 +200,32 @@ static int xsd_id_value_record(struct xsd_validator* v, const char* val) {
         free(n);
         return 1;
     }
+    n->carrier = scope;
+    n->is_content = via_content;
     n->next = *b;
     *b = n;
     return 1;
+}
+
+/* #2184: pool one value (is_ref = an IDREF awaiting resolution). */
+static void xsd_id_pool_record(struct xsd_validator* v, const char* val,
+                               LeptrisElement carrier, int is_ref) {
+    if (!v || !val || !val[0]) return;
+    struct id_ref* n = (struct id_ref*)malloc(sizeof(*n));
+    if (!n) return;
+    n->v = strdup(val);
+    if (!n->v) {
+        free(n);
+        return;
+    }
+    n->is_ref = is_ref;
+    n->carrier = carrier;
+    n->next = NULL;
+    if (v->id_pool_tail)
+        v->id_pool_tail->next = n;
+    else
+        v->id_pool = n;
+    v->id_pool_tail = n;
 }
 
 struct ic_skipped {
@@ -2062,6 +2116,211 @@ static int attr_row_admits(const XsdAttrDecl* a, const char* local,
     return 1;
 }
 
+/* ---- #2184: the ID/IDREF bookkeeping ------------------------------- */
+
+/* What one lexical value contributes when assessed against a simple
+ * type: 0 nothing, 1 an ID value, 2 an IDREF value. A UNION decides
+ * by its FIRST accepting member (the datatype's {actual member} —
+ * id006's "23" rides the integer arm, ii17's "true" the boolean arm,
+ * and neither registers); a RESTRICTION walks its base chain
+ * (id007's pattern-restricted arms are ID/IDREF derivatives); LISTS
+ * are itemized by the caller. Unresolved names classify as 0 — the
+ * compile-time leniency posture, never a silent constraint. */
+static int id_item_accepts(struct leptris_xsd_schema* s, const char* name,
+                           const XsdSimple* def, const char* v,
+                           int depth);
+static int id_classify_value(struct leptris_xsd_schema* s,
+                             const XsdSimple* st, const char* name,
+                             const char* v, int depth) {
+    if (!s || depth > 8) return 0;
+    if (name && strncmp(name, "xs:", 3) == 0) {
+        if (strcmp(name, "xs:ID") == 0 || strcmp(name, "xsd:ID") == 0)
+            return 1;
+        if (strcmp(name, "xs:IDREF") == 0 ||
+            strcmp(name, "xsd:IDREF") == 0)
+            return 2;
+        return 0;
+    }
+    if (!st && name) st = xsd_find_simple_pub(s, name);
+    if (!st) return 0;
+    if (st->deriv == XSD_SIMPLE_UNION) {
+        /* the FIRST accepting member is the {actual member}: its
+         * classification governs, 0 included — "true" rides the
+         * boolean arm of unionOfIDs even though the ID arm would
+         * also accept it (ii17/id006). */
+        for (size_t i = 0; i < st->member_count; i++)
+            if (id_item_accepts(s, st->members[i], NULL, v, depth))
+                return id_classify_value(s, NULL, st->members[i], v,
+                                         depth + 1);
+        for (size_t i = 0; i < st->member_def_count; i++)
+            if (id_item_accepts(s, NULL, st->member_defs[i], v, depth))
+                return id_classify_value(s, st->member_defs[i], NULL, v,
+                                         depth + 1);
+        return 0;
+    }
+    if (st->deriv == XSD_SIMPLE_LIST) return 0; /* caller itemizes */
+    /* RESTRICT: the base chain decides. */
+    if (st->base_def) return id_classify_value(s, st->base_def, NULL, v,
+                                               depth + 1);
+    if (st->base) return id_classify_value(s, NULL, st->base, v,
+                                           depth + 1);
+    return 0;
+}
+
+static int id_item_accepts(struct leptris_xsd_schema* s, const char* name,
+                           const XsdSimple* def, const char* v,
+                           int depth) {
+    if (!s || depth > 8) return 0;
+    if (name && strncmp(name, "xs:", 3) == 0)
+        return xsd_builtin_valid(name, v);
+    if (def) return xsd_simple_valid_chain(s, def, v);
+    if (name) {
+        const XsdSimple* next = xsd_find_simple_pub(s, name);
+        if (next) return xsd_simple_valid_chain(s, next, v);
+    }
+    return 1; /* unresolved: accept, and classification stays 0 */
+}
+
+/* The chain's LIST definition (NULL = not a list): a restriction of
+ * a list keeps the list's value space (the #1882 posture). */
+static const XsdSimple* id_chain_list_def(struct leptris_xsd_schema* s,
+                                          const XsdSimple* t) {
+    int depth = 0;
+    while (t && depth++ < 32) {
+        if (t->deriv == XSD_SIMPLE_LIST) return t;
+        if (!t->base) {
+            if (t->base_def) {
+                t = t->base_def;
+                continue;
+            }
+            return NULL;
+        }
+        if (strncmp(t->base, "xs:", 3) == 0) return NULL;
+        t = xsd_find_simple_pub(s, t->base);
+    }
+    return NULL;
+}
+
+/* Assess one (type reference, value) pair into the bookkeeping.
+ * carrier = the element that carries the value; via_content marks a
+ * CONTENT-carried value (the uniqueness scope is the parent). Lists
+ * itemize (every classified item joins the pool; the first ID
+ * item also joins TableA — id004/id005), unions decide per member
+ * (id006/id007/ii17). Lexical failures never reach here: the
+ * callers gate on text_valid. */
+static void xsd_id_bookkeep(struct xsd_validator* v,
+                            struct leptris_xsd_schema* s,
+                            const char* type, const char* ns,
+                            const char* value, LeptrisElement carrier,
+                            int via_content) {
+    if (!v || !s || !type || !value || !value[0]) return;
+    /* The token-family datatypes collapse their lexical before the
+     * [normalized value] exists (§3.2.4.2) — the tables see the
+     * normalized form: v16's trailing-newline idref resolves as b2,
+     * id001.n02's " aaa " duplicates para1's aaa. */
+    {
+        char norm[512];
+        if (strlen(value) < sizeof(norm) &&
+            type_collapses_ws(s, type, ns) &&
+            xsd_collapse_str(value, norm, sizeof(norm)))
+            value = norm;
+    }
+    const XsdSimple* st = NULL;
+    if (strncmp(type, "xs:", 3) == 0 || strncmp(type, "xsd:", 4) == 0) {
+        if (strcmp(type, "xs:ID") == 0 || strcmp(type, "xsd:ID") == 0) {
+            if (!xsd_id_value_record(v, value, carrier, via_content))
+                verrf_atk(v, carrier, "attribute-use", "ID", "attribute",
+                          "ID", "duplicate ID value");
+            xsd_id_pool_record(v, value, carrier, 0);
+        } else if (strcmp(type, "xs:IDREF") == 0 ||
+                   strcmp(type, "xsd:IDREF") == 0) {
+            xsd_id_pool_record(v, value, carrier, 1);
+        } else if (strcmp(type, "xs:IDREFS") == 0 ||
+                   strcmp(type, "xsd:IDREFS") == 0) {
+            char* dup = strdup(value);
+            if (!dup) return;
+            for (char* p = dup; *p;) {
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (!*p) break;
+                char* end = p;
+                while (*end && !isspace((unsigned char)*end)) end++;
+                char was = *end;
+                *end = 0;
+                xsd_id_pool_record(v, p, carrier, 1);
+                *end = was;
+                p = end;
+            }
+            free(dup);
+        }
+        return;
+    }
+    st = xsd_find_simple_ns_pub(s, type, ns);
+    if (!st) st = xsd_find_simple_pub(s, type);
+    if (!st) return;
+    const XsdSimple* ldef = id_chain_list_def(s, st);
+    if (ldef) {
+        char* dup = strdup(value);
+        if (!dup) return;
+        int first_id = 1;
+        for (char* p = dup; *p;) {
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+            char* end = p;
+            while (*end && !isspace((unsigned char)*end)) end++;
+            char was = *end;
+            *end = 0;
+            int c = id_classify_value(s, ldef->item_def, ldef->item_type,
+                                      p, 0);
+            if (c == 1) {
+                xsd_id_pool_record(v, p, carrier, 0);
+                /* the FIRST ID item of a list value joins TableA with
+                 * document-wide scope (id004.n01's zzz as two id
+                 * elements' first items is a duplicate even under one
+                 * parent); the value's other items only feed the
+                 * pool (id004.v01's zzz/bbb repeats are legal). */
+                if (first_id &&
+                    !xsd_id_value_record(v, p, carrier, 0))
+                    verrf_atk(v, carrier, "attribute-use", "ID",
+                              "attribute", "ID", "duplicate ID value");
+                first_id = 0;
+            } else if (c == 2) {
+                xsd_id_pool_record(v, p, carrier, 1);
+            }
+            *end = was;
+            p = end;
+        }
+        free(dup);
+        return;
+    }
+    int c = id_classify_value(s, st, NULL, value, 0);
+    if (c == 1) {
+        if (!xsd_id_value_record(v, value, carrier, via_content))
+            verrf_atk(v, carrier, "attribute-use", "ID", "attribute",
+                      "ID", "duplicate ID value");
+        xsd_id_pool_record(v, value, carrier, 0);
+    } else if (c == 2) {
+        xsd_id_pool_record(v, value, carrier, 1);
+    }
+}
+
+/* §C.4 integrity (end of run): every IDREF/IDREFS value the run
+ * recorded must match an ID registered in the same document —
+ * the ii-family rows (ii04 ads_, ii06 asd, ii15/ii17/ii18 true,
+ * id005's hhh, id008's ddd, id016's defaulted para001). */
+static void xsd_idrefs_resolve(struct xsd_validator* v) {
+    if (!v) return;
+    for (struct id_ref* r = v->id_pool; r; r = r->next) {
+        if (!r->is_ref) continue;
+        int found = 0;
+        for (struct id_ref* p = v->id_pool; p && !found; p = p->next)
+            if (!p->is_ref && strcmp(p->v, r->v) == 0) found = 1;
+        if (!found && r->carrier)
+            verrf_atk(v, r->carrier, "IDREF-resolution", "IDREF",
+                      "IDREF", "IDREF",
+                      "value does not resolve to any ID in the document");
+    }
+}
+
 static void validate_attributes(struct xsd_validator* v,
                                 struct leptris_xsd_schema* s,
                                 LeptrisElement elem,
@@ -2108,6 +2367,14 @@ static void validate_attributes(struct xsd_validator* v,
             if (a->required)
                 verrf_atk(v, elem, "attribute-use", a->name, "attribute",
                           a->name, "required but absent");
+            /* #2184 §3.4.4.2: an absent attribute is satisfied by its
+             * {value constraint} — a DEFAULT (id010/id016) or a FIXED
+             * (id011/id013: the fixed acts as the default) value
+             * joins the bookkeeping like an instance-supplied one. */
+            const char* constraint = a->def ? a->def : a->fixed;
+            if (constraint && constraint[0])
+                xsd_id_bookkeep(v, s, a->type, ta ? ta->ns : NULL,
+                                constraint, elem, 0);
             continue;
         }
         /* #2185: use="prohibited" removes the attribute from the
@@ -2135,14 +2402,12 @@ static void validate_attributes(struct xsd_validator* v,
                 continue;
             }
         }
-        text_valid(v, s, a->type, val, ta ? ta->ns : NULL, "attribute",
-                   a->name, elem);
-        /* #2184 §3.3.5: ID-typed values are unique within the
-         * document — the overridden attributeGroup's required @id
-         * (over008.n01) is no exception. */
-        if (attr_type_is_id(s, a->type) && !xsd_id_value_record(v, val))
-            verrf_atk(v, elem, "attribute-use", a->name, "attribute",
-                      a->name, "duplicate ID value");
+        /* #2184: ID/IDREF bookkeeping rides a lexically VALID value —
+         * TableA uniqueness plus the resolution pool (§C.4). */
+        if (text_valid(v, s, a->type, val, ta ? ta->ns : NULL,
+                       "attribute", a->name, elem))
+            xsd_id_bookkeep(v, s, a->type, ta ? ta->ns : NULL, val, elem,
+                            0);
         if (a->fixed && strcmp(val, a->fixed) != 0 &&
             !attr_fixed_matches(s, a->type, ta ? ta->ns : NULL, val,
                                 a->fixed))
@@ -2220,8 +2485,22 @@ static void validate_attributes(struct xsd_validator* v,
         if (ta && attr_wc_admits(s, ta, auri, local,
                                  ta->any_attr_unit_ns
                                      ? ta->any_attr_unit_ns
-                                     : xsd_target_ns(s)))
+                                     : xsd_target_ns(s))) {
+            /* #2184: a wildcard-admitted attribute whose GLOBAL
+             * declaration is ID/IDREF-typed joins the bookkeeping
+             * (attZ014's a/b; id002's admitted id-two) — the
+             * lexical verdict stays the wildcard's (lax passes
+             * unresolved names). */
+            const XsdAttrDecl* g = xsd_find_top_attr(s, local);
+            if (g && g->type && g->type[0]) {
+                const char* aval =
+                    leptris_attribute_get_value(elem, at);
+                if (aval)
+                    xsd_id_bookkeep(v, s, g->type, xsd_target_ns(s),
+                                    aval, elem, 0);
+            }
             continue;
+        }
         /* moxml#579 (§3.12.4): the attribute references of the CTA
          * test in force pass undeclared — the alternative's selector
          * attribute is its own witness, not a declared use. */
@@ -2237,46 +2516,61 @@ static void validate_attributes(struct xsd_validator* v,
     /* leptris-rs#73 (W3C attZ014, XSD 1.0): an element assessed with
      * more than one ID-typed attribute is invalid — declared rows
      * AND wildcard-admitted attributes whose GLOBAL declaration is
-     * ID-derived both count. 1.1 lifted the constraint. */
+     * ID-derived both count. 1.1 lifted the constraint.
+     * #2184: two or more DECLARED ID-typed uses on one type cannot
+     * be a legal 1.0 schema (the constraint is 1.0-only), so the
+     * schema is 1.1 by syntax evidence (the #2149 posture) and the
+     * rule does not apply. A single declared ID beside a
+     * wildcard-admitted second is NOT such evidence — the rs#73
+     * pinned shapes keep the 1.0 verdict. A schema the author
+     * explicitly pinned to 1.0 (@version / vc:maxVersion="1.0")
+     * keeps the gate whatever its table carries. */
     if (!xsd_schema_version_11(s)) {
         int id_count = 0;
         for (XsdAttrDecl* a = ta->attrs; a; a = a->next)
             if (attr_type_is_id(s, a->type)) id_count++;
-        for (LeptrisAttribute at = leptris_element_first_attribute(elem);
-             at && id_count < 2; at = leptris_attribute_next(at)) {
-            const char* qn = leptris_attribute_get_name(at);
-            if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
-            const char* colon = strchr(qn, ':');
-            const char* local = colon ? colon + 1 : qn;
-            const char* auri = leptris_attribute_namespace_uri(at);
-            int declared = 0;
-            for (XsdAttrDecl* a = ta->attrs; a && !declared; a = a->next)
-                if (attr_row_admits(a, local, qn, auri))
-                    declared = 1;
-            if (declared) continue;
-            if (auri && strcmp(auri,
-                               "http://www.w3.org/2001/XMLSchema-instance")
-                    == 0)
-                continue;
-            if (ta->any_attr_not_qname &&
-                attr_not_qname_hits(ta->any_attr_not_qname, s, local,
-                                    auri))
-                continue;
-            int admitted =
-                attr_wc_admits(s, ta, auri, local,
-                               ta->any_attr_unit_ns
-                                   ? ta->any_attr_unit_ns
-                                   : xsd_target_ns(s));
-            if (!admitted) continue;
-            const XsdAttrDecl* g =
-                xsd_find_top_attr(s, local);
-            if (g && attr_type_is_id(s, g->type)) id_count++;
+        /* #2184: the declared-evidence skip belongs to UNMARKED
+         * schemas only — a schema the author pinned to 1.0 keeps the
+         * gate whatever its table carries. */
+        if (xsd_schema_pinned_10(s) || id_count < 2) {
+            for (LeptrisAttribute at = leptris_element_first_attribute(elem);
+                 at && id_count < 2; at = leptris_attribute_next(at)) {
+                const char* qn = leptris_attribute_get_name(at);
+                if (!qn || strncmp(qn, "xmlns", 5) == 0) continue;
+                const char* colon = strchr(qn, ':');
+                const char* local = colon ? colon + 1 : qn;
+                const char* auri = leptris_attribute_namespace_uri(at);
+                int declared = 0;
+                for (XsdAttrDecl* a = ta->attrs; a && !declared;
+                     a = a->next)
+                    if (attr_row_admits(a, local, qn, auri))
+                        declared = 1;
+                if (declared) continue;
+                if (auri && strcmp(auri,
+                                   "http://www.w3.org/2001/"
+                                   "XMLSchema-instance")
+                        == 0)
+                    continue;
+                if (ta->any_attr_not_qname &&
+                    attr_not_qname_hits(ta->any_attr_not_qname, s, local,
+                                        auri))
+                    continue;
+                int admitted =
+                    attr_wc_admits(s, ta, auri, local,
+                                   ta->any_attr_unit_ns
+                                       ? ta->any_attr_unit_ns
+                                       : xsd_target_ns(s));
+                if (!admitted) continue;
+                const XsdAttrDecl* g =
+                    xsd_find_top_attr(s, local);
+                if (g && attr_type_is_id(s, g->type)) id_count++;
+            }
+            if (id_count > 1)
+                verrf_atk(v, elem, "attribute-use", "ID", "attribute",
+                          "ID",
+                          "more than one ID-typed attribute (XSD 1.0 "
+                          "one-ID-per-element)");
         }
-        if (id_count > 1)
-            verrf_atk(v, elem, "attribute-use", "ID", "attribute",
-                      "ID",
-                      "more than one ID-typed attribute (XSD 1.0 "
-                      "one-ID-per-element)");
     }
 }
 
@@ -2653,8 +2947,19 @@ static void validate_local_uri(struct xsd_validator* v,
             const char* text = leptris_element_text(elem);
             if (!text) text = "";
             if (fill && !*text) text = fill;
-            text_valid(v, s, ct->text_type, text, ct->ns,
-                       "element", local, elem);
+            if (text_valid(v, s, ct->text_type, text, ct->ns,
+                           "element", local, elem))
+                /* #2184: content-carried IDs/IDREFs join the
+                 * bookkeeping (id008's pseudoID values, ii04's
+                 * restrict, the §3.12.2 fills id014/id015). A
+                 * simpleContent EXTENSION classifies against its BASE
+                 * simple type (ct->ext_base — v15's listOfIDs list);
+                 * text_type keeps its pinned lexical posture. */
+                xsd_id_bookkeep(v, s,
+                                ct->text_ext_base
+                                             ? ct->text_ext_base
+                                             : ct->text_type,
+                                ct->ns, text, elem, 1);
         }
         return;
     }
@@ -2677,8 +2982,9 @@ static void validate_local_uri(struct xsd_validator* v,
         const char* text = leptris_element_text(elem);
         if (!text) text = "";
         if (fill && !*text) text = fill;
-        text_valid(v, s, type, text, euri, "element", local,
-                   elem);
+        if (text_valid(v, s, type, text, euri, "element", local,
+                       elem))
+            xsd_id_bookkeep(v, s, type, euri, text, elem, 1);
         return;
     }
     /* libxml2-compat (#1691 ns1_0/seq-dubl-elem1): an UNPREFIXED
@@ -2698,8 +3004,9 @@ static void validate_local_uri(struct xsd_validator* v,
             const char* text = leptris_element_text(elem);
             if (!text) text = "";
             if (fill && !*text) text = fill;
-            text_valid(v, s, builtin, text, euri, "element",
-                       local, elem);
+            if (text_valid(v, s, builtin, text, euri, "element",
+                           local, elem))
+                xsd_id_bookkeep(v, s, builtin, euri, text, elem, 1);
             return;
         }
     }
@@ -3288,6 +3595,15 @@ void xsd_validator_free(struct xsd_validator* v) {
     for (size_t i = 0; i < v->type_rec_n; i++)
         free(v->type_recs[i].type);
     free(v->type_recs);
+    {
+        struct id_ref* n = v->id_pool;
+        while (n) {
+            struct id_ref* nn = n->next;
+            free(n->v);
+            free(n);
+            n = nn;
+        }
+    }
     struct xsd_error* e = v->errors;
     while (e) {
         struct xsd_error* n = e->next;
@@ -3314,6 +3630,10 @@ int xsd_validator_run(struct xsd_validator* v, LeptrisDocument doc) {
     resolve_keyrefs(v, v->s, keys, refs);
     tables_free(keys);
     tables_free(refs);
+
+    /* #2184 §C.4: the IDREF half of the bookkeeping — every recorded
+     * IDREF/IDREFS value resolves against the run's ID table. */
+    xsd_idrefs_resolve(v);
 
     return v->count == 0 ? 1 : 0;
 }

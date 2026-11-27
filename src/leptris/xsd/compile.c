@@ -126,6 +126,12 @@ struct leptris_xsd_schema {
     XsdElementIcs* element_ics;
     char* target_ns;
     int version_11;    /* xs:schema @version = "1.1" */
+    /* #2184: the schema EXPLICITLY pins the 1.0 dialect —
+     * xs:schema/@version="1.0" or vc:maxVersion="1.0". Syntax
+     * evidence (the multi-ID table, the #2149 posture) arms 1.1
+     * semantics for unmarked schemas, but a schema the author pinned
+     * to 1.0 keeps the 1.0 rules (the attZ014 inverse). */
+    int version_pinned_10;
     /* #2149: the schema carries xs:alternative chains — 1.1 syntax
      * that appears on schemas marked version="1.0" (23 of the 24 cta
      * schemas). Asserts inside such a schema belong to the CTA
@@ -400,6 +406,7 @@ static void xsd_cm_free(XsdCm* cm) {
         free(cm->oc_ext_base);
         free(cm->oc_ext_base_ns);
         free(cm->text_type);
+        free(cm->text_ext_base);
         free(cm->fixed_value);
         free(cm->default_value);
         free(cm);
@@ -4408,6 +4415,12 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
                    (vmin && strcmp(vmin, "1.1") == 0);
         if (vmax && strcmp(vmax, "1.0") == 0) is11 = 0;
         s->version_11 = is11;
+        /* #2184: an explicit 1.0 pin (@version="1.0" or
+         * vc:maxVersion="1.0") keeps the 1.0-only rules armed —
+         * syntax evidence never relaxes them for such a schema. */
+        s->version_pinned_10 =
+            (ver && strcmp(ver, "1.0") == 0) ||
+            (vmax && strcmp(vmax, "1.0") == 0);
         /* #2149: order-independent 1.1-syntax evidence — one walk
          * for xs:alternative elements before any component capture.
          * Real-world cta schemas carry alternatives while marked
@@ -6549,6 +6562,11 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->fixed = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "fixed"));
+                    /* #2184 §3.2.2.3: a top-level declaration's own
+                     * default (id016/id012's global id/idref). */
+                    d->def = xsd_strdup(
+                        leptris_element_attribute((LeptrisElement)n,
+                                                  "default"));
                     const char* use = leptris_element_attribute(
                         (LeptrisElement)n, "use");
                     d->required = (use && strcmp(use, "required") == 0);
@@ -6727,6 +6745,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             free(a->name);
             free(a->type);
             free(a->fixed);
+            free(a->def);
             free(a->ns);
             free(a);
             a = an;
@@ -6790,6 +6809,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
             free(a->name);
             free(a->type);
             free(a->fixed);
+            free(a->def);
             free(a->ns);
             free(a);
             a = an2;
@@ -6803,6 +6823,7 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(ta_row->name);
         free(ta_row->type);
         free(ta_row->fixed);
+        free(ta_row->def);
         free(ta_row->ns);
         free(ta_row);
         ta_row = ta_next;
@@ -7958,6 +7979,15 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         } else {
                             root->text_type = xsd_strdup(base);
                         }
+                        /* #2184 §3.2.2.3: an EXTENSION's text type is
+                         * its BASE simple type. text_type keeps the
+                         * pinned synth-slot posture above (bug306806's
+                         * mis-typed radius rows judge lexically
+                         * exactly as before); the base rides ext_base
+                         * beside it so the ID bookkeeping sees the
+                         * real list (v15's listOfIDs content). */
+                        if (strcmp(dl, "extension") == 0)
+                            root->text_ext_base = xsd_strdup(base);
                         /* leptris#1923: a simpleContent restriction
                          * rides its base for strict-attribute
                          * admission (libxml2 admits the chain's
@@ -7970,6 +8000,7 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                         }
                     }
                 }
+            have_text_type:
                 attrs = xsd_capture_attr_rows(s, dq, 0);
                 /* XSD 1.1: asserts nested under the simpleContent
                  * derivation (test4.xsd: the alternative-selected
@@ -8359,6 +8390,13 @@ int xsd_schema_version_11(struct leptris_xsd_schema* s) {
     return s ? s->version_11 : 0;
 }
 
+/* #2184: the author's explicit 1.0 pin (@version="1.0" /
+ * vc:maxVersion="1.0") — syntax evidence never relaxes a rule the
+ * schema pinned to the 1.0 dialect. */
+int xsd_schema_pinned_10(struct leptris_xsd_schema* s) {
+    return s ? s->version_pinned_10 : 0;
+}
+
 XsdGroupDef* xsd_find_group(struct leptris_xsd_schema* s,
                             const char* name) {
     if (!s || !name) return NULL;
@@ -8392,6 +8430,7 @@ static XsdAttrDecl* xsd_copy_attr_rows(const XsdAttrDecl* src,
         d->name = xsd_strdup(src->name);
         d->type = xsd_strdup(src->type);
         d->fixed = xsd_strdup(src->fixed);
+        d->def = xsd_strdup(src->def);
         d->ns = xsd_strdup(src->ns);
         d->required = src->required;
         d->prohibited = src->prohibited;
@@ -8427,8 +8466,13 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 if (!src) continue;
                 free(a->type);
                 free(a->fixed);
+                free(a->def);
                 a->type = xsd_strdup(src->type);
                 a->fixed = xsd_strdup(src->fixed);
+                /* #2184 §3.2.2.3: the ref'd declaration's default
+                 * rides unless the use carried its own. */
+                if (!(a->pending_ref & XSD_PENDING_USE) || !a->def)
+                    a->def = xsd_strdup(src->def);
                 free(a->ns);
                 a->ns = xsd_strdup(src->ns);
                 if (!(a->pending_ref & XSD_PENDING_USE)) {
@@ -8447,8 +8491,13 @@ static void xsd_resolve_pending_attr_refs(struct leptris_xsd_schema* s) {
                 if (!src) continue;
                 free(a->type);
                 free(a->fixed);
+                free(a->def);
                 a->type = xsd_strdup(src->type);
                 a->fixed = xsd_strdup(src->fixed);
+                /* #2184 §3.2.2.3: the ref'd declaration's default
+                 * rides unless the use carried its own. */
+                if (!(a->pending_ref & XSD_PENDING_USE) || !a->def)
+                    a->def = xsd_strdup(src->def);
                 free(a->ns);
                 a->ns = xsd_strdup(src->ns);
                 if (!(a->pending_ref & XSD_PENDING_USE)) {
@@ -8550,6 +8599,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
                     free(rows->name);
                     free(rows->type);
                     free(rows->fixed);
+                    free(rows->def);
                     free(rows->ns);
                     free(rows);
                     rows = rn;
@@ -8561,6 +8611,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
             free(r->name);
             free(r->type);
             free(r->fixed);
+            free(r->def);
             free(r->ns);
             /* splice out: the walker continues from r->next, so
              * rebuild the chain by freeing in place — the caller's
@@ -8568,6 +8619,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
             r->name = NULL;
             r->type = NULL;
             r->fixed = NULL;
+            r->def = NULL;
             r->ns = NULL;
             r->from_base = 2; /* tombstone */
             continue;
@@ -8583,6 +8635,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
         d->name = r->name;
         d->type = r->type;
         d->fixed = r->fixed;
+        d->def = r->def;
         d->ns = r->ns;
         d->required = r->required;
         d->prohibited = r->prohibited;
@@ -8593,6 +8646,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
         r->name = NULL;
         r->type = NULL;
         r->fixed = NULL;
+        r->def = NULL;
         r->ns = NULL;
     }
     while (rows) {
@@ -8600,6 +8654,7 @@ static int xsd_defattr_apply_group(struct leptris_xsd_schema* s,
         free(rows->name);
         free(rows->type);
         free(rows->fixed);
+        free(rows->def);
         free(rows->ns);
         free(rows);
         rows = rn;
@@ -8777,6 +8832,10 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                         xsd_inline_attr_type(s, ae, an));
                 d->fixed = xsd_strdup(
                     leptris_element_attribute(ae, "fixed"));
+                /* #2184 §3.2.2.3: the use's own {value constraint}
+                 * default rides the row (id010's defaulted id). */
+                d->def = xsd_strdup(
+                    leptris_element_attribute(ae, "default"));
                 d->required = (use && strcmp(use, "required") == 0);
                 d->prohibited =
                     (use && strcmp(use, "prohibited") == 0);
@@ -8904,6 +8963,15 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     d->name = xsd_strdup(src->name);
                     d->type = xsd_strdup(src->type);
                     d->fixed = xsd_strdup(src->fixed);
+                    /* #2184 §3.2.2.3: the {value constraint} is the
+                     * use's own default when it carries one, else the
+                     * referenced declaration's (id016's ref rows ride
+                     * the globals' defaults). */
+                    {
+                        const char* ud = leptris_element_attribute(
+                            ae, "default");
+                        d->def = xsd_strdup(ud ? ud : src->def);
+                    }
                     /* #679: a ref binds in the REFERENCED
                      * declaration's namespace (top-level attribute
                      * declarations are always qualified with their
