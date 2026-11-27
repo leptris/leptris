@@ -2466,7 +2466,10 @@ static void validate_local_uri(struct xsd_validator* v,
      * Attributes are unaffected by nil and still validate. */
     const char* nilattr = leptris_element_attribute_ns(
         elem, "http://www.w3.org/2001/XMLSchema-instance", "nil");
-    if (nilattr && strcmp(nilattr, "true") == 0) {
+    /* XSD boolean lexical: "true" and "1" both spell true (#2184 —
+     * the saxon All rows write xsi:nil="1") */
+    if (nilattr && (strcmp(nilattr, "true") == 0 ||
+                    strcmp(nilattr, "1") == 0)) {
         const char* ntext = leptris_element_text(elem);
         if (ntext && *ntext)
             verrfk(v, "content-model", "element", local,
