@@ -291,8 +291,18 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * value, so the lexical strcmp no longer false-rejects):
  * 1847/2206 — simple001.v01/simple002 (saxonData/Simple) flip to
  * their oracle verdicts, attribute- and element-side alike
- * (measured 2026-11-27 on the c0da7a9e base). */
-    EXPECT_GE(pass, 1847) << "conformance floor regressed - re-measure the union";
+ * (measured 2026-11-27 on the c0da7a9e base). Raised by #2213
+ * (the wildcard negative namespace/name sets — §3.10.2 + §3.10.6.3:
+ * fold-at-capture canonization, the intersection-over-refs effective
+ * wildcard, extension unions, notNamespace/notQName enforcement with
+ * the xml prefix prebound, ##definedSibling expansion, the
+ * restriction-subset law, the UPA-relaxation arming scoped to
+ * ##definedSibling): 1909/2206 — 64 rows flip (43 accept-side
+ * predicate rows, 15 src-wildcard schema-error rows, 6 valid rows),
+ * zero regressions by red-set diff (measured 2026-11-27 on the
+ * #2207-merged base; the PR's pin hunk lost its rebase — this rider
+ * re-measured and raised). */
+    EXPECT_GE(pass, 1909) << "conformance floor regressed - re-measure the union";
     EXPECT_GE(pass_valid, 1194);
     EXPECT_GE(pass_invalid, 492);
     EXPECT_GE(pass_schema_error, 161);
