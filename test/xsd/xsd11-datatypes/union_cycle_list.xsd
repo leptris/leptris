@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple019: the membership must not contain a type CONSTRUCTED
+     from the union (a list of it). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="chap">
+    <xs:union memberTypes="dt time"/>
+  </xs:simpleType>
+  <xs:simpleType name="dt">
+    <xs:union memberTypes="xs:date xs:dateTime sub-chap"/>
+  </xs:simpleType>
+  <xs:simpleType name="sub-chap">
+    <xs:list itemType="chap"/>
+  </xs:simpleType>
+</xs:schema>

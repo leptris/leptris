@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- simple020/s3_16_2si05: constructed-from covers a union whose
+     member is (transitively) the union. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="chap">
+    <xs:union memberTypes="dt time"/>
+  </xs:simpleType>
+  <xs:simpleType name="dt">
+    <xs:union memberTypes="xs:date xs:dateTime sub-chap"/>
+  </xs:simpleType>
+  <xs:simpleType name="sub-chap">
+    <xs:union memberTypes="chap xs:integer"/>
+  </xs:simpleType>
+</xs:schema>
