@@ -14,6 +14,17 @@
  * this; growth doubles under the rehash gate below. */
 #define DOM_INTERN_INIT_CAP 64u
 
+/* Last doubling step before the final-size jump (#2132 uniq sizing):
+ * growth doubles 64->128->256->512->1024, then lands on
+ * DOM_INTERN_MAX_SLOTS in ONE jump. The append-uniq profile (2026-11-27)
+ * showed the staged 1024->2048->...->16384 cadence costing a
+ * memset+copy+walk burst per stage (dom_intern_rehash 4.6% of the row);
+ * the single jump reaches the same ceiling with the small-doc tables
+ * unchanged (<= 719 distinct names still live in a 1024-slot, 16 KiB
+ * array) and abandons <= 31 KiB of small arrays to the pool bump
+ * instead of the previous <= 2x-final geometric waste. */
+#define DOM_INTERN_JUMP_AFTER 1024u
+
 /* Slot-array ceiling: 8192 entries sit at 50% load of this — the
  * rehash gate naturally stops here and the distinct cap fires first. */
 #define DOM_INTERN_MAX_SLOTS 16384u
@@ -68,20 +79,31 @@ static int dom_intern_bytes_eq(const char* a, const char* b, size_t len) {
     return memcmp(a, b, len) == 0;
 }
 
-/* Pool-carved replacement for `ix->slots` at `ncap` entries (zeroed),
- * or NULL on allocation failure (caller keeps the old array). */
+/* Pool-carved replacement for `ix->slots` at `ncap` entries, or NULL
+ * on allocation failure (caller keeps the old array). */
 static struct leptris_intern_entry* dom_intern_slots_new(
     LeptrisMemoryPool* pool, size_t ncap) {
     struct leptris_intern_entry* ns = (struct leptris_intern_entry*)
         leptris_pool_alloc(pool, ncap * sizeof(*ns));
     if (!ns) return NULL;
-    memset(ns, 0, ncap * sizeof(*ns));
+    /* Clear ONLY the name fields (strided: 8 of every 16 bytes — a
+     * contiguous half-size memset would leave the upper half of the
+     * array with garbage names). The empty-slot test is `!e->name`
+     * and the probe loop breaks on it BEFORE reading probe_hash/len,
+     * so the tail bytes of an empty slot are never read; rehash and
+     * insert write all four fields of every live entry. Halving the
+     * growth clear is the #2132 append-uniq rehash-burst lever. */
+    for (size_t k = 0; k < ncap; k++) ns[k].name = NULL;
     return ns;
 }
 
 static void dom_intern_rehash(struct leptris_document* doc,
                               struct leptris_name_intern* ix) {
+    /* Geometric growth, then the final-size jump (DOM_INTERN_JUMP_AFTER
+     * law): one rehash lands on the ceiling instead of a memset+copy+
+     * walk burst per doubling stage. */
     size_t ncap = ix->cap * 2;
+    if (ncap > DOM_INTERN_JUMP_AFTER) ncap = DOM_INTERN_MAX_SLOTS;
     struct leptris_intern_entry* ns = dom_intern_slots_new(doc->pool, ncap);
     if (!ns) return; /* stay at old size; the probe bound handles full */
     for (size_t i = 0; i < ix->cap; i++) {
