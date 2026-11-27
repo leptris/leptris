@@ -93,6 +93,10 @@ typedef struct xsd_simple {
     /* XSD 1.1 (#2154): the restriction's xs:assertion facet list —
      * accumulated, enforced across the chain by the validator. */
     XsdAssertionFacet* assertions;
+    /* A single-occurrence facet repeated in one restriction (§4.3
+     * XML representation; #2184 residue, simple060-084): the schema
+     * fails — the capture no longer overwrites silently. */
+    unsigned char dup_facet;
     struct xsd_simple* next;
 } XsdSimple;
 

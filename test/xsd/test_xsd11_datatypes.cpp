@@ -250,3 +250,73 @@ TEST(Xsd11Datatypes, YearZeroValueSpace) {
     EXPECT_EQ(verdict_of("yearzero_bounds.xsd", "yearzero_v.xml"), 1);
     EXPECT_NE(verdict_of("yearzero_bounds.xsd", "yearzero_n.xml"), 1);
 }
+
+/* ---- duplicate facets (#2184 residue) ------------------------------ */
+
+/* A single-occurrence facet may appear at most once in one
+ * restriction (§4.3 XML representation; the suite's simple060-084
+ * "Facet must not appear more than once" class — 25 rows): a
+ * repetition fails the SCHEMA. The capture overwrote silently. */
+TEST(Xsd11Datatypes, DuplicateFacetRejected) {
+    expect_schema_error("dup_facet_each.xsd");
+}
+
+TEST(Xsd11Datatypes, DuplicateWhiteSpaceDifferentValueRejected) {
+    expect_schema_error("dup_facet_whitespace.xsd");
+}
+
+/* The guard: one of each single-occurrence facet compiles clean,
+ * and the multi-occurrence facets still repeat legally. */
+TEST(Xsd11Datatypes, DuplicateFacetGuardStillCompiles) {
+    expect_schema_ok("dup_facet_guard.xsd");
+}
+
+/* ---- the explicitTimezone derivation law (#2184 residue) ---------- */
+
+/* Once explicitTimezone is set anywhere up the chain the value is
+ * LOCKED — the derived restriction carries the same posture
+ * (zone004/zone005/zone408/zone409). */
+TEST(Xsd11Datatypes, TimezoneFacetDerivationLocked) {
+    expect_schema_error("tz_derive_optional_from_required.xsd");
+    expect_schema_error("tz_derive_optional_from_prohibited.xsd");
+    expect_schema_error("tz_derive_required_from_prohibited.xsd");
+    expect_schema_error("tz_derive_prohibited_from_required.xsd");
+}
+
+/* explicitTimezone on a UNION base — the union admits only the
+ * common facets (zone008). */
+TEST(Xsd11Datatypes, TimezoneFacetOnUnionRejected) {
+    expect_schema_error("tz_union_base.xsd");
+}
+
+/* The guard: same-posture derivations and first choices from the
+ * bare builtin compile clean. */
+TEST(Xsd11Datatypes, TimezoneFacetDerivationGuard) {
+    expect_schema_ok("tz_derive_same_guard.xsd");
+}
+
+/* ---- NOTATION / anyAtomicType placement (#2184 residue) ----------- */
+
+/* A bare xs:NOTATION element type fails the schema (simple090);
+ * NOTATION is not a legal list item type (simple092) nor union
+ * member (simple093). */
+TEST(Xsd11Datatypes, NotationPlacementRejected) {
+    expect_schema_error("notation_element_type.xsd");
+    expect_schema_error("notation_list_item.xsd");
+    expect_schema_error("notation_union_member.xsd");
+}
+
+/* An enumerated NOTATION restriction names only DECLARED notations
+ * (simple095); the declared-symbol form compiles clean. */
+TEST(Xsd11Datatypes, NotationEnumerationMustNameDeclaredNotations) {
+    expect_schema_error("notation_enum_undeclared.xsd");
+    expect_schema_ok("notation_enum_declared_guard.xsd");
+}
+
+/* xs:anyAtomicType is abstract: no restriction base (simple051),
+ * no list item type (simple052), no union member (simple053). */
+TEST(Xsd11Datatypes, AnyAtomicTypePlacementRejected) {
+    expect_schema_error("anyatomic_restriction_base.xsd");
+    expect_schema_error("anyatomic_list_item.xsd");
+    expect_schema_error("anyatomic_union_member.xsd");
+}

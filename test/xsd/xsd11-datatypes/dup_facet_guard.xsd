@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The guard: every single-occurrence facet exactly once compiles
+     clean, and the MULTI-occurrence facets (pattern, enumeration)
+     still repeat legally. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="a" type="g-length"/>
+        <xs:element name="b" type="g-patterns"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="g-length">
+    <xs:restriction base="xs:string">
+      <xs:length value="4"/>
+      <xs:whiteSpace value="replace"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="g-patterns">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="a.*"/>
+      <xs:pattern value="b.*"/>
+      <xs:enumeration value="aa"/>
+      <xs:enumeration value="bb"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
