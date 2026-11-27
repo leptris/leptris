@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "../../include/leptris.h"
+#include "../../include/leptris/dtd.h"
 #include "xsd_internal.h"
 #include "../dom/element.h"
 
@@ -27,6 +28,10 @@ extern int xsd_builtin_valid(const char* type, const char* v);
 extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
                                   const XsdSimple* t, const char* v);
+/* #2184: the §3.2.5 unparsed-entity integrity — ENTITY/ENTITIES
+ * values resolve against the instance's DTD entity table (the
+ * notation_name marks an UNPARSED entity). Internal dtd model. */
+#include "../dtd/model.h"
 
 
 
@@ -2139,6 +2144,9 @@ static int id_classify_value(struct leptris_xsd_schema* s,
         if (strcmp(name, "xs:IDREF") == 0 ||
             strcmp(name, "xsd:IDREF") == 0)
             return 2;
+        if (strcmp(name, "xs:ENTITY") == 0 ||
+            strcmp(name, "xsd:ENTITY") == 0)
+            return 3; /* the §3.2.5 unparsed-entity arm */
         return 0;
     }
     if (!st && name) st = xsd_find_simple_pub(s, name);
@@ -2201,6 +2209,41 @@ static const XsdSimple* id_chain_list_def(struct leptris_xsd_schema* s,
     return NULL;
 }
 
+/* #2184 (§3.2.5): the value names a DECLARED UNPARSED entity of the
+ * instance's DTD (a notation-carrying external entity). */
+static int xsd_unparsed_entity_declared(struct xsd_validator* v,
+                                        const char* name) {
+    if (!v || !v->doc || !name || !name[0]) return 0;
+    LeptrisDTD* dtd = leptris_document_get_dtd(v->doc);
+    if (!dtd) return 0;
+    DTDEntityDecl* e = ttdtd_lookup_entity(dtd, name);
+    return e && e->notation_name;
+}
+
+/* The ENTITY/ENTITIES integrity arm: itemize the value, every name
+ * must resolve to a declared unparsed entity (id018.n01's undeclared
+ * entity1 in the default-filled ENTITIES, id021.n02's entity4). */
+static void xsd_entity_bookkeep(struct xsd_validator* v,
+                                const char* value, LeptrisElement carrier) {
+    char* dup = strdup(value);
+    if (!dup) return;
+    for (char* p = dup; *p;) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        char* end = p;
+        while (*end && !isspace((unsigned char)*end)) end++;
+        char was = *end;
+        *end = 0;
+        if (!xsd_unparsed_entity_declared(v, p))
+            verrf_atk(v, carrier, "entity-resolution", "ENTITY",
+                      "ENTITY", "ENTITY",
+                      "value does not name a declared unparsed entity");
+        *end = was;
+        p = end;
+    }
+    free(dup);
+}
+
 /* Assess one (type reference, value) pair into the bookkeeping.
  * carrier = the element that carries the value; via_content marks a
  * CONTENT-carried value (the uniqueness scope is the parent). Lists
@@ -2253,6 +2296,12 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
                 p = end;
             }
             free(dup);
+        } else if (strcmp(type, "xs:ENTITY") == 0 ||
+                   strcmp(type, "xsd:ENTITY") == 0 ||
+                   strcmp(type, "xs:ENTITIES") == 0 ||
+                   strcmp(type, "xsd:ENTITIES") == 0) {
+            /* §3.2.5: every value names a declared unparsed entity */
+            xsd_entity_bookkeep(v, value, carrier);
         }
         return;
     }
@@ -2287,6 +2336,8 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
                 first_id = 0;
             } else if (c == 2) {
                 xsd_id_pool_record(v, p, carrier, 1);
+            } else if (c == 3) {
+                xsd_entity_bookkeep(v, p, carrier);
             }
             *end = was;
             p = end;
@@ -2302,6 +2353,8 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
         xsd_id_pool_record(v, value, carrier, 0);
     } else if (c == 2) {
         xsd_id_pool_record(v, value, carrier, 1);
+    } else if (c == 3) {
+        xsd_entity_bookkeep(v, value, carrier);
     }
 }
 

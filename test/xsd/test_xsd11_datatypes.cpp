@@ -320,3 +320,20 @@ TEST(Xsd11Datatypes, AnyAtomicTypePlacementRejected) {
     expect_schema_error("anyatomic_list_item.xsd");
     expect_schema_error("anyatomic_union_member.xsd");
 }
+
+/* ---- value constraints must be valid lexicals (#2184 residue) ----- */
+
+/* An attribute/element default or fixed value is a LEXICAL of the
+ * declared type — an enumeration mismatch fails the schema
+ * (s3_3_4si01/si04/si07). */
+TEST(Xsd11Datatypes, DeclaredValueConstraintInvalidRejected) {
+    expect_schema_error("default_enum_mismatch.xsd");
+    expect_schema_error("fixed_enum_mismatch.xsd");
+    expect_schema_error("default_list_enum_mismatch.xsd");
+}
+
+/* Valid value constraints — builtin atomics, the list builtins,
+ * enumerated locals with matching values — compile clean. */
+TEST(Xsd11Datatypes, DeclaredValueConstraintValidGuard) {
+    expect_schema_ok("default_values_valid_guard.xsd");
+}

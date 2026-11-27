@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- s3_3_4si01: the default value violates the type's enumeration. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="root">
+    <xs:complexType>
+      <xs:attribute name="e1" type="entities" default="asd qws"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="entities">
+    <xs:restriction base="xs:ENTITIES">
+      <xs:enumeration value="asd qwe"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

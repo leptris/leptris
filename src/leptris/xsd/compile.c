@@ -2150,8 +2150,13 @@ static int xsd_check_structure(struct leptris_xsd_schema* s,
         if (strcmp(local, "element") == 0 ||
             strcmp(local, "attribute") == 0) {
             const char* ty = leptris_element_attribute(c, "type");
+            /* #2184: the EXISTENCE probe — the list builtins
+             * (IDREFS/NMTOKENS/ENTITIES) and the ur-types sit outside
+             * the tier-1 lexical table but are real builtin
+             * definitions (the guard fixture's xs:NMTOKENS attribute
+             * default must not fail src-attribute.4). */
             if (ty && strncmp(ty, "xs:", 3) == 0 &&
-                xsd_builtin_valid(ty, "x") == -1 &&
+                !xsd_builtin_exists(ty) &&
                 strcmp(ty, "xs:anyType") != 0 &&
                 strcmp(ty, "xs:anySimpleType") != 0 &&
                 strcmp(ty, "xs:anyAtomicType") != 0 &&
@@ -4249,6 +4254,133 @@ static int xsd_simple_type_refs_ok(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* #2184 (Structures §3.2.2/§3.3.4 + Part 2 §4.2): an attribute or
+ * element {value constraint} is a LEXICAL of the declared type — a
+ * default/fixed value that violates the type's facets (the
+ * enumeration family, s3_3_4si01-11) fails the SCHEMA. Builtin
+ * list-typed defaults itemize (a xs:NMTOKENS default is a list of
+ * NMTOKENs); unresolved type refs stay the ref checks' job. */
+static int xsd_decl_value_lexical_ok(struct leptris_xsd_schema* s,
+                                     const char* type,
+                                     const char* value) {
+    if (!type || !value) return 1;
+    if (strncmp(type, "xs:", 3) == 0) {
+        if (strcmp(type, "xs:IDREFS") == 0 ||
+            strcmp(type, "xs:NMTOKENS") == 0 ||
+            strcmp(type, "xs:ENTITIES") == 0) {
+            char* dup = xsd_strdup(value);
+            if (!dup) return 1;
+            const char* atomic =
+                strcmp(type, "xs:IDREFS") == 0
+                    ? "xs:IDREF"
+                    : strcmp(type, "xs:ENTITIES") == 0 ? "xs:ENTITY"
+                                                       : "xs:NMTOKEN";
+            int ok = 1;
+            for (char* p = dup; *p;) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                       *p == '\r')
+                    p++;
+                if (!*p) break;
+                char* start = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                       *p != '\r')
+                    p++;
+                char was = *p;
+                *p = 0;
+                if (!xsd_builtin_valid(atomic, start)) ok = 0;
+                *p = (char)was;
+                if (!ok) break;
+            }
+            free(dup);
+            return ok;
+        }
+        return xsd_builtin_valid(type, value);
+    }
+    const XsdSimple* t = xsd_find_simple(s, type);
+    if (!t) return 1;
+    return xsd_simple_valid_chain(s, t, value);
+}
+
+static int xsd_check_decl_values_cm(struct leptris_xsd_schema* s,
+                                    const XsdCm* cm, const char* owner,
+                                    int depth) {
+    if (!cm || depth > 64) return 0;
+    for (const XsdCm* c = cm; c; c = c->next) {
+        if (c->fixed_value || c->default_value) {
+            if (!xsd_decl_value_lexical_ok(s, c->type,
+                                           c->default_value) ||
+                !xsd_decl_value_lexical_ok(s, c->type,
+                                           c->fixed_value)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "e-props-correct: the local element '%s' of "
+                         "'%s' carries a value constraint that is not "
+                         "a valid lexical of its type",
+                         c->name ? c->name : "?",
+                         owner ? owner : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+        if (c->first_child &&
+            xsd_check_decl_values_cm(s, c->first_child, owner,
+                                     depth + 1) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int xsd_check_decl_values(struct leptris_xsd_schema* s) {
+    for (const XsdAttrDecl* a = s->top_attrs; a; a = a->next) {
+        if (!xsd_decl_value_lexical_ok(s, a->type, a->def) ||
+            !xsd_decl_value_lexical_ok(s, a->type, a->fixed)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "a-props-correct: the attribute '%s' carries a "
+                     "value constraint that is not a valid lexical "
+                     "of its type",
+                     a->name ? a->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    for (const XsdTypeAttrs* ta = s->type_attrs; ta; ta = ta->next)
+        for (const XsdAttrDecl* a = ta->attrs; a; a = a->next) {
+            if (!xsd_decl_value_lexical_ok(s, a->type, a->def) ||
+                !xsd_decl_value_lexical_ok(s, a->type, a->fixed)) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "a-props-correct: the attribute '%s' of type "
+                         "'%s' carries a value constraint that is not "
+                         "a valid lexical of its type",
+                         a->name ? a->name : "?",
+                         ta->type_name ? ta->type_name : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    for (const XsdElementDecl* d = s->elements; d; d = d->next) {
+        if (!xsd_decl_value_lexical_ok(s, d->type, d->default_value) ||
+            !xsd_decl_value_lexical_ok(s, d->type, d->fixed)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "e-props-correct: the element '%s' carries a "
+                     "value constraint that is not a valid lexical "
+                     "of its type",
+                     d->name ? d->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    /* local particles: the content-model element decls carry their
+     * own default/fixed (s3_3_4si07's list_of_ids) */
+    for (const XsdCm* c = s->complex_types; c; c = c->next)
+        if (xsd_check_decl_values_cm(s, c->first_child,
+                                     c->name ? c->name : "?", 0) != 0)
+            return -1;
+    return 0;
+}
+
 /* #2184 (§3.9.6 cos-particle-restricts): an xs:all restricts an
  * xs:all particle-for-particle. The derived particles PARTITION
  * across the base's: each derived particle restricts some base
@@ -4845,6 +4977,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
      * abstract builtin in base/list/union slots, the bare NOTATION
      * element type, and the declared-notation enumeration law. */
     if (xsd_simple_type_refs_ok(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: value constraints are lexicals — an attribute/element
+     * default or fixed value violating the declared type's facets
+     * fails the schema (s3_3_4si01-11). */
+    if (xsd_check_decl_values(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
