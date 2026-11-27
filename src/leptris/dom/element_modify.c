@@ -207,12 +207,21 @@ static LeptrisElement mut_elem_carve(struct leptris_document* doc) {
             (size_t)MUT_ELEM_BLOCK_COUNT * sizeof(struct leptris_element));
         if (!blk) return NULL;
     }
+    /* NO bulk zero here (#2132): the per-element memset this used to
+     * run — 44 bytes x block count at acquire, cold — was 5.5% of the
+     * append-uniq row and 6.3% of mutcycle (#2230's assign-not-clear
+     * carve made it redundant the same way). The per-element fresh
+     * pass restores the memset's observable contract: unassigned
+     * fields read as zero, initialized while the slot is hot. */
+
     blk->next = doc->mut_elem_blocks;
     doc->mut_elem_blocks = blk;
     doc->mut_elem_cursor = (LeptrisElement)blk->bytes;
     doc->mut_elem_end = doc->mut_elem_cursor + MUT_ELEM_BLOCK_COUNT;
     return doc->mut_elem_cursor++;
 }
+
+
 
 /**
  * Create new element in document (Public API)
@@ -258,8 +267,8 @@ LeptrisElement leptris_element_create(LeptrisDocument doc, const char* name) {
         if (name_len == 255 && name[255]) name_len = strlen(name);
         elem = mut_elem_carve(doc);
         if (elem) {
-            /* #2132 mutcycle: assign-instead-of-clear — the block
-             * acquire no longer bulk-zeroes, so every field the
+            /* #2132 mutcycle + uniq: assign-instead-of-clear — the
+             * block acquire no longer bulk-zeroes, so every field the
              * branches below do not set is assigned here (recycled
              * storage holds the previous document's values; fresh
              * mallocs hold garbage). Plain stores fold into the
