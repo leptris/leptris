@@ -454,6 +454,25 @@ static int xsd_value_equal(const char* canon_type, const char* a,
                            const char* b);
 static int xsd_collapse_str(const char* src, char* out, size_t cap);
 
+/* Float/double value-space equality (moxml#588, #2207): the
+ * specials compare as VALUES, not spellings — "INF"/"+INF" are one
+ * value (overflow forms like "1E999" land there too), "-INF" is
+ * its own, and NaN identifies with itself (the simple022 identity
+ * reading — §3.2.5 spells NaN one way, enumeration admits it).
+ * Finite values compare numerically, so the exponential spellings
+ * agree. Both lexicals must be xs:double-shaped first: strtod
+ * alone would admit the C hex/infinity spellings the datatype
+ * rejects. */
+static int xsd_float_double_value_equal(const char* a, const char* b) {
+    if (!xsd_builtin_valid("xs:double", a) ||
+        !xsd_builtin_valid("xs:double", b))
+        return 0;
+    int na = strcmp(a, "NaN") == 0;
+    int nb = strcmp(b, "NaN") == 0;
+    if (na || nb) return na && nb;
+    return strtod(a, NULL) == strtod(b, NULL);
+}
+
 static int xsd_value_equal(const char* canon_type, const char* a,
                            const char* b) {
     if (strcmp(a, b) == 0) return 1;
@@ -464,7 +483,7 @@ static int xsd_value_equal(const char* canon_type, const char* a,
     }
     if (strcmp(canon_type, "xs:float") == 0 ||
         strcmp(canon_type, "xs:double") == 0)
-        return strtod(a, NULL) == strtod(b, NULL);
+        return xsd_float_double_value_equal(a, b);
     if (strstr(canon_type, "int") || strstr(canon_type, "decimal") ||
         strstr(canon_type, "long") || strstr(canon_type, "short") ||
         strstr(canon_type, "byte") ||
@@ -1390,6 +1409,33 @@ static const XsdSimple* assertion_base_next(
     return NULL;
 }
 
+/* The builtin a type NAME resolves to through the restriction
+ * ladder ("xs:double" for a chain rooted there): the name itself
+ * when it is a builtin spelling, NULL when the chain carries no
+ * builtin base or the local type never resolves. The fixed-value
+ * comparator uses this to pick the value-space rule. */
+static const char* fixed_terminal_builtin(struct leptris_xsd_schema* s,
+                                          const char* type,
+                                          const char* ns) {
+    if (!type) return NULL;
+    if (strncmp(type, "xs:", 3) == 0) return type;
+    const XsdSimple* st = xsd_find_simple_ns_pub(s, type, ns);
+    for (int d = 0; st && d < 32; d++) {
+        if (st->base && strncmp(st->base, "xs:", 3) == 0)
+            return st->base;
+        st = assertion_base_next(s, st);
+    }
+    return NULL;
+}
+
+/* moxml#588 (#2207): float/double fixed constraints are VALUE
+ * constraints (XSD 1.0 §3.2.3/§4.3.1.2, 1.1 §3.2.3.1) — the
+ * comparator picks the datatype's value-space rule by terminal. */
+static int fixed_terminal_is_float_double(const char* term) {
+    return term && (strcmp(term, "xs:float") == 0 ||
+                    strcmp(term, "xs:double") == 0);
+}
+
 /* The chain's terminal builtin ("xs:date"...): NULL when no builtin
  * ends the walk — the value binds as the lexical string. */
 static const char* assertion_chain_terminal(struct leptris_xsd_schema* s,
@@ -1801,19 +1847,31 @@ static int xsd_collapse_str(const char* src, char* out, size_t cap) {
  * the TYPE's value, not the raw lexical (XSD 1.0 §3.2.3/§4.3.1.2) —
  * a whitespace-variant lexical of a collapsing type (token family,
  * numeric) is the same value. Normalize both per the type's
- * whiteSpace and compare. */
+ * whiteSpace and compare; moxml#588 (#2207): float/double then
+ * compare in the datatype's VALUE space — the infinity family's
+ * spellings ("INF"/"+INF"/"1E999") all satisfy a fixed constraint
+ * naming any one of them, and non-numeric terminals keep the
+ * lexical comparison. */
 static int attr_fixed_matches(struct leptris_xsd_schema* s,
                               const char* type, const char* ns,
                               const char* val, const char* fixed) {
     if (!type) return 0;
-    if (!type_collapses_ws(s, type, ns)) return 0;
     char norm_v[512];
     char norm_f[512];
-    if (strlen(val) >= sizeof(norm_v)) return 0;
-    if (strlen(fixed) >= sizeof(norm_f)) return 0;
-    if (!xsd_collapse_str(val, norm_v, sizeof(norm_v))) return 0;
-    if (!xsd_collapse_str(fixed, norm_f, sizeof(norm_f))) return 0;
-    return strcmp(norm_v, norm_f) == 0;
+    const char* cv = val;
+    const char* cf = fixed;
+    if (type_collapses_ws(s, type, ns)) {
+        if (strlen(val) >= sizeof(norm_v)) return 0;
+        if (strlen(fixed) >= sizeof(norm_f)) return 0;
+        if (!xsd_collapse_str(val, norm_v, sizeof(norm_v))) return 0;
+        if (!xsd_collapse_str(fixed, norm_f, sizeof(norm_f))) return 0;
+        cv = norm_v;
+        cf = norm_f;
+    }
+    if (strcmp(cv, cf) == 0) return 1;
+    if (fixed_terminal_is_float_double(fixed_terminal_builtin(s, type, ns)))
+        return xsd_float_double_value_equal(cv, cf);
+    return 0;
 }
 
 /* leptris-rs#73: xs:ID itself or a user simpleType whose restriction
@@ -2141,6 +2199,25 @@ static void validate_element_decl(struct xsd_validator* v,
                 }
         if (d->fixed) {
             int match = !has_content || strcmp(text, d->fixed) == 0;
+            if (!match) {
+                /* moxml#588 (#2207): float/double content compares
+                 * in the datatype's VALUE space — the same §4.3.1.2
+                 * rule the attribute side rides (the infinity
+                 * family's spellings and the overflow forms are one
+                 * value). Non-float/double terminals fall through
+                 * to the typed walks below, unchanged. */
+                const char* term =
+                    fixed_terminal_builtin(s, d->type, d->ns);
+                if (fixed_terminal_is_float_double(term)) {
+                    char tv[512], tf[512];
+                    const char* tp = text ? text : "";
+                    if (strlen(tp) < sizeof(tv) &&
+                        strlen(d->fixed) < sizeof(tf) &&
+                        xsd_collapse_str(tp, tv, sizeof(tv)) &&
+                        xsd_collapse_str(d->fixed, tf, sizeof(tf)))
+                        match = xsd_float_double_value_equal(tv, tf);
+                }
+            }
             if (!match) {
                 const XsdSimple* ut =
                     d->type ? xsd_find_simple_ns_pub(s, d->type, d->ns)

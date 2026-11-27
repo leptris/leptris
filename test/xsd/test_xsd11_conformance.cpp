@@ -285,9 +285,15 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * suite-rejected set so the non-OK-status compile quirk handles keep
  * validating): 1845/2206 — the override family closes 87/87,
  * simple091/094 flip with the NOTATION rule (measured 2026-11-27 on
- * the 8e05b358 base). */
-    EXPECT_GE(pass, 1845) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1192);
+ * the 8e05b358 base). Raised by #2207 (moxml#588; the float/double
+ * fixed-value constraint compares in the datatype's VALUE space —
+ * the infinity family's spellings and the overflow forms are one
+ * value, so the lexical strcmp no longer false-rejects):
+ * 1847/2206 — simple001.v01/simple002 (saxonData/Simple) flip to
+ * their oracle verdicts, attribute- and element-side alike
+ * (measured 2026-11-27 on the c0da7a9e base). */
+    EXPECT_GE(pass, 1847) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1194);
     EXPECT_GE(pass_invalid, 492);
     EXPECT_GE(pass_schema_error, 161);
     RecordProperty("pass_valid", std::to_string(pass_valid));
