@@ -1498,6 +1498,211 @@ TEST(XsdValidate, Rs74UnionFixedStillRejectsDifferentValues) {
     leptris_xsd_free(s);
 }
 
+// moxml#588 (issue #2207, suite simple001/simple002): the fixed
+// value constraint is a VALUE constraint (XSD 1.0 §3.2.3/§4.3.1.2,
+// 1.1 §3.2.3.1) — float/double compare in the datatype's VALUE
+// space, so the infinity family's legal spellings all satisfy a
+// fixed constraint naming any one of them ("INF"/"+INF"/"1E999"
+// are one value; "-INF" is its own; NaN identifies with itself,
+// the simple022 identity reading). Attributes and element content
+// both ride the comparator; non-numeric types keep lexical
+// comparison.
+TEST(XsdValidate, AttrDoubleFixedInfAdmitsBothInfinitySpellings) {
+    // the simple001.xsd shape (suite row v01: valid)
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='doc'><xs:complexType><xs:sequence>"
+        "<xs:element name='section'><xs:complexType>"
+        "<xs:attribute name='ref' type='xs:double' fixed='+INF'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* valid[] = {"<doc><section ref='INF'/></doc>",
+                           "<doc><section ref='+INF'/></doc>",
+                           // overflow forms land on +infinity
+                           "<doc><section ref='1E999'/></doc>"};
+    for (const char* doc : valid) {
+        LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << doc << ": "
+            << leptris_xsd_error_at(s, 0);
+        leptris_document_free(d);
+    }
+    const char* invalid[] = {"<doc><section ref='-INF'/></doc>",
+                             "<doc><section ref='NaN'/></doc>",
+                             "<doc><section ref='1'/></doc>"};
+    for (const char* doc : invalid) {
+        LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_xsd_validate(s, d), 0) << doc;
+        leptris_document_free(d);
+    }
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, AttrFloatFixedInfAdmitsBothInfinitySpellings) {
+    // the simple002.xsd shape: xs:float rides the same value space
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='doc'><xs:complexType><xs:sequence>"
+        "<xs:element name='section'><xs:complexType>"
+        "<xs:attribute name='ref' type='xs:float' fixed='INF'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* doc = "<doc><section ref='+INF'/></doc>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1) << ": "
+        << leptris_xsd_error_at(s, 0);
+    leptris_document_free(d);
+    const char* neg = "<doc><section ref='-INF'/></doc>";
+    LeptrisDocument b = leptris_parse_string(neg, strlen(neg), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, AttrDoubleFixedFiniteAndExponentialValueSpace) {
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='r'><xs:complexType>"
+        "<xs:attribute name='v' type='xs:double' fixed='1E30'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* valid[] = {"<r v='1e+30'/>", "<r v='10E29'/>",
+                           "<r v='1000000000000000000000000000000'/>"};
+    for (const char* doc : valid) {
+        LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << doc << ": "
+            << leptris_xsd_error_at(s, 0);
+        leptris_document_free(d);
+    }
+    const char* neg = "<r v='1.5'/>";
+    LeptrisDocument b = leptris_parse_string(neg, strlen(neg), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, AttrDoubleFixedNaNAdmitsOnlyNaN) {
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='r'><xs:complexType>"
+        "<xs:attribute name='v' type='xs:double' fixed='NaN'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* doc = "<r v='NaN'/>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1) << ": "
+        << leptris_xsd_error_at(s, 0);
+    leptris_document_free(d);
+    const char* neg = "<r v='INF'/>";
+    LeptrisDocument b = leptris_parse_string(neg, strlen(neg), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, AttrRestrictionChainRidesTheNumericTerminal) {
+    // a user simpleType restricting xs:double resolves its terminal —
+    // the fixed compare stays in the datatype's value space
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:simpleType name='myDouble'>"
+        "<xs:restriction base='xs:double'/>"
+        "</xs:simpleType>"
+        "<xs:element name='r'><xs:complexType>"
+        "<xs:attribute name='v' type='myDouble' fixed='-INF'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    // -1E999 overflows to -infinity: the same VALUE as the fixed
+    // spelling, a different lexical — the chain's terminal governs
+    const char* doc = "<r v='-1E999'/>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1) << ": "
+        << leptris_xsd_error_at(s, 0);
+    leptris_document_free(d);
+    const char* neg = "<r v='INF'/>";
+    LeptrisDocument b = leptris_parse_string(neg, strlen(neg), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, ElementDoubleFixedInfAdmitsBothInfinitySpellings) {
+    // the element-content fixed constraint rides the same comparator
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='p' type='xs:double' fixed='+INF'/>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* valid[] = {"<p>INF</p>", "<p>+INF</p>", "<p>1E999</p>"};
+    for (const char* doc : valid) {
+        LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_xsd_validate(s, d), 1) << doc << ": "
+            << leptris_xsd_error_at(s, 0);
+        leptris_document_free(d);
+    }
+    const char* invalid[] = {"<p>-INF</p>", "<p>NaN</p>"};
+    for (const char* doc : invalid) {
+        LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(leptris_xsd_validate(s, d), 0) << doc;
+        leptris_document_free(d);
+    }
+    leptris_xsd_free(s);
+}
+
+TEST(XsdValidate, NonNumericFixedKeepsLexicalComparison) {
+    const char* schema =
+        "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+        "<xs:element name='r'><xs:complexType>"
+        "<xs:attribute name='v' type='xs:string' fixed='abc'/>"
+        "</xs:complexType></xs:element>"
+        "</xs:schema>";
+    LeptrisStatus st = LEPTRIS_OK;
+    LeptrisXsdSchema s = leptris_xsd_compile(schema, strlen(schema), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "status " << (int)st;
+    const char* doc = "<r v='abc'/>";
+    LeptrisDocument d = leptris_parse_string(doc, strlen(doc), &st);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1);
+    leptris_document_free(d);
+    // a different string is a different value — no numeric reading
+    const char* neg = "<r v='abd'/>";
+    LeptrisDocument b = leptris_parse_string(neg, strlen(neg), &st);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(leptris_xsd_validate(s, b), 0);
+    leptris_document_free(b);
+    leptris_xsd_free(s);
+}
+
 // moxml#545 (W3C attgC035-038, msData/attributeGroup, valid): an
 // attributeGroup-redefine body that refs its OWN name means the
 // ORIGINAL group (XSD 1.0 §4.2.2) — the name-keyed slot holds the
