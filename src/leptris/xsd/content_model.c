@@ -307,9 +307,15 @@ static int any_ns_matches(XsdCm* any, const char* uri,
     if (strcmp(f, "##local") == 0) return uri == NULL;
     /* #2184: a schema without a targetNamespace has {target
      * namespace} = absent — ##targetNamespace then names the
-     * ABSENT namespace, so unqualified children match (all006) */
-    if (strcmp(f, "##targetNamespace") == 0)
-        return uri == NULL && (!target_ns || !target_ns[0]);
+     * ABSENT namespace, so unqualified children match (all006).
+     * The qualified reading is untouched: the declaring unit's tns
+     * still admits its own qualified children (t1735 — the
+     * imported-unit shape regressed when the branch was replaced
+     * instead of extended). */
+    if (strcmp(f, "##targetNamespace") == 0) {
+        if (uri == NULL) return !target_ns || !target_ns[0];
+        return target_ns && strcmp(uri, target_ns) == 0;
+    }
     if (strcmp(f, "##other") == 0)
         return uri != NULL &&
                !(target_ns && strcmp(uri, target_ns) == 0);
