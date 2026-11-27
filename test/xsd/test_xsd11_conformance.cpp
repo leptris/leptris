@@ -347,11 +347,33 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * be gone; re-pin on the first cross-platform measure if any row
  * still straddles. Re-measured on the MERGED base (the wave-3
  * xitype class + this wave): **1984/2206** — 1252 valid / 543
- * invalid / 189 schema-error (measured 2026-11-27). */
-    EXPECT_GE(pass, 1984) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1252);
-    EXPECT_GE(pass_invalid, 543);
-    EXPECT_GE(pass_schema_error, 189);
+ * invalid / 189 schema-error (measured 2026-11-27). Raised by the
+ * CTA/IC residue tail (branch `xsd11-cta-ic`, five small slices —
+ * the SELECTED alternative type's TEXT typing runs (§3.4.3.3: a
+ * simpleContent derivation's inline <xs:simpleType> child is the
+ * text type, captured as the synthesized slot — cta0001.n01/n02,
+ * s3_12ii01.xml; xsd_capture_simple accepts a restriction element
+ * directly so direct-facet restrictions capture their enumeration,
+ * s3_12ii03.xml); CTA test prefixes bind in the SCHEMA document
+ * (§3.13.2 {namespace bindings} + xpathDefaultNamespace prolog,
+ * cta0002.n01); a cast/castable target resolving to a COMPLEX type
+ * of the schema fails the schema (XPST0080, s3_12ii06); §4.2.2
+ * conditional inclusion — vc:-gated components prune at capture,
+ * malformed vc: values fail the schema, an unsatisfied xs:schema
+ * root empties the document, and one document's surviving globals
+ * may not repeat a name (src-element.2) — s4_2_2si01, the
+ * vc90x.bad class, plus vc002.n1, vc010.v1 x4 and ibm test5/test6
+ * riding the same mechanism; keyref tuples compare in the VALUE
+ * space (§3.11.4 — the field terminal's assessed type drives a
+ * time/instant/duration/numeric dispatch past the string lexical)
+ * — zone206.v01/v02, zone301.v01, zone302.v01): +22 flips by
+ * red-set diff, ZERO regressions — **2006/2206**, 1258 valid /
+ * 553 invalid / 195 schema-error; the cta family CLOSES at
+ * **125/125** (measured 2026-11-28 on the ccc58dcb base). */
+    EXPECT_GE(pass, 2006) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1258);
+    EXPECT_GE(pass_invalid, 553);
+    EXPECT_GE(pass_schema_error, 195);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
