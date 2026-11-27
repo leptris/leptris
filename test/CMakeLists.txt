@@ -226,6 +226,12 @@ target_compile_definitions(test_xsd11_defattr PRIVATE
 leptris_add_test(test_xsd11_wildcard xsd/test_xsd11_wildcard.cpp)
 target_compile_definitions(test_xsd11_wildcard PRIVATE
     LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
+# #2184: attribute uses referencing the built-in xsi declarations
+# (the defaulted-xsi:type class) — the saxon Complex shapes ride the
+# pinned xsd11-cases corpus.
+leptris_add_test(test_xsd11_xitype xsd/test_xsd11_xitype.cpp)
+target_compile_definitions(test_xsd11_xitype PRIVATE
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 target_compile_definitions(test_rng PRIVATE
     LEPTRIS_RNG_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rng/include-cases")
 leptris_add_test(test_rng_corpus rng/test_rng_corpus.cpp)
