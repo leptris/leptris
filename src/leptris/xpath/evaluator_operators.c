@@ -637,6 +637,38 @@ static int xq_valid_datetime(const char* s) {
     return leptris_time_norm_seconds(p + 1, &c, &l) ? 1 : 0;
 }
 
+/* #2206: the XML Schema builtin datatype LOCAL names. An unprefixed
+ * SequenceType name with NO default namespace in force (`castable
+ * as double`, moxml#585's assertion spelling) resolves to none of
+ * the evaluator's typed branches unless the name qualifies into the
+ * XML Schema namespace — this is the qualification gate. Names
+ * outside the table keep the permissive path (a schema-scope type
+ * the engine cannot assess is never a rejection). */
+static int builtin_local_name(const char* b) {
+    static const char* const names[] = {
+        "string",         "normalizedString", "token",
+        "language",       "Name",             "NCName",
+        "ID",             "IDREF",            "IDREFS",
+        "ENTITY",         "ENTITIES",         "NMTOKEN",
+        "NMTOKENS",       "boolean",          "float",
+        "double",         "decimal",          "duration",
+        "dateTime",       "dateTimeStamp",    "time",
+        "date",           "gYearMonth",       "gYear",
+        "gMonthDay",      "gDay",             "gMonth",
+        "hexBinary",      "base64Binary",     "anyURI",
+        "QName",          "NOTATION",         "integer",
+        "nonPositiveInteger", "negativeInteger", "long",
+        "int",            "short",            "byte",
+        "nonNegativeInteger", "unsignedLong", "unsignedInt",
+        "unsignedShort",  "unsignedByte",     "positiveInteger",
+        "yearMonthDuration", "dayTimeDuration", "precisionDecimal",
+        "anySimpleType",  "anyType",          "anyAtomicType",
+        "untypedAtomic",  NULL};
+    for (int i = 0; names[i]; i++)
+        if (strcmp(b, names[i]) == 0) return 1;
+    return 0;
+}
+
 /* XSD atomic families that ride typed carriers: the sequence
  * fold marks members "\x03<mark>" so equality and grouping keep
  * distinct families apart even at identical spellings
@@ -3315,11 +3347,23 @@ struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
          * schema-scope name the engine cannot assess stays on the
          * permissive path; only the XML Schema namespace qualifies
          * into the builtin registry spelling (`double` -> xs:double,
-         * assert-simple003/004). */
+         * assert-simple003/004). #2206 (moxml#585): the ecosystem's
+         * common spelling writes the builtin WITHOUT the namespace
+         * mark and without any xpathDefaultNamespace
+         * (`$value castable as double`) — the unprefixed name then
+         * belongs to no namespace at all, and every check below
+         * fell through to the permissive path, so the assertion
+         * accepted anything. When NO default namespace is in force,
+         * a builtin local name resolves to the XML Schema namespace
+         * (the same qualification the xdn branch delivers); a
+         * non-builtin name keeps the permissive path. */
         char xdnq[96];
-        if (!strchr(base, ':') && ctx->xquery_default_ns &&
-            strcmp(ctx->xquery_default_ns,
-                   "http://www.w3.org/2001/XMLSchema") == 0 &&
+        if (!strchr(base, ':') &&
+            ((ctx->xquery_default_ns &&
+              strcmp(ctx->xquery_default_ns,
+                     "http://www.w3.org/2001/XMLSchema") == 0) ||
+             ((!ctx->xquery_default_ns || !ctx->xquery_default_ns[0]) &&
+              builtin_local_name(base))) &&
             strlen(base) < sizeof(xdnq) - 4) {
             snprintf(xdnq, sizeof(xdnq), "xs:%s", base);
             tlen = strlen(xdnq);
