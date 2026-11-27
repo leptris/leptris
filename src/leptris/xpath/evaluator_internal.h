@@ -12,6 +12,32 @@
 #include "xpath_variables.h"
 #include "../dom/node.h"  /* LeptrisNode for matches_node_test (TODO 109) */
 
+/* Cache-line phase pinning for the evaluator hot set (#2194).
+ *
+ * The PGO row gate (pgo.yml) compares USE against OFF per row. The
+ * functions/axes rows spend ~2/3 of their time in a handful of
+ * functions here (matches_node_test, evaluate_step, xpath_nodeset_add,
+ * apply_axis + callees — callgrind, Ir shares 8-12% each). These are
+ * byte-identical between the two builds; only their absolute .so
+ * placement moves. GCC's per-TU codegen sizes upstream of this block
+ * (parser.c, xsd/compile.c grew in #2200) shift every downstream
+ * object, and a shift that is not a multiple of the cache line
+ * re-rolls where each hot loop starts inside a line — measured as a
+ * swing between -0.1% and +8% on the SAME hardware between two
+ * independent trainings (#2201's proof vs flip-check tables).
+ *
+ * Pinning the entry of each dominant hot function to a line boundary
+ * freezes its intra-line phase in EVERY build (OFF included), so
+ * USE-vs-OFF measures the profile-guided code transform alone
+ * (callgrind: USE executes 7.45% fewer instructions on the functions
+ * row) instead of an alignment lottery. Padding cost: <=63 bytes per
+ * pinned function. */
+#if defined(__GNUC__) || defined(__clang__)
+#define LEPTRIS_CACHELINE_ALIGNED __attribute__((aligned(64)))
+#else
+#define LEPTRIS_CACHELINE_ALIGNED
+#endif
+
 /* Forward declarations for internal functions */
 
 /* From evaluator_types.c */

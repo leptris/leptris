@@ -58,10 +58,11 @@ static void collect_descendants(XPathContext* ctx,
 }
 
 /* Helper: Collect descendants or self (TODO 109: walks all node types). */
-static void collect_descendants_or_self(XPathContext* ctx,
-                                       LeptrisElement node,
-                                       XPathNodeSet* result,
-                                       XPathASTNode* node_test) {
+static LEPTRIS_CACHELINE_ALIGNED void collect_descendants_or_self(
+        XPathContext* ctx,
+        LeptrisElement node,
+        XPathNodeSet* result,
+        XPathASTNode* node_test) {
     if (!node) return;
 
     if (leptris_node_get_type((LeptrisNodeRef)node) ==
@@ -740,8 +741,10 @@ XPathAxisType xpath_axis_from_name(const char* name) {
  * TODO 113 Phase 1: switches on the pre-computed axis_id from the
  * AST node, avoiding the strcmp chain. Falls back to from_name if
  * axis_id wasn't set (defensive — should always be set by parser). */
-XPathNodeSet* apply_axis(XPathContext* ctx, LeptrisNode* node,
-                         const char* axis_name, XPathASTNode* test) {
+LEPTRIS_CACHELINE_ALIGNED XPathNodeSet* apply_axis(XPathContext* ctx,
+                                                   LeptrisNode* node,
+                                                   const char* axis_name,
+                                                   XPathASTNode* test) {
     DEBUG_LOG("      === apply_axis: %s ===", axis_name ? axis_name : "(null/child)");
 
     XPathAxisType axis_id = test ? test->axis_id : XPATH_AXIS_CHILD;
