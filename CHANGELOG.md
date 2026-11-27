@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.450] - 2026-11-27
+
+### Fixed
+
+- rename the cta lane's ncname static (#2184) (amalgam)
+
+
+
 ## [1.9.449] - 2026-11-27
 
 The XSD 1.1 conformance wave: the official W3C suite floor moves **1439 → 1984 / 2206 (65.2% → 89.9%)** in one train, with zero regressions at every step (per-row red-set diffs, monotonic CI pins at the cross-platform stable values).
