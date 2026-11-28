@@ -24,7 +24,8 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
                              int* oc_from, unsigned char* oc_attr,
-                             unsigned char* wc_attr);
+                             unsigned char* wc_attr,
+                             XsdCm** hit_particle);
 extern int xsd_builtin_valid(const char* type, const char* v);
 extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
@@ -1241,6 +1242,66 @@ static const char* xsd_chain_particle_type(struct leptris_xsd_schema* s,
     return NULL;
 }
 
+/* #2221: the same-named element particle whose window a WILDCARD-slot
+ * child's trace exhausted (§3.3.4.3 cl. 4.2 — the child's xsi:type
+ * substitutes STRICTLY against this particle's selected type,
+ * wild062's second f). First-name-match order mirrors the pre-trace
+ * DFS posture; UPA-valid models carry exactly one such particle. */
+static const XsdCm* wildcard_slot_particle(
+    struct leptris_xsd_schema* s, const XsdCm* model, const char* cl,
+    const char* cu) {
+    if (!model) return NULL;
+    const XsdCm* stack[64];
+    int sp = 0;
+    stack[sp++] = model;
+    while (sp > 0) {
+        const XsdCm* p = stack[--sp];
+        for (; p; p = p->next) {
+            int child_ns = cu && cu[0];
+            int pns_ok =
+                p->ns ? (!child_ns || strcmp(p->ns, cu) == 0)
+                      : !child_ns;
+            if (p->kind == XSD_CM_ELEMENT && p->name &&
+                strcmp(p->name, cl) == 0 &&
+                (p->type || p->alternatives) && pns_ok)
+                return p;
+            if (p->kind == XSD_CM_GROUP_REF) {
+                XsdGroupDef* g = xsd_find_group(s, p->name);
+                if (g && g->model && sp < 64)
+                    stack[sp++] = g->model;
+            }
+            if (sp < 64 && p->first_child)
+                stack[sp++] = p->first_child;
+        }
+    }
+    return NULL;
+}
+
+/* The weak-wildcard GOVERNING-TYPE law (#2239), shared by both of its
+ * routing sites: a wildcard-admitted child resolves its GLOBAL
+ * declaration, and that declaration's type must be validly derived
+ * from the shadowed same-name particle's — ONE-directional, through
+ * the facet-free union member path when the particle types a union
+ * (§3.4.4.3 dynamic EDC; wild064's decimal over the integer is NOT a
+ * derivation, wild066's date over the date/time union rides the
+ * member path). A shadowed particle carrying no type (alternatives
+ * only) or a declaration with none imposes no check. */
+static void weak_wildcard_governing_check(
+    struct xsd_validator* v, struct leptris_xsd_schema* s,
+    LeptrisElement ce, const char* cl, const char* cu,
+    const char* shadow_type, const XsdElementDecl* wcd) {
+    int govt_ok = !shadow_type || !wcd->type ||
+                  xsd_type_derives_from(s, wcd->type, shadow_type);
+    if (!govt_ok)
+        govt_ok = xsd_union_member_path_fwd(s, shadow_type,
+                                            wcd->type);
+    if (!govt_ok)
+        verrf_atk(v, ce, "element-declarations-consistent", cl,
+                  "element", cl,
+                  "the wildcard-admitted element's governing type is "
+                  "not compatible with the shadowed particle's type");
+}
+
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
                               LeptrisElement elem, XsdCm* ct) {
@@ -1412,8 +1473,26 @@ static void validate_children(struct xsd_validator* v,
         free(oc_attr);
         return;
     }
+    /* #2221: the NFA trace — WHICH particle consumed each child
+     * (position-exact typing; the first-name-match DFS below stays
+     * as the fallback for untraced walks). */
+    XsdCm** hit = NULL;
+    if (n > 0) {
+        hit = (XsdCm**)calloc(n, sizeof(*hit));
+        if (!hit) {
+            free(names);
+            free(uris);
+            free(oc_attr);
+            free(wc_attr);
+            return;
+        }
+    }
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
-                               n, &oc_from, oc_attr, wc_attr);
+                               n, &oc_from, oc_attr, wc_attr, hit);
+    /* the trace is authoritative only for a FULL (accepted) walk —
+     * a dying walk's tail entries are NULL and the fallback DFS
+     * keeps the pre-trace posture */
+    int traced = (ok == 1);
     if (ok == -2) {
         /* #1894/#514: pathological occurrence product — the automaton
          * exceeds the compile-time size cap. The cap is a resource
@@ -1426,6 +1505,7 @@ static void validate_children(struct xsd_validator* v,
         free(uris);
         free(oc_attr);
         free(wc_attr);
+        free(hit);
         return;
     }
     if (ok) {
@@ -1512,14 +1592,27 @@ static void validate_children(struct xsd_validator* v,
          * not take it): the weak-wildcard slot. */
         int wc_admitted = wc_attr ? wc_attr[child_i] != 0 : 0;
         child_i++;
+        /* #2221: the position-exact trace — the particle the NFA
+         * actually matched for THIS child (XSD 1.0 §3.9.3). When the
+         * walk was fully traced, it outranks every name-keyed scan:
+         * an element-particle hit governs the child, a wildcard hit
+         * routes the child through its own processContents, and NO
+         * other wildcard elsewhere in the model may gate or skip a
+         * child its slot never reached. */
+        XsdCm* hitp =
+            (traced && hit) ? hit[child_i - 1] : NULL;
         /* #1879: wildcard processContents gates the child — skip
          * imposes no constraint at all (even a declared child);
          * strict demands a declaration when no particle/global
          * types it; lax validates declared children only. */
         int wpc = oc_attributed ? model->open_any->pc_level
-                                : model_wildcard_pc(model, cu,
-                                                    xsd_target_ns(s),
-                                                    cl);
+                                : (hitp && hitp->kind == XSD_CM_ANY
+                                       ? hitp->pc_level
+                                       : (hitp ? -1
+                                               : model_wildcard_pc(
+                                                     model, cu,
+                                                     xsd_target_ns(s),
+                                                     cl)));
         if (wpc == 2) {
             /* #2156: record the skip attribution (§3.10.4.1) —
              * identity constraints omit skipped subtrees from their
@@ -1544,7 +1637,18 @@ static void validate_children(struct xsd_validator* v,
          * decides whether it is needed. */
         const char* ltype = NULL;
         const char* lfill = NULL;
-        if (model && !oc_attributed) {
+        if (hitp && hitp->kind == XSD_CM_ELEMENT &&
+            (hitp->type || hitp->alternatives)) {
+            /* #2221: the traced particle governs — position-exact,
+             * no first-name-match collapse across same-named
+             * particles/windows. A particle carrying no type (a ref,
+             * which resolves to a global declaration) falls through
+             * to the global lookup below, like the DFS path. */
+            ptype = hitp->type;
+            pmatch = hitp;
+            pfill = hitp->fixed_value ? hitp->fixed_value
+                                      : hitp->default_value;
+        } else if (model && !oc_attributed && !hitp) {
             XsdCm* stack[64];
             int sp = 0;
             stack[sp++] = model;
@@ -1638,33 +1742,18 @@ static void validate_children(struct xsd_validator* v,
                  * the resolved type must stay COMPATIBLE with the
                  * shadowed particle's (the governing-type law: IBM
                  * s3_8_6's integer over the local string is neither's
-                 * derivation, so the instance fails). */
+                 * derivation, so the instance fails). This is the
+                 * UNTRACED routing site: a fully-accepted walk routes
+                 * its weak-wildcard children through the traced
+                 * wildcard slot below; a dying walk keeps the
+                 * first-name-match posture here. */
                 const XsdElementDecl* wcd =
                     xsd_find_element_child_ns(s, cl, cu);
                 if (wcd) {
-                    /* §3.4.4.3's dynamic EDC, one-directional: the
-                     * resolved global's type must be validly derived
-                     * from the shadowed particle's — through the
-                     * facet-free union member path when the particle
-                     * types a union (wild066's date over the
-                     * date/time union; wild064's decimal over the
-                     * integer is NOT). */
-                    int govt_ok = !ptype || !wcd->type ||
-                                  xsd_type_derives_from(s, wcd->type,
-                                                        ptype);
-                    if (!govt_ok)
-                        govt_ok =
-                            xsd_union_member_path_fwd(s, ptype,
-                                                      wcd->type);
-                    if (!govt_ok) {
-                        verrf_atk(v, ce,
-                                  "element-declarations-consistent",
-                                  cl, "element", cl,
-                                  "the wildcard-admitted element's "
-                                  "governing type is not "
-                                  "compatible with the shadowed "
-                                  "particle's type");
-                    }
+                    /* §3.4.4.3's dynamic EDC, one-directional, with
+                     * the facet-free union member path (wild066). */
+                    weak_wildcard_governing_check(v, s, ce, cl, cu,
+                                                  ptype, wcd);
                     validate_element_decl(v, s, ce, 0, wcd);
                 } else if (ltype) {
                     validate_local(v, s, ce, cl, ltype, lfill,
@@ -1703,9 +1792,96 @@ static void validate_children(struct xsd_validator* v,
                 }
             }
         } else {
+            /* #2221: a traced WILDCARD-slot child carrying xsi:type
+             * substitutes STRICTLY against the same-named particle's
+             * selected type (§3.3.4.3 cl. 4.2 — wild062's second f,
+             * wild063.v2's byte: the trace proves the window is
+             * exhausted, so the strict arm rides unconditionally).
+             * Without a particle type the global-declaration path
+             * below keeps handling it. */
+            int wxsi_handled = 0;
+            const char* wxsi =
+                (hitp && hitp->kind == XSD_CM_ANY && !oc_attributed)
+                    ? leptris_element_attribute_ns(
+                          ce,
+                          "http://www.w3.org/2001/XMLSchema-instance",
+                          "type")
+                    : NULL;
+            if (wxsi && wxsi[0]) {
+                const XsdCm* pw =
+                    wildcard_slot_particle(s, model, cl, cu);
+                if (pw && (pw->type || pw->alternatives)) {
+                    wxsi_handled = 1;
+                    if (pw->type) {
+                        char xuri[512], xlocal[256];
+                        xsd_resolve_qname_inst(
+                            ce, wxsi, xuri, sizeof(xuri), xlocal,
+                            sizeof(xlocal));
+                        if (!xlocal[0]) {
+                            verrf_atk(v, ce, "type-resolution", cl,
+                                      "element", cl,
+                                      "xsi:type prefix is not bound "
+                                      "in the instance");
+                        } else if (xsi_type_override_fails_pos(
+                                       s, xlocal, xuri, pw->type, cu,
+                                       ct ? ct->ns : NULL, 1)) {
+                            verrf_atk(
+                                v, ce, "type-resolution", cl,
+                                "element", cl,
+                                "xsi:type does not override the "
+                                "selected type definition");
+                        } else {
+                            validate_local_uri(
+                                v, s, ce, cl, xlocal, xuri, wxsi,
+                                pw->fixed_value ? pw->fixed_value
+                                                : pw->default_value,
+                                ct ? ct->ns : NULL);
+                        }
+                    } else {
+                        /* alternative-only particle: the selected
+                         * type has no base to substitute against —
+                         * the named type assesses as given */
+                        char xuri[512], xlocal[256];
+                        xsd_resolve_qname_inst(
+                            ce, wxsi, xuri, sizeof(xuri), xlocal,
+                            sizeof(xlocal));
+                        if (!xlocal[0]) {
+                            verrf_atk(v, ce, "type-resolution", cl,
+                                      "element", cl,
+                                      "xsi:type prefix is not bound "
+                                      "in the instance");
+                        } else {
+                            validate_local_uri(v, s, ce, cl, xlocal,
+                                               xuri, wxsi, NULL,
+                                               ct ? ct->ns : NULL);
+                        }
+                    }
+                }
+            }
+            if (!wxsi_handled) {
             const XsdElementDecl* cd =
                 xsd_find_element_child_ns(s, cl, cu);
             if (cd) {
+                if (traced && wc_admitted) {
+                    /* #2239 x #2221, the TRACED weak-wildcard slot: the
+                     * trace proves the same-name particle's window is
+                     * spent, so the resolved global declaration faces
+                     * the governing-type law against THAT particle's
+                     * type — one-directional, with the facet-free
+                     * union member path (wild064's decimal over the
+                     * integer is not a derivation; wild066's date over
+                     * the date/time union rides the member path). The
+                     * shadow is found through the derivation CHAIN
+                     * (wild068: the restricting type's model carries
+                     * no e particle at all — the shadowed union-typed
+                     * particle lives in the base), the same lookup the
+                     * untraced posture uses. */
+                    const char* govt =
+                        ct ? xsd_chain_particle_type(s, ct, cl, cu)
+                           : NULL;
+                    weak_wildcard_governing_check(v, s, ce, cl, cu,
+                                                  govt, cd);
+                } else {
                 /* §3.4.4.3 (dynamic EDC, #2184): a wildcard-admitted
                  * element resolves to a GLOBAL declaration; when the
                  * governing type's derivation chain declares the same
@@ -1723,6 +1899,7 @@ static void validate_children(struct xsd_validator* v,
                               "type is not validly derived from the "
                               "governing declaration's");
                 }
+                }
                 validate_element_decl(v, s, ce, 0, cd);
             } else if (ltype) {
                 /* nothing global claims the namespaced child —
@@ -1731,6 +1908,7 @@ static void validate_children(struct xsd_validator* v,
                 validate_local(v, s, ce, cl, ltype, lfill,
                                ct ? ct->ns : NULL);
             }
+            }
         }
         /* wildcard-admitted children without a declaration pass:
          * strict and lax alike admit undeclared names (the pinned
@@ -1738,6 +1916,7 @@ static void validate_children(struct xsd_validator* v,
     }
     free(oc_attr);
     free(wc_attr);
+    free(hit);
 }
 
 /* $value binds typed: a numeric-derived simple type binds the

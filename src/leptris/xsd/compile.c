@@ -39,7 +39,8 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
                              int* oc_from, unsigned char* oc_attr,
-                             unsigned char* wc_attr);
+                             unsigned char* wc_attr,
+                             XsdCm** hit_particle);
 
 struct leptris_xsd_schema {
     size_t declaration_count;
@@ -3877,6 +3878,38 @@ static int xsd_cm_derives_from(struct leptris_xsd_schema* s, XsdCm* cm,
     return xsd_cm_derives_from(s, next, target, hops + 1);
 }
 
+/* #2221: is `derived` a (transitive) member type of the local UNION
+ * `base`? The union arm of the derivation-ok ladder (the same reading
+ * cos-ct-type-substitutable pins — D substitutes a union B when D
+ * derives from any of B's member types): the dynamic EDC's
+ * wildcard-resolved comparison rides it (wild066's xs:date against
+ * the governing union(date,time) holds; wild068's xs:duration stays
+ * outside). Member names arrive canonized at capture ("xs:date");
+ * unprefixed spellings compare leniently. */
+static int xsd_simple_in_union(struct leptris_xsd_schema* s,
+                               const char* derived, const char* base,
+                               int hops) {
+    if (hops > 8 || !base || !base[0]) return 0;
+    const XsdSimple* u = xsd_find_simple(s, base);
+    if (!u || u->deriv != XSD_SIMPLE_UNION) return 0;
+    const char* dloc = derived
+                           ? (strncmp(derived, "xs:", 3) == 0
+                                  ? derived + 3
+                                  : derived)
+                           : "";
+    for (size_t i = 0; i < u->member_count; i++) {
+        const char* m = u->members[i];
+        if (!m || !m[0]) continue;
+        if (strcmp(m, derived) == 0) return 1;
+        const char* mloc = strncmp(m, "xs:", 3) == 0 ? m + 3 : m;
+        if (dloc[0] && strcmp(mloc, dloc) == 0) return 1;
+        if (strncmp(m, "xs:", 3) != 0 &&
+            xsd_simple_in_union(s, derived, m, hops + 1))
+            return 1;
+    }
+    return 0;
+}
+
 /* #2184 (§3.4.4.3 dynamic EDC): is `derived` validly derived from
  * `base`? Builtin ladders, local simple chains, and complex chains;
  * names that resolve nowhere stay POSTURE (1) — the ref checks own
@@ -3903,9 +3936,12 @@ int xsd_type_derives_from(struct leptris_xsd_schema* s,
     if (strncmp(derived, "xs:", 3) == 0) {
         resolved = 1;
         if (xsd_builtin_derives_from(derived, base)) return 1;
-        if (strncmp(base, "xs:", 3) != 0 &&
-            xsd_find_simple(s, base))
+        if (strncmp(base, "xs:", 3) != 0 && xsd_find_simple(s, base)) {
+            /* the union arm before the blanket: a builtin that is a
+             * MEMBER of the local union derives from it (wild066) */
+            if (xsd_simple_in_union(s, derived, base, 0)) return 1;
             return 0; /* a builtin never derives from a local type */
+        }
     } else {
         if (xsd_find_simple(s, derived)) {
             resolved = 1;
@@ -12311,7 +12347,8 @@ LEPTRIS_API int leptris_xsd_content_valid(
     if (!model) return child_count == 0;
 
     int ok = xsd_content_valid(s, model, s->target_ns, child_names,
-                               child_ns, child_count, NULL, NULL, NULL);
+                               child_ns, child_count, NULL, NULL, NULL,
+                               NULL);
     /* #1894: -2 = the model crosses the automaton size cap — surface
      * the loud structured row and keep the public contract's -1 for
      * "not evaluable". */

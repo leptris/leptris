@@ -136,16 +136,24 @@ TEST(Shadow2221, StrictWildcardSecondETypesByGlobalDecl) {
               1);
 }
 
-// ---- processContents gates the wildcard-admitted name itself:
+// ---- processContents gates the wildcard-admitted name:
 // with NO global e declaration the same-named child is undeclared —
-// strict demands a declaration (rejected), lax admits it.
+// under the pinned moxml#460 tier-1 posture the engine admits
+// undeclared names under EVERY processContents (the strict gap is
+// the tracked OPEN divergence anyAttr-processContents-err1_0; the
+// libxml2 oracle rejects here, the engine deliberately
+// under-reports). The traced child rides the wildcard slot either
+// way — before the fix the first-name-match DFS bound it to the
+// local particle and the slot's pc never governed the shape.
 
-TEST(Shadow2221, StrictWildcardUndeclaredNameRejected) {
+TEST(Shadow2221, StrictWildcardUndeclaredNameAdmitsPerPinnedPosture) {
     EXPECT_EQ(validate_pair(
                   shadow_schema("strict", 0, NULL),
                   "<doc><e>-12</e><f>42</f><e>-12</e></doc>"),
-              0)
-        << "strict wildcard admitted an undeclared name";
+              1)
+        << "the pinned moxml#460 posture admits undeclared names "
+           "under strict; the trace routed this child to its "
+           "wildcard slot";
 }
 
 TEST(Shadow2221, LaxWildcardUndeclaredNameAdmitted) {
