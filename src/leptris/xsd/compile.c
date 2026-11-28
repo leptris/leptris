@@ -25,6 +25,9 @@ void xsd_capture_ics(struct leptris_xsd_schema* s,
 extern int xsd_simple_valid(const XsdSimple* simple, const char* v,
                             const char* terminal_base, int chain_is_list,
                             int xsd_10);
+static int xsd_restriction_facets_valid(struct leptris_xsd_schema* s,
+                                        const XsdSimple* t,
+                                        const char* v, int depth);
 extern struct xsd_validator* xsd_validator_new(
     struct leptris_xsd_schema* s);
 extern void xsd_validator_free(struct xsd_validator* v);
@@ -1168,8 +1171,176 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
      * this level's facets. */
     if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
         return 0;
-    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t), 0,
-                            xsd_schema_pinned_10(s));
+    return xsd_restriction_facets_valid(s, t, v, depth);
+}
+
+/* ---- #2184 (simple085): the union facet value ---------------------
+ * A restriction of a UNION applies its facets (the pattern lane
+ * Saxonica issue 2247 pins) to "the value produced by applying the
+ * whitespace normalization defined on the member type against which
+ * the input was validated" — the §3.16.1 FIRST member that
+ * validates picks the normalization, so a member declaring
+ * whiteSpace="collapse" delivers the collapsed lexical to the
+ * restriction's pattern even though the raw lexical misses it. */
+
+/* The whitespace normalization the chain declares: the explicit
+ * xs:whiteSpace facet wins; the token family collapses and
+ * normalizedString replaces intrinsically (the builtin surfaces).
+ * NULL = the chain normalizes nothing. */
+static const char* xsd_chain_ws_mode(struct leptris_xsd_schema* s,
+                                     const XsdSimple* t) {
+    int depth = 0;
+    while (t && depth < 32) {
+        if (t->whitespace) return t->whitespace;
+        if (t->base && strncmp(t->base, "xs:", 3) == 0) {
+            if (strcmp(t->base, "xs:normalizedString") == 0)
+                return "replace";
+            static const char* collapsing[] = {
+                "xs:token", "xs:language", "xs:Name", "xs:NCName",
+                "xs:ID", "xs:IDREF", "xs:ENTITY", "xs:NMTOKEN",
+                "xs:NMTOKENS", "xs:IDREFS", "xs:ENTITIES", NULL };
+            for (size_t i = 0; collapsing[i]; i++)
+                if (strcmp(t->base, collapsing[i]) == 0)
+                    return "collapse";
+            return NULL;
+        }
+        if (!t->base) {
+            t = t->base_def;
+            depth++;
+            continue;
+        }
+        t = xsd_find_simple(s, t->base);
+        depth++;
+    }
+    return NULL;
+}
+
+/* collapse/replace over the raw lexical (the facet_check shape:
+ * trim the ends, inner whitespace runs become one space). */
+static char* xsd_ws_apply(const char* v, const char* mode) {
+    int replace = strcmp(mode, "replace") == 0;
+    if (!replace && strcmp(mode, "collapse") != 0) return NULL;
+    char* out = (char*)malloc(strlen(v) + 1);
+    if (!out) return NULL;
+    size_t o = 0;
+    int in_ws = 0;
+    const char* start = v;
+    const char* end = v + strlen(v);
+    if (!replace) {
+        while (start < end && (*start == ' ' || *start == '\t' ||
+                               *start == '\n' || *start == '\r'))
+            start++;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                               end[-1] == '\n' || end[-1] == '\r'))
+            end--;
+    }
+    for (const char* p = start; p < end; p++) {
+        char ch = *p;
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+            if (replace) {
+                out[o++] = ' ';
+                in_ws = 0;
+            } else {
+                if (!in_ws && o) out[o++] = ' ';
+                in_ws = 1;
+            }
+        } else {
+            out[o++] = ch;
+            in_ws = 0;
+        }
+    }
+    out[o] = 0;
+    return out;
+}
+
+/* Does this chain root at a UNION derivation? */
+static int xsd_chain_is_union(struct leptris_xsd_schema* s,
+                              const XsdSimple* t) {
+    int depth = 0;
+    while (t && depth < 32) {
+        if (t->deriv == XSD_SIMPLE_UNION) return 1;
+        if (!t->base) {
+            if (t->base_def) {
+                t = t->base_def;
+                depth++;
+                continue;
+            }
+            return 0;
+        }
+        if (strncmp(t->base, "xs:", 3) == 0) return 0;
+        t = xsd_find_simple(s, t->base);
+        depth++;
+    }
+    return 0;
+}
+
+/* The winning member's normalized lexical (malloc'd), or NULL when
+ * no member validates or the winner normalizes nothing. */
+static char* xsd_union_normalized(struct leptris_xsd_schema* s,
+                                  const XsdSimple* u, const char* v,
+                                  int depth) {
+    if (!u || u->deriv != XSD_SIMPLE_UNION || depth > 32) return NULL;
+    /* §3.16.1: the first member that validates is the one whose
+     * whitespace normalization produced the value */
+    for (size_t i = 0; i < u->member_count; i++) {
+        const char* name = u->members[i];
+        if (name && strncmp(name, "xs:", 3) == 0) {
+            /* builtin member: only the token family normalizes */
+            static const char* collapsing[] = {
+                "xs:token", "xs:language", "xs:Name", "xs:NCName",
+                "xs:ID", "xs:IDREF", "xs:ENTITY", "xs:NMTOKEN",
+                "xs:NMTOKENS", "xs:IDREFS", "xs:ENTITIES", NULL };
+            int hit = 0;
+            for (size_t k = 0; collapsing[k]; k++)
+                if (strcmp(name, collapsing[k]) == 0) hit = 1;
+            if (hit && xsd_builtin_valid(name, v))
+                return xsd_ws_apply(v, "collapse");
+            if (!hit && strcmp(name, "xs:normalizedString") == 0 &&
+                xsd_builtin_valid(name, v))
+                return xsd_ws_apply(v, "replace");
+            continue;
+        }
+        const XsdSimple* next = name ? xsd_find_simple(s, name) : NULL;
+        if (next && xsd_valid_chain(s, next, v, depth + 1)) {
+            const char* ws = xsd_chain_ws_mode(s, next);
+            return ws ? xsd_ws_apply(v, ws) : NULL;
+        }
+    }
+    for (size_t i = 0; i < u->member_def_count; i++) {
+        const XsdSimple* m = u->member_defs[i];
+        if (m && xsd_valid_chain(s, m, v, depth + 1)) {
+            const char* ws = xsd_chain_ws_mode(s, m);
+            return ws ? xsd_ws_apply(v, ws) : NULL;
+        }
+    }
+    return NULL;
+}
+
+/* The facet walk for a RESTRICT whose base chain already validated:
+ * for a union-rooted base the facets judge the winning member's
+ * normalized lexical, otherwise the raw one. */
+static int xsd_restriction_facets_valid(struct leptris_xsd_schema* s,
+                                        const XsdSimple* t,
+                                        const char* v, int depth) {
+    const char* fv = v;
+    char* norm = NULL;
+    const XsdSimple* u = NULL;
+    if (t->base_def) {
+        if (t->base_def->deriv == XSD_SIMPLE_UNION)
+            u = t->base_def;
+    } else if (t->base && strncmp(t->base, "xs:", 3) != 0) {
+        const XsdSimple* next = xsd_find_simple(s, t->base);
+        if (next && xsd_chain_is_union(s, next)) u = next;
+    }
+    if (u) {
+        norm = xsd_union_normalized(s, u, v, depth);
+        if (norm) fv = norm;
+    }
+    int rc = xsd_simple_valid(t, fv, xsd_chain_terminal(s, t),
+                              xsd_chain_is_list(s, t),
+                              xsd_schema_pinned_10(s));
+    free(norm);
+    return rc;
 }
 
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
@@ -1186,9 +1357,7 @@ static int xsd_valid_chain(struct leptris_xsd_schema* s,
      * then this restriction's facets. */
     if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
         return 0;
-    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t),
-                            xsd_chain_is_list(s, t),
-                            xsd_schema_pinned_10(s));
+    return xsd_restriction_facets_valid(s, t, v, depth);
 }
 
 static void xsd_set_error(struct leptris_xsd_schema* s, const char* msg) {

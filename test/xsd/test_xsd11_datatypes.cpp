@@ -375,3 +375,48 @@ TEST(Xsd11Datatypes, TargetNamespacePlacement) {
 TEST(Xsd11Datatypes, ImportNamespaceAgreement) {
     expect_schema_error("import_ns_mismatch_rejected.xsd");
 }
+
+/* ---- the pattern facet on a union (#2184, simple085) -------------- */
+
+/* A restriction of a UNION carrying a pattern facet applies that
+ * pattern to the value produced by applying the winning MEMBER's
+ * whitespace normalization (§4.3.4 as Saxonica issue 2247 pins it:
+ * "the value produced by applying the whitespace normalization
+ * defined on the member type against which the input was
+ * validated"). The member here collapses, so the raw lexical
+ * "  Hello           world" reaches the pattern as "Hello world"
+ * and matches; judging the raw lexical fails the instance. */
+TEST(Xsd11Datatypes, UnionPatternAppliesMemberNormalization) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"myUnion\"><xs:union>"
+        "<xs:simpleType><xs:restriction base=\"xs:string\">"
+        "<xs:whiteSpace value=\"collapse\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:union></xs:simpleType>"
+        "<xs:element name=\"elem\">"
+        "<xs:simpleType><xs:restriction base=\"myUnion\">"
+        "<xs:pattern value=\"Hello world\"/>"
+        "</xs:restriction></xs:simpleType>"
+        "</xs:element></xs:schema>";
+    const char* ok_inst =
+        "<?xml version=\"1.0\"?><elem>  Hello           world</elem>";
+    const char* bad_inst =
+        "<?xml version=\"1.0\"?><elem>Goodbye           world</elem>";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(
+        xsd, strlen(xsd), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0) << "union pattern schema compiles";
+    ASSERT_EQ(st, LEPTRIS_OK) << "union pattern compile status";
+    LeptrisDocument d = leptris_parse_string(ok_inst, strlen(ok_inst), &st);
+    ASSERT_NE(d, (LeptrisDocument)0);
+    EXPECT_EQ(leptris_xsd_validate(s, d), 1)
+        << "member-collapsed lexical matches the pattern";
+    leptris_document_free(d);
+    d = leptris_parse_string(bad_inst, strlen(bad_inst), &st);
+    ASSERT_NE(d, (LeptrisDocument)0);
+    EXPECT_NE(leptris_xsd_validate(s, d), 1)
+        << "a lexical whose member form misses the pattern rejects";
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
