@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified"
+  xpathDefaultNamespace="##targetNamespace">
+  <!-- chameleon unit: no targetNamespace of its own; the
+       includer's tns and elementFormDefault govern every
+       declaration and particle ref captured from here -->
+  <xs:element name="temp">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="temp" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:assert test="empty(temp/temp/temp)"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
