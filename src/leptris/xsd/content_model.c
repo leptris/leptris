@@ -655,8 +655,16 @@ static int all_oc_interleave(XsdCm* all, XsdCm* w,
 int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
                       const char* const* ns_uris, size_t count,
-                      int* oc_from, unsigned char* oc_attr) {
+                      int* oc_from, unsigned char* oc_attr,
+                      unsigned char* wc_attr) {
     if (!model) return -1;
+    /* #2184: the weak-wildcard attribution trace — wc_attr[c] is 1
+     * when child c advanced ONLY through wildcard transitions (the
+     * same-name element particles could not take it). Zero for
+     * particle-governed children; untouched when the caller passes
+     * NULL. The xs:all counting walk has its own attribution (the
+     * weak-wildcard precedence there) and leaves the trace unset. */
+    if (wc_attr && count) memset(wc_attr, 0, count);
     if (model->kind == XSD_CM_ALL && model->first_child) {
         /* #2151: an open content over an xs:all model — the all's
          * counting walk takes the wildcards into account */
@@ -866,6 +874,8 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
         StateSet next;
         memset(&next, 0, sizeof(next));
         const char* uri = ns_uris ? ns_uris[c] : NULL;
+        int particle_hit = 0;
+        int wc_hit = 0;
         for (size_t i = 0; i < live.count; i++) {
             for (size_t t = 0; t < n.count; t++) {
                 CmTrans* tr = &n.trans[t];
@@ -907,7 +917,10 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                                (n.s && !oc_open &&
                                 !xsd_find_element_child_ns(
                                     n.s, names[c], uri)));
-                    if (named && pns_ok) ss_add(&next, tr->to);
+                    if (named && pns_ok) {
+                        ss_add(&next, tr->to);
+                        particle_hit = 1;
+                    }
                 } else if (p->kind == XSD_CM_ANY) {
                     /* #1735: ##targetNamespace/##other are relative
                      * to the DECLARING unit's tns */
@@ -934,9 +947,15 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                                           names[c], uri))
                         continue;
                     ss_add(&next, tr->to);
+                    wc_hit = 1;
                 }
             }
         }
+        /* #2184: the greedy attribution — the element particle wins
+         * when ANY live state could take the child (§3.4.4.3's
+         * particle-first law); only a child no particle could take
+         * rides the wildcard. */
+        if (wc_attr) wc_attr[c] = (!particle_hit && wc_hit) ? 1 : 0;
         free(live.states);
         live = next;
         ss_close(&live, &n);

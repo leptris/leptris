@@ -694,7 +694,13 @@ list, in yield order:**
    (union(x,y) is not derived from union(x,y,z); a union member is
    not substitutable when the union is derived by restriction). The
    xsi:type half of the law shipped in this wave; the
-   substitution-group half is open.
+   substitution-group half is open. **CLOSED by the #2184 subst
+   wave** — the member-vs-head check walks a restricting member's
+   re-declared particles with the union law (a union derives from no
+   atomic member; a member path through a facet-carrying union hop
+   is blocked — the xsi:type lane's facet-free-path law); the green
+   twins simple010/013 (member paths through BARE unions) stay
+   valid.
 6. Regex char-class lanes (5): simple041/042 (the subtraction and
    mid-dash class shapes must REJECT), simple045.xsd+v01 (the legal
    hyphen-in-class form must compile and validate — currently
@@ -707,12 +713,38 @@ list, in yield order:**
 8. Weak-wildcard lax typing residue (8): s3_8_6v01+ii01,
    s3_10_1v04 x2+ii06, s3_3_4v02, d3_3_17ii01, s3_16_2ii06 — the
    lax/strict processContents typing of wildcard-admitted declared
-   elements at assessment.
+   elements at assessment. **7 of 8 CLOSED by the #2184 subst
+   wave**: the compile side arms the weak-wildcard relaxation on the
+   sequence element-vs-wildcard overlap shape itself (a legal 1.0
+   schema cannot carry it — the multi-ID syntax-evidence posture;
+   a 1.0 pin keeps the gate and the choice-branch overlap stays
+   rejected, any4_0), and the assessment side gains the NFA
+   wildcard-attribution trace + the governing-type law (a
+   wildcard-admitted element resolves its GLOBAL declaration, whose
+   type must be validly derived from the shadowed particle's through
+   the facet-free union member path — s3_8_6v01.xml invalid via
+   integer-vs-string, s3_10_1v04.xml valid, wild063.n1 flips as a
+   rider). The d3_3_17ii01 member closed with the base64Binary
+   quantum law (the length including padding is a multiple of four),
+   the s3_16_2ii06 member with union memberTypes resolving by local
+   name (the list itemType convention). The residue is s3_3_4v02 —
+   the OWNER-GATED wildcard-admitted second ID shape (identical to
+   the pinned attZ014b; see the owner-decision box above).
 9. Substitution-group compile constraints (4): s2_2_2si01 (circular
    substitution groups), s2_2_2si02 (the member's type not validly
    substitutable for the head's), subsgroup901 (EDC between a local
    element and a substitution member in one model), subsgroup903
-   (UPA in an all via a multi-head member).
+   (UPA in an all via a multi-head member). **CLOSED by the #2184
+   subst wave**: the post-capture sweep — the head graph must be
+   acyclic (structures 3.3.6.1.5), the member's type substitutes
+   every head's (3.3.6.1.4), a substitution member and a same-name
+   LOCAL particle of one model must agree on type
+   (cos-element-consistent), and an xs:all whose particles share a
+   substitution member inherits the UPA violation (subsgroup903;
+   riders all242/all302/all303 on the 1.1 lane and oss-fuzz-51295 on
+   the 1.0 lane). The green multi-head twins (subsgroup001/002,
+   s2_2_2v01-v03) and the green alls (all002/all221/all225) stay
+   valid. Spec tests: test/xsd/test_xsd11_substgroup.cpp.
 10. Small classes (6): simple004/005 (simpleType/@final=extension
     blocks the simpleContent extension — spec bug 2074's law),
     simple006 (an unresolved list itemType must fail the schema),
