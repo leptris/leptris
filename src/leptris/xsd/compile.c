@@ -2769,7 +2769,78 @@ struct xsd_upa_first {
     const char* name;   /* local name; NULL for a pure wildcard */
     char ns[256];       /* the name's namespace ("" unqualified) */
     char wc[256];       /* wildcard namespace spec ("" if not wc) */
+    char not_ns[256];   /* #2184: the wildcard's notNamespace
+                         * exclusions ("" when absent) — the UPA
+                         * pair law must weigh the EFFECTIVE set */
 };
+
+/* does the raw notNamespace token list exclude the namespace uri
+ * (NULL = no namespace)? ##local excludes "", ##targetNamespace
+ * excludes tns, literals compare verbatim (#2184, wild049/050). */
+static int xsd_upa_not_ns_excludes(const char* not_ns, const char* uri,
+                                   const char* tns) {
+    if (!not_ns || !not_ns[0]) return 0;
+    const char* p = not_ns;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        char tok[256];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        const char* turi;
+        if (strcmp(tok, "##local") == 0) {
+            turi = "";
+        } else if (strcmp(tok, "##targetNamespace") == 0) {
+            turi = tns ? tns : "";
+        } else {
+            turi = tok;
+        }
+        if (uri ? strcmp(turi, uri) == 0 : turi[0] == '\0') return 1;
+    }
+    return 0;
+}
+
+/* does the wildcard spec (positive grammar wc + notNamespace
+ * exclusions) admit the namespace uri (NULL = no namespace)? */
+static int xsd_upa_wc_admits(const char* wc, const char* not_ns,
+                             const char* uri, const char* tns) {
+    if (xsd_upa_not_ns_excludes(not_ns, uri, tns)) return 0;
+    if (!wc || !wc[0] || strcmp(wc, "##any") == 0) return 1;
+    if (strcmp(wc, "##other") == 0) {
+        if (!uri || !uri[0]) return 0;
+        return !(tns && strcmp(uri, tns) == 0);
+    }
+    const char* p = wc;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == 0) break;
+        char tok[256];
+        if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+        memcpy(tok, start, len);
+        tok[len] = 0;
+        const char* turi;
+        if (strcmp(tok, "##local") == 0) {
+            turi = "";
+        } else if (strcmp(tok, "##targetNamespace") == 0) {
+            turi = tns ? tns : "";
+        } else {
+            turi = tok;
+        }
+        if (uri ? strcmp(turi, uri) == 0 : turi[0] == '\0') return 1;
+    }
+    return 0;
+}
 
 static int xsd_upa_ns_covers(const char* wc, const char* ns,
                              const char* tns) {
@@ -2789,13 +2860,71 @@ static int xsd_upa_first_overlap(const struct xsd_upa_first* a,
                                  const struct xsd_upa_first* b,
                                  const char* tns, int relax_wildcard) {
     if (a->wc[0] && b->wc[0]) {
-        /* two wildcards overlap unless their sets are disjoint —
-         * conservatively report any pair carrying ##any, or equal
-         * specs */
-        if (strcmp(a->wc, "##any") == 0 || strcmp(b->wc, "##any") == 0 ||
-            strcmp(a->wc, b->wc) == 0)
+        /* two wildcards overlap unless their EFFECTIVE sets (the
+         * positive grammar minus the notNamespace exclusions)
+         * intersect — wild049/050's ##local vs
+         * notNamespace="##local" pair is disjoint, all243's
+         * overlapping enumerations are not, issue40's ##other vs
+         * ##local choice stays clean. Enumerate whichever side
+         * carries a positive list; two unenumerable positives fall
+         * to the ##-form ladder. */
+        int a_enum = a->wc[0] && strcmp(a->wc, "##any") != 0 &&
+                     strcmp(a->wc, "##other") != 0;
+        int b_enum = b->wc[0] && strcmp(b->wc, "##any") != 0 &&
+                     strcmp(b->wc, "##other") != 0;
+        if (a_enum || b_enum) {
+            const struct xsd_upa_first* enum_side = a_enum ? a : b;
+            const struct xsd_upa_first* other = a_enum ? b : a;
+            const char* p = enum_side->wc;
+            while (*p) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                    p++;
+                const char* start = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                       *p != '\r')
+                    p++;
+                size_t len = (size_t)(p - start);
+                if (len == 0) break;
+                char tok[256];
+                if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+                memcpy(tok, start, len);
+                tok[len] = 0;
+                const char* uri;
+                if (strcmp(tok, "##local") == 0) {
+                    uri = NULL;
+                } else if (strcmp(tok, "##targetNamespace") == 0) {
+                    uri = tns ? tns : "";
+                } else {
+                    uri = tok;
+                }
+                /* the enumerated side's own exclusions strike too */
+                if (!xsd_upa_wc_admits(enum_side->wc, enum_side->not_ns,
+                                       uri, tns))
+                    continue;
+                if (xsd_upa_wc_admits(other->wc, other->not_ns, uri, tns))
+                    return 1;
+            }
+            /* the enumerated side's list IS its full set: no token
+             * admitted by the other side means the sets are
+             * disjoint */
+            return 0;
+        }
+        int a_any = strcmp(a->wc, "##any") == 0;
+        int b_any = strcmp(b->wc, "##any") == 0;
+        if (a_any || b_any) {
+            /* ##any covers everything its exclusions do not strike:
+             * disjoint only when the other side is ##local and the
+             * ##any side's exclusions strike no-namespace
+             * (wild049/050's spellings) */
+            const struct xsd_upa_first* any_side = a_any ? a : b;
+            const struct xsd_upa_first* known = a_any ? b : a;
+            if (strcmp(known->wc, "##local") == 0 &&
+                xsd_upa_not_ns_excludes(any_side->not_ns, NULL, tns))
+                return 0;
             return 1;
-        return 0;
+        }
+        /* ##other vs ##other: both admit every foreign namespace */
+        return 1;
     }
     if (a->wc[0])
         /* XSD 1.1 (§3.8.6.4) relaxes UPA: an element particle and a
@@ -2868,6 +2997,11 @@ static int xsd_upa_first(LeptrisElement e, struct xsd_upa_first* out,
         const char* ns = leptris_element_attribute(e, "namespace");
         snprintf(f.wc, sizeof(f.wc), "%s",
                  (ns && ns[0]) ? ns : "##any");
+        /* #2184: keep the exclusions — the pair law weighs the
+         * EFFECTIVE set (wild049/050's disjoint spellings) */
+        const char* nns = leptris_element_attribute(e, "notNamespace");
+        snprintf(f.not_ns, sizeof(f.not_ns), "%s",
+                 (nns && nns[0]) ? nns : "");
         if (*n < max) out[(*n)++] = f;
         return 0;
     }
@@ -5531,6 +5665,167 @@ static int xsd_all_type_ok(struct leptris_xsd_schema* s, const XsdCm* d,
                                   : 1;
 }
 
+/* #2184 (§3.9.6): ONE derived wildcard may restrict the UNION of
+ * base wildcard splits — wild049/050 re-union a ##local and a
+ * notNamespace="##local" base wildcard into one ##any/notQName
+ * wildcard. The owners are every base wildcard whose processContents
+ * matches and whose set overlaps the derived's; the UNION must cover
+ * every name the derived admits — checked at namespace level over
+ * probes (the derived's own positive tokens, no-namespace, the unit
+ * tns, a foreign probe) and at NAME level over every notQName
+ * candidate token (wild048's x:e / wild051's x:heres-the-rub live
+ * below the namespace grain). Returns the owner count (>0) and
+ * fills owners, or 0. */
+static int xsd_wc_not_ns_hits(const char* tokens, const char* uri,
+                              const char* target_ns);
+static void xsd_not_qname_split(const char* tok, char* ns, size_t nsc,
+                                const char** local) {
+    ns[0] = '\0';
+    *local = tok;
+    if (tok[0] == '{') {
+        const char* close = strchr(tok, '}');
+        if (close) {
+            size_t l = (size_t)(close - tok - 1);
+            if (l >= nsc) l = nsc - 1;
+            memcpy(ns, tok + 1, l);
+            ns[l] = '\0';
+            *local = close + 1;
+        }
+    }
+}
+
+/* does the wildcard w admit the NAME (ns, local)? Namespace set
+ * minus the notNamespace exclusions minus the notQName disallows. */
+static int xsd_wc_admits_name(const XsdCm* w, const char* ns,
+                              const char* local) {
+    const char* uri = (ns && ns[0]) ? ns : NULL;
+    if (!oc_ns_admits(w, uri)) return 0;
+    if (w->not_ns &&
+        xsd_wc_not_ns_hits(w->not_ns, uri, w->any_unit_tns))
+        return 0;
+    if (w->not_qname) {
+        if (uri) {
+            char braced[640];
+            snprintf(braced, sizeof(braced), "{%s}%s", ns, local);
+            if (oc_ns_list_has(w->not_qname, braced)) return 0;
+        } else if (oc_ns_list_has(w->not_qname, local)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int xsd_all_wild_union_owners(XsdCm* d, XsdCm** bparts, long bn,
+                                     int* owners, int* nowners) {
+    int n = 0;
+    for (long j = 0; j < bn; j++) {
+        if (bparts[j]->kind != XSD_CM_ANY) continue;
+        if (bparts[j]->pc_level != d->pc_level) continue;
+        if (!xsd_all_wildcards_overlap(d, bparts[j])) continue;
+        if (n < 8) owners[n] = (int)j;
+        n++;
+    }
+    if (n == 0 || n > 8) return 0;
+    /* coverage: every name the derived admits must live in SOME
+     * owner. Name-level candidates: every notQName token on either
+     * side (the only names where exclusions differ below the
+     * namespace grain). */
+    for (int pass = 0; pass < 2; pass++) {
+        const char* list = pass == 0 ? d->not_qname : NULL;
+        for (int k = 0; k < n; k++) {
+            if (pass == 1) list = bparts[owners[k]]->not_qname;
+            if (!list) continue;
+            const char* p = list;
+            while (*p) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                       *p == '\r')
+                    p++;
+                const char* start = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                       *p != '\r')
+                    p++;
+                size_t len = (size_t)(p - start);
+                if (len == 0) break;
+                char tok[640];
+                if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+                memcpy(tok, start, len);
+                tok[len] = '\0';
+                if (tok[0] == '#' && (strcmp(tok, "##defined") == 0 ||
+                                      strcmp(tok,
+                                             "##definedSibling") == 0))
+                    continue;
+                char tns2[256];
+                const char* tlocal;
+                xsd_not_qname_split(tok, tns2, sizeof(tns2), &tlocal);
+                if (!xsd_wc_admits_name(d, tns2, tlocal)) continue;
+                int covered = 0;
+                for (int q = 0; q < n && !covered; q++)
+                    if (xsd_wc_admits_name(bparts[owners[q]], tns2,
+                                           tlocal))
+                        covered = 1;
+                if (!covered) return 0;
+            }
+            if (pass == 1) break;
+        }
+    }
+    /* namespace-level probes: the derived's own positive tokens,
+     * no-namespace, the unit tns, and a foreign probe (all229's
+     * one.uri lives only in the derived's positive list) */
+    const char* probes[5];
+    char probe_store[2][512];
+    int np = 0;
+    probes[np++] = NULL;
+    probes[np++] = d->any_unit_tns && d->any_unit_tns[0]
+                       ? d->any_unit_tns
+                       : "http://leptris.upa/probe";
+    probes[np++] = "http://leptris.upa/probe";
+    if (d->any_ns && d->any_ns[0] && d->any_ns[0] != '#') {
+        const char* p = d->any_ns;
+        while (*p && np < 5) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                p++;
+            const char* start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                   *p != '\r')
+                p++;
+            size_t len = (size_t)(p - start);
+            if (len == 0) break;
+            char tok[512];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = '\0';
+            if (tok[0] == '#') continue;
+            int dup = 0;
+            for (int q = 0; q < np && !dup; q++)
+                if (probes[q] && strcmp(probes[q], tok) == 0) dup = 1;
+            if (dup) continue;
+            int slot = np % 2;
+            snprintf(probe_store[slot], sizeof(probe_store[0]), "%s",
+                     tok);
+            probes[np++] = probe_store[slot];
+        }
+    }
+    for (int pi = 0; pi < np; pi++) {
+        const char* p = probes[pi];
+        int d_admits = oc_ns_admits(d, p) &&
+                       !(d->not_ns &&
+                         xsd_wc_not_ns_hits(d->not_ns, p,
+                                            d->any_unit_tns));
+        if (!d_admits) continue;
+        int covered = 0;
+        for (int k = 0; k < n && !covered; k++) {
+            XsdCm* o = bparts[owners[k]];
+            if (oc_ns_admits(o, p) &&
+                !(o->not_ns &&
+                  xsd_wc_not_ns_hits(o->not_ns, p, o->any_unit_tns)))
+                covered = 1;
+        }
+        if (!covered) return 0;
+    }
+    *nowners = n;
+    return 1;
+}
+
 /* The §3.9.6 sum law over ONE derived particle list against the
  * base all's flattened particles: every derived particle maps to a
  * base owner (identity, substitution membership, wildcard set) whose
@@ -5597,6 +5892,15 @@ static int xsd_all_sum_check(struct leptris_xsd_schema* s,
         for (long j = 0; j < bn && owner < 0; j++)
             if (xsd_all_part_restricts(s, d, bparts[j]))
                 owner = (int)j;
+        /* #2184 (§3.9.6): a derived wildcard with no single owner
+         * may restrict the UNION of base wildcard splits (wild049/
+         * wild050) — the occurrence windows ride into every owner */
+        int union_n = 0;
+        int union_owners[8];
+        if (owner < 0 && d->kind == XSD_CM_ANY &&
+            xsd_all_wild_union_owners(d, bparts, bn, union_owners,
+                                      &union_n))
+            owner = union_owners[0];
         if (owner < 0) {
             char msg[512];
             snprintf(msg, sizeof(msg),
@@ -5622,11 +5926,30 @@ static int xsd_all_sum_check(struct leptris_xsd_schema* s,
             xsd_set_error(s, msg);
             return -1;
         }
-        bhit[owner] = 1;
-        bmin_sum[owner] += d->min;
-        bmax_sum[owner] = (bmax_sum[owner] < 0 || d->max < 0)
-                              ? -1
-                              : bmax_sum[owner] + d->max;
+        if (union_n == 0) {
+            bhit[owner] = 1;
+            bmin_sum[owner] += d->min;
+            bmax_sum[owner] = (bmax_sum[owner] < 0 || d->max < 0)
+                                  ? -1
+                                  : bmax_sum[owner] + d->max;
+        } else {
+            /* the union mapping splits the derived window per owner
+             * by NAME ROUTING (all244: an occurrence of a
+             * {two,three} wildcard that is a three never counts
+             * toward a {one,two} owner) — the min rides only owners
+             * whose set covers every name the derived admits; the
+             * max caps at the derived window for every intersecting
+             * owner */
+            for (int uo_k = 0; uo_k < union_n; uo_k++) {
+                int uo = union_owners[uo_k];
+                XsdCm* uo_p = bparts[uo];
+                bhit[uo] = 1;
+                if (oc_wildcard_subset(d, uo_p)) bmin_sum[uo] += d->min;
+                bmax_sum[uo] = (bmax_sum[uo] < 0 || d->max < 0)
+                                   ? -1
+                                   : bmax_sum[uo] + d->max;
+            }
+        }
     }
     for (long j = 0; j < bn; j++) {
         XsdCm* b = bparts[j];
@@ -7009,8 +7332,11 @@ static int oc_wildcard_subset(const XsdCm* sub, const XsdCm* super) {
             if (!blocked) return 0;
         }
     }
-    /* {disallowed names}: each super notQName must be blocked by
-     * the sub (clause 1 of §3.10.6.2 — s3_4_1si06) */
+    /* {disallowed names}: each super notQName token the SUB can
+     * admit must be blocked by the sub (clause 1 of §3.10.6.2 —
+     * s3_4_1si06). A token outside the sub's own admitted set
+     * (wild050's x:e/x:d against a ##local sub) needs no blocking —
+     * the sub never admits the name to begin with. */
     if (super->not_qname) {
         const char* p = super->not_qname;
         while (*p) {
@@ -7028,6 +7354,13 @@ static int oc_wildcard_subset(const XsdCm* sub, const XsdCm* super) {
             tok[len] = 0;
             int blocked = sub->not_qname &&
                           oc_ns_list_has(sub->not_qname, tok);
+            if (!blocked && tok[0] != '#') {
+                char tns2[256];
+                const char* tlocal;
+                xsd_not_qname_split(tok, tns2, sizeof(tns2), &tlocal);
+                if (!xsd_wc_admits_name(sub, tns2, tlocal))
+                    blocked = 1;
+            }
             if (!blocked) return 0;
         }
     }
