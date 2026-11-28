@@ -159,3 +159,75 @@ TEST(Xsd11Assertions, ChameleonIncludeParticleRefsAdoptTns) {
     EXPECT_EQ(verdict_of("chameleon_main.xsd", "chameleon_v.xml"), 1);
     EXPECT_NE(verdict_of("chameleon_main.xsd", "chameleon_n.xml"), 1);
 }
+
+/* ---- the assert-test function sweep (#2184, d4_3_15si04) ----------- */
+/* §3.13.2: an assert's test is a VALID XPath expression — an
+ * unknown function call is the static XPST0017 error and fails the
+ * SCHEMA (d4_3_15si04), not the §3.13.4 "evaluation error = false"
+ * channel (that channel is for DYNAMIC errors: the div-by-zero and
+ * doc() miss laws of #2183). The check resolves exactly like the
+ * evaluator: the standard registry (fns + xs: constructors), the
+ * prebound prefixes, and the schema document's own bindings. */
+TEST(Xsd11Assertions, UnknownFunctionInAssertFailsSchema) {
+    const char* bad =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        " <xs:element name=\"root\" type=\"rootType\"/>"
+        " <xs:complexType name=\"rootType\">"
+        "  <xs:complexContent>"
+        "   <xs:extension base=\"xs:string\">"
+        "    <xs:attribute name=\"attr\" type=\"xs:string\"/>"
+        "    <xs:assert test=\"invalid-XPath-expression() le @date\"/>"
+        "   </xs:extension>"
+        "  </xs:complexContent>"
+        " </xs:complexType>"
+        "</xs:schema>";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(bad, strlen(bad), &st);
+    EXPECT_TRUE(s == (LeptrisXsdSchema)0 || st != LEPTRIS_OK)
+        << "an assert naming an unknown function fails the schema";
+    if (s) leptris_xsd_free(s);
+}
+
+/* Known functions and xs: constructors — spelled through any prefix
+ * the schema binds to the XML namespace — keep compiling. */
+TEST(Xsd11Assertions, KnownAssertFunctionsStayLegal) {
+    const char* ok =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:zd=\"http://www.w3.org/2001/XMLSchema\">"
+        " <xs:element name=\"root\">"
+        "  <xs:complexType>"
+        "   <xs:sequence>"
+        "    <xs:element name=\"temp\" maxOccurs=\"unbounded\"/>"
+        "   </xs:sequence>"
+        "   <xs:assert test=\"empty(temp) and count(temp) le 4\"/>"
+        "  </xs:complexType>"
+        " </xs:element>"
+        " <xs:element name=\"d\" type=\"dateT\"/>"
+        " <xs:complexType name=\"dateT\">"
+        "  <xs:simpleContent>"
+        "   <xs:extension base=\"xs:date\">"
+        "    <xs:assert test=\"zd:date(.) gt xs:date('2000-01-01')\"/>"
+        "   </xs:extension>"
+        "  </xs:simpleContent>"
+        " </xs:complexType>"
+        "</xs:schema>";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(ok, strlen(ok), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0)
+        << "known functions compile" << leptris_xsd_error(s);
+    EXPECT_EQ(st, LEPTRIS_OK)
+        << leptris_xsd_error(s);
+    if (s) leptris_xsd_free(s);
+}
+
+/* The pinned corpus row (d4_3_15si04) flips to schema-error. */
+TEST(Xsd11Assertions, CorpusAssertCompileRowFlips) {
+    std::string p = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                    "/ibmData/schema_invalid/D4_3_15/"
+                    "d4_3_15si04.xsd";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_TRUE(s == (LeptrisXsdSchema)0 || st != LEPTRIS_OK)
+        << "d4_3_15si04 must be rejected";
+    if (s) leptris_xsd_free(s);
+}
