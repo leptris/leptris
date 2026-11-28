@@ -112,6 +112,14 @@ typedef struct xsd_assert {
     char* test;             /* the wire expression, for reporting */
     char* ns_prolog;        /* §3.13.2 bindings as XQuery prolog */
     LeptrisXQuery compiled; /* NULL when compilation failed */
+    /* #2184 (d4_3_15si04): the schema document's prefix bindings at
+     * the assert element — INCLUDING the XML vocabulary's own
+     * prefix (the prolog omits it: it must never resolve INSTANCE
+     * names, but a constructor call `zd:date(...)` resolves through
+     * it). The static function-resolution sweep reads these. */
+    char** ns_pfx;
+    char** ns_uri;
+    int ns_n;
     struct xsd_assert* next;
 } XsdAssert;
 
@@ -159,6 +167,11 @@ typedef struct xsd_cm {
     char* name;   /* CM_ELEMENT: child element local name */
     char* type;   /* CM_ELEMENT: the particle's type ref, if any */
     char* ns;     /* CM_ELEMENT: expected namespace (NULL = unqualified) */
+    /* #2184 (target001): the ns came from the declaration's OWN
+     * @targetNamespace — the particle matches STRICTLY (the child
+     * must be in the ns), never through the elemZ020/#1871 leniency
+     * that lets an efd-qualified particle admit a no-ns child. */
+    unsigned char ns_explicit;
     char* ext_base; /* extension whose base was not yet captured at
                      * capture time (forward ref) — folded by the
                      * post-capture resolver (leptris-ruby#440 A) */

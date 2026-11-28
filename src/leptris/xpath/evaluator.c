@@ -920,6 +920,40 @@ extern struct leptris_xpath_result* evaluate_location_path(XPathContext* ctx,
 extern struct leptris_xpath_result* evaluate_operator(XPathContext* ctx,
                                                      XPathASTNode* ast);
 
+/* ---- intra-library: the static function-resolution law ------------
+ * The compile-time XPST0017 sweep (#2184 d4_3_15si04) resolves
+ * names through the SAME rules the evaluator applies at call time
+ * — these accessors are the SSOT for both (the call path below and
+ * xquery.c's assert sweep). */
+
+const char* xpath_function_ns_for_prefix(const char* prefix) {
+    static const struct { const char* pfx; const char* u; }
+        k_prebound[] = {
+            { "fn", "http://www.w3.org/2005/xpath-functions" },
+            { "xs", "http://www.w3.org/2001/XMLSchema" },
+            { "math",
+              "http://www.w3.org/2005/xpath-functions/math" },
+            { "map",
+              "http://www.w3.org/2005/xpath-functions/map" },
+            { "array",
+              "http://www.w3.org/2005/xpath-functions/array" },
+            { "err", "http://www.w3.org/2005/xqt-errors" },
+            { NULL, NULL }
+        };
+    if (!prefix) return NULL;
+    for (int i = 0; k_prebound[i].pfx; i++)
+        if (strcmp(prefix, k_prebound[i].pfx) == 0)
+            return k_prebound[i].u;
+    return NULL;
+}
+
+int xpath_uri_is_function_ns(const char* uri) {
+    if (!uri) return 0;
+    for (int i = 0; k_extension_ns_uris[i]; i++)
+        if (strcmp(uri, k_extension_ns_uris[i]) == 0) return 1;
+    return 0;
+}
+
 /**
  * Evaluate function call AST node
  */
@@ -999,37 +1033,19 @@ static struct leptris_xpath_result* evaluate_function_call_impl(XPathContext* ct
             /* Pre-bound prefixes (XQuery 1.0/3.1 prolog reserves
              * these with no declaration needed): fn, xs, math,
              * map, array, err. Only consulted when the prefix has
-             * NO user declaration. */
+             * NO user declaration. The table lives in
+             * xpath_function_ns_for_prefix — the #2184 assert sweep
+             * resolves through the SAME law. */
             if (!uri) {
-                static const struct { const char* pfx; const char* u; }
-                    k_prebound[] = {
-                        { "fn", "http://www.w3.org/2005/xpath-functions" },
-                        { "xs", "http://www.w3.org/2001/XMLSchema" },
-                        { "math",
-                          "http://www.w3.org/2005/xpath-functions/math" },
-                        { "map",
-                          "http://www.w3.org/2005/xpath-functions/map" },
-                        { "array",
-                          "http://www.w3.org/2005/xpath-functions/array" },
-                        { "err", "http://www.w3.org/2005/xqt-errors" },
-                        { NULL, NULL }
-                    };
                 size_t pl = (size_t)(colon - func_name);
-                for (int i = 0; k_prebound[i].pfx; i++)
-                    if (strlen(k_prebound[i].pfx) == pl &&
-                        strncmp(func_name, k_prebound[i].pfx, pl) == 0) {
-                        uri = k_prebound[i].u;
-                        break;
-                    }
+                char pfx[64];
+                if (pl < sizeof(pfx)) {
+                    memcpy(pfx, func_name, pl);
+                    pfx[pl] = 0;
+                    uri = xpath_function_ns_for_prefix(pfx);
+                }
             }
-            int ext = 0;
-            if (uri) {
-                for (int i = 0; k_extension_ns_uris[i]; i++)
-                    if (strcmp(uri, k_extension_ns_uris[i]) == 0) {
-                        ext = 1;
-                        break;
-                    }
-            }
+            int ext = xpath_uri_is_function_ns(uri);
             if (ext) {
                 char local[128];
                 snprintf(local, sizeof(local), "%s", colon + 1);

@@ -910,13 +910,31 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                      * unqualified <b> must not swallow the
                      * disallowed.com <b> the union excludes). */
                     int oc_open = model->open_any && model->oc_mode;
-                    int pns_ok =
-                        pns ? (!child_ns ||
-                               (uri && strcmp(uri, pns) == 0))
-                            : (!child_ns ||
-                               (n.s && !oc_open &&
-                                !xsd_find_element_child_ns(
-                                    n.s, names[c], uri)));
+                    int pns_ok;
+                    if (pns) {
+                        if (p->ns_explicit) {
+                            /* #2184 (target001/s3_2_3ii04-ii05): the
+                             * ns came from the declaration's OWN
+                             * @targetNamespace — the declaration's
+                             * {target namespace} IS the particle's
+                             * match set, no elemZ020 leniency: a
+                             * no-ns child misses */
+                            pns_ok = child_ns && uri &&
+                                     strcmp(uri, pns) == 0;
+                        } else {
+                            /* elemZ020: the ns gate is asymmetric —
+                             * a qualified particle matches its own
+                             * ns but leniently admits a no-ns child
+                             * (the pinned #1871 corpus posture). */
+                            pns_ok = !child_ns ||
+                                     (uri && strcmp(uri, pns) == 0);
+                        }
+                    } else {
+                        pns_ok = !child_ns ||
+                                 (n.s && !oc_open &&
+                                  !xsd_find_element_child_ns(
+                                      n.s, names[c], uri));
+                    }
                     if (named && pns_ok) {
                         ss_add(&next, tr->to);
                         particle_hit = 1;
