@@ -166,6 +166,10 @@ target_compile_definitions(test_rs35_regression PRIVATE
 leptris_add_test(test_i1957_1958 xsd/test_i1957_1958.cpp)
 target_compile_definitions(test_i1957_1958 PRIVATE
     LEPTRIS_XSD_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/libxml2-cases")
+# #2221: same-named global/local element declarations — the
+# content-model walk types each child by the particle it matched
+# (position-exact), not the first same-named particle anywhere.
+leptris_add_test(test_2221_local_shadow xsd/test_2221_local_shadow.cpp)
 # #2148: the XSD 1.1 baseline lane — oracle is the pinned w3c/xsdtests
 # suite metadata (see xsd/xsd11-cases/MANIFEST.tsv header).
 leptris_add_test(test_xsd11_conformance xsd/test_xsd11_conformance.cpp)
