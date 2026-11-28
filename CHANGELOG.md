@@ -1,11 +1,14 @@
 ## [Unreleased]
 
-## [1.9.453] - 2026-11-28
+## [1.9.453] - 2026-11-29
+
+The last engine-side law of the XSD 1.1 campaign: the official W3C floor moves **2200 → 2202 / 2206 (99.8%)**, XML Schema 1.0 holds **1046/1056 (99.1%)**. The four remaining rows are owner-decision only — 100% is now a decision, not an implementation gap.
 
 ### Fixed
+- **Content-carried IDs on the validation root denote nothing** (#2245): XSD 1.1 §3.17.5.2 builds each ID/IDREF binding's `[binding]` set from ID-derived **attributes or child elements** — an ID value carried by an element's own simple content binds to the carrier's *parent*, so IDs in the validation root's content have an empty binding set and §B.1 cvc-id clause 1 invalidates the document (§3.3.4.5's own note works the case; the suite re-rooted its valid twins per upstream bug #12143). Flips `s3_3_4ii26` (list-of-ID simpleContent) and `s3_3_4ii27` (union-with-ID member), red-first specs in `Xsd11RootContentId`; the duplicate-ID/scope posture, the union actual-member rule, and list itemization are untouched.
 
-- content-carried IDs on the validation root denote nothing (xsd11)
-
+### Floors
+XSD 1.1: **2202/2206 (99.8%)** — 4 reds, all owner-decision (the wildcard-admitted-ID oracle tension, `id001`/`id003`/`id015`/`s3_3_4v02`, awaiting the dialect-gated flip call). XSD 1.0: **1046/1056 (99.1%)**. XPath 1.0: 438/438. libxslt: 205/205.
 
 
 ## [1.9.452] - 2026-11-28
