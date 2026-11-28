@@ -2,17 +2,34 @@
 
 ## [1.9.451] - 2026-11-28
 
+The XSD 1.1 campaign's consolidation wave: the official W3C suite floor moves **2047 → 2148 / 2206 (92.8% → 97.4%)** — **100 of the remaining reds flipped in one slice train**, zero regressions, the residue dispositioned row by row.
+
+### XSD 1.1 (#2184 final consolidation, #2234)
+Nine mechanism slices, each red-spec-first:
+- **Duplicate single-occurrence facets** (25 rows) — the capture silently overwrote repeats; now diagnosed per §3.16.
+- **The explicitTimezone posture law** — required/prohibited LOCK the derivation chain's posture, "optional" stays open (the reading both the IBM and Saxon families pin), plus not-applicable-to-union.
+- **NOTATION/xs:anyAtomicType placement** + declared-notation enumerations (a new xs:notation symbol table).
+- **Value constraints are lexicals** (§3.2.5) + unparsed-entity integrity + the src-attribute.4 probe on the builtin-exists table (a real latent bug: list builtins failed type-ref existence).
+- **Union circularity** — transitive-membership.
+- **targetNamespace placement** + src-import agreement.
+- **RecurseAsSum** in the all restriction sweep + UPA FOLLOW-through-nullability routing.
+- **§3.4.4.3 dynamic EDC** + §3.3.4.3 cl. 4.2 xsi:type substitutability.
+- **Multi-head substitution groups** + the §3.3.4 {abstract} law.
+
+**The dispositioned remainder (58 rows)**: 3 owner-decision rows (the attZ014b wildcard-admitted-ID oracle tension — the suite and a sibling pin genuinely conflict) and 55 real gaps itemized by mechanism as the next wave's work list (all-compile residue, compile-time wildcard EDC, regex char-class lanes, weak-wildcard lax typing, substitution-group compile constraints).
+
+### Performance (#2132 mutation-row levers, three profiled slices)
+- **mutcycle 13.2 → 11.5 ns/child (−13%)** (#2230): the per-append document-resolve hoist (851 → 1 profile samples) + the assign-not-clear carve (the 45KB cold memset → per-field assignment); also fixes a real double-parenting bug the contract spec caught red-first.
+- **attrparse −7.9% (ratio 1.27 → 1.16)** (#2232): the whole-document SIMD text pre-scan is bounded for ≤128KB documents (fused into the mandatory scratch copy via a new NEON/AVX2/scalar census kernel) — large docs keep the exact-count path. The AVX2 core's signed-compare spelling bug (every ≥0x80 byte falsely flagged) was caught by the x86 CI legs and fixed cross-arch.
+- **append-uniq 19.6 → 18.4 ns/child** (#2231): the intern table jump-sizes to its ceiling (the staged rehash bursts gone — 102 → 10 profile samples); the redundant slot memset dropped.
+
 ### Fixed
+- A stack-use-after-scope in the new ID collapse path (#2227, caught by the ASAN leg).
+- An amalgamation collision in the CTA lane's ncname static (#2226).
+- The AVX2 census control detector: top-bits test, not signed lt (the cross-arch law's exact class, caught by the x86 CI legs).
 
-- AVX2 census control detector must test top bits, not signed lt (simd)
-
-### Performance
-
-- fuse the parse census into the scratch copy (#2132) (attrparse)
-- intern jump point moves to 2048 slots (#2132) (dom)
-- intern growth clear stays a full contiguous memset (#2132) (dom)
-- intern table jump-sizing + strided name clear, assign-not-clear carve (#2132) (dom)
-- mutcycle doc-resolve hoist + assign-not-clear carve (#2132) (dom)
+### Floors
+XSD 1.0: **1044/1056 (98.9%)**. XSD 1.1: **2148/2206 (97.4%)** — 58 rows remain, dispositioned: 3 owner-decision (the attZ014b oracle tension) and 55 itemized real gaps (#2181 carries the next wave's work list).
 
 
 
