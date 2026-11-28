@@ -2776,13 +2776,18 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
             struct xsd_upa_first fi[XSD_UPA_MAX];
             int ni = 0;
             xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
-            /* the union of every LATER sibling's FIRST — after the
-             * repeating/skippable child, any of them may come next */
+            /* the FOLLOW set — after the repeating/skippable child
+             * only the FIRST of the next sibling can follow; a
+             * NON-NULLABLE sibling stops the walk (a choice in
+             * between routes the tail away — all234's
+             * b{1-3},choice{d|c|a},b{1-2} is deterministic) */
             struct xsd_upa_first rest[XSD_UPA_MAX];
             int nr = 0;
-            for (int j = i + 1; j < nk; j++)
+            for (int j = i + 1; j < nk; j++) {
                 xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
                               depth + 1);
+                if (!xsd_upa_nullable(kids[j], depth + 1)) break;
+            }
             for (int a = 0; a < ni; a++)
                 for (int b = 0; b < nr; b++) {
                     if (xsd_upa_first_overlap(&fi[a], &rest[b], tns, relax_wildcard)) {
@@ -3764,8 +3769,7 @@ static int xsd_simple_name_derives_from(struct leptris_xsd_schema* s,
  * fold; ext_base kept as the belt), with the simpleContent text type
  * carrying the chain through a simple base. */
 static int xsd_cm_derives_from(struct leptris_xsd_schema* s, XsdCm* cm,
-                               const char* target, int hops) {
-    if (!cm || hops > 16) return 0;
+                               const char* target, int hops) {    if (!cm || hops > 16) return 0;
     if (cm->name && strcmp(cm->name, target) == 0) return 1;
     if (cm->text_type &&
         xsd_simple_name_derives_from(s, cm->text_type, target))
@@ -3788,6 +3792,51 @@ static int xsd_cm_derives_from(struct leptris_xsd_schema* s, XsdCm* cm,
         if (!next) next = xsd_find_complex(s, cm->ext_base);
     }
     return xsd_cm_derives_from(s, next, target, hops + 1);
+}
+
+/* #2184 (§3.4.4.3 dynamic EDC): is `derived` validly derived from
+ * `base`? Builtin ladders, local simple chains, and complex chains;
+ * names that resolve nowhere stay POSTURE (1) — the ref checks own
+ * them. The capture strips prefixes on particle types, so a bare
+ * name that names a builtin canonizes to the xs: spelling. */
+int xsd_type_derives_from(struct leptris_xsd_schema* s,
+                          const char* derived, const char* base) {
+    if (!derived || !base || !derived[0] || !base[0]) return 1;
+    if (strcmp(derived, base) == 0) return 1;
+    char dbuf[128], bbuf[128];
+    if (strncmp(derived, "xs:", 3) != 0) {
+        snprintf(dbuf, sizeof(dbuf), "xs:%s", derived);
+        if (xsd_builtin_exists(dbuf)) derived = dbuf;
+    }
+    if (strncmp(base, "xs:", 3) != 0) {
+        snprintf(bbuf, sizeof(bbuf), "xs:%s", base);
+        if (xsd_builtin_exists(bbuf)) base = bbuf;
+    }
+    if (strcmp(derived, base) == 0) return 1;
+    if (strcmp(base, "xs:anyType") == 0 ||
+        strcmp(base, "xs:anySimpleType") == 0)
+        return 1;
+    int resolved = 0;
+    if (strncmp(derived, "xs:", 3) == 0) {
+        resolved = 1;
+        if (xsd_builtin_derives_from(derived, base)) return 1;
+        if (strncmp(base, "xs:", 3) != 0 &&
+            xsd_find_simple(s, base))
+            return 0; /* a builtin never derives from a local type */
+    } else {
+        if (xsd_find_simple(s, derived)) {
+            resolved = 1;
+            if (xsd_simple_name_derives_from(s, derived, base)) return 1;
+        }
+        XsdCm* dc = xsd_find_complex(s, derived);
+        if (dc) {
+            resolved = 1;
+            if (xsd_cm_derives_from(s, dc, base, 0)) return 1;
+        }
+    }
+    if (!resolved) return 1; /* posture */
+    /* the derived side resolved and every arm failed */
+    return 0;
 }
 
 /* One resolved type reference. kind: 0 unresolved, 1 ur-type
@@ -4545,15 +4594,205 @@ static int xsd_all_part_restricts(struct leptris_xsd_schema* s,
     return 0;
 }
 
+/* #2184 (§3.10.4 RecurseAsSum): a SEQUENCE restricts an ALL by
+ * summing per-base-particle occurrence windows. The derived tree
+ * flattens (sequence/choice children, group refs); every element or
+ * wildcard particle maps to a base all particle (identity,
+ * substitution membership, wildcard set); per owner the windows SUM
+ * within the base's window, base-required particles stay covered,
+ * and an element re-declaration's type must derive from the base's
+ * (all227's positiveInteger->int narrowing). all233's top-level
+ * CHOICE is not a restriction of an all; all234's nested-choice
+ * sequence sums clean (the suite's "valid but difficult" row). */
+static int xsd_collect_seq_parts(struct leptris_xsd_schema* s,
+                                 XsdCm* head, XsdCm** out, long* n,
+                                 int depth);
+
+/* ONE particle (its subtree, not its siblings) into the collector. */
+static int xsd_collect_one_part(struct leptris_xsd_schema* s, XsdCm* p,
+                                XsdCm** out, long* n, int depth) {
+    if (!p) return 0;
+    if (*n >= XSD_ALL_RESTRICT_MAX) return -1;
+    if (p->kind == XSD_CM_GROUP_REF) {
+        if (depth > 32) return -1;
+        XsdGroupDef* g = s ? xsd_find_group(s, p->name) : NULL;
+        if (!g || !g->model) return -1;
+        if (xsd_collect_seq_parts(s, g->model->first_child, out, n,
+                                  depth + 1) < 0)
+            return -1;
+        return 0;
+    }
+    if (p->kind == XSD_CM_SEQ || p->kind == XSD_CM_CHOICE ||
+        p->kind == XSD_CM_ALL) {
+        if (xsd_collect_seq_parts(s, p->first_child, out, n,
+                                  depth + 1) < 0)
+            return -1;
+        return 0;
+    }
+    out[(*n)++] = p;
+    return 0;
+}
+
+static int xsd_collect_seq_parts(struct leptris_xsd_schema* s,
+                                 XsdCm* head, XsdCm** out, long* n,
+                                 int depth) {
+    for (XsdCm* p = head; p; p = p->next)
+        if (xsd_collect_one_part(s, p, out, n, depth) < 0) return -1;
+    return *n;
+}
+
+/* The element re-declaration's type derives from the base's —
+ * enforced only when both sides RESOLVE (builtin spellings or
+ * resolvable local names); unresolved refs stay posture. */
+static int xsd_all_type_ok(struct leptris_xsd_schema* s, const XsdCm* d,
+                           const XsdCm* b) {
+    const char* dt = d->type;
+    const char* bt = b->type;
+    if (!dt || !bt || !dt[0] || !bt[0]) return 1;
+    if (strcmp(dt, bt) == 0) return 1;
+    if (strncmp(dt, "xs:", 3) == 0 || strncmp(bt, "xs:", 3) == 0)
+        return xsd_simple_name_derives_from(s, dt, bt);
+    return xsd_find_simple(s, dt) ? xsd_simple_name_derives_from(s, dt,
+                                                                 bt)
+                                  : 1;
+}
+
+/* The §3.9.6 sum law over ONE derived particle list against the
+ * base all's flattened particles: every derived particle maps to a
+ * base owner (identity, substitution membership, wildcard set) whose
+ * re-declared type derives from the base's, per-owner windows SUM
+ * within the base's window, base-required particles stay covered,
+ * and a derived wildcard never strips a base element's attribution
+ * (§3.10.6.3 cl. 3). Returns 0, or -1 with s->error set. */
+static int xsd_all_sum_check(struct leptris_xsd_schema* s,
+                             const XsdCm* c, XsdCm** bparts, long bn,
+                             XsdCm** dparts, long dn) {
+    /* §3.10.6.3 cl. 3 (wild069): a derived wildcard must not ADMIT a
+     * name the base declares as an element particle, unless the
+     * derived re-declares it (the element particle would take the
+     * attribution away from the wildcard — dropping the base's typed
+     * declaration widens the model). */
+    for (long i = 0; i < dn; i++) {
+        XsdCm* d = dparts[i];
+        if (d->kind != XSD_CM_ANY) continue;
+        for (long j = 0; j < bn; j++) {
+            XsdCm* b = bparts[j];
+            if (b->kind != XSD_CM_ELEMENT || !b->name) continue;
+            int redeclared = 0;
+            for (long k = 0; k < dn && !redeclared; k++) {
+                XsdCm* dd = dparts[k];
+                if (dd->kind != XSD_CM_ELEMENT || !dd->name) continue;
+                const char* dns = dd->ns ? dd->ns : "";
+                const char* bns = b->ns ? b->ns : "";
+                if (strcmp(dd->name, b->name) == 0 &&
+                    strcmp(dns, bns) == 0)
+                    redeclared = 1;
+            }
+            if (redeclared) continue;
+            const char* bns = b->ns ? b->ns : "";
+            int admitted = oc_ns_admits(d, b->ns) &&
+                           !(d->not_ns &&
+                             oc_ns_list_has(d->not_ns, bns)) &&
+                           !(d->not_qname && !bns[0] &&
+                             oc_ns_list_has(d->not_qname, b->name));
+            if (admitted) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-particle-restrict: the restriction of "
+                         "'%s' keeps a wildcard admitting '%s', which "
+                         "the base declares as an element particle",
+                         c->name ? c->name : "?", b->name);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    }
+    /* per-base accumulators over the restricting derived particles:
+     * the windows SUM (§3.9.6 substitution fold and wildcard splits) */
+    long bmin_sum[XSD_ALL_RESTRICT_MAX];
+    long bmax_sum[XSD_ALL_RESTRICT_MAX];
+    int bhit[XSD_ALL_RESTRICT_MAX];
+    for (long i = 0; i < bn; i++) {
+        bmin_sum[i] = 0;
+        bmax_sum[i] = 0;
+        bhit[i] = 0;
+    }
+    for (long i = 0; i < dn; i++) {
+        XsdCm* d = dparts[i];
+        int owner = -1;
+        for (long j = 0; j < bn && owner < 0; j++)
+            if (xsd_all_part_restricts(s, d, bparts[j]))
+                owner = (int)j;
+        if (owner < 0) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "cos-particle-restrict: the restriction of '%s' "
+                     "adds or widens particle '%s' beyond the base all",
+                     c->name ? c->name : "?",
+                     d->name ? d->name
+                             : (d->kind == XSD_CM_ANY ? "the wildcard"
+                                                      : "?"));
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        /* §3.9.6: the re-declared element's type derives from the
+         * base's (all227's positiveInteger->int narrowing) */
+        if (!xsd_all_type_ok(s, d, bparts[owner])) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "cos-particle-restrict: the restriction of '%s' "
+                     "re-declares '%s' with a type that does not "
+                     "derive from the base's",
+                     c->name ? c->name : "?",
+                     d->name ? d->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        bhit[owner] = 1;
+        bmin_sum[owner] += d->min;
+        bmax_sum[owner] = (bmax_sum[owner] < 0 || d->max < 0)
+                              ? -1
+                              : bmax_sum[owner] + d->max;
+    }
+    for (long j = 0; j < bn; j++) {
+        XsdCm* b = bparts[j];
+        if (b->min > 0 && !bhit[j]) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "cos-particle-restrict: the restriction of '%s' "
+                     "drops the required particle '%s'",
+                     c->name ? c->name : "?",
+                     b->name ? b->name : "the wildcard");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+        if (!bhit[j]) continue;
+        if (bmin_sum[j] < b->min ||
+            (b->max >= 0 &&
+             (bmax_sum[j] < 0 || bmax_sum[j] > b->max))) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "cos-particle-restrict: the restriction of '%s' "
+                     "widens the occurrence window of '%s'",
+                     c->name ? c->name : "?",
+                     b->name ? b->name : "the wildcard");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* §3.9.6 cos-particle-restrict for xs:all bases: the derived model —
+ * an ALL (particle-for-particle), a SEQUENCE (RecurseAsSum), or a
+ * CHOICE whose every BRANCH independently sums within the base's
+ * windows (all231/232 valid vs all233's widening a 1-8 branch). A
+ * bare-particle root rides the sequence arm. */
 static int xsd_check_all_restriction(struct leptris_xsd_schema* s) {
     const char* tns = xsd_target_ns(s);
     for (XsdCm* c = s->complex_types; c; c = c->next) {
         if (!c->res_base || !c->first_child) continue;
         XsdCm* der = c->first_child;
-        /* all-vs-all only — the sequence-permutation subsumption
-         * (si06, all212/213, all234/238's choice shapes) rides the
-         * compile-constraint sweep */
-        if (der->kind != XSD_CM_ALL) continue;
         XsdCm* base = xsd_find_complex_ns(
             s, c->res_base, c->res_base_ns ? c->res_base_ns : tns);
         if (!base) base = xsd_find_complex(s, c->res_base);
@@ -4563,117 +4802,35 @@ static int xsd_check_all_restriction(struct leptris_xsd_schema* s) {
         XsdCm* ball = base->first_child;
         XsdCm* bparts[XSD_ALL_RESTRICT_MAX];
         XsdCm* dparts[XSD_ALL_RESTRICT_MAX];
-        long bn = 0, dn = 0;
+        long bn = 0;
         /* an unresolvable group ref is the ref-check's duty: skip
          * the type rather than guess */
         if (xsd_all_flatten(s, ball->first_child, bparts, &bn, 0) < 0)
             continue;
-        if (xsd_all_flatten(s, der->first_child, dparts, &dn, 0) < 0)
-            continue;
-        /* §3.10.6.3 cl. 3 (wild069): a derived wildcard must not
-         * ADMIT a name the base declares as an element particle,
-         * unless the derived re-declares it (the element particle
-         * would take the attribution away from the wildcard —
-         * dropping the base's typed declaration widens the model). */
-        for (long i = 0; i < dn; i++) {
-            XsdCm* d = dparts[i];
-            if (d->kind != XSD_CM_ANY) continue;
-            for (long j = 0; j < bn; j++) {
-                XsdCm* b = bparts[j];
-                if (b->kind != XSD_CM_ELEMENT || !b->name) continue;
-                int redeclared = 0;
-                for (long k = 0; k < dn && !redeclared; k++) {
-                    XsdCm* dd = dparts[k];
-                    if (dd->kind != XSD_CM_ELEMENT || !dd->name)
-                        continue;
-                    const char* dns = dd->ns ? dd->ns : "";
-                    const char* bns = b->ns ? b->ns : "";
-                    if (strcmp(dd->name, b->name) == 0 &&
-                        strcmp(dns, bns) == 0)
-                        redeclared = 1;
-                }
-                if (redeclared) continue;
-                const char* bns = b->ns ? b->ns : "";
-                int admitted = oc_ns_admits(d, b->ns) &&
-                               !(d->not_ns &&
-                                 oc_ns_list_has(d->not_ns, bns)) &&
-                               !(d->not_qname && !bns[0] &&
-                                 oc_ns_list_has(d->not_qname, b->name));
-                if (admitted) {
-                    char msg[512];
-                    snprintf(msg, sizeof(msg),
-                             "cos-particle-restrict: the restriction "
-                             "of '%s' keeps a wildcard admitting "
-                             "'%s', which the base declares as an "
-                             "element particle",
-                             c->name ? c->name : "?", b->name);
-                    xsd_set_error(s, msg);
+        if (der->kind == XSD_CM_ALL) {
+            long dn = 0;
+            if (xsd_all_flatten(s, der->first_child, dparts, &dn, 0) <
+                0)
+                continue;
+            if (xsd_all_sum_check(s, c, bparts, bn, dparts, dn) != 0)
+                return -1;
+        } else if (der->kind == XSD_CM_SEQ ||
+                   der->kind == XSD_CM_ELEMENT) {
+            long dn = 0;
+            XsdCm* head =
+                der->kind == XSD_CM_SEQ ? der->first_child : der;
+            if (xsd_collect_seq_parts(s, head, dparts, &dn, 0) < 0)
+                continue;
+            if (xsd_all_sum_check(s, c, bparts, bn, dparts, dn) != 0)
+                return -1;
+        } else if (der->kind == XSD_CM_CHOICE) {
+            for (XsdCm* br = der->first_child; br; br = br->next) {
+                long dn = 0;
+                if (xsd_collect_one_part(s, br, dparts, &dn, 0) < 0)
+                    break;
+                if (xsd_all_sum_check(s, c, bparts, bn, dparts, dn) !=
+                    0)
                     return -1;
-                }
-            }
-        }
-        /* per-base accumulators over the restricting derived
-         * particles: the windows SUM (§3.9.6 substitution fold and
-         * wildcard splits) */
-        long bmin_sum[XSD_ALL_RESTRICT_MAX];
-        long bmax_sum[XSD_ALL_RESTRICT_MAX];
-        int bhit[XSD_ALL_RESTRICT_MAX];
-        for (long i = 0; i < bn; i++) {
-            bmin_sum[i] = 0;
-            bmax_sum[i] = 0;
-            bhit[i] = 0;
-        }
-        for (long i = 0; i < dn; i++) {
-            XsdCm* d = dparts[i];
-            int owner = -1;
-            for (long j = 0; j < bn && owner < 0; j++)
-                if (xsd_all_part_restricts(s, d, bparts[j]))
-                    owner = (int)j;
-            if (owner < 0) {
-                char msg[512];
-                snprintf(msg, sizeof(msg),
-                         "cos-particle-restrict: the restriction of "
-                         "'%s' adds or widens particle '%s' beyond "
-                         "the base all",
-                         c->name ? c->name : "?",
-                         d->name ? d->name
-                                 : (d->kind == XSD_CM_ANY ? "the "
-                                                            "wildcard"
-                                                          : "?"));
-                xsd_set_error(s, msg);
-                return -1;
-            }
-            bhit[owner] = 1;
-            bmin_sum[owner] += d->min;
-            bmax_sum[owner] = (bmax_sum[owner] < 0 || d->max < 0)
-                                  ? -1
-                                  : bmax_sum[owner] + d->max;
-        }
-        for (long j = 0; j < bn; j++) {
-            XsdCm* b = bparts[j];
-            if (b->min > 0 && !bhit[j]) {
-                char msg[512];
-                snprintf(msg, sizeof(msg),
-                         "cos-particle-restrict: the restriction of "
-                         "'%s' drops the required particle '%s'",
-                         c->name ? c->name : "?",
-                         b->name ? b->name : "the wildcard");
-                xsd_set_error(s, msg);
-                return -1;
-            }
-            if (!bhit[j]) continue;
-            if (bmin_sum[j] < b->min ||
-                (b->max >= 0 &&
-                 (bmax_sum[j] < 0 || bmax_sum[j] > b->max))) {
-                char msg[512];
-                snprintf(msg, sizeof(msg),
-                         "cos-particle-restrict: the restriction "
-                         "of '%s' widens the occurrence window of "
-                         "'%s'",
-                         c->name ? c->name : "?",
-                         b->name ? b->name : "the wildcard");
-                xsd_set_error(s, msg);
-                return -1;
             }
         }
     }

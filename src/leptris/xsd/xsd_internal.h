@@ -274,6 +274,12 @@ typedef struct xsd_group_def {
 /* XSD 1.1 (xs:schema @version="1.1") gates 1.1 enforcement. */
 int xsd_schema_version_11(struct leptris_xsd_schema* s);
 
+/* #2184 (§3.4.4.3 dynamic EDC): is `derived` validly derived from
+ * `base`? Builtin ladders, local simple chains, complex chains;
+ * unresolved names stay posture (1). */
+int xsd_type_derives_from(struct leptris_xsd_schema* s,
+                          const char* derived, const char* base);
+
 /* #2184: the author's explicit 1.0 pin (@version="1.0" /
  * vc:maxVersion="1.0") — 1.0-only rules stay armed for such a schema
  * whatever 1.1-only syntax it carries. */

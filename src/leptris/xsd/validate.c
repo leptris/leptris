@@ -1116,6 +1116,124 @@ static const char* xsd_cta_select(struct xsd_validator* v,
     return sel;
 }
 
+/* #2184: the xsi:type override law — declared below (§3.3.4.3).
+ * strict=1 (the wildcard-slot excess position) skips the cast arm. */
+static int xsi_type_override_fails_pos(struct leptris_xsd_schema* s,
+                                       const char* xlocal,
+                                       const char* xuri,
+                                       const char* sel_type,
+                                       const char* euri,
+                                       const char* tns_hint,
+                                       int strict);
+
+/* #2184: is THIS child beyond the model's window for its own name?
+ * The count of the model tree's same-name element particles against
+ * the count of same-name preceding siblings + this one (wild062's
+ * second f rides the wildcard slot; the single v of
+ * XsiTypeSimpleTypeRestrictsText does not). */
+static int xsd_child_exceeds_model(struct leptris_xsd_schema* s,
+                                   XsdCm* model, LeptrisElement ce,
+                                   const char* cl) {
+    int model_n = 0;
+    if (model) {
+        XsdCm* stack[64];
+        int sp = 0;
+        stack[sp++] = model;
+        while (sp > 0) {
+            XsdCm* p = stack[--sp];
+            for (; p; p = p->next) {
+                if (p->kind == XSD_CM_ELEMENT && p->name &&
+                    strcmp(p->name, cl) == 0)
+                    model_n++;
+                if (p->kind == XSD_CM_GROUP_REF) {
+                    XsdGroupDef* g = xsd_find_group(s, p->name);
+                    if (g && g->model && sp < 64)
+                        stack[sp++] = g->model;
+                }
+                if (sp < 64 && p->first_child)
+                    stack[sp++] = p->first_child;
+            }
+        }
+    }
+    int inst_n = 1; /* this child */
+    for (LeptrisNodeRef n = leptris_node_previous_sibling(
+             leptris_element_as_node(ce));
+         n; n = leptris_node_previous_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        const char* nl = NULL;
+        leptris_element_expanded_name((LeptrisElement)n, &nl, NULL,
+                                      NULL);
+        if (nl && strcmp(nl, cl) == 0) inst_n++;
+    }
+    return inst_n > model_n;
+}
+
+/* #2184: the xsi:type override law — declared below (§3.3.4.3). */
+static int xsi_type_override_fails(struct leptris_xsd_schema* s,
+                                   const char* xlocal, const char* xuri,
+                                   const char* sel_type, const char* euri,
+                                   const char* tns_hint);
+
+/* #2184 (§3.4.4.3 dynamic EDC): the same-name element particle's
+ * TYPE through the assessed type's DERIVATION chain — the governing
+ * declaration the wildcard-resolved global must derive from. Depth-
+ * and hop-capped; particles without a declared type return NULL
+ * (posture). */
+static const char* xsd_chain_particle_type(struct leptris_xsd_schema* s,
+                                           XsdCm* ct, const char* cl,
+                                           const char* cu) {
+    int hops = 0;
+    XsdCm* cm = ct;
+    while (cm && hops <= 16) {
+        XsdCm* stack[64];
+        int sp = 0;
+        stack[sp++] = cm->first_child;
+        while (sp > 0) {
+            XsdCm* p = stack[--sp];
+            for (; p; p = p->next) {
+                int child_ns = cu && cu[0];
+                int pns_ok =
+                    p->ns ? (child_ns ? strcmp(p->ns, cu) == 0 : 1)
+                          : !child_ns;
+                if (p->kind == XSD_CM_ELEMENT && p->name &&
+                    strcmp(p->name, cl) == 0 && pns_ok && p->type)
+                    return p->type;
+                if (p->kind == XSD_CM_GROUP_REF) {
+                    XsdGroupDef* g = xsd_find_group(s, p->name);
+                    if (g && g->model && sp < 64)
+                        stack[sp++] = g->model;
+                }
+                if (sp < 64 && p->first_child)
+                    stack[sp++] = p->first_child;
+            }
+        }
+        const char* tns = xsd_target_ns(s);
+        XsdCm* next = NULL;
+        if (cm->res_base) {
+            next = xsd_find_complex_ns(
+                s, cm->res_base,
+                cm->res_base_ns ? cm->res_base_ns : tns);
+            if (!next) next = xsd_find_complex(s, cm->res_base);
+        }
+        if (!next && cm->assert_base) {
+            next = xsd_find_complex_ns(
+                s, cm->assert_base,
+                cm->assert_base_ns ? cm->assert_base_ns : tns);
+            if (!next) next = xsd_find_complex(s, cm->assert_base);
+        }
+        if (!next && cm->ext_base) {
+            next = xsd_find_complex_ns(
+                s, cm->ext_base,
+                cm->ext_base_ns ? cm->ext_base_ns : tns);
+            if (!next) next = xsd_find_complex(s, cm->ext_base);
+        }
+        cm = next;
+        hops++;
+    }
+    return NULL;
+}
+
 static void validate_children(struct xsd_validator* v,
                               struct leptris_xsd_schema* s,
                               LeptrisElement elem, XsdCm* ct) {
@@ -1472,6 +1590,23 @@ static void validate_children(struct xsd_validator* v,
                 if (!xlocal[0]) {
                     verrf_atk(v, ce, "type-resolution", cl, "element", cl,
                               "xsi:type prefix is not bound in the instance");
+                } else if (ptype &&
+                           xsi_type_override_fails_pos(
+                               s, xlocal, xuri, ptype, cu,
+                               ct ? ct->ns : NULL,
+                               xsd_child_exceeds_model(s, model, ce,
+                                                       cl))) {
+                    /* #2184 (§3.3.4.3 cl. 4.2): the explicit type
+                     * must substitute for the particle's selected
+                     * type — STRICT derivation when the same-name
+                     * particle's window is exhausted and this child
+                     * rides the wildcard slot (wild062's second f),
+                     * the substitutability arms (cast included)
+                     * in-window */
+                    verrf_atk(v, ce, "type-resolution", cl, "element",
+                              cl,
+                              "xsi:type does not override the "
+                              "selected type definition");
                 } else {
                     validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi,
                                        pfill, NULL);
@@ -1509,9 +1644,26 @@ static void validate_children(struct xsd_validator* v,
         } else {
             const XsdElementDecl* cd =
                 xsd_find_element_child_ns(s, cl, cu);
-            if (cd)
+            if (cd) {
+                /* §3.4.4.3 (dynamic EDC, #2184): a wildcard-admitted
+                 * element resolves to a GLOBAL declaration; when the
+                 * governing type's derivation chain declares the same
+                 * name, the global's type must be validly derived
+                 * from that declaration's type (wild062's time vs the
+                 * governing date, wild068's duration vs the union). */
+                const char* govt = ct ? xsd_chain_particle_type(
+                                            s, ct, cl, cu)
+                                      : NULL;
+                if (govt && cd->type &&
+                    !xsd_type_derives_from(s, cd->type, govt)) {
+                    verrf_atk(v, ce, "element-declarations-consistent",
+                              cl, "element", cl,
+                              "the wildcard-resolved declaration's "
+                              "type is not validly derived from the "
+                              "governing declaration's");
+                }
                 validate_element_decl(v, s, ce, 0, cd);
-            else if (ltype) {
+            } else if (ltype) {
                 /* nothing global claims the namespaced child —
                  * the unqualified particle's type governs
                  * (wp.xsd corpus posture) */
@@ -2663,11 +2815,57 @@ static void validate_element(struct xsd_validator* v,
  * Complex-over-complex keeps the pinned lax direction (derivation-ok
  * walking is not entered here). The name-resolution ladder mirrors
  * validate_local_uri's (tns hint, free-first, ref-uri, plain). */
-static int xsi_type_override_fails(struct leptris_xsd_schema* s,
-                                   const char* xlocal, const char* xuri,
-                                   const char* sel_type,
-                                   const char* euri,
-                                   const char* tns_hint) {
+
+/* #2184 (§3.3.4.3 cl. 4.2 / §2.2.4 substitutability): can `target`
+ * (a type name) substitute for the simple type `t`? A facet-free
+ * union-member path substitutes; a hop carrying restriction facets
+ * (pattern/enumeration) blocks (simple016.n01's date behind dt's
+ * pattern vs v01's direct time member). */
+static const char* xsd_strip_prefix(const char* n) {
+    const char* c = n ? strchr(n, ':') : NULL;
+    return c ? c + 1 : n;
+}
+
+static int xsd_union_member_path(struct leptris_xsd_schema* s,
+                                 const XsdSimple* t, const char* target,
+                                 int depth) {
+    if (!t || depth > 16) return 0;
+    const char* ul = xsd_strip_prefix(target);
+    if (t->name && strcmp(xsd_strip_prefix(t->name), ul) == 0)
+        return 1;
+    if (t->patterns || t->enum_values) return 0;
+    for (size_t i = 0; i < t->member_count; i++) {
+        const char* ml = xsd_strip_prefix(t->members[i]);
+        if (strcmp(ml, ul) == 0) return 1;
+        const XsdSimple* m = xsd_find_simple_pub(s, ml);
+        if (m && xsd_union_member_path(s, m, target, depth + 1))
+            return 1;
+    }
+    for (size_t i = 0; i < t->member_def_count; i++) {
+        const XsdSimple* m = t->member_defs[i];
+        if (m && m->name && strcmp(xsd_strip_prefix(m->name), ul) == 0)
+            return 1;
+        if (m && xsd_union_member_path(s, m, target, depth + 1))
+            return 1;
+    }
+    if (t->base_def)
+        return xsd_union_member_path(s, t->base_def, target,
+                                     depth + 1);
+    if (t->base) {
+        const XsdSimple* b =
+            xsd_find_simple_pub(s, xsd_strip_prefix(t->base));
+        if (b) return xsd_union_member_path(s, b, target, depth + 1);
+    }
+    return 0;
+}
+
+static int xsi_type_override_fails_pos(struct leptris_xsd_schema* s,
+                                       const char* xlocal,
+                                       const char* xuri,
+                                       const char* sel_type,
+                                       const char* euri,
+                                       const char* tns_hint,
+                                       int strict) {
     if (!xlocal || !xlocal[0]) return 0;
     /* the named type must resolve SIMPLE */
     int named_simple = 0;
@@ -2700,7 +2898,55 @@ static int xsi_type_override_fails(struct leptris_xsd_schema* s,
         sel = xsd_find_complex_ns_free_first(s, sel_type);
     if (!sel) sel = xsd_find_complex_ref(s, sel_type, euri);
     if (!sel) sel = xsd_find_complex(s, sel_type);
-    return sel != NULL;
+    if (sel) return 1; /* simple over COMPLEX: never overrides */
+    /* #2184 (§3.3.4.3 cl. 4.2): BOTH resolve SIMPLE — the explicit
+     * type must be validly SUBSTITUTABLE for the selected one
+     * (§2.2.4's substitutability, not bare derivation): a member of
+     * the selected union substitutes (simple016.v01's time over the
+     * union), but a member reached THROUGH a restriction-carrying
+     * type does not (simple016.n01's date behind the pattern facet).
+     * Complex-over-complex keeps the pinned lax direction: the
+     * selection resolved complex above. */
+    {
+        char xfull[300];
+        const char* xname = xlocal;
+        if ((!xuri || !xuri[0] ||
+             strcmp(xuri, "http://www.w3.org/2001/XMLSchema") == 0)) {
+            if (snprintf(xfull, sizeof(xfull), "xs:%s", xlocal) <
+                (int)sizeof(xfull))
+                xname = xfull;
+        }
+        int resolved_sel = 0;
+        char sfull[300];
+        const char* sname = sel_type;
+        if (strncmp(sel_type, "xs:", 3) == 0) {
+            resolved_sel = 1;
+        } else if (xsd_find_simple_pub(s, sel_type)) {
+            resolved_sel = 1;
+        } else if (snprintf(sfull, sizeof(sfull), "xs:%s", sel_type) <
+                       (int)sizeof(sfull) &&
+                   xsd_builtin_exists(sfull)) {
+            resolved_sel = 1;
+            sname = sfull;
+        }
+        if (!resolved_sel) return 0; /* posture */
+        const XsdSimple* sel_sm =
+            strncmp(sname, "xs:", 3) == 0
+                ? NULL
+                : xsd_find_simple_pub(s, sname);
+        if (sel_sm && xsd_union_member_path(s, sel_sm, xname, 0))
+            return 0; /* substitutable through a facet-free path */
+        if (!xsd_type_derives_from(s, xname, sname) && !strict) {
+            /* the cast arm (§3.16.6.4): every value of the nominated
+             * atomic's space casts to the string family (the
+             * integer-over-string gate of XsiTypeSimpleTypeRestrictsText;
+             * never for a wildcard-slot excess — strict above) */
+            if (strcmp(sname, "xs:string") == 0 ||
+                strcmp(sname, "xs:normalizedString") == 0)
+                return 0;
+        }
+        return !xsd_type_derives_from(s, xname, sname);
+    }
 }
 
 /* decl_override: the CALLER's ns-free declaration find (the content
@@ -2823,8 +3069,8 @@ static void validate_element_decl(struct xsd_validator* v,
          * is locally invalid, and — per the cl. 4 Note — assessment
          * falls back to the selected type instead of returning. The
          * complex005 shapes pin the verdict. */
-        if (xsi_type_override_fails(s, xlocal, xuri, eff_type, guri,
-                                    NULL)) {
+        if (xsi_type_override_fails_pos(s, xlocal, xuri, eff_type, guri,
+                                        NULL, 0)) {
             verrf_atk(v, elem, "type-resolution", local, "element",
                       local,
                       "xsi:type does not override the selected type "
