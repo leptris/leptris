@@ -2971,6 +2971,14 @@ static void validate_element_decl(struct xsd_validator* v,
                   "not declared (strict)");
         return;
     }
+    /* #2184 (§3.3.4): an ABSTRACT declaration is never validated
+     * against directly — only its substitution members stand for
+     * instances (subsgroup001.n1's appendixContent). */
+    if (d->abstract) {
+        verrf_atk(v, elem, "element-decl", local, "element", local,
+                  "the declaration is abstract");
+        return;
+    }
 
     /* XSD 1.1: the first alternative whose test passes types the
      * element for this instance (context = the element); a test-less

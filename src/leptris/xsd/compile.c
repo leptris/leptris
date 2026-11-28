@@ -631,6 +631,14 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
     return head;
 }
 
+static char* xsd_strndup(const char* s, size_t len) {
+    char* out = (char*)malloc(len + 1);
+    if (!out) return NULL;
+    memcpy(out, s, len);
+    out[len] = 0;
+    return out;
+}
+
 static char* xsd_strdup(const char* s) {
     if (!s) return NULL;
     size_t n = strlen(s) + 1;
@@ -7222,12 +7230,41 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->default_value = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "default"));
+                    d->abstract =
+                        (unsigned char)xsd_bool_attr(
+                            (LeptrisElement)n, "abstract", 0);
                     const char* sg = leptris_element_attribute(
                         (LeptrisElement)n, "substitutionGroup");
                     if (sg) {
                         const char* colon = strchr(sg, ':');
                         d->sub_head = xsd_strdup(
                             colon ? colon + 1 : sg);
+                        /* #2184 §3.3.6: the multi-head form — every
+                         * whitespace-separated head registers */
+                        for (const char* hp = sg; *hp;) {
+                            while (*hp == ' ' || *hp == '\t' ||
+                                   *hp == '\n' || *hp == '\r')
+                                hp++;
+                            if (!*hp) break;
+                            const char* hs = hp;
+                            while (*hp && *hp != ' ' && *hp != '\t' &&
+                                   *hp != '\n' && *hp != '\r')
+                                hp++;
+                            const char* hc = hs;
+                            for (; hc < hp; hc++)
+                                if (*hc == ':') break;
+                            char** grown = (char**)realloc(
+                                d->sub_heads,
+                                (d->sub_head_count + 1) *
+                                    sizeof(char*));
+                            if (!grown) break;
+                            d->sub_heads = grown;
+                            d->sub_heads[d->sub_head_count++] =
+                                xsd_strndup(hc < hp ? hc + 1 : hs,
+                                            (size_t)(hp - (hc < hp
+                                                               ? hc + 1
+                                                               : hs)));
+                        }
                     }
                     d->next = s->elements;
                     s->elements = d;
@@ -7265,12 +7302,41 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                     d->default_value = xsd_strdup(
                         leptris_element_attribute((LeptrisElement)n,
                                                   "default"));
+                    d->abstract =
+                        (unsigned char)xsd_bool_attr(
+                            (LeptrisElement)n, "abstract", 0);
                     const char* sg = leptris_element_attribute(
                         (LeptrisElement)n, "substitutionGroup");
                     if (sg) {
                         const char* colon = strchr(sg, ':');
                         d->sub_head = xsd_strdup(
                             colon ? colon + 1 : sg);
+                        /* #2184 §3.3.6: the multi-head form — every
+                         * whitespace-separated head registers */
+                        for (const char* hp = sg; *hp;) {
+                            while (*hp == ' ' || *hp == '\t' ||
+                                   *hp == '\n' || *hp == '\r')
+                                hp++;
+                            if (!*hp) break;
+                            const char* hs = hp;
+                            while (*hp && *hp != ' ' && *hp != '\t' &&
+                                   *hp != '\n' && *hp != '\r')
+                                hp++;
+                            const char* hc = hs;
+                            for (; hc < hp; hc++)
+                                if (*hc == ':') break;
+                            char** grown = (char**)realloc(
+                                d->sub_heads,
+                                (d->sub_head_count + 1) *
+                                    sizeof(char*));
+                            if (!grown) break;
+                            d->sub_heads = grown;
+                            d->sub_heads[d->sub_head_count++] =
+                                xsd_strndup(hc < hp ? hc + 1 : hs,
+                                            (size_t)(hp - (hc < hp
+                                                               ? hc + 1
+                                                               : hs)));
+                        }
                     }
                     d->next = s->elements;
                     s->elements = d;
@@ -7565,6 +7631,9 @@ LEPTRIS_API void leptris_xsd_free(LeptrisXsdSchema schema) {
         free(d->fixed);
         free(d->default_value);
         free(d->sub_head);
+        for (size_t h = 0; h < d->sub_head_count; h++)
+            free(d->sub_heads[h]);
+        free(d->sub_heads);
         free(d);
         d = dn;
     }
@@ -9142,10 +9211,29 @@ static const XsdElementDecl* xsd_find_element_decl(
 
 const XsdElementDecl* xsd_substitute_member(
     struct leptris_xsd_schema* s, const char* name, const char* head) {
+    /* #2184 §3.3.6: a member may sit in SEVERAL substitution groups —
+     * the walk branches over every head (depth-capped). */
+    const XsdElementDecl* stack[32];
+    int sp = 0;
     const XsdElementDecl* d = xsd_find_element_decl(s, name);
-    for (int hops = 0; d && d->sub_head && hops < 16; hops++) {
-        if (strcmp(d->sub_head, head) == 0) return d;
-        d = xsd_find_element_decl(s, d->sub_head);
+    if (d) stack[sp++] = d;
+    int hops = 0;
+    while (sp > 0 && hops < 64) {
+        const XsdElementDecl* e = stack[--sp];
+        for (size_t i = 0; i < e->sub_head_count; i++) {
+            const char* h = e->sub_heads[i];
+            if (!h) continue;
+            if (strcmp(h, head) == 0) return e;
+            const XsdElementDecl* up = xsd_find_element_decl(s, h);
+            if (up && sp < 32) stack[sp++] = up;
+        }
+        if (!e->sub_head_count && e->sub_head) {
+            if (strcmp(e->sub_head, head) == 0) return e;
+            const XsdElementDecl* up =
+                xsd_find_element_decl(s, e->sub_head);
+            if (up && sp < 32) stack[sp++] = up;
+        }
+        hops++;
     }
     return NULL;
 }
@@ -10618,11 +10706,17 @@ static void xsd_wc_expand_defined_sibling(XsdCm* any, XsdCm* parent,
             int added = 0;
             for (const XsdElementDecl* d = s ? s->elements : NULL;
                  d; d = d->next) {
-                if (!d->sub_head) continue;
                 int in_chain = 0;
-                for (int i = 0; i < hn && !in_chain; i++)
-                    if (strcmp(d->sub_head, heads[i]) == 0)
+                for (int i = 0; i < hn && !in_chain; i++) {
+                    if (d->sub_head &&
+                        strcmp(d->sub_head, heads[i]) == 0)
                         in_chain = 1;
+                    for (size_t h2 = 0; h2 < d->sub_head_count && !in_chain;
+                         h2++)
+                        if (d->sub_heads[h2] &&
+                            strcmp(d->sub_heads[h2], heads[i]) == 0)
+                            in_chain = 1;
+                }
                 if (!in_chain) continue;
                 char mtok[600];
                 if (d->ns && *d->ns)

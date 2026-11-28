@@ -333,7 +333,17 @@ typedef struct xsd_element_decl {
     char* fixed;    /* fixed element content: text must string-equal it */
     char* default_value; /* leptris-rs#35: supplies content when the
                               element is empty (stZ072) */
+    unsigned char abstract; /* §3.3.4: an abstract declaration is
+                               never validated against directly —
+                               only its substitution members stand
+                               for instances */
     char* sub_head; /* substitutionGroup head (local name after ':') */
+    /* #2184 §3.3.6 (XSD 1.1): the FULL head list — a member may sit
+     * in SEVERAL substitution groups (subsgroup001's
+     * "chapContent appendixContent"); the single sub_head keeps the
+     * first head for the legacy chain walks. */
+    char** sub_heads;
+    size_t sub_head_count;
     struct xsd_element_decl* next;
 } XsdElementDecl;
 
