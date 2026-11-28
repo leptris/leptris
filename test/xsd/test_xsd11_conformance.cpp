@@ -478,11 +478,19 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * resolving by local name (s3_16_2ii06). 18 rows flip, zero
  * regressions by red-set diff; s3_3_4v02 stays RED (the attZ014b
  * owner-gated wildcard-second-ID shape). **2166/2206** — 1283 valid
- * / 600 invalid / 283 schema-error (measured 2026-11-28). */
-    EXPECT_GE(pass, 2166) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1283);
-    EXPECT_GE(pass_invalid, 600);
-    EXPECT_GE(pass_schema_error, 283);
+ * / 600 invalid / 283 schema-error (measured 2026-11-28). Raised by
+ * the xsd11-wild-all wave (cos-all-limited + the all UPA + the
+ * extension-all occurrence, the UPA notNamespace repair and the
+ * wildcard-union sum, the compile-time wildcard EDC, the
+ * chameleon-include effective tns + the per-unit assertion
+ * evidence, xsi:nil's boolean lexical, the xsi-attribute law, and
+ * the wildcard-slot per-child attribution — the trace rides
+ * #2240): **2171/2206** — 1282 valid / 601 invalid / 288
+ * schema-error (measured 2026-11-28). */
+    EXPECT_GE(pass, 2171) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1282);
+    EXPECT_GE(pass_invalid, 601);
+    EXPECT_GE(pass_schema_error, 288);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

@@ -3828,9 +3828,12 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
      * engine rides the shared paths: the xsi:nil="1" boolean
      * spelling, the order-free all matcher, the element-only
      * character-content gate): 1044/1056 — three rows flip to their
-     * oracle verdicts (measured 2026-11-27 on the #2215 base). */
-    EXPECT_GE(pass, 1044) << "conformance floor regressed";
-    EXPECT_GE(pass_valid, 185);
+     * oracle verdicts (measured 2026-11-27 on the #2215 base).
+     * Raised by the xsd11-wild-all wave (the chameleon-include
+     * effective tns law on the ref-particle capture and the
+     * xsi-attribute law): 1045/1056 (measured 2026-11-28). */
+    EXPECT_GE(pass, 1045) << "conformance floor regressed";
+    EXPECT_GE(pass_valid, 186);
     EXPECT_GE(pass_invalid, 657);
     EXPECT_GE(pass_schema_error, 202);
     RecordProperty("pass_valid", std::to_string(pass_valid));
