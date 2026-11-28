@@ -2,17 +2,25 @@
 
 ## [1.9.452] - 2026-11-28
 
-### Added
+The residue endgame: the XSD 1.1 tail-classes campaign completes — the official W3C floor moves **2148 → 2200 / 2206 (97.4% → 99.7%)**, XML Schema 1.0 stands at **1046/1056 (99.1%)**, and six rows remain (three owner-decision, three itemized corners, all dispositioned row-by-row in `test/xsd/xsd11-dispositions/README.md`).
 
-- move/steal node adoption - leptris_document_adopt_move (#1548) (dom)
+### XSD 1.1 — four residue waves, one day (#2184 closed)
+- **Substitution groups + weak wildcards** (#2239): head-graph acyclicity, member-type substitutability for every head of the multi-head form, cos-element-consistent member-vs-local-particle, union substitutability in substitution groups, and the weak-wildcard relaxation armed by sequence element-vs-wildcard overlap evidence with the NFA per-child attribution trace and the governing-type law.
+- **Wildcard/all** (#2241): the cos-all-limited post-capture sweep, the all-UPA (identity/substitution-group/common-member overlaps, wildcard namespace-set intersection), compile-time wildcard EDC, the wildcard-restriction sum over effective wildcard sets, chameleon-include targetNamespace scoping to the sub-capture, and the xsi:nil boolean lexical.
+- **Small classes** (#2242): eleven disposition rows plus a new standard function — `fn:in-scope-prefixes` (F&O §15.3.2) — because XSD 1.1 assertions are XPath, and a red row's assertion needed it.
+- **Shadow binding** (#2240, closes #2221): `xsd_content_valid` records a per-child particle trace and `validate_children` makes it authoritative — same-named global/local declarations bind by position, not by first-name-match.
 
 ### Fixed
+- **Windows-only stack exhaustion in the UPA walkers** (#2241): the recursion scratch (`xsd_upa_first[64]` pairs) moved off the C stack into one heap workspace — Windows' 1MB main-thread stack no longer SEGVs on ~11-level schemas; POSIX's 8MB had hidden the class.
+- `leptris_document_adopt_move` (#1548): move/steal subtree adoption — names interned into the destination, every document/namespace backreference re-stamped; the splice-cleanup live set drops **11.7×** (18.0 MB → 1.6 MB on the 50k-element cg3 shape), enforced permanently by the `AdoptionLiveSet` CI gate (a pinned 2.5 MB bound with the deep-copy baseline recorded).
+- Raw attribute views now journal on interleaved-built trees (#2233) — `leptris_element_attributes_raw` no longer returns 0 there.
+- RELAX NG `externalRef` resolves against its own file inside included grammars (RELAX NG 4.5/4.7), not the top schema's directory.
 
-- local element declarations shadow globals in the content model (#2221) (xsd)
-- resolve externalRef in an included grammar against its own file (rng)
-- journal raw attribute views on interleaved-built trees (#2233) (flat)
+### Performance (#2132 closed)
+The mutation cycle no longer loses to pugixml on any platform: **25% (x86_64) and 29% (arm64) wins, parity on macOS** (the #2230 doc-resolve hoist + assign-not-clear carve took the macOS row from 1.43 behind to 1.00), append at **0.73×**, append-uniq improved to 1.14 (the one visible remainder, on the #2054 scoreboard).
 
-
+### Floors
+XSD 1.1: **2200/2206 (99.7%)** — 6 reds: 3 owner-decision (the wildcard-admitted-ID oracle tension, awaiting the dialect-gated flip call) + 3 deepest ID/IDREF bookkeeping corners. XSD 1.0: **1046/1056 (99.1%)**. XPath 1.0: 438/438. libxslt: 205/205.
 
 ## [1.9.451] - 2026-11-28
 
