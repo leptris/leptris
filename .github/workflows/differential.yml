@@ -27,10 +27,10 @@ permissions:
 # for releases that predate build-manifest/2; they are the diffpins
 # train's last known-good set.
 env:
-  FALLBACK_ENGINE_TAG: v1.9.451
-  FALLBACK_GEM: 1.9.451.0
-  FALLBACK_PYPI: 1.9.451.0
-  FALLBACK_NPM: 0.1.88
+  FALLBACK_ENGINE_TAG: v1.9.452
+  FALLBACK_GEM: 1.9.452.0
+  FALLBACK_PYPI: 1.9.452.0
+  FALLBACK_NPM: 0.1.89
   FALLBACK_RS: 1.9.0
 
 jobs:
