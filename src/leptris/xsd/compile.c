@@ -4400,6 +4400,515 @@ static int xsd_check_union_circularity(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* ---- #2184: the substitution-group compile constraints ------------
+ * (§3.3.6 + the #2234 residue, s2_2_2si01/si02, subsgroup901/903,
+ * simple011/014/015):
+ *   - structures 3.3.6.1.5: the substitution-group graph is acyclic;
+ *   - structures 3.3.6.1.4: the member's {type definition} is validly
+ *     substitutable for EVERY head's (the multi-head form) — a
+ *     RESTRICTING member additionally walks its re-declared
+ *     particles, each carrying a type validly derived from the base's
+ *     same-name particle, with the union law (a union derives from no
+ *     atomic member; a member path through a facet-carrying union hop
+ *     is blocked — the xsi:type lane's facet-free-path law);
+ *   - cos-element-consistent (§3.8.6): a substitution member whose
+ *     expanded name equals a LOCAL particle of the same content model
+ *     must agree with it on type;
+ *   - the UPA an xs:all inherits when two of its particles share one
+ *     substitution member (the member could satisfy either slot).
+ * Unresolved type names stay the ref checks' posture. */
+
+/* Resolution with the #2149 bare-name canon: unprefixed builtin
+ * spellings ("string", captured prefix-stripped) resolve to kind 2. */
+static XsdTypeRef xsd_subst_resolve(struct leptris_xsd_schema* s,
+                                    const char* name) {
+    XsdTypeRef r = xsd_resolve_type_ref(s, name);
+    if (r.kind == 0 && name && name[0] && strncmp(name, "xs:", 3) != 0) {
+        char buf[128];
+        if (snprintf(buf, sizeof(buf), "xs:%s", name) < (int)sizeof(buf) &&
+            xsd_builtin_exists(buf))
+            r.kind = 2;
+    }
+    return r;
+}
+
+/* Does the chain from `t` toward its terminal carry a facet-bearing
+ * restriction hop (pattern/enumeration)? A union member path is only
+ * open when every hop to the variety-union definition is facet-free. */
+static int xsd_simple_chain_facet_free(const XsdSimple* t, int depth) {
+    for (int hop = 0; t && hop < 32; hop++) {
+        if (t->patterns || t->enum_values) return 0;
+        if (t->deriv == XSD_SIMPLE_UNION) return 1;
+        if (t->base_def) {
+            t = t->base_def;
+            continue;
+        }
+        if (t->base && strncmp(t->base, "xs:", 3) != 0)
+            return 0; /* named hops resolve at the caller level */
+        return 0;
+    }
+    return 0;
+}
+
+/* The substitutability law over two RESOLVED simple types (§2.2.4's
+ * "validly derived" as the substitution-group and xsi:type lanes read
+ * it): equality, the restriction chain, or — through a FACET-FREE
+ * union — derivation from some member. A union never derives from an
+ * atomic member, so union(x,y) is not derived from union(x,y,z)
+ * (simple011), and a member path through a pattern-carrying hop is
+ * blocked (simple014/015). */
+static int xsd_simple_substitutes(struct leptris_xsd_schema* s,
+                                  const XsdSimple* d, const XsdSimple* b,
+                                  int depth) {
+    if (!d || !b || depth > 16) return 0;
+    if (d == b) return 1;
+    if (d->name && b->name && strcmp(d->name, b->name) == 0) return 1;
+    /* the restriction chain: only RESTRICT hops continue upward — but
+     * a builtin-anchored chain does NOT end the question: the base
+     * side's member path may still reach D (simple010's sub-chap is a
+     * restriction of xs:date and substitutes the bare date union
+     * through that member). */
+    if (d->deriv == XSD_SIMPLE_RESTRICT) {
+        const XsdSimple* up =
+            d->base_def
+                ? d->base_def
+                : (d->base && strncmp(d->base, "xs:", 3) != 0
+                       ? xsd_union_member_resolve(s, d->base)
+                       : NULL);
+        if (up && xsd_simple_substitutes(s, up, b, depth + 1)) return 1;
+        if (!up && d->base && strncmp(d->base, "xs:", 3) == 0) {
+            char full[128];
+            if (snprintf(full, sizeof(full), "%s", d->base) <
+                    (int)sizeof(full) &&
+                b->name && strcmp(full, b->name) == 0)
+                return 1;
+            if (!up && d->base && b->name &&
+                strncmp(b->name, "xs:", 3) == 0 &&
+                xsd_builtin_derives_from(d->base, b->name))
+                return 1;
+        }
+    }
+    /* the base side: union-valued (variety union reached through
+     * facet-free hops) opens the member path */
+    if (xsd_simple_chain_facet_free(b, 0)) {
+        const XsdSimple* bu = b;
+        for (int hop = 0; bu && bu->deriv != XSD_SIMPLE_UNION && hop < 32;
+             hop++) {
+            if (bu->base_def) {
+                bu = bu->base_def;
+                continue;
+            }
+            if (bu->base && strncmp(bu->base, "xs:", 3) != 0)
+                bu = xsd_union_member_resolve(s, bu->base);
+            else
+                bu = NULL;
+        }
+        if (bu && bu->deriv == XSD_SIMPLE_UNION) {
+            for (size_t i = 0; i < bu->member_count; i++) {
+                const XsdSimple* m =
+                    xsd_union_member_resolve(s, bu->members[i]);
+                if (m && xsd_simple_substitutes(s, d, m, depth + 1))
+                    return 1;
+                /* a builtin member: a restriction of it substitutes */
+                if (strncmp(bu->members[i], "xs:", 3) == 0 &&
+                    d->deriv == XSD_SIMPLE_RESTRICT && d->base &&
+                    strcmp(d->base, bu->members[i]) == 0)
+                    return 1;
+            }
+            for (size_t i = 0; i < bu->member_def_count; i++)
+                if (xsd_simple_substitutes(s, d, bu->member_defs[i],
+                                           depth + 1))
+                    return 1;
+            return 0;
+        }
+    }
+    return xsd_simple_name_derives_from(s, d->name, b->name);
+}
+
+/* Does the FACET-FREE member path of `t` (its union members, their
+ * members, its restriction bases) reach the type named `target`? A
+ * facet-bearing hop blocks (the xsi:type lane's law). */
+static int xsd_simple_member_reaches(struct leptris_xsd_schema* s,
+                                     const XsdSimple* t,
+                                     const char* target, int depth) {
+    if (!t || !target || depth > 16) return 0;
+    if (t->name && strcmp(t->name, target) == 0) return 1;
+    if (t->patterns || t->enum_values) return 0;
+    if (t->deriv == XSD_SIMPLE_UNION) {
+        for (size_t i = 0; i < t->member_count; i++) {
+            if (strcmp(t->members[i], target) == 0) return 1;
+            if (strncmp(t->members[i], "xs:", 3) == 0) {
+                /* a builtin member: the target derives from it? */
+                char full[128];
+                if (strncmp(target, "xs:", 3) != 0 &&
+                    snprintf(full, sizeof(full), "xs:%s", target) <
+                        (int)sizeof(full) &&
+                    xsd_builtin_derives_from(full, t->members[i]))
+                    return 1;
+                if (strncmp(target, "xs:", 3) == 0 &&
+                    xsd_builtin_derives_from(target, t->members[i]))
+                    return 1;
+                continue;
+            }
+            const XsdSimple* m =
+                xsd_union_member_resolve(s, t->members[i]);
+            if (m && xsd_simple_member_reaches(s, m, target, depth + 1))
+                return 1;
+        }
+        for (size_t i = 0; i < t->member_def_count; i++)
+            if (xsd_simple_member_reaches(s, t->member_defs[i], target,
+                                          depth + 1))
+                return 1;
+        return 0;
+    }
+    if (t->base_def)
+        return xsd_simple_member_reaches(s, t->base_def, target,
+                                         depth + 1);
+    if (t->base && strncmp(t->base, "xs:", 3) != 0) {
+        const XsdSimple* b = xsd_union_member_resolve(s, t->base);
+        if (b) return xsd_simple_member_reaches(s, b, target, depth + 1);
+    }
+    return 0;
+}
+
+/* The two types a member-vs-head (or particle-vs-particle) check
+ * compares: substitutable per kind — complex chains walk the cm
+ * ladder, simple pairs run the union law, builtin pairs the builtin
+ * table. Unresolved names were skipped by the caller. */
+static int xsd_subst_types_ok(struct leptris_xsd_schema* s,
+                              const char* dname, const XsdTypeRef* d,
+                              const char* bname, const XsdTypeRef* b) {
+    if (!dname || !bname) return 1;
+    if (strcmp(dname, bname) == 0) return 1;
+    if (b->kind == 1) return 1; /* anyType/ur: everything derives */
+    if (d->kind == 1) return 0; /* a ur type derives from nothing else */
+    if (d->kind == 3) {
+        if (b->kind != 3) return 0; /* complex never derives from simple */
+        return xsd_cm_derives_from(s, d->cm, bname, 0);
+    }
+    if (d->kind == 2) {
+        if (b->kind == 2) return xsd_builtin_derives_from(dname, bname);
+        if (b->kind == 4) {
+            /* a builtin substitutes a union whose facet-free member
+             * path reaches it (cta0014's xs:date over the union) —
+             * the facet-free law, not bare derivation */
+            return b->sm
+                       ? xsd_simple_member_reaches(s, b->sm, dname, 0)
+                       : 0;
+        }
+        return 0;
+    }
+    /* d simple-local */
+    if (b->kind == 2) return 0; /* a local never derives from a builtin */
+    if (b->kind == 4)
+        return b->sm ? xsd_simple_substitutes(s, d->sm, b->sm, 0) : 0;
+    return 0;
+}
+
+/* The re-declared particles of a RESTRICTING member: each same-name
+ * pair must keep the base particle's type (validly derived). Group
+ * refs expand; unresolved types skip. Returns 0 ok, -1 failed (error
+ * set). */
+static int xsd_restrict_particle_ok(struct leptris_xsd_schema* s,
+                                    XsdCm* dpart, XsdCm* base_model,
+                                    int depth) {
+    if (depth > 24) return 0;
+    for (XsdCm* p = dpart; p; p = p->next) {
+        if (p->kind == XSD_CM_GROUP_REF) {
+            XsdGroupDef* g = xsd_find_group(s, p->name);
+            if (g && g->model &&
+                xsd_restrict_particle_ok(s, g->model, base_model,
+                                         depth + 1) != 0)
+                return -1;
+            continue;
+        }
+        if (p->kind == XSD_CM_SEQ || p->kind == XSD_CM_CHOICE ||
+            p->kind == XSD_CM_ALL) {
+            if (p->first_child &&
+                xsd_restrict_particle_ok(s, p->first_child, base_model,
+                                         depth + 1) != 0)
+                return -1;
+            continue;
+        }
+        if (p->kind != XSD_CM_ELEMENT || !p->name || !p->type) continue;
+        /* the base model's same-name particle */
+        XsdCm* stack[64];
+        int sp = 0;
+        stack[sp++] = base_model;
+        XsdCm* q = NULL;
+        while (sp > 0 && !q) {
+            XsdCm* t = stack[--sp];
+            for (; t; t = t->next) {
+                if (t->kind == XSD_CM_ELEMENT && t->name &&
+                    strcmp(t->name, p->name) == 0 && t->type) {
+                    q = t;
+                    break;
+                }
+                if (t->kind == XSD_CM_GROUP_REF) {
+                    XsdGroupDef* g = xsd_find_group(s, t->name);
+                    if (g && g->model && sp < 64)
+                        stack[sp++] = g->model;
+                }
+                if (sp < 64 && t->first_child &&
+                    (t->kind == XSD_CM_SEQ || t->kind == XSD_CM_CHOICE ||
+                     t->kind == XSD_CM_ALL))
+                    stack[sp++] = t->first_child;
+            }
+        }
+        if (!q || !strcmp(q->type, p->type)) continue;
+        XsdTypeRef pt = xsd_subst_resolve(s, p->type);
+        XsdTypeRef qt = xsd_subst_resolve(s, q->type);
+        if (pt.kind == 0 || qt.kind == 0) continue; /* posture */
+        char msg[512];
+        if (!xsd_subst_types_ok(s, p->type, &pt, q->type, &qt)) {
+            snprintf(msg, sizeof(msg),
+                     "cos-elt-substs: the substitution member '%s' "
+                     "re-declares the particle '%s' with a type that "
+                     "is not validly derived from the head's '%s'",
+                     p->name, p->type, q->type);
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* The head chain from `from` reaches back to `target` (structures
+ * 3.3.6.1.5 — a cycle is one that RETURNS to its origin). */
+static int xsd_subst_reaches(struct leptris_xsd_schema* s,
+                             XsdElementDecl* from, XsdElementDecl* target,
+                             int depth) {
+    if (!from || !target || depth > 32) return 0;
+    size_t heads = from->sub_head_count;
+    if (!heads && from->sub_head) heads = 1;
+    for (size_t i = 0; i < heads; i++) {
+        const char* h = (heads == 1 && !from->sub_head_count)
+                            ? from->sub_head
+                            : from->sub_heads[i];
+        if (!h) continue;
+        if (strcmp(h, target->name) == 0) return 1;
+        for (XsdElementDecl* t = s->elements; t; t = t->next)
+            if (strcmp(t->name, h) == 0 &&
+                xsd_subst_reaches(s, t, target, depth + 1))
+                return 1;
+    }
+    return 0;
+}
+
+static int xsd_check_substitution_groups(struct leptris_xsd_schema* s) {
+    /* (a) the head graph is acyclic (structures 3.3.6.1.5) */
+    for (XsdElementDecl* d = s->elements; d; d = d->next) {
+        if (xsd_subst_reaches(s, d, d, 0)) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "st-props-correct: the substitution-group graph "
+                     "is circular at element '%s'",
+                     d->name ? d->name : "?");
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    /* (b) the member's type substitutes every head's (3.3.6.1.4) */
+    for (XsdElementDecl* d = s->elements; d; d = d->next) {
+        if (d->alternatives) continue; /* the cta sweep owns those */
+        size_t heads = d->sub_head_count;
+        if (!heads && d->sub_head) heads = 1;
+        for (size_t i = 0; i < heads; i++) {
+            const char* h = heads == 1 && !d->sub_head_count
+                                ? d->sub_head
+                                : d->sub_heads[i];
+            if (!h) continue;
+            const XsdElementDecl* hd = NULL;
+            for (XsdElementDecl* t = s->elements; t; t = t->next)
+                if (strcmp(t->name, h) == 0) {
+                    hd = t;
+                    break;
+                }
+            if (!hd) continue; /* dangling ref: the ref checks own it */
+            const char* mty = d->type ? d->type : hd->type;
+            const char* hty = hd->type ? hd->type : d->type;
+            if (!mty || !hty) continue; /* §3.3.5: defaults to the
+                                           head's own type */
+            /* synthesized slots (inline anonymous types, alternative
+             * captures) compare by node identity the assessment lane
+             * owns — skip (all006's anonymous member type) */
+            if (strncmp(mty, "element:", 8) == 0 ||
+                strncmp(mty, "complex:", 8) == 0 ||
+                strncmp(mty, "alternative:", 12) == 0 ||
+                strncmp(hty, "element:", 8) == 0 ||
+                strncmp(hty, "complex:", 8) == 0 ||
+                strncmp(hty, "alternative:", 12) == 0)
+                continue;
+            XsdTypeRef mt = xsd_subst_resolve(s, mty);
+            XsdTypeRef ht = xsd_subst_resolve(s, hty);
+            if (mt.kind == 0 || ht.kind == 0) continue;
+            char msg[512];
+            if (!xsd_subst_types_ok(s, mty, &mt, hty, &ht)) {
+                snprintf(msg, sizeof(msg),
+                         "cos-elt-substs: the substitution member '%s' "
+                         "is not of a type validly derived from the "
+                         "head '%s' (member type '%s', head type '%s')",
+                         d->name ? d->name : "?", h, mty, hty);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+            /* a RESTRICTING member walks its re-declared particles */
+            if (mt.kind == 3 && ht.kind == 3 && mt.cm && ht.cm &&
+                mt.cm->res_base) {
+                if (xsd_restrict_particle_ok(s, mt.cm->first_child,
+                                             ht.cm->first_child, 0) != 0)
+                    return -1;
+            }
+        }
+    }
+    /* (c) cos-element-consistent: member vs LOCAL particle of one
+     * model (subsgroup901) */
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        if (!c->first_child) continue;
+        /* collect the model's LOCAL particles (name + own type) */
+        XsdCm* locals[256];
+        int nl = 0;
+        {
+            XsdCm* stack[64];
+            int sp = 0;
+            stack[sp++] = c->first_child;
+            while (sp > 0 && nl < 256) {
+                XsdCm* t = stack[--sp];
+                for (; t; t = t->next) {
+                    if (t->kind == XSD_CM_ELEMENT && t->name && t->type &&
+                        nl < 256)
+                        locals[nl++] = t;
+                    if (t->kind == XSD_CM_GROUP_REF) {
+                        XsdGroupDef* g = xsd_find_group(s, t->name);
+                        if (g && g->model && sp < 64)
+                            stack[sp++] = g->model;
+                    }
+                    if (sp < 64 && t->first_child)
+                        stack[sp++] = t->first_child;
+                }
+            }
+        }
+        if (!nl) continue;
+        /* every particle's substitution members vs the locals */
+        XsdCm* stack[64];
+        int sp = 0;
+        stack[sp++] = c->first_child;
+        int failed = 0;
+        while (sp > 0 && !failed) {
+            XsdCm* t = stack[--sp];
+            for (; t && !failed; t = t->next) {
+                if (t->kind == XSD_CM_ELEMENT && t->name) {
+                    for (XsdElementDecl* m = s->elements; m && !failed;
+                         m = m->next) {
+                        if (strcmp(m->name, t->name) == 0) continue;
+                        if (!xsd_is_substitute(s, m->name, t->name)) continue;
+                        const char* mty = m->type;
+                        if (!mty) continue;
+                        for (int li = 0; li < nl; li++) {
+                            if (strcmp(locals[li]->name, m->name) != 0)
+                                continue;
+                            if (locals[li] == t) continue;
+                            XsdTypeRef mt2 = xsd_subst_resolve(s, mty);
+                            XsdTypeRef lt =
+                                xsd_subst_resolve(s, locals[li]->type);
+                            if (mt2.kind == 0 || lt.kind == 0) continue;
+                            if (xsd_subst_types_ok(s, mty, &mt2,
+                                                   locals[li]->type,
+                                                   &lt) ||
+                                xsd_subst_types_ok(s, locals[li]->type,
+                                                   &lt, mty, &mt2))
+                                continue;
+                            char msg[512];
+                            snprintf(msg, sizeof(msg),
+                                     "cos-element-consistent: the "
+                                     "substitution member '%s' and the "
+                                     "local particle '%s' disagree on "
+                                     "type ('%s' vs '%s')",
+                                     m->name, m->name, mty,
+                                     locals[li]->type);
+                            xsd_set_error(s, msg);
+                            failed = 1;
+                            break;
+                        }
+                    }
+                }
+                if (failed) break;
+                if (t->kind == XSD_CM_GROUP_REF) {
+                    XsdGroupDef* g = xsd_find_group(s, t->name);
+                    if (g && g->model && sp < 64) stack[sp++] = g->model;
+                }
+                if (sp < 64 && t->first_child)
+                    stack[sp++] = t->first_child;
+            }
+        }
+        if (failed) return -1;
+    }
+    /* (d) the UPA an all inherits from shared substitution members
+     * (subsgroup903): two all-particles whose attribution sets
+     * intersect cannot both stand in one all — an instance element
+     * named by the shared member could satisfy either slot. Every
+     * ALL model in the tree (an all usually rides inside the
+     * complexType's sequence wrapper). */
+    for (XsdCm* c = s->complex_types; c; c = c->next) {
+        if (!c->first_child) continue;
+        XsdCm* stack[64];
+        int sp = 0;
+        stack[sp++] = c->first_child;
+        int failed = 0;
+        while (sp > 0 && !failed) {
+            XsdCm* all = stack[--sp];
+            for (; all && !failed; all = all->next) {
+                if (all->kind == XSD_CM_ALL && all->first_child) {
+                    for (XsdCm* p = all->first_child; p && !failed;
+                         p = p->next) {
+                        if (p->kind != XSD_CM_ELEMENT || !p->name)
+                            continue;
+                        for (XsdCm* q = p->next; q && !failed;
+                             q = q->next) {
+                            if (q->kind != XSD_CM_ELEMENT || !q->name)
+                                continue;
+                            int clash =
+                                (strcmp(p->name, q->name) == 0);
+                            for (XsdElementDecl* m = s->elements;
+                                 m && !clash; m = m->next) {
+                                if (strcmp(m->name, p->name) == 0 ||
+                                    strcmp(m->name, q->name) == 0)
+                                    continue;
+                                if (xsd_is_substitute(s, m->name,
+                                                      p->name) &&
+                                    xsd_is_substitute(s, m->name,
+                                                      q->name))
+                                    clash = 1;
+                            }
+                            if (!clash) continue;
+                            char msg[512];
+                            snprintf(msg, sizeof(msg),
+                                     "upa: the xs:all content model "
+                                     "is ambiguous — the substitution "
+                                     "members of '%s' and '%s' "
+                                     "overlap",
+                                     p->name, q->name);
+                            xsd_set_error(s, msg);
+                            failed = 1;
+                        }
+                    }
+                }
+                if (failed) break;
+                if (all->kind == XSD_CM_GROUP_REF) {
+                    XsdGroupDef* g = xsd_find_group(s, all->name);
+                    if (g && g->model && sp < 64)
+                        stack[sp++] = g->model;
+                }
+                if (sp < 64 && all->first_child &&
+                    (all->kind == XSD_CM_SEQ || all->kind == XSD_CM_CHOICE))
+                    stack[sp++] = all->first_child;
+            }
+        }
+        if (failed) return -1;
+    }
+    return 0;
+}
+
 /* #2184 (Structures §3.2.2/§3.3.4 + Part 2 §4.2): an attribute or
  * element {value constraint} is a LEXICAL of the declared type — a
  * default/fixed value that violates the type's facets (the
@@ -5351,6 +5860,18 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     /* #2184: union circularity — a union's transitive membership
      * never reaches the union itself (s3_16_2si01-05, simple017-020). */
     if (xsd_check_union_circularity(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184: the substitution-group compile constraints — an acyclic
+     * head graph, the member's type substituting EVERY head's (the
+     * restriction's re-declared particles carrying the union law),
+     * cos-element-consistent against a local particle, and the UPA an
+     * all inherits from shared members (s2_2_2si01/si02,
+     * subsgroup901/903, simple011/014/015). */
+    if (xsd_check_substitution_groups(s) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
