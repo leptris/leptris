@@ -511,6 +511,10 @@ int xsd_builtin_valid(const char* type, const char* v) {
             if (*p == '.') {
                 p++;
                 saw_fraction = 1;
+                /* #2184 simple086: the decimal point needs at least
+                 * one digit AFTER it (PT1.S is invalid; the leading
+                 * digit gate keeps .5S out of the loop) */
+                if (!isdigit((unsigned char)*p)) return 0;
                 while (isdigit((unsigned char)*p)) p++;
             }
             char unit = *p;
@@ -552,6 +556,11 @@ int xsd_builtin_valid(const char* type, const char* v) {
             if (*p == '.') {
                 p++;
                 saw_fraction = 1;
+                /* #2184 simple086: the decimal point needs at least
+                 * one digit AFTER it (§3.16.2's ISO 8601 spelling —
+                 * PT12H30M12.S is invalid; PT12H30M.5S never enters
+                 * the component loop, the leading digit gates it) */
+                if (!isdigit((unsigned char)*p)) return 0;
                 while (isdigit((unsigned char)*p)) p++;
             }
             char unit = *p;
