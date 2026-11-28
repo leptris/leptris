@@ -8876,6 +8876,9 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             if (!s->saw_assert)
                                 s->saw_assert =
                                     xsd_doc_has_assert(subroot, 0);
+                            if (!s->saw_alternative)
+                                s->saw_alternative =
+                                    xsd_doc_has_alternative(subroot, 0);
                             int saved_unit = s->current_unit;
                             if (s->unit_count < s->unit_cap ||
                                 (s->units = (char**)realloc(
