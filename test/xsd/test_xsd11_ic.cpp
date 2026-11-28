@@ -196,3 +196,113 @@ TEST(Xsd11Ic, KeyrefDurationValueSpace) {
     EXPECT_NE(verdict_cases("saxonData/Zone/zone302.xsd",
                             "saxonData/Zone/zone302.n01.xml"), 1);
 }
+
+/* ---- #2184: the @ref form's shape (§3.11.3.4) ---------------------- */
+/* "If ref is present, then only id and <annotation> are allowed to
+ * appear together with ref" — a selector/field child (or any
+ * attribute beside ref/id) on the ref form fails the schema
+ * (s2_2_4si01's three shapes). The annotation-only twin stays
+ * legal (s2_2_4v01). */
+namespace {
+int compile_ok_inline(const char* xsd) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    int ok = (s && st == LEPTRIS_OK);
+    if (s) leptris_xsd_free(s);
+    return ok;
+}
+/* The named constraints every shape below references — hi1/hi2
+ * mirror s2_2_4si01's structure (the refs RESOLVE; only the shapes
+ * are illegal). keyref's @ref names another KEYREF (§3.11.3's
+ * category match), not the key. */
+const char* k_ic_ref_prologue =
+    "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+    " targetNamespace=\"u\" xmlns:v=\"u\">"
+    "<complexType name=\"t\"><sequence>"
+    "<element name=\"hi1\"><complexType><sequence/>"
+    " <key name=\"One\"><selector xpath=\"e\"/>"
+    " <field xpath=\"@a\"/></key>"
+    " <unique name=\"Two\"><selector xpath=\"e\"/>"
+    " <field xpath=\"@a\"/></unique>"
+    " <keyref name=\"Three\" refer=\"v:One\">"
+    " <selector xpath=\"e\"/><field xpath=\"@a\"/></keyref>"
+    "</complexType></element>"
+    "<element name=\"hi2\">";
+}  // namespace
+TEST(Xsd11Ic, RefFormForbidsSelectorFieldAndExtras) {
+    std::string head = k_ic_ref_prologue;
+    std::string tail =
+        "</element></sequence></complexType>"
+        "<element name=\"r\"><complexType><sequence>"
+        "<element name=\"x\" type=\"v:t\"/>"
+        "</sequence></complexType></element>"
+        "</schema>";
+    /* ref + selector child */
+    {
+        std::string xsd =
+            head +
+            " <key ref=\"v:One\">"
+            "  <selector xpath=\"./a\"/>"
+            " </key>" +
+            tail;
+        EXPECT_EQ(compile_ok_inline(xsd.c_str()), 0)
+            << "a selector beside @ref fails the schema";
+    }
+    /* ref + field child (+ id, which alone would be legal) */
+    {
+        std::string xsd =
+            head +
+            " <unique ref=\"v:Two\" id=\"q\">"
+            "  <field xpath=\"@b\"/>"
+            " </unique>" +
+            tail;
+        EXPECT_EQ(compile_ok_inline(xsd.c_str()), 0)
+            << "a field beside @ref fails the schema";
+    }
+    /* ref + element child */
+    {
+        std::string xsd =
+            head +
+            " <keyref ref=\"v:Three\">"
+            "  <element name=\"a\"/>"
+            " </keyref>" +
+            tail;
+        EXPECT_EQ(compile_ok_inline(xsd.c_str()), 0)
+            << "an element child beside @ref fails the schema";
+    }
+    /* the annotation-only ref twin stays legal (s2_2_4v01) */
+    {
+        std::string xsd =
+            head +
+            " <key ref=\"v:One\">"
+            "  <annotation><documentation>a</documentation>"
+            "  </annotation>"
+            " </key>" +
+            tail;
+        EXPECT_EQ(compile_ok_inline(xsd.c_str()), 1)
+            << "ref + annotation only compiles";
+    }
+    /* the pinned corpus row flips */
+    {
+        std::string p = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                        "/ibmData/schema_invalid/S2_2_4/"
+                        "s2_2_4si01.xsd";
+        LeptrisStatus st = (LeptrisStatus)0;
+        LeptrisXsdSchema s =
+            leptris_xsd_compile_file(p.c_str(), &st);
+        EXPECT_TRUE(s == (LeptrisXsdSchema)0 || st != LEPTRIS_OK)
+            << "s2_2_4si01 must be rejected";
+        if (s) leptris_xsd_free(s);
+    }
+}
+
+/* The valid ref-form corpus twin stays green. */
+TEST(Xsd11Ic, RefFormAnnotationTwinStaysGreen) {
+    std::string p = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                    "/ibmData/valid/S2_2_4/s2_2_4v01.xsd";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(p.c_str(), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    if (s) leptris_xsd_free(s);
+}

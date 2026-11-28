@@ -1023,6 +1023,14 @@ TEST(XsdDatatypes, BuiltinTableConvergesOnPart2) {
         {"xs:time", "13:20:60", 0},
         {"xs:duration", "P1Y2MT", 0},
         {"xs:duration", "P200.5Y", 0},
+        /* #2184 simple086: the seconds field's decimal point needs
+         * digits on BOTH sides (§3.16.2's ISO 8601 spelling — a
+         * trailing '12.S' or a leading '.5S' is invalid; '12.5S'
+         * stays valid) */
+        {"xs:duration", "PT12H30M12.S", 0},
+        {"xs:duration", "PT12H30M.5S", 0},
+        {"xs:dayTimeDuration", "PT1.S", 0},
+        {"xs:dayTimeDuration", "PT.5S", 0},
         {"xs:base64Binary", "abcde", 0},
         {"xs:QName", "xmlns:xsi", 0},
         /* leptris-rs#28 (errE002): nonNegativeInteger allows an
@@ -1036,6 +1044,7 @@ TEST(XsdDatatypes, BuiltinTableConvergesOnPart2) {
         {"xs:date", "2000-02-29", 1},
         {"xs:time", "23:59:60", 1},  /* leap second */
         {"xs:duration", "PT1.5S", 1},
+        {"xs:duration", "PT12H30M12.5S", 1},
         {"xs:base64Binary", "QUJD", 1},
         {"xs:QName", "xsi:attr", 1},
     };

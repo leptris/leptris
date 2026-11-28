@@ -420,3 +420,272 @@ TEST(Xsd11Datatypes, UnionPatternAppliesMemberNormalization) {
     leptris_document_free(d);
     leptris_xsd_free(s);
 }
+
+/* ---- the small classes (#2184 residue, class 10) ------------------- */
+
+/* Compile/validate helpers over INLINE schemas (no fixture files —
+ * the pinned-corpus rows ride the MANIFEST gate). */
+static int compile_ok(const char* xsd) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    int ok = (s && st == LEPTRIS_OK);
+    if (s) leptris_xsd_free(s);
+    return ok;
+}
+
+static int verdict_inline(const char* xsd, const char* inst) {
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile(xsd, strlen(xsd), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << "schema must compile";
+    if (!s) return -1;
+    LeptrisDocument d = leptris_parse_string(inst, strlen(inst), &st);
+    EXPECT_NE(d, (LeptrisDocument)0) << "instance must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
+/* A local declaration's own @targetNamespace governs the particle's
+ * namespace match at ASSESSMENT (§3.2.3.2 — the attribute is the
+ * declaration's {target namespace}, not a shadow of the form
+ * default). target001: the restricted particle names
+ * {http://www.target001.com/}child, so the no-namespace child of
+ * the n1 instance misses and the tns-qualified child of the twin
+ * matches. The engine captured the tns but matched by the form
+ * default alone. */
+TEST(Xsd11Datatypes, LocalTnsGovernsParticleMatch) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " elementFormDefault=\"qualified\""
+        " attributeFormDefault=\"unqualified\">"
+        "<xs:complexType name=\"B\" abstract=\"true\">"
+        " <xs:sequence>"
+        "  <xs:any namespace=\"http://www.target001.com/\""
+        "   processContents=\"lax\"/>"
+        " </xs:sequence>"
+        "</xs:complexType>"
+        "<xs:complexType name=\"R\">"
+        " <xs:complexContent><xs:restriction base=\"B\">"
+        "  <xs:sequence>"
+        "   <xs:element name=\"child\""
+        "    targetNamespace=\"http://www.target001.com/\""
+        "    type=\"xs:integer\"/>"
+        "  </xs:sequence>"
+        " </xs:restriction></xs:complexContent>"
+        "</xs:complexType>"
+        "<xs:element name=\"parent\" type=\"R\"/>"
+        "</xs:schema>";
+    EXPECT_NE(verdict_inline(
+                  xsd,
+                  "<?xml version=\"1.0\"?>"
+                  "<parent><child>23</child></parent>"),
+              1)
+        << "a no-namespace child misses the tns-declared particle";
+    EXPECT_EQ(verdict_inline(
+                  xsd,
+                  "<?xml version=\"1.0\"?><parent>"
+                  "<child xmlns=\"http://www.target001.com/\">23</child>"
+                  "</parent>"),
+              1)
+        << "the tns-qualified twin matches";
+}
+
+/* The same law on a plain (non-restricted) local declaration whose
+ * tns EQUALS the schema's (s3_2_3ii04 — the schema compiles, the
+ * efd=unqualified instance's no-namespace child misses). */
+TEST(Xsd11Datatypes, LocalTnsEqualOutsideRestrictionGoverns) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:tns=\"http://www.schemaTest.org/schema11_S3_2_3\""
+        " targetNamespace=\"http://www.schemaTest.org/schema11_S3_2_3\""
+        " elementFormDefault=\"unqualified\""
+        " attributeFormDefault=\"qualified\">"
+        "<complexType name=\"type1\"><sequence>"
+        "<element name=\"element1\" type=\"integer\""
+        " targetNamespace=\"http://www.schemaTest.org/schema11_S3_2_3\"/>"
+        "<element name=\"element2\" type=\"integer\"/>"
+        "</sequence></complexType>"
+        "<element name=\"root\" type=\"tns:type1\"/>"
+        "</schema>";
+    EXPECT_NE(verdict_inline(
+                  xsd,
+                  "<?xml version=\"1.0\"?>"
+                  "<dv:root xmlns:dv="
+                  "\"http://www.schemaTest.org/schema11_S3_2_3\">"
+                  "<element1>123</element1>"
+                  "<element2>123</element2>"
+                  "</dv:root>"),
+              1)
+        << "element1 declares the tns; its no-namespace child misses";
+}
+
+/* §3.2.3.2: the anyType-restriction carve-out still binds the local
+ * declaration's tns to the schema's own — a restriction of
+ * xs:anyType in a NO-targetNamespace schema cannot carry
+ * targetNamespace="b" on its local element (s3_2_3si08,
+ * schema-error). The legal twin (explicit tns equal to the schema's
+ * inside an anyType restriction) compiles clean. */
+TEST(Xsd11Datatypes, AnyTypeRestrictionLocalTnsMustMatchSchema) {
+    const char* bad =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " elementFormDefault=\"qualified\""
+        " attributeFormDefault=\"qualified\" xmlns:bb=\"b\">"
+        " <xsd:complexType name=\"ct\">"
+        "  <xsd:complexContent>"
+        "   <xsd:restriction base=\"xsd:anyType\">"
+        "    <xsd:sequence>"
+        "     <xsd:element name=\"e1\" type=\"xsd:integer\""
+        "      targetNamespace=\"b\"/>"
+        "    </xsd:sequence>"
+        "   </xsd:restriction>"
+        "  </xsd:complexContent>"
+        " </xsd:complexType>"
+        " <xsd:element name=\"root\" type=\"ct\"/>"
+        "</xsd:schema>";
+    EXPECT_NE(compile_ok(bad), 1)
+        << "a foreign local tns inside an anyType restriction fails "
+           "the schema";
+    const char* ok =
+        "<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://x.x/\""
+        " elementFormDefault=\"qualified\">"
+        " <xsd:complexType name=\"ct\">"
+        "  <xsd:complexContent>"
+        "   <xsd:restriction base=\"xsd:anyType\">"
+        "    <xsd:sequence>"
+        "     <xsd:element name=\"e1\" type=\"xsd:integer\""
+        "      targetNamespace=\"http://x.x/\"/>"
+        "    </xsd:sequence>"
+        "   </xsd:restriction>"
+        "  </xsd:complexContent>"
+        " </xsd:complexType>"
+        " <xsd:element name=\"root\" type=\"ct\"/>"
+        "</xsd:schema>";
+    EXPECT_EQ(compile_ok(ok), 1)
+        << "the equal-tns anyType-restriction form compiles";
+}
+
+/* simpleType/@final="extension" blocks deriving from it by
+ * EXTENSION (spec bug 2074's law — simple004 explicit,
+ * simple005 via finalDefault). Using the type as a TYPE stays
+ * legal (simple003's attribute). */
+TEST(Xsd11Datatypes, SimpleTypeFinalExtensionBlocksExtension) {
+    const char* explicit_final =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://s.ly/\""
+        " xmlns:s=\"http://s.ly/\" elementFormDefault=\"qualified\">"
+        " <xs:simpleType name=\"pubDate\" final=\"extension\">"
+        "  <xs:restriction base=\"xs:date\">"
+        "   <xs:pattern value=\"2012.*\"/>"
+        "  </xs:restriction>"
+        " </xs:simpleType>"
+        " <xs:complexType name=\"pubType\">"
+        "  <xs:simpleContent>"
+        "   <xs:extension base=\"s:pubDate\">"
+        "    <xs:attribute name=\"country\" type=\"xs:string\"/>"
+        "   </xs:extension>"
+        "  </xs:simpleContent>"
+        " </xs:complexType>"
+        " <xs:element name=\"doc\" type=\"s:pubType\"/>"
+        "</xs:schema>";
+    EXPECT_NE(compile_ok(explicit_final), 1)
+        << "an extension of a final=extension simpleType fails the "
+           "schema";
+    const char* defaulted =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://s.ly/\""
+        " xmlns:s=\"http://s.ly/\" elementFormDefault=\"qualified\""
+        " finalDefault=\"extension\">"
+        " <xs:simpleType name=\"pubDate\">"
+        "  <xs:restriction base=\"xs:date\">"
+        "   <xs:pattern value=\"2012.*\"/>"
+        "  </xs:restriction>"
+        " </xs:simpleType>"
+        " <xs:complexType name=\"pubType\">"
+        "  <xs:simpleContent>"
+        "   <xs:extension base=\"s:pubDate\">"
+        "    <xs:attribute name=\"country\" type=\"xs:string\"/>"
+        "   </xs:extension>"
+        "  </xs:simpleContent>"
+        " </xs:complexType>"
+        " <xs:element name=\"doc\" type=\"s:pubType\"/>"
+        "</xs:schema>";
+    EXPECT_NE(compile_ok(defaulted), 1)
+        << "finalDefault=extension rides the same law";
+    const char* used_as_type =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+        " targetNamespace=\"http://s.ly/\""
+        " xmlns:s=\"http://s.ly/\" elementFormDefault=\"qualified\">"
+        " <xs:simpleType name=\"pubDate\" final=\"extension\">"
+        "  <xs:restriction base=\"xs:date\">"
+        "   <xs:pattern value=\"2012.*\"/>"
+        "  </xs:restriction>"
+        " </xs:simpleType>"
+        " <xs:element name=\"doc\">"
+        "  <xs:complexType>"
+        "   <xs:attribute name=\"date\" type=\"s:pubDate\"/>"
+        "  </xs:complexType>"
+        " </xs:element>"
+        "</xs:schema>";
+    EXPECT_EQ(compile_ok(used_as_type), 1)
+        << "USE of a final=extension type stays legal (simple003)";
+}
+
+/* An xs:list's itemType must RESOLVE (simple006): a reference to no
+ * declared simpleType and no builtin fails the schema. */
+TEST(Xsd11Datatypes, UnresolvedListItemTypeFailsSchema) {
+    const char* xsd =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:element name=\"root\" type=\"AvailableSizesType\"/>"
+        "<xs:simpleType name=\"AvailableSizesType\">"
+        " <xs:restriction>"
+        "  <xs:simpleType>"
+        "   <xs:list itemType=\"SizeType\"/>"
+        "  </xs:simpleType>"
+        " </xs:restriction>"
+        "</xs:simpleType>"
+        "</xs:schema>";
+    EXPECT_NE(compile_ok(xsd), 1)
+        << "an unresolved list itemType fails the schema";
+    const char* guard =
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"SizeType\">"
+        " <xs:restriction base=\"xs:integer\"/>"
+        "</xs:simpleType>"
+        "<xs:element name=\"root\" type=\"AvailableSizesType\"/>"
+        "<xs:simpleType name=\"AvailableSizesType\">"
+        " <xs:list itemType=\"SizeType\"/>"
+        "</xs:simpleType>"
+        "</xs:schema>";
+    EXPECT_EQ(compile_ok(guard), 1)
+        << "a resolved list itemType compiles";
+}
+
+/* Type references into the DEPRECATED datatypes namespace
+ * (http://www.w3.org/2001/XMLSchema-datatypes) fail the schema
+ * (d3_1si01) — the document binds the prefix and uses it for a
+ * type reference. */
+TEST(Xsd11Datatypes, DeprecatedDatatypesNamespaceRefRejected) {
+    const char* xsd =
+        "<schema xmlns=\"http://www.w3.org/2001/XMLSchema\""
+        " xmlns:xs=\"http://www.w3.org/2001/XMLSchema-datatypes\""
+        " targetNamespace=\"http://xstest-tns/schema11\">"
+        " <complexType name=\"TimerType\">"
+        "  <attribute name=\"time\" type=\"xs:gYear\"/>"
+        " </complexType>"
+        " <element name=\"root\">"
+        "  <complexType><sequence>"
+        "   <element name=\"elDTimeType\" minOccurs=\"0\""
+        "    maxOccurs=\"unbounded\"/>"
+        "  </sequence></complexType>"
+        " </element>"
+        "</schema>";
+    EXPECT_NE(compile_ok(xsd), 1)
+        << "a type reference into the deprecated datatypes namespace "
+           "fails the schema";
+}

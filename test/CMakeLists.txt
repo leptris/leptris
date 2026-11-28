@@ -187,10 +187,12 @@ target_compile_definitions(test_xsd11_ctatable PRIVATE
 leptris_add_test(test_xsd_ns_qualification xsd/test_xsd_ns_qualification.cpp)
 target_compile_definitions(test_xsd_ns_qualification PRIVATE
     LEPTRIS_XSD_NS_QUAL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/ns-qual")
-# #2154: xs:assertion facet spec tests.
+# #2154: xs:assertion facet spec tests. #2184: the assert-test
+# function sweep pins its corpus row (d4_3_15si04).
 leptris_add_test(test_xsd11_assertions xsd/test_xsd11_assertions.cpp)
 target_compile_definitions(test_xsd11_assertions PRIVATE
-    LEPTRIS_XSD11_ASSERTIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assertions")
+    LEPTRIS_XSD11_ASSERTIONS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-assertions"
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 # #2183: the assertion-facet XQuery-semantics residue (absent focus,
 # fn:doc base resolution, error mapping, subtree rooting, carriers,
 # castable-as).
