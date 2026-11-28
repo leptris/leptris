@@ -1891,11 +1891,16 @@ TEST(XsdValidate, BuiltinCollapseCoversNonStringBuiltins) {
         "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
         " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
         " xsi:type=\"xsd:integer\">12  345</root>"), 0);
-    /* non-numeric builtins collapse the same way */
+    /* #2184 (§3.3.4.3 cl. 4.2 substitutability): boolean does NOT
+     * substitute for the decimal selected type (no derivation, no
+     * cast arm) — the override fails and assessment falls back to
+     * the selected type, where " true " is not a decimal. The
+     * collapse-on-override intent stays pinned by the integer case
+     * above (integer DERIVES from decimal). */
     EXPECT_EQ(validate_doc(sch,
         "<root xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
         " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""
-        " xsi:type=\"xsd:boolean\"> true </root>"), 1);
+        " xsi:type=\"xsd:boolean\"> true </root>"), 0);
 }
 
 // leptris-rs#27 (XSD §4.3.5 + App. E): enumeration membership over
