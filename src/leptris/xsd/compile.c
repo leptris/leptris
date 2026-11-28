@@ -6034,6 +6034,131 @@ static int xsd_check_all_restriction(struct leptris_xsd_schema* s) {
     return 0;
 }
 
+/* ---- #2184: cos-all-limited + the all UPA -------------------------- */
+
+/* xsd_is_substitute rides xsd_internal.h (the multi-head §3.3.6
+ * walk over the captured substitution-group table). */
+
+/* cos-all-limited (§3.8.3): a group reference inside an all must
+ * resolve to an ALL group and carry minOccurs=maxOccurs=1
+ * (all008's sequence group, all011's choice group, all009's
+ * minOccurs=0, all010's maxOccurs=3). Unresolved refs stay the
+ * ref-check's duty. */
+static int xsd_all_limited_one(struct leptris_xsd_schema* s,
+                               XsdCm* all) {
+    for (XsdCm* p = all->first_child; p; p = p->next) {
+        if (p->kind != XSD_CM_GROUP_REF) continue;
+        XsdGroupDef* g = xsd_find_group(s, p->name);
+        if (!g || !g->model) continue;
+        if (g->model->kind != XSD_CM_ALL) {
+            xsd_set_error(s, "cos-all-limited: the model group "
+                             "reference inside an all must resolve "
+                             "to an all group");
+            return -1;
+        }
+        if (p->min != 1 || p->max != 1) {
+            xsd_set_error(s, "cos-all-limited: the model group "
+                             "reference inside an all must carry "
+                             "minOccurs=maxOccurs=1");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* do two ELEMENT particles of one all overlap? Identity, direct
+ * substitution-group membership in either direction, or a COMMON
+ * member — some declaration substituting for both heads (all241's
+ * p-under-o, all242/all303's shared q/dg). */
+static int xsd_all_elements_overlap(struct leptris_xsd_schema* s,
+                                    const XsdCm* a, const XsdCm* b) {
+    if (!a->name || !b->name) return 0;
+    const char* ans = a->ns ? a->ns : "";
+    const char* bns = b->ns ? b->ns : "";
+    if (strcmp(a->name, b->name) == 0 && strcmp(ans, bns) == 0)
+        return 1;
+    if (xsd_is_substitute(s, a->name, b->name) ||
+        xsd_is_substitute(s, b->name, a->name))
+        return 1;
+    for (const XsdElementDecl* m = s->elements; m; m = m->next) {
+        if (!m->name) continue;
+        if (xsd_is_substitute(s, m->name, a->name) &&
+            xsd_is_substitute(s, m->name, b->name))
+            return 1;
+    }
+    return 0;
+}
+
+/* cos-nonambig over one ALL (§3.10.4 with the §3.8.6.4 relaxation):
+ * element-element overlaps via identity or substitution groups
+ * (all241/242/all302/303) and wildcard-wildcard overlaps via
+ * namespace-set intersection (all243). An element and a wildcard
+ * MAY compete — the element wins the attribution. */
+static int xsd_all_upa_one(struct leptris_xsd_schema* s, XsdCm* all) {
+    for (XsdCm* p = all->first_child; p; p = p->next) {
+        for (XsdCm* q = p->next; q; q = q->next) {
+            int bad = 0;
+            if (p->kind == XSD_CM_ELEMENT && q->kind == XSD_CM_ELEMENT)
+                bad = xsd_all_elements_overlap(s, p, q);
+            else if (p->kind == XSD_CM_ANY && q->kind == XSD_CM_ANY)
+                bad = xsd_all_wildcards_overlap(p, q);
+            if (bad) {
+                xsd_set_error(
+                    s, "upa: two particles of the all group overlap "
+                       "(substitution-group or wildcard namespace "
+                       "intersection)");
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* walk every ALL node of a captured model tree (nested groups
+ * splice at the NFA, so the group-def models are visited directly
+ * by the caller) */
+static int xsd_all_walk_models(struct leptris_xsd_schema* s, XsdCm* node,
+                               int (*visit)(struct leptris_xsd_schema*,
+                                           XsdCm*),
+                               int depth) {
+    if (!node || depth > 32) return 0;
+    for (XsdCm* c = node; c; c = c->next) {
+        if (c->kind == XSD_CM_ALL && visit(s, c) != 0) return -1;
+        if (c->kind == XSD_CM_GROUP_REF) continue;
+        if (xsd_all_walk_models(s, c->first_child, visit,
+                                depth + 1) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/* the compile sweep: cos-all-limited group refs + the all UPA over
+ * every complex type and group definition (post-fold, so the
+ * all-extension merges are in the lists). Both laws hold in 1.0 as
+ * well — the 1.0 spellings just make the violations harder to
+ * write (no wildcards, no relaxed occurrences), and the doc-level
+ * gate already catches its share. */
+static int xsd_check_all_limited(struct leptris_xsd_schema* s) {
+    for (XsdCm* t = s->complex_types; t; t = t->next)
+        if (xsd_all_walk_models(s, t->first_child, xsd_all_limited_one,
+                                0) != 0)
+            return -1;
+    for (XsdGroupDef* g = s->groups; g; g = g->next)
+        if (g->model &&
+            xsd_all_walk_models(s, g->model, xsd_all_limited_one,
+                                0) != 0)
+            return -1;
+    for (XsdCm* t = s->complex_types; t; t = t->next)
+        if (xsd_all_walk_models(s, t->first_child, xsd_all_upa_one,
+                                0) != 0)
+            return -1;
+    for (XsdGroupDef* g = s->groups; g; g = g->next)
+        if (g->model &&
+            xsd_all_walk_models(s, g->model, xsd_all_upa_one, 0) != 0)
+            return -1;
+    return 0;
+}
+
 /* #2184 src-ct.1 + §3.2.7.1, walked over the SOURCE elements (the
  * captured models no longer carry the wrapper shape):
  *
@@ -6857,6 +6982,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
 
+    /* #2184: cos-all-limited (group refs inside an all resolve to
+     * ALL groups at minOccurs=maxOccurs=1) + the all UPA (particle
+     * overlaps inside one all, across the extension merges too). */
+    if (xsd_check_all_limited(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
     /* #2184 §4.2.2: the conditional-inclusion capture rejected the
      * schema (a malformed version-controlled annotation value), or
      * one document declared the same global element twice after the
@@ -7085,12 +7219,23 @@ static void xsd_resolve_extension_bases(struct leptris_xsd_schema* s) {
                 /* #2184 §3.4.4.2: extending an all with an all
                  * merges the particle sets (all301/all314 — the
                  * deferred-fold leg of the same rule the capture
-                 * fold applies) */
+                 * fold applies). The extension's all occurrence must
+                 * EQUAL the base's (all313's minOccurs=0 against a
+                 * (1,1) base all). */
                 if (copied && !copied->next &&
                     copied->kind == XSD_CM_ALL && c->first_child &&
                     !c->first_child->next &&
                     c->first_child->kind == XSD_CM_ALL) {
                     XsdCm* down = c->first_child;
+                    if (down->min != copied->min ||
+                        down->max != copied->max) {
+                        xsd_set_error(
+                            s, "cos-ct-extends: the extension's all "
+                               "particle must carry the base all's "
+                               "occurrence range");
+                        s->oc_failed = 1;
+                        continue;
+                    }
                     XsdCm* kids = down->first_child;
                     down->first_child = NULL;
                     xsd_cm_free(down);
@@ -7406,7 +7551,8 @@ static int xsd_all_wildcards_overlap(const XsdCm* w1, const XsdCm* w2) {
         }
         if (oc_ns_admits(other, uri) &&
             !(other->not_ns &&
-              oc_ns_list_has(other->not_ns, uri ? uri : "")))
+              xsd_wc_not_ns_hits(other->not_ns, uri,
+                                 other->any_unit_tns)))
             overlap = 1;
     }
     return overlap;
@@ -10291,10 +10437,20 @@ static XsdCm* xsd_capture_complex_model(struct leptris_xsd_schema* s,
                      * instance interleaves base and derived
                      * particles freely, so the two-children
                      * sequence-wrap shape can never match. The
-                     * merged all keeps the base's occurrence. */
+                     * merged all keeps the base's occurrence — the
+                     * extension's all occurrence must EQUAL it
+                     * (all313's minOccurs=0 against a (1,1) base). */
                     if (base_copy && !base_copy->next &&
                         base_copy->kind == XSD_CM_ALL && own &&
                         !own->next && own->kind == XSD_CM_ALL) {
+                        if (own->min != base_copy->min ||
+                            own->max != base_copy->max) {
+                            xsd_set_error(
+                                s, "cos-ct-extends: the extension's "
+                                   "all particle must carry the base "
+                                   "all's occurrence range");
+                            s->oc_failed = 1;
+                        }
                         XsdCm* kids = own->first_child;
                         own->first_child = NULL;
                         xsd_cm_free(own);
