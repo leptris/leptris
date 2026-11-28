@@ -455,11 +455,34 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  *    declaration is never validated against directly) —
  *    subsgroup001/s2_2_2, 6 rows.
  * Union re-measure: **2148/2206** — 1278 valid / 597 invalid /
- * 273 schema-error (measured 2026-11-28). */
-    EXPECT_GE(pass, 2148) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1278);
-    EXPECT_GE(pass_invalid, 597);
-    EXPECT_GE(pass_schema_error, 273);
+ * 273 schema-error (measured 2026-11-28). Raised by the
+ * substitution-group / weak-wildcard endgame wave (branch
+ * `xsd11-subst`, #2184/#2234 clusters 5/8/9): the weak-wildcard
+ * dialect evidence (a SEQUENCE carrying an element-vs-wildcard
+ * namespace overlap cannot be a legal 1.0 schema — the ibm
+ * S3_8_6/S3_10_1 schemas compile clean; a 1.0 pin keeps the gate and
+ * the choice-branch overlap stays rejected) + the NFA wildcard
+ * attribution trace and the weak-wildcard assessment law (the
+ * wildcard-admitted element resolves its GLOBAL declaration, whose
+ * type must be validly derived from the shadowed particle's through
+ * the facet-free union member path — s3_8_6v01/ii01, s3_10_1v04,
+ * wild063 rider); the substitution-group compile constraints (the
+ * head graph acyclic — s2_2_2si01; the member's type substituting
+ * EVERY head's — s2_2_2si02; cos-element-consistent against a local
+ * particle — subsgroup901; the UPA an all inherits from shared
+ * members — subsgroup903, riders all242/all302/all303 + the 1.0
+ * lane's oss-fuzz-51295); union substitutability (union(x,y)
+ * derives from no atomic member; a member path through a
+ * facet-carrying union hop is blocked — simple011/014/015); the
+ * base64Binary quantum closing (d3_3_17ii01) and union memberTypes
+ * resolving by local name (s3_16_2ii06). 18 rows flip, zero
+ * regressions by red-set diff; s3_3_4v02 stays RED (the attZ014b
+ * owner-gated wildcard-second-ID shape). **2166/2206** — 1283 valid
+ * / 600 invalid / 283 schema-error (measured 2026-11-28). */
+    EXPECT_GE(pass, 2166) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1283);
+    EXPECT_GE(pass_invalid, 600);
+    EXPECT_GE(pass_schema_error, 283);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));

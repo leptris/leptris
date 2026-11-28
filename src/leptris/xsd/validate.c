@@ -23,7 +23,8 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
-                             int* oc_from, unsigned char* oc_attr);
+                             int* oc_from, unsigned char* oc_attr,
+                             unsigned char* wc_attr);
 extern int xsd_builtin_valid(const char* type, const char* v);
 extern int xsd_builtin_known(const char* type);
 extern int xsd_simple_valid_chain(struct leptris_xsd_schema* s,
@@ -43,6 +44,12 @@ extern const XsdElementDecl* xsd_find_element_ns(
     struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern const XsdElementDecl* xsd_find_element(
     struct leptris_xsd_schema* s, const char* name);
+/* #2184: the facet-free union-member path (defined below) — the
+ * weak-wildcard governing-type law reads it (a member of a
+ * facet-free union is validly derived from the union). */
+static int xsd_union_member_path_fwd(struct leptris_xsd_schema* s,
+                                     const char* union_name,
+                                     const char* target);
 extern const XsdElementDecl* xsd_find_element_child_ns(
     struct leptris_xsd_schema* s, const char* name, const char* uri);
 extern XsdCm* xsd_find_complex_ns(struct leptris_xsd_schema* s,
@@ -1398,8 +1405,15 @@ static void validate_children(struct xsd_validator* v,
             return;
         }
     }
+    unsigned char* wc_attr = (unsigned char*)calloc(n ? n : 1, 1);
+    if (!wc_attr) {
+        free(names);
+        free(uris);
+        free(oc_attr);
+        return;
+    }
     int ok = xsd_content_valid(s, model, xsd_target_ns(s), names, uris,
-                               n, &oc_from, oc_attr);
+                               n, &oc_from, oc_attr, wc_attr);
     if (ok == -2) {
         /* #1894/#514: pathological occurrence product — the automaton
          * exceeds the compile-time size cap. The cap is a resource
@@ -1411,6 +1425,7 @@ static void validate_children(struct xsd_validator* v,
         free(names);
         free(uris);
         free(oc_attr);
+        free(wc_attr);
         return;
     }
     if (ok) {
@@ -1492,6 +1507,10 @@ static void validate_children(struct xsd_validator* v,
             oc_attr ? oc_attr[child_i] != 0
                     : (oc_from >= 0 && (int)child_i >= oc_from &&
                        model->open_any);
+        /* #2184: the NFA attribution trace — this child advanced ONLY
+         * through wildcard transitions (the same-name particles could
+         * not take it): the weak-wildcard slot. */
+        int wc_admitted = wc_attr ? wc_attr[child_i] != 0 : 0;
         child_i++;
         /* #1879: wildcard processContents gates the child — skip
          * imposes no constraint at all (even a declared child);
@@ -1611,6 +1630,48 @@ static void validate_children(struct xsd_validator* v,
                     validate_local_uri(v, s, ce, cl, xlocal, xuri, cxsi,
                                        pfill, NULL);
                 }
+            } else if (wc_admitted) {
+                /* #2184 (§3.8.6 weak-wildcard assessment): the
+                 * shadowed particle's window is spent — this element
+                 * rides the wildcard. Its GLOBAL declaration types it
+                 * (strict) or — lax — types it when one resolves, and
+                 * the resolved type must stay COMPATIBLE with the
+                 * shadowed particle's (the governing-type law: IBM
+                 * s3_8_6's integer over the local string is neither's
+                 * derivation, so the instance fails). */
+                const XsdElementDecl* wcd =
+                    xsd_find_element_child_ns(s, cl, cu);
+                if (wcd) {
+                    /* §3.4.4.3's dynamic EDC, one-directional: the
+                     * resolved global's type must be validly derived
+                     * from the shadowed particle's — through the
+                     * facet-free union member path when the particle
+                     * types a union (wild066's date over the
+                     * date/time union; wild064's decimal over the
+                     * integer is NOT). */
+                    int govt_ok = !ptype || !wcd->type ||
+                                  xsd_type_derives_from(s, wcd->type,
+                                                        ptype);
+                    if (!govt_ok)
+                        govt_ok =
+                            xsd_union_member_path_fwd(s, ptype,
+                                                      wcd->type);
+                    if (!govt_ok) {
+                        verrf_atk(v, ce,
+                                  "element-declarations-consistent",
+                                  cl, "element", cl,
+                                  "the wildcard-admitted element's "
+                                  "governing type is not "
+                                  "compatible with the shadowed "
+                                  "particle's type");
+                    }
+                    validate_element_decl(v, s, ce, 0, wcd);
+                } else if (ltype) {
+                    validate_local(v, s, ce, cl, ltype, lfill,
+                                   ct ? ct->ns : NULL);
+                }
+                /* no declaration claims the name: tier-1 lax (the
+                 * pinned moxml#460 posture) */
             } else {
                 /* #2149: the particle's alternative chain governs the
                  * instance element (§3.12.4); no match falls back to
@@ -1676,6 +1737,7 @@ static void validate_children(struct xsd_validator* v,
          * moxml#460 notQName semantics — tier-1 lax direction) */
     }
     free(oc_attr);
+    free(wc_attr);
 }
 
 /* $value binds typed: a numeric-derived simple type binds the
@@ -2857,6 +2919,19 @@ static int xsd_union_member_path(struct leptris_xsd_schema* s,
         if (b) return xsd_union_member_path(s, b, target, depth + 1);
     }
     return 0;
+}
+
+/* The weak-wildcard law's union arm: resolve `union_name` (a
+ * particle type name — a local union, an inline synth slot, or a
+ * builtin spelling) and answer whether `target` reaches it through a
+ * FACET-FREE member path (the xsi:type lane's law). */
+static int xsd_union_member_path_fwd(struct leptris_xsd_schema* s,
+                                     const char* union_name,
+                                     const char* target) {
+    if (!union_name || !target) return 0;
+    const XsdSimple* sm = xsd_find_simple_pub(s, union_name);
+    if (!sm) return 0; /* builtins carry no union members */
+    return xsd_union_member_path(s, sm, target, 0);
 }
 
 static int xsi_type_override_fails_pos(struct leptris_xsd_schema* s,

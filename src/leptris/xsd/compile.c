@@ -38,7 +38,8 @@ extern int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                              const char* target_ns,
                              const char* const* names,
                              const char* const* ns_uris, size_t count,
-                             int* oc_from, unsigned char* oc_attr);
+                             int* oc_from, unsigned char* oc_attr,
+                             unsigned char* wc_attr);
 
 struct leptris_xsd_schema {
     size_t declaration_count;
@@ -2866,19 +2867,77 @@ static int xsd_doc_has_defined_sibling(LeptrisElement root) {
     return 0;
 }
 
+/* #2184 (the ibm S3_8_6/S3_10_1 weak-wildcard shapes): a SEQUENCE
+ * carrying an element particle and a wildcard whose namespace sets
+ * overlap cannot be a legal 1.0 schema — the UPA gate would reject
+ * it — so the overlap shape is itself the 1.1 dialect evidence (the
+ * multi-ID posture: syntax a legal 1.0 schema cannot carry). The
+ * choice-branch overlap is NOT evidence (any4_0's pinned 1.0
+ * rejection), and a @version/vc:maxVersion="1.0" pin keeps the
+ * gate. */
+static int xsd_seq_wc_overlap(LeptrisElement e, const char* tns,
+                              int depth) {
+    if (!e || depth > 24) return 0;
+    const char* l = NULL;
+    const char* p2 = NULL;
+    const char* u = NULL;
+    leptris_element_expanded_name(e, &l, &p2, &u);
+    if (!l || !u || strcmp(u, XSD_NS) != 0) return 0;
+    int hit = 0;
+    if (strcmp(l, "sequence") == 0) {
+        LeptrisElement kids[64];
+        int nk = xsd_upa_collect_children(e, kids, 64);
+        for (int i = 0; i + 1 < nk && !hit; i++) {
+            if (!xsd_upa_particle_can_repeat_or_skip(kids[i])) continue;
+            struct xsd_upa_first fi[XSD_UPA_MAX];
+            int ni = 0;
+            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            struct xsd_upa_first rest[XSD_UPA_MAX];
+            int nr = 0;
+            for (int j = i + 1; j < nk; j++) {
+                xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
+                              depth + 1);
+                if (!xsd_upa_nullable(kids[j], depth + 1)) break;
+            }
+            for (int a = 0; a < ni && !hit; a++)
+                for (int b = 0; b < nr && !hit; b++) {
+                    if (fi[a].wc[0] && rest[b].name) {
+                        if (xsd_upa_ns_covers(fi[a].wc, rest[b].ns,
+                                              tns))
+                            hit = 1;
+                    } else if (rest[b].wc[0] && fi[a].name) {
+                        if (xsd_upa_ns_covers(rest[b].wc, fi[a].ns,
+                                              tns))
+                            hit = 1;
+                    }
+                }
+        }
+    }
+    if (hit) return 1;
+    for (LeptrisNodeRef c = leptris_node_first_child(
+             leptris_element_as_node(e));
+         c && !hit; c = leptris_node_next_sibling(c)) {
+        if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        hit = xsd_seq_wc_overlap((LeptrisElement)c, tns, depth + 1);
+    }
+    return hit;
+}
+
 static int xsd_check_upa(struct leptris_xsd_schema* s,
                          LeptrisElement root) {
     if (!root) return 0;
     const char* tns = s->target_ns;
     /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
      * arm the relaxation on any 1.1 evidence (open034 is unmarked).
-     * #2151; #2184 adds the ##definedSibling spellings and the
-     * relaxed xs:all syntax — the all's counting match defers to
-     * element particles (weak wildcards) even on unmarked schemas
-     * (the ibm S3_3_6/S3_4_6 sets carry no version attribute). */
-    int relax_wildcard = (s->version_11 || s->saw_open_content ||
-                          s->saw_relaxed_all ||
-                          xsd_doc_has_defined_sibling(root));
+     * #2151; #2184 adds the ##definedSibling spellings, the relaxed
+     * xs:all syntax, and — the ibm S3_8_6/S3_10_1 rows — the
+     * sequence element-vs-wildcard overlap shape itself (a legal
+     * 1.0 schema cannot carry it). */
+    int relax_wildcard =
+        (s->version_11 || s->saw_open_content || s->saw_relaxed_all ||
+         xsd_doc_has_defined_sibling(root) ||
+         (!s->version_pinned_10 && xsd_seq_wc_overlap(root, tns, 0)));
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
          n; n = leptris_node_next_sibling(n)) {
@@ -12252,7 +12311,7 @@ LEPTRIS_API int leptris_xsd_content_valid(
     if (!model) return child_count == 0;
 
     int ok = xsd_content_valid(s, model, s->target_ns, child_names,
-                               child_ns, child_count, NULL, NULL);
+                               child_ns, child_count, NULL, NULL, NULL);
     /* #1894: -2 = the model crosses the automaton size cap — surface
      * the loud structured row and keep the public contract's -1 for
      * "not evaluable". */
