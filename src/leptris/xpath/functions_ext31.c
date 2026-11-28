@@ -6646,6 +6646,99 @@ static struct leptris_xpath_result* fn_normalize_unicode(XPathContext* ctx,
 }
 #endif
 
+/* ---- F&O §15.3.2: fn:in-scope-prefixes -----------------------------
+ * The prefixes of $element's IN-SCOPE namespaces: its own
+ * declarations plus every ancestor's, the nearest binding deciding
+ * (the leptris_element_lookup_namespace resolution law — a shadowed
+ * ancestor prefix never resurfaces; xmlns="" un-declares the
+ * default namespace), the prebound xml prefix, and a zero-length
+ * string when a default namespace is in scope. The order is
+ * implementation-dependent. (#2184 ns4's assert:
+ * in-scope-prefixes(.) = 'a' is existential over this sequence.) */
+static struct leptris_xpath_result* fn_in_scope_prefixes(
+        XPathContext* ctx, XPathASTNode** args, size_t n) {
+    LeptrisElement e = NULL;
+    if (n >= 1) {
+        struct leptris_xpath_result* r = xpath_evaluate(ctx, args[0]);
+        if (r) {
+            if (r->type == XPATH_RESULT_NODESET &&
+                r->value.nodeset_value && r->value.nodeset_value->count) {
+                void* nd = r->value.nodeset_value->nodes[0];
+                if (leptris_node_get_type(nd) == LEPTRIS_NODE_TYPE_ELEMENT)
+                    e = (LeptrisElement)nd;
+            }
+            leptris_xpath_result_free(r);
+        }
+    }
+    if (!e) {
+        snprintf(ctx->error_msg, sizeof(ctx->error_msg),
+                 "in-scope-prefixes(): the argument must be an "
+                 "element node");
+        snprintf(ctx->error_code, sizeof(ctx->error_code), "XPTY0004");
+        return NULL;
+    }
+    /* first-decided-wins tables, nearest element to the root */
+    size_t cap = 16, np = 0;
+    char** seen = (char**)malloc(cap * sizeof(*seen));
+    char* live = (char*)malloc(cap);
+    if (!seen || !live) {
+        free(seen);
+        free(live);
+        return seq_new();
+    }
+    int default_ns = -1; /* -1 undecided, 1 in scope, 0 un-declared */
+    for (LeptrisElement up = e; up;
+         up = leptris_element_get_parent(up)) {
+        size_t count = leptris_element_namespace_count(up);
+        for (size_t i = 0; i < count; i++) {
+            const char* p =
+                leptris_element_namespace_decl_prefix(up, i);
+            const char* u =
+                leptris_element_namespace_decl_uri(up, i);
+            int is_default = (!p || !p[0]);
+            int decided = 0;
+            if (is_default) {
+                decided = (default_ns >= 0);
+            } else {
+                for (size_t k = 0; k < np && !decided; k++)
+                    if (strcmp(seen[k], p) == 0) decided = 1;
+            }
+            if (decided) continue;
+            int is_live = (u && u[0]);
+            if (is_default) {
+                default_ns = is_live;
+                continue;
+            }
+            if (np == cap) {
+                size_t nc = cap * 2;
+                char** ns2 = (char**)realloc(seen,
+                                             nc * sizeof(*ns2));
+                char* nl2 = (char*)realloc(live, nc);
+                if (!ns2 || !nl2) continue;
+                seen = ns2;
+                live = nl2;
+                cap = nc;
+            }
+            char* d = strdup(p);
+            if (!d) continue;
+            seen[np] = d;
+            live[np] = (char)is_live;
+            np++;
+        }
+    }
+    struct leptris_xpath_result* out = seq_new();
+    if (out) {
+        seq_push_str(out, "xml");
+        for (size_t k = 0; k < np; k++)
+            if (live[k]) seq_push_str(out, seen[k]);
+        if (default_ns == 1) seq_push_str(out, "");
+    }
+    for (size_t k = 0; k < np; k++) free(seen[k]);
+    free(seen);
+    free(live);
+    return out;
+}
+
 static struct leptris_xpath_result* fn_resolve_qname(XPathContext* ctx,
         XPathASTNode** args, size_t n) {
     char* qn = re_str_arg(ctx, args, 0);
@@ -7185,6 +7278,7 @@ void xpath_register_fn31(XPathFunctionRegistry* registry) {
     xpath_function_registry_register(registry, "normalize-unicode", fn_normalize_unicode, 1, 2);
 #endif
     xpath_function_registry_register(registry, "resolve-QName", fn_resolve_qname, 2, 2);
+    xpath_function_registry_register(registry, "in-scope-prefixes", fn_in_scope_prefixes, 1, 1);
     xpath_function_registry_register(registry, "environment-variable", fn_environment_variable, 1, 1);
     xpath_function_registry_register(registry, "available-environment-variables", fn_available_env_vars, 0, 0);
     xpath_function_registry_register(registry, "unparsed-text", fn_unparsed_text, 1, 2);
