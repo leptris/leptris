@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [1.9.452] - 2026-11-28
+
+### Added
+
+- move/steal node adoption - leptris_document_adopt_move (#1548) (dom)
+
+### Fixed
+
+- local element declarations shadow globals in the content model (#2221) (xsd)
+- resolve externalRef in an included grammar against its own file (rng)
+- journal raw attribute views on interleaved-built trees (#2233) (flat)
+
+
+
 ## [1.9.451] - 2026-11-28
 
 The XSD 1.1 campaign's consolidation wave: the official W3C suite floor moves **2047 → 2148 / 2206 (92.8% → 97.4%)** — **100 of the remaining reds flipped in one slice train**, zero regressions, the residue dispositioned row by row.

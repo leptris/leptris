@@ -4262,8 +4262,8 @@ LEPTRIS_API const char* leptris_xinclude_get_encoding(LeptrisElement include_ele
  * CI's export-surface gate diffs the header against the binary. */
 #define LIBLEPTRIS_VERSION_MAJOR 1
 #define LIBLEPTRIS_VERSION_MINOR 9
-#define LIBLEPTRIS_VERSION_PATCH 451
-#define LIBLEPTRIS_VERSION_STRING "1.9.451"
+#define LIBLEPTRIS_VERSION_PATCH 452
+#define LIBLEPTRIS_VERSION_STRING "1.9.452"
 
 /**
  * Get libleptris version string
