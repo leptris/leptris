@@ -388,6 +388,12 @@ static void xsd_cm_free(XsdCm* cm) {
             if (a->compiled) leptris_xquery_free(a->compiled);
             free(a->test);
             free(a->ns_prolog);
+            for (int i = 0; i < a->ns_n; i++) {
+                free(a->ns_pfx[i]);
+                free(a->ns_uri[i]);
+            }
+            free(a->ns_pfx);
+            free(a->ns_uri);
             free(a);
             a = an;
         }
@@ -517,35 +523,57 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                         cm->ns = xsd_capture_unit_tns(s, e);
                 } else {
                     nm = leptris_element_attribute(e, "name");
-                    /* name-form: @form wins; otherwise the unit's
-                     * elementFormDefault decides */
+                    /* #2184 (§3.2.3.2): an explicit @targetNamespace
+                     * IS the declaration's {target namespace} — it
+                     * governs the particle's match at assessment
+                     * (target001: the restricted particle names the
+                     * tns-qualified child, so the instance's
+                     * no-namespace child misses). The form default
+                     * applies only when the attribute is absent.
+                     * (The §3.2.3 placement rules constrain WHEN the
+                     * attribute may appear — xsd_check_tns_placement.) */
+                    const char* own_tns =
+                        leptris_element_attribute(e, "targetNamespace");
                     const char* form =
                         leptris_element_attribute(e, "form");
-                    const char* efd = NULL;
-                    if (!form) {
-                        for (LeptrisElement up =
-                                 leptris_element_parent(e);
-                             up; up = leptris_element_parent(up)) {
-                            const char* ul = NULL;
-                            leptris_element_expanded_name(
-                                up, &ul, NULL, NULL);
-                            if (ul && strcmp(ul, "schema") == 0) {
-                                efd = leptris_element_attribute(
-                                    up, "elementFormDefault");
-                                break;
+                    if (own_tns) {
+                        if (own_tns[0]) {
+                            cm->ns = xsd_strdup(own_tns);
+                            /* the declaration's OWN tns — the
+                             * particle matches strictly
+                             * (target001/s3_2_3ii04-ii05) */
+                            cm->ns_explicit = 1;
+                        }
+                    } else {
+                        /* @form wins; otherwise the unit's
+                         * elementFormDefault decides */
+                        const char* efd = NULL;
+                        if (!form) {
+                            for (LeptrisElement up =
+                                     leptris_element_parent(e);
+                                 up; up = leptris_element_parent(up)) {
+                                const char* ul = NULL;
+                                leptris_element_expanded_name(
+                                    up, &ul, NULL, NULL);
+                                if (ul &&
+                                    strcmp(ul, "schema") == 0) {
+                                    efd = leptris_element_attribute(
+                                        up, "elementFormDefault");
+                                    break;
+                                }
                             }
                         }
-                    }
-                    int qualified =
-                        form ? strcmp(form, "qualified") == 0
-                             : (efd &&
-                                strcmp(efd, "qualified") == 0);
-                    if (qualified) {
-                        char* tns = xsd_capture_unit_tns(s, e);
-                        if (tns && tns[0])
-                            cm->ns = tns;
-                        else
-                            free(tns);
+                        int qualified =
+                            form ? strcmp(form, "qualified") == 0
+                                 : (efd &&
+                                    strcmp(efd, "qualified") == 0);
+                        if (qualified) {
+                            char* tns = xsd_capture_unit_tns(s, e);
+                            if (tns && tns[0])
+                                cm->ns = tns;
+                            else
+                                free(tns);
+                        }
                     }
                 }
                 cm->name = xsd_strdup(nm);
@@ -4534,6 +4562,9 @@ static int xsd_chain_terminal_notation(struct leptris_xsd_schema* s,
 
 /* Every enumeration value of a NOTATION-typed component names a
  * DECLARED notation (simple095 — "png" against jpeg-only). */
+static const XsdSimple* xsd_union_member_resolve(
+    struct leptris_xsd_schema* s, const char* ref);
+
 static int xsd_notation_enum_symbols_ok(struct leptris_xsd_schema* s,
                                         const XsdSimple* t) {
     for (const XsdFacetValue* e = t->enum_values; e; e = e->next) {
@@ -4563,6 +4594,35 @@ static int xsd_simple_type_refs_walk(struct leptris_xsd_schema* s,
                       "type-ref: the list item type is an "
                       "abstract or non-instantiable builtin");
         return 0;
+    }
+    /* #2184 (simple006): a NAMED list item type must RESOLVE —
+     * builtin spellings canonize to the xs: form at capture (any
+     * XMLSchema-bound prefix decides by local name, the engine's
+     * name-flat resolution); a leftover name matching neither a
+     * schema simpleType nor a builtin is the schema error. Inline
+     * anonymous item types ride item_def and need no resolution. */
+    if (t->item_type && !t->item_def) {
+        const char* colon = strchr(t->item_type, ':');
+        const char* local = colon ? colon + 1 : t->item_type;
+        int resolves =
+            strncmp(t->item_type, "xs:", 3) == 0 ||
+            xsd_union_member_resolve(s, local);
+        if (!resolves) {
+            char buf[256];
+            if (snprintf(buf, sizeof(buf), "xs:%s", local) <
+                    (int)sizeof(buf) &&
+                xsd_builtin_known(buf))
+                resolves = 1;
+        }
+        if (!resolves) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "src-list: the list item type '%s' does not "
+                     "resolve to a simple type",
+                     t->item_type);
+            xsd_set_error(s, msg);
+            return 0;
+        }
     }
     for (size_t i = 0; i < t->member_count; i++) {
         if (xsd_ref_names(t->members[i], "anyAtomicType") ||
@@ -5740,7 +5800,8 @@ static int xsd_check_schema_source(struct leptris_xsd_schema* s,
  * declarations). */
 static int xsd_check_tns_placement(struct leptris_xsd_schema* s,
                                    LeptrisElement e, int depth,
-                                   int in_restriction, int has_ct) {
+                                   int in_restriction, int has_ct,
+                                   int in_anytype_restriction) {
     if (!e || depth > 32) return 0;
     int top_level = (depth == 0);
     for (LeptrisNodeRef n =
@@ -5755,7 +5816,8 @@ static int xsd_check_tns_placement(struct leptris_xsd_schema* s,
         if (!cl || !cu || strcmp(cu, XSD_NS) != 0) {
             /* non-xs content: recurse without touching the context */
             if (xsd_check_tns_placement(s, c, depth + 1, in_restriction,
-                                        has_ct) != 0)
+                                        has_ct,
+                                        in_anytype_restriction) != 0)
                 return -1;
             continue;
         }
@@ -5791,8 +5853,23 @@ static int xsd_check_tns_placement(struct leptris_xsd_schema* s,
                              "a local declaration's targetNamespace "
                              "must equal the schema's or ride a "
                              "restriction");
+                } else if (in_anytype_restriction &&
+                           (!s->target_ns ||
+                            strcmp(s->target_ns, tns) != 0)) {
+                    /* #2184 (§3.2.3.2, s3_2_3si08): even inside the
+                     * anyType-restriction carve-out the local
+                     * declaration's targetNamespace must equal the
+                     * schema's own — a no-targetNamespace schema
+                     * cannot re-home its local particles through the
+                     * attribute (the IBM rule: base=anyType AND
+                     * [no schema tns OR a foreign tns] is a schema
+                     * error) */
+                    bad = 1;
+                    snprintf(why, sizeof(why),
+                             "an anyType restriction's local "
+                             "targetNamespace must equal the "
+                             "schema's");
                 }
-                (void)has_ct;
                 if (bad) {
                     char msg[400];
                     const char* nm =
@@ -5808,13 +5885,408 @@ static int xsd_check_tns_placement(struct leptris_xsd_schema* s,
         }
         int next_restriction = in_restriction;
         int next_ct = has_ct;
+        int next_anytype = in_anytype_restriction;
         if (strcmp(cl, "complexType") == 0) next_ct = 1;
-        if (strcmp(cl, "restriction") == 0 && next_ct)
+        if (strcmp(cl, "restriction") == 0 && next_ct) {
             next_restriction = 1;
-        else if (strcmp(cl, "extension") == 0) next_restriction = 0;
+            /* §3.2.3.2: the carve-out's law differs by the BASE —
+             * xs:anyType restrictions bind the local tns to the
+             * schema's own (si08); other bases carry the
+             * target001 re-homing */
+            const char* base = leptris_element_attribute(c, "base");
+            if (base && base[0]) {
+                char ruri[512], rlocal[256];
+                xsd_resolve_qname(c, base, ruri, sizeof(ruri),
+                                  rlocal, sizeof(rlocal));
+                if (strcmp(ruri, XSD_NS) == 0 &&
+                    strcmp(rlocal, "anyType") == 0)
+                    next_anytype = 1;
+            }
+        } else if (strcmp(cl, "extension") == 0) {
+            next_restriction = 0;
+            next_anytype = 0;
+        }
         if (xsd_check_tns_placement(s, c, depth + 1, next_restriction,
-                                    next_ct) != 0)
+                                    next_ct, next_anytype) != 0)
             return -1;
+    }
+    return 0;
+}
+
+/* ---- #2184 (class 10): the source-level type-reference checks ----- */
+
+/* The top-level simpleTypes' final blockage, collected once per
+ * walk: @final or the schema's finalDefault containing "extension"
+ * (#all included). */
+struct xsd_st_final {
+    char* name;
+    char* ns;
+    int blocks_ext;
+    struct xsd_st_final* next;
+};
+
+static void xsd_st_final_free(struct xsd_st_final* list) {
+    while (list) {
+        struct xsd_st_final* n = list->next;
+        free(list->name);
+        free(list->ns);
+        free(list);
+        list = n;
+    }
+}
+
+static int xsd_final_blocks_ext(const char* final) {
+    if (!final || !final[0]) return 0;
+    if (strcmp(final, "#all") == 0) return 1;
+    /* whitespace-separated derivation set */
+    const char* p = final;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+            p++;
+        size_t len = (size_t)(p - start);
+        if (len == strlen("extension") &&
+            strncmp(start, "extension", len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* The deprecated datatypes namespace (d3_1si01): XSD 1.1 demoted
+ * http://www.w3.org/2001/XMLSchema-datatypes — its components are
+ * no longer schema components, so a type reference resolving into
+ * it fails the schema. */
+static const char k_datatypes_ns[] =
+    "http://www.w3.org/2001/XMLSchema-datatypes";
+
+static int xsd_type_refs_source_walk(struct leptris_xsd_schema* s,
+                                     LeptrisElement e, int depth,
+                                     const struct xsd_st_final* finals,
+                                     int check_final) {
+    if (!e || depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0) {
+            const char* ref_attrs[3] = {0, 0, 0};
+            const char* type =
+                leptris_element_attribute(c, "type");
+            const char* base =
+                leptris_element_attribute(c, "base");
+            const char* item_type =
+                leptris_element_attribute(c, "itemType");
+            ref_attrs[0] = type;
+            ref_attrs[1] = base;
+            ref_attrs[2] = item_type;
+            for (int i = 0; i < 3; i++) {
+                if (!ref_attrs[i] || !ref_attrs[i][0]) continue;
+                char ruri[512], rlocal[256];
+                xsd_resolve_qname(c, ref_attrs[i], ruri, sizeof(ruri),
+                                  rlocal, sizeof(rlocal));
+                if (strcmp(ruri, k_datatypes_ns) == 0) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "the type reference '%s' resolves into "
+                             "the deprecated "
+                             "http://www.w3.org/2001/XMLSchema-"
+                             "datatypes namespace",
+                             ref_attrs[i]);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+            const char* members =
+                leptris_element_attribute(c, "memberTypes");
+            if (members && members[0]) {
+                const char* p = members;
+                while (*p) {
+                    while (*p == ' ' || *p == '\t' || *p == '\n' ||
+                           *p == '\r')
+                        p++;
+                    const char* start = p;
+                    while (*p && *p != ' ' && *p != '\t' &&
+                           *p != '\n' && *p != '\r')
+                        p++;
+                    if (p == start) continue;
+                    char token[256];
+                    size_t len = (size_t)(p - start);
+                    if (len >= sizeof(token)) len = sizeof(token) - 1;
+                    memcpy(token, start, len);
+                    token[len] = 0;
+                    char ruri[512], rlocal[256];
+                    xsd_resolve_qname(c, token, ruri, sizeof(ruri),
+                                      rlocal, sizeof(rlocal));
+                    if (strcmp(ruri, k_datatypes_ns) == 0) {
+                        char msg[512];
+                        snprintf(msg, sizeof(msg),
+                                 "the union member '%s' resolves "
+                                 "into the deprecated "
+                                 "http://www.w3.org/2001/XMLSchema-"
+                                 "datatypes namespace",
+                                 token);
+                        xsd_set_error(s, msg);
+                        return -1;
+                    }
+                }
+            }
+            /* bug 2074's law (simple004/005): deriving by EXTENSION
+             * from a simpleType whose final set forbids extension
+             * fails the schema. USE of the type stays legal
+             * (simple003); complex bases keep the 1.0 lax posture;
+             * a schema pinned to the 1.0 dialect keeps the 1.0 law. */
+            if (check_final && strcmp(cl, "extension") == 0 &&
+                !xsd_schema_pinned_10(s)) {
+                const char* base =
+                    leptris_element_attribute(c, "base");
+                if (base && base[0]) {
+                    char ruri[512], rlocal[256];
+                    xsd_resolve_qname(c, base, ruri, sizeof(ruri),
+                                      rlocal, sizeof(rlocal));
+                    for (const struct xsd_st_final* f = finals; f;
+                         f = f->next) {
+                        if (!f->blocks_ext || !f->name ||
+                            strcmp(f->name, rlocal) != 0)
+                            continue;
+                        /* the declaring unit's tns must match the
+                         * reference's namespace (a foreign-ns
+                         * same-named type is a different component) */
+                        const char* fns = f->ns ? f->ns : "";
+                        if (strcmp(fns, ruri) != 0) continue;
+                        char msg[512];
+                        snprintf(msg, sizeof(msg),
+                                 "cos-derivation-ok: the simple "
+                                 "type '%s' is final#extension — "
+                                 "deriving from it by extension "
+                                 "fails the schema",
+                                 base);
+                        xsd_set_error(s, msg);
+                        return -1;
+                    }
+                }
+            }
+        }
+        if (xsd_type_refs_source_walk(s, c, depth + 1, finals,
+                                      check_final) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int xsd_check_type_refs_source(struct leptris_xsd_schema* s,
+                                      LeptrisElement root) {
+    if (!root) return 0;
+    /* the top-level simpleTypes' final sets (explicit @final, else
+     * the schema's finalDefault) — keyed by (declaring unit's tns,
+     * name) */
+    const char* final_default =
+        leptris_element_attribute(root, "finalDefault");
+    const char* unit_tns =
+        leptris_element_attribute(root, "targetNamespace");
+    struct xsd_st_final* finals = NULL;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(root));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (!cl || !cu || strcmp(cu, XSD_NS) != 0 ||
+            strcmp(cl, "simpleType") != 0)
+            continue;
+        const char* nm = leptris_element_attribute(c, "name");
+        if (!nm || !nm[0]) continue;
+        const char* final =
+            leptris_element_attribute(c, "final");
+        if (!final) final = final_default;
+        if (!xsd_final_blocks_ext(final)) continue;
+        struct xsd_st_final* f =
+            (struct xsd_st_final*)calloc(1, sizeof(*f));
+        if (!f) break;
+        f->name = xsd_strdup(nm);
+        f->ns = unit_tns ? xsd_strdup(unit_tns) : NULL;
+        f->blocks_ext = 1;
+        f->next = finals;
+        finals = f;
+    }
+    int rc = xsd_type_refs_source_walk(s, root, 0, finals, 1);
+    xsd_st_final_free(finals);
+    return rc;
+}
+
+/* ---- #2184 (s2_2_4si01): the identity-constraint @ref shape --------
+ * §3.11.3.4: "If ref is present, then only id and <annotation> are
+ * allowed to appear together with ref." The IC capture table keys
+ * on TOP-LEVEL element declarations, so constraints riding LOCAL
+ * particles (si01's hi2) never reach the capture-side check — this
+ * source walk judges every xs:key/unique/keyref in the document
+ * directly. */
+static int xsd_check_ic_ref_shape_walk(struct leptris_xsd_schema* s,
+                                       LeptrisElement e, int depth) {
+    if (!e || depth > 32) return 0;
+    for (LeptrisNodeRef n =
+             leptris_node_first_child(leptris_element_as_node(e));
+         n; n = leptris_node_next_sibling(n)) {
+        if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
+            continue;
+        LeptrisElement c = (LeptrisElement)n;
+        const char* cl = NULL;
+        const char* cu = NULL;
+        leptris_element_expanded_name(c, &cl, NULL, &cu);
+        if (cl && cu && strcmp(cu, XSD_NS) == 0 &&
+            (strcmp(cl, "key") == 0 || strcmp(cl, "unique") == 0 ||
+             strcmp(cl, "keyref") == 0)) {
+            const char* ref =
+                leptris_element_attribute(c, "ref");
+            if (ref && ref[0]) {
+                const char* bad_attr = NULL;
+                if (leptris_element_attribute(c, "name"))
+                    bad_attr = "name";
+                else if (leptris_element_attribute(c, "refer"))
+                    bad_attr = "refer";
+                if (bad_attr) {
+                    char msg[400];
+                    snprintf(msg, sizeof(msg),
+                             "src-identity-constraint (§3.11.3.4): "
+                             "only id and annotation may appear "
+                             "beside ref — found @%s",
+                             bad_attr);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+                for (LeptrisNodeRef fc =
+                         leptris_node_first_child(
+                             leptris_element_as_node(c));
+                     fc; fc = leptris_node_next_sibling(fc)) {
+                    if (leptris_node_get_type(fc) !=
+                        LEPTRIS_NODE_TYPE_ELEMENT)
+                        continue;
+                    LeptrisElement fe = (LeptrisElement)fc;
+                    const char* fl = NULL;
+                    const char* fu = NULL;
+                    leptris_element_expanded_name(fe, &fl, NULL,
+                                                  &fu);
+                    if (!fl || !fu || strcmp(fu, XSD_NS) != 0)
+                        continue;
+                    if (strcmp(fl, "annotation") == 0) continue;
+                    char msg[400];
+                    snprintf(msg, sizeof(msg),
+                             "src-identity-constraint (§3.11.3.4): "
+                             "only id and annotation may appear "
+                             "beside ref — found <%s>",
+                             fl);
+                    xsd_set_error(s, msg);
+                    return -1;
+                }
+            }
+        }
+        if (xsd_check_ic_ref_shape_walk(s, c, depth + 1) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int xsd_check_ic_ref_shape(struct leptris_xsd_schema* s,
+                                  LeptrisElement root) {
+    return xsd_check_ic_ref_shape_walk(s, root, 0);
+}
+
+/* ---- #2184 (d4_3_15si04): the assert-test function sweep -----------
+ * §3.13.2 XPath valid: an assert (or §3.16 assertion facet) test
+ * naming an UNKNOWN function is the static XPST0017 error and fails
+ * the SCHEMA — the capture's "NULL = assertion false" posture is
+ * the DYNAMIC-error law (#2183), and a static error arriving there
+ * silently disarms the assertion. The check runs only over tests
+ * that COMPILED (a test the engine cannot parse stays the
+ * not-enforced posture — the #2149 lax arm); function resolution
+ * itself is judged by the xquery layer under the evaluator's own
+ * call-time rules (leptris_xquery_functions_resolve). */
+extern int leptris_xquery_functions_resolve(LeptrisXQuery q,
+                                            const char* const* pfx,
+                                            const char* const* uri,
+                                            size_t n, char* bad,
+                                            size_t cap);
+
+static int xsd_assert_functions_resolve(struct leptris_xsd_schema* s,
+                                        LeptrisXQuery q,
+                                        const XsdAssert* a) {
+    char bad[256];
+    if (leptris_xquery_functions_resolve(q,
+                                         (const char* const*)a->ns_pfx,
+                                         (const char* const*)a->ns_uri,
+                                         (size_t)a->ns_n, bad,
+                                         sizeof(bad)))
+        return 1;
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "src-assert (§3.13.2 XPath valid): the assert test "
+             "names an unknown function '%s'",
+             bad[0] ? bad : "?");
+    xsd_set_error(s, msg);
+    return 0;
+}
+
+static int xsd_check_assert_functions(struct leptris_xsd_schema* s) {
+    for (XsdCm* t = s->complex_types; t; t = t->next) {
+        for (XsdAssert* a = t->asserts; a; a = a->next) {
+            if (!a->compiled) continue;
+            if (!xsd_assert_functions_resolve(s, a->compiled, a))
+                return -1;
+        }
+    }
+    /* the §3.16 assertion facets: the compiled form is LAZY — wrap
+     * the test the same way the validate path does and judge the
+     * functions; a test that does not parse keeps the not-enforced
+     * posture. Facet tests resolve through the prolog's own
+     * declarations + the prebound prefixes (the corpus's facet
+     * constructors spell the canonical xs:). */
+    for (XsdSimple* t = s->simple_types; t; t = t->next) {
+        for (XsdAssertionFacet* f = t->assertions; f; f = f->next) {
+            if (!f->test || !f->test[0]) continue;
+            size_t pl = f->ns_prolog ? strlen(f->ns_prolog) : 0;
+            size_t tl = strlen(f->test);
+            char* wrapped = (char*)malloc(pl + tl + 64);
+            if (!wrapped) continue;
+            size_t o = 0;
+            if (pl) {
+                memcpy(wrapped + o, f->ns_prolog, pl);
+                o += pl;
+                wrapped[o++] = ' ';
+            }
+            {
+                static const char head[] =
+                    "declare variable $value external; ";
+                memcpy(wrapped + o, head, sizeof(head) - 1);
+                o += sizeof(head) - 1;
+            }
+            memcpy(wrapped + o, f->test, tl + 1);
+            LeptrisXQuery q = leptris_xquery_parse(wrapped, o + tl);
+            free(wrapped);
+            if (!q) continue;
+            char bad[256];
+            int ok = leptris_xquery_functions_resolve(q, NULL, NULL,
+                                                      0, bad,
+                                                      sizeof(bad));
+            leptris_xquery_free(q);
+            if (!ok) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "src-assert (§3.13.2 XPath valid): the "
+                         "assertion facet test names an unknown "
+                         "function '%s'",
+                         bad[0] ? bad : "?");
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
     }
     return 0;
 }
@@ -6097,6 +6569,15 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
     }
+
+    /* #2184 (d4_3_15si04): §3.13.2 XPath valid — an assert (or
+     * assertion-facet) test naming an unknown function is the
+     * static XPST0017 error and fails the SCHEMA. */
+    if (xsd_check_assert_functions(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
     if (root && xsd_check_schema_source(s, root, 0) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
@@ -6106,7 +6587,26 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     /* #2184: the targetNamespace placement rules — a top-level
      * declaration's tns must equal the schema's; a local one rides a
      * restriction and never @form (target002/004, s3_2_3si01-si07). */
-    if (root && xsd_check_tns_placement(s, root, 0, 0, 0) != 0) {
+    if (root && xsd_check_tns_placement(s, root, 0, 0, 0, 0) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184 (class 10): type references resolve — never into the
+     * deprecated datatypes namespace (d3_1si01), and never by
+     * EXTENSION from a simpleType whose final set forbids it
+     * (bug 2074's law, simple004/005; USE stays legal, simple003). */
+    if (root && xsd_check_type_refs_source(s, root) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
+    /* #2184 (s2_2_4si01): the identity-constraint @ref form admits
+     * only id and annotation — judged at the source level so
+     * constraints on LOCAL particles are covered too. */
+    if (root && xsd_check_ic_ref_shape(s, root) != 0) {
         if (status) *status = LEPTRIS_ERROR_PARSE;
         leptris_document_free(doc);
         return (LeptrisXsdSchema)s;
@@ -9205,6 +9705,44 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
      * unprefixed names resolve under, captured at the assert
      * element */
     a->ns_prolog = xsd_capture_ns_prolog(s, e, s->base_dir);
+    /* #2184 (d4_3_15si04): the SAME bindings as prefix→uri pairs
+     * for the static function-resolution sweep — including the XML
+     * vocabulary's own prefix, which the prolog omits (it must
+     * never resolve INSTANCE names, but a constructor call
+     * `zd:date(...)` resolves through it — assert024's shape). */
+    {
+        const int cap = 16;
+        a->ns_pfx = (char**)calloc((size_t)cap, sizeof(char*));
+        a->ns_uri = (char**)calloc((size_t)cap, sizeof(char*));
+        if (a->ns_pfx && a->ns_uri) {
+            for (LeptrisElement up = e; up;
+                 up = leptris_element_parent(up)) {
+                size_t n = leptris_element_namespace_count(up);
+                for (size_t i = 0; i < n && a->ns_n < cap; i++) {
+                    const char* dp =
+                        leptris_element_namespace_decl_prefix(up, i);
+                    if (!dp || !dp[0]) continue; /* the default decl */
+                    int dup = 0;
+                    for (int k = 0; k < a->ns_n && !dup; k++)
+                        if (strcmp(a->ns_pfx[k], dp) == 0) dup = 1;
+                    if (dup) continue;
+                    const char* du =
+                        leptris_element_namespace_decl_uri(up, i);
+                    if (!du) continue;
+                    a->ns_pfx[a->ns_n] = xsd_strdup(dp);
+                    a->ns_uri[a->ns_n] = xsd_strdup(du);
+                    if (a->ns_pfx[a->ns_n] && a->ns_uri[a->ns_n])
+                        a->ns_n++;
+                }
+            }
+        } else {
+            free(a->ns_pfx);
+            free(a->ns_uri);
+            a->ns_pfx = NULL;
+            a->ns_uri = NULL;
+            a->ns_n = 0;
+        }
+    }
     /* #2149: compiled when the schema claims 1.1 OR carries
      * xs:alternative chains — the alternative evidence marks schemas
      * whose selected types' asserts belong to the CTA semantics
@@ -12041,15 +12579,23 @@ static void xsd_ic_path_clear(XsdIcPath* p);
 static void xsd_ic_capture_shape(LeptrisElement e, XsdIc* ic) {
     const char* nm = leptris_element_attribute(e, "name");
     const char* ref = leptris_element_attribute(e, "ref");
-    if (nm) {
+    if (nm && ref) {
+        /* §3.11.3.2: name and ref are mutually exclusive */
+        ic->parse_error = 1;
+    } else if (nm) {
         ic->name = xsd_strdup(nm);
     } else if (ref) {
         const char* colon = strchr(ref, ':');
         ic->ref_local = xsd_strdup(colon ? colon + 1 : ref);
         ic->ref_pending = 1;
+        /* §3.11.3.4: beside @ref only @id and <annotation> are
+         * allowed — @refer (keyref's pointer) is a NAME-form
+         * attribute (s2_2_4si01) */
+        if (leptris_element_attribute(e, "refer"))
+            ic->parse_error = 1;
     }
     const char* refer = leptris_element_attribute(e, "refer");
-    if (refer) {
+    if (refer && !ic->ref_pending) {
         /* node tables key by constraint LOCAL name; the corpus never
          * refers across namespaces */
         const char* colon = strchr(refer, ':');
@@ -12064,6 +12610,13 @@ static void xsd_ic_capture_shape(LeptrisElement e, XsdIc* ic) {
         const char* fl = NULL, *fu = NULL;
         leptris_element_expanded_name(fe, &fl, NULL, &fu);
         if (!fl || !fu || strcmp(fu, XSD_NS) != 0) continue;
+        /* §3.11.3.4 (s2_2_4si01): the @ref form admits only the
+         * <annotation> child — a selector/field (or any other xs
+         * child) beside @ref is a schema error */
+        if (ic->ref_pending && strcmp(fl, "annotation") != 0) {
+            ic->parse_error = 1;
+            continue;
+        }
         const int is_sel = strcmp(fl, "selector") == 0;
         if (!is_sel && strcmp(fl, "field") != 0) continue;
         const char* xp = leptris_element_attribute(fe, "xpath");
@@ -12262,10 +12815,16 @@ static int xsd_resolve_ic_refs(struct leptris_xsd_schema* s) {
     for (XsdElementIcs* t = s->element_ics; t; t = t->next) {
         for (XsdIc* ic = t->constraints; ic; ic = ic->next) {
             if (ic->parse_error) {
-                xsd_set_error(s,
-                              "identity-constraint selector/field is "
-                              "outside the XSD 1.1 XPath subset "
-                              "(c-selector-xpath/c-fields-xpaths)");
+                if (ic->ref_pending)
+                    xsd_set_error(s,
+                                  "src-identity-constraint (§3.11.3.4): "
+                                  "only id and annotation may appear "
+                                  "beside ref");
+                else
+                    xsd_set_error(s,
+                                  "identity-constraint selector/field "
+                                  "is outside the XSD 1.1 XPath subset "
+                                  "(c-selector-xpath/c-fields-xpaths)");
                 return -1;
             }
             if (!ic->ref_pending) continue;

@@ -198,4 +198,22 @@ char* xpath_to_string(struct leptris_xpath_result* result);
 struct leptris_xpath_result* xpath_evaluate(XPathContext* context,
                                            XPathASTNode* ast);
 
+/* ---- intra-library: the static function-resolution law ------------
+ * The compile-time XPST0017 sweep (#2184 d4_3_15si04 — an assert
+ * test naming an unknown function fails the SCHEMA) resolves names
+ * through the SAME rules the evaluator applies at call time: the
+ * standard registry (functions + xs: constructors), the prebound
+ * prefixes (fn/xs/math/map/array/err), and any prefix bound to a
+ * function namespace. These two accessors expose the evaluator's
+ * tables so the sweep never drifts from call-time resolution. */
+
+/* The namespace URI a prebound prefix designates (fn, xs, math,
+ * map, array, err), or NULL when the prefix is not prebound. */
+const char* xpath_function_ns_for_prefix(const char* prefix);
+
+/* Whether a namespace URI's local names resolve through the
+ * standard registry when a prefix binds them (the fn/xs/math/map/
+ * array/err families plus the XSLT/EXSLT extension namespaces). */
+int xpath_uri_is_function_ns(const char* uri);
+
 #endif /* XPATH_EVALUATOR_H */

@@ -1329,6 +1329,200 @@ static char* xq_hoist_ctor_flwor(const char* q, size_t len,
     return out.s;
 }
 
+/* ---- #2184 (d4_3_15si04): static function resolution ---------------
+ *
+ * §3.13.2/§3.16.4: an assert (or assertion-facet) test must be a
+ * VALID XPath expression — an unknown function call is the static
+ * XPST0017 error and fails the SCHEMA, not the §3.13.4 "evaluation
+ * error = false" channel (that channel stays the DYNAMIC errors'
+ * law). The parse alone cannot judge it: leptris_xquery_parse
+ * accepts calls the evaluator would reject at run time, and the
+ * "NULL = assertion false" capture posture turns a static error
+ * into a silent not-enforced assertion. The resolution mirrors the
+ * evaluator's call-time rules EXACTLY (the shared tables in
+ * xpath_function_ns_for_prefix / xpath_uri_is_function_ns): the
+ * standard registry (functions and xs: constructors), the prebound
+ * prefixes, the query's own declare-namespace bindings, and the
+ * caller's map (the schema document's bindings — the prolog omits
+ * the XML vocabulary's own prefix). A name the engine does not
+ * IMPLEMENT but that is a STANDARD library member (the fn:/math:/
+ * map:/array: catalog below — ns4's in-scope-prefixes) stays
+ * valid: the schema compiles and the assert keeps today's
+ * not-enforced posture. Returns 1 when every call resolves; 0 with
+ * the offending name copied into `bad` (best effort, NULL
+ * tolerated). */
+
+/* The standard function library's LOCAL names (XPath F&O 1.0-3.1
+ * core, math, map, array) — the validity catalog for names the
+ * engine may not implement. Sorted; linear scan (compile-time
+ * only). */
+static const char* const k_std_fn_catalog[] = {
+    "abs", "acos", "acosh", "adjust-date-to-timezone",
+    "adjust-dateTime-to-timezone", "adjust-time-to-timezone",
+    "analyze-string", "append", "apply", "asin", "asin", "asinh",
+    "atan", "atan2", "atanh", "avg", "base-uri", "boolean",
+    "ceiling", "char", "characters", "codepoint-equal",
+    "codepoints-to-string", "collation", "collation-key", "collection",
+    "compare", "concat", "contains", "contains-token", "copy-of",
+    "cos", "cosh", "count", "current-date", "current-dateTime",
+    "current-time", "current-uri", "data", "date-time", "dateTime",
+    "day-from-date", "day-from-dateTime", "days-from-duration",
+    "deep-equal", "default-collation", "default-language",
+    "distinct-values", "doc", "doc-available", "document-uri",
+    "element-with-id", "empty", "encode-for-uri", "ends-with",
+    "entries", "environment-variable", "error", "escape-html-uri",
+    "exists", "exp", "exp10", "false", "filter", "flatten", "floor",
+    "fold-left", "fold-right", "foot", "for-each", "format-date",
+    "format-dateTime", "format-integer", "format-number",
+    "format-time", "function-arity", "function-lookup",
+    "function-name", "generate-id", "get", "head", "id", "idref",
+    "implicit-timezone", "index-of", "innermost", "in-scope-prefixes",
+    "insert-before", "iri-to-uri", "join", "json-doc", "json-to-xml",
+    "keys", "lang", "last", "local-name", "local-name-from-QName",
+    "log", "log10", "lower-case", "map", "matches", "max", "merge",
+    "min", "minutes-from-duration", "minutes-from-time",
+    "month-from-date", "month-from-dateTime", "months-from-duration",
+    "name", "namespace-uri", "namespace-uri-for-prefix",
+    "namespace-uri-from-QName", "nilled", "node-name",
+    "normalize-space", "normalize-unicode", "not", "number",
+    "one-or-more", "outermost", "parse-ietf-date", "parse-json",
+    "parse-xml", "parse-xml-fragment", "path", "pi", "position",
+    "pow", "prefix-from-QName", "put", "random-number-generator",
+    "remove", "replace", "resolve-QName", "resolve-uri", "reverse",
+    "root", "round", "round-half-to-even", "seconds",
+    "seconds-from-duration", "seconds-from-time", "serialize", "sin",
+    "sinh", "size", "sort", "sqrt", "starts-with", "string",
+    "string-join", "string-length", "string-to-codepoints",
+    "subarray", "submap", "subsequence", "substring",
+    "substring-after", "substring-before", "sum", "tail", "tan",
+    "tanh", "timezone-from-date", "timezone-from-dateTime",
+    "timezone-from-time", "tokenize", "trace", "translate", "true",
+    "unordered", "unparsed-entity-public-id", "unparsed-entity-uri",
+    "upper-case", "xml-to-json", "year-from-date",
+    "year-from-dateTime", "years-from-duration", "zero-or-one", NULL
+};
+
+static int xq_name_in_std_catalog(const char* local) {
+    if (!local) return 0;
+    for (int i = 0; k_std_fn_catalog[i]; i++)
+        if (strcmp(k_std_fn_catalog[i], local) == 0) return 1;
+    return 0;
+}
+
+static int xq_function_known(struct LeptrisXQueryInternal* q,
+                             const char* const* pfx,
+                             const char* const* uri, size_t n,
+                             const char* name) {
+    if (!name || !name[0]) return 1;
+    XPathFunctionRegistry* reg = xpath_function_registry_get_standard();
+    if (xpath_function_registry_get(reg, name)) return 1;
+    for (size_t i = 0; q && i < q->ndecls; i++)
+        if (q->decls[i].kind == XQ_DECL_FN && q->decls[i].name &&
+            strcmp(q->decls[i].name, name) == 0)
+            return 1;
+    const char* colon = strchr(name, ':');
+    if (!colon || !colon[1]) {
+        /* §3.13.2: the assert test's unprefixed function names
+         * resolve in the DEFAULT function namespace — the XPath
+         * fn: library (a schema document has no prolog to rebind
+         * it). A name the standard library declares but the engine
+         * does not implement stays valid (the not-enforced
+         * posture); anything else is the static XPST0017 error. */
+        return xq_name_in_std_catalog(name);
+    }
+    size_t pl = (size_t)(colon - name);
+    char p[64];
+    if (pl >= sizeof(p)) return 0;
+    memcpy(p, name, pl);
+    p[pl] = 0;
+    const char* ns = NULL;
+    for (size_t i = 0; q && i < q->ndecls; i++)
+        if (q->decls[i].kind == XQ_DECL_NS && q->decls[i].name &&
+            q->decls[i].uri && strcmp(q->decls[i].name, p) == 0) {
+            ns = q->decls[i].uri;
+            break;
+        }
+    /* the caller's map (the schema document's bindings — including
+     * the XML vocabulary's own prefix, which the prolog omits)
+     * outranks the prebound table, mirroring the eval-time order */
+    if (!ns) {
+        for (size_t i = 0; i < n; i++)
+            if (pfx && uri && pfx[i] && uri[i] &&
+                strcmp(pfx[i], p) == 0) {
+                ns = uri[i];
+                break;
+            }
+    }
+    if (!ns) ns = xpath_function_ns_for_prefix(p);
+    if (!xpath_uri_is_function_ns(ns)) return 0;
+    char local[256];
+    if (snprintf(local, sizeof(local), "%s", colon + 1) >=
+        (int)sizeof(local))
+        return 0;
+    if (xpath_function_registry_get(reg, local)) return 1;
+    static const char k_fn_uri[] =
+        "http://www.w3.org/2005/xpath-functions";
+    static const char k_math_uri[] =
+        "http://www.w3.org/2005/xpath-functions/math";
+    static const char k_map_uri[] =
+        "http://www.w3.org/2005/xpath-functions/map";
+    static const char k_array_uri[] =
+        "http://www.w3.org/2005/xpath-functions/array";
+    if (ns && (strcmp(ns, k_fn_uri) == 0 || strcmp(ns, k_math_uri) == 0 ||
+               strcmp(ns, k_map_uri) == 0 ||
+               strcmp(ns, k_array_uri) == 0))
+        return xq_name_in_std_catalog(local);
+    /* a prefix bound to the XML SCHEMA namespace spells a
+     * CONSTRUCTOR call (assert024's xsd:QName / the guard's
+     * zd:date) — the registry stores those under the canonical
+     * xs: spelling */
+    static const char k_schema_uri[] =
+        "http://www.w3.org/2001/XMLSchema";
+    if (ns && strcmp(ns, k_schema_uri) == 0) {
+        char ctor[288];
+        if (snprintf(ctor, sizeof(ctor), "xs:%s", local) <
+            (int)sizeof(ctor))
+            return xpath_function_registry_get(reg, ctor) != NULL;
+    }
+    return 0;
+}
+
+static int xq_ast_functions_resolve(const XPathASTNode* ast,
+                                    struct LeptrisXQueryInternal* q,
+                                    const char* const* pfx,
+                                    const char* const* uri, size_t n,
+                                    char* bad, size_t cap, int depth) {
+    if (!ast || depth > 64) return 1;
+    if (ast->type == XPATH_AST_FUNCTION_CALL &&
+        !xq_function_known(q, pfx, uri, n, ast->value)) {
+        if (bad && cap) {
+            snprintf(bad, cap, "%s", ast->value ? ast->value : "?");
+        }
+        return 0;
+    }
+    for (size_t i = 0; i < ast->child_count; i++)
+        if (!xq_ast_functions_resolve(ast->children[i], q, pfx, uri,
+                                      n, bad, cap, depth + 1))
+            return 0;
+    return 1;
+}
+
+int leptris_xquery_functions_resolve(LeptrisXQuery query,
+                                     const char* const* pfx,
+                                     const char* const* uri, size_t n,
+                                     char* bad, size_t cap) {
+    struct LeptrisXQueryInternal* q =
+        (struct LeptrisXQueryInternal*)query;
+    if (!q) return 1;
+    for (size_t i = 0; i < q->ndecls; i++)
+        if (q->decls[i].ast &&
+            !xq_ast_functions_resolve(q->decls[i].ast, q, pfx, uri, n,
+                                      bad, cap, 0))
+            return 0;
+    return xq_ast_functions_resolve(q->return_ast, q, pfx, uri, n, bad,
+                                    cap, 0);
+}
+
 LEPTRIS_API LeptrisXQuery leptris_xquery_parse(const char* query,
                                                size_t len) {
     if (!query || !len) return NULL;
