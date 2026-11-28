@@ -89,6 +89,43 @@ std::string make_attr_fixture(int elems, int attrs) {
     return xml;
 }
 
+/* MSVC has no setenv/unsetenv (the interleaved suite's pattern):
+ * _putenv_s(k, "") is the only "unset" the CRT offers, and it
+ * leaves an empty value the memo treats as unset. */
+extern "C" void leptris_dp_env_cache_reset(void);
+#ifdef _WIN32
+static void set_env(const char* k, const char* v) { _putenv_s(k, v); leptris_dp_env_cache_reset(); }
+static void unset_env(const char* k) { _putenv_s(k, ""); leptris_dp_env_cache_reset(); }
+#else
+static void set_env(const char* k, const char* v) { setenv(k, v, 1); leptris_dp_env_cache_reset(); }
+static void unset_env(const char* k) { unsetenv(k); leptris_dp_env_cache_reset(); }
+#endif
+
+/* The lane specs pin the CLASSIC-parse census family (the bounded
+ * lane and the exact-count lane — the interleaved lane never
+ * consults the census and, being env-gated, is otherwise covered by
+ * test_interleaved). The fixture pins that family regardless of the
+ * ambient environment a CI leg may force (LEPTRIS_INTERLEAVED=1,
+ * LEPTRIS_IL_MIN=0), saving and restoring the ambient IL_MIN so the
+ * leg's own setting survives these tests. */
+class CensusCopyLane : public ::testing::Test {
+protected:
+    void SetUp() override {
+        const char* cur = std::getenv("LEPTRIS_IL_MIN");
+        had_min_ = (cur != NULL);
+        old_min_ = had_min_ ? std::string(cur) : std::string();
+        set_env("LEPTRIS_IL_MIN", "2147483647");
+    }
+    void TearDown() override {
+        if (had_min_)
+            set_env("LEPTRIS_IL_MIN", old_min_.c_str());
+        else
+            unset_env("LEPTRIS_IL_MIN");
+    }
+    bool had_min_;
+    std::string old_min_;
+};
+
 }  // namespace
 
 /* ---- Kernel: SIMD core vs scalar oracle (cross-arch law) ---- */
@@ -159,7 +196,7 @@ TEST(CensusCopyKernel, RandomizedCrossCheck) {
 
 /* ---- Lane: bounded-census parse behavior (public API) ---- */
 
-TEST(CensusCopyLane, AttrFixtureParityBothEntries) {
+TEST_F(CensusCopyLane, AttrFixtureParityBothEntries) {
     std::string xml = make_attr_fixture(4, 16);
     const LeptrisParseFlags door_a = static_cast<LeptrisParseFlags>(
         LEPTRIS_PARSE_SKIP_DUP_DETECTION |
@@ -195,7 +232,7 @@ TEST(CensusCopyLane, AttrFixtureParityBothEntries) {
     }
 }
 
-TEST(CensusCopyLane, InvalidUtf8SmallDocStillFails) {
+TEST_F(CensusCopyLane, InvalidUtf8SmallDocStillFails) {
     /* The encoding gate moved inside the bounded lane — the verdict
      * must not move: truncated sequence and stray continuation both
      * reject. */
@@ -213,7 +250,7 @@ TEST(CensusCopyLane, InvalidUtf8SmallDocStillFails) {
     }
 }
 
-TEST(CensusCopyLane, ValidMultibyteUtf8ParsesAndRoundTrips) {
+TEST_F(CensusCopyLane, ValidMultibyteUtf8ParsesAndRoundTrips) {
     std::string s = "<r a=\"caf\xc3\xa9\">na\xc3\xa9ve</r>";
     LeptrisDocument d = leptris_parse_string(s.data(), s.size(), NULL);
     ASSERT_NE(d, nullptr);
@@ -227,7 +264,7 @@ TEST(CensusCopyLane, ValidMultibyteUtf8ParsesAndRoundTrips) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, TagDenseDocNearElementBound) {
+TEST_F(CensusCopyLane, TagDenseDocNearElementBound) {
     /* `<a/>` is 4 bytes — the len/4 element density the sizing bound
      * must hold for. All elements must carve (no arena exhaustion,
      * no silent loss). */
@@ -242,7 +279,7 @@ TEST(CensusCopyLane, TagDenseDocNearElementBound) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, AttrDenseDocAtQuoteBound) {
+TEST_F(CensusCopyLane, AttrDenseDocAtQuoteBound) {
     /* `a=''` is 4 bytes per attribute carrying 2 quotes — the quote
      * density the attr-capacity bound keys on. */
     std::string xml = "<r>";
@@ -257,13 +294,17 @@ TEST(CensusCopyLane, AttrDenseDocAtQuoteBound) {
     ASSERT_NE(c, nullptr);
     const char* names[8];
     const char* vals[8];
-    EXPECT_EQ(leptris_element_attributes_raw(c, names, vals, 8), 1u);
-    EXPECT_STREQ(names[0], "a");
-    EXPECT_STREQ(vals[0], "");
+    const size_t na = leptris_element_attributes_raw(c, names, vals, 8);
+    EXPECT_EQ(na, 1u);
+    /* never read the out-slots when the accessor returned none */
+    if (na >= 1u) {
+        EXPECT_STREQ(names[0], "a");
+        EXPECT_STREQ(vals[0], "");
+    }
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, CommentHeavyLtByteDensity) {
+TEST_F(CensusCopyLane, CommentHeavyLtByteDensity) {
     /* '<' bytes inside comments inflate the count3 '<' census without
      * creating elements — the bounded lane sizes markup from len
      * bounds instead; comment nodes must still all carve. (Comments
@@ -284,7 +325,7 @@ TEST(CensusCopyLane, CommentHeavyLtByteDensity) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, CdataWithLtBytesParses) {
+TEST_F(CensusCopyLane, CdataWithLtBytesParses) {
     std::string xml = "<r><![CDATA[<<<< && ''\"]]><t/></r>";
     LeptrisDocument d = leptris_parse_string(xml.data(), xml.size(), NULL);
     ASSERT_NE(d, nullptr);
@@ -295,7 +336,7 @@ TEST(CensusCopyLane, CdataWithLtBytesParses) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, CopySourceDocsKeepValueSemantics) {
+TEST_F(CensusCopyLane, CopySourceDocsKeepValueSemantics) {
     /* '&' and literal tab/LF arm the copy-source census: entity text
      * decodes, attribute values normalize tab/LF/CR to one space
      * (XML 1.0 §3.3.3, CRLF as one break). */
@@ -311,7 +352,7 @@ TEST(CensusCopyLane, CopySourceDocsKeepValueSemantics) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, MultilineDocRoundTrips) {
+TEST_F(CensusCopyLane, MultilineDocRoundTrips) {
     /* valws > 0 keeps the pristine carve alive; the document must
      * round-trip through serialize (quotes normalize to doubles,
      * document-tail newline is not tree content). */
@@ -325,7 +366,7 @@ TEST(CensusCopyLane, MultilineDocRoundTrips) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, EntityInAttrValueLazilyExpands) {
+TEST_F(CensusCopyLane, EntityInAttrValueLazilyExpands) {
     std::string s = "<r a='x&amp;y&amp;z'/>";
     LeptrisDocument d = leptris_parse_string(s.data(), s.size(), NULL);
     ASSERT_NE(d, nullptr);
@@ -335,7 +376,7 @@ TEST(CensusCopyLane, EntityInAttrValueLazilyExpands) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, DifferentialSmallVsLargeSerialize) {
+TEST_F(CensusCopyLane, DifferentialSmallVsLargeSerialize) {
     /* Lane selection is by the document's own size, so the same
      * content cannot ride both lanes. Instead: serialize the fast
      * lane's per-element unit, then verify the classic lane's tree
@@ -384,7 +425,7 @@ TEST(CensusCopyLane, DifferentialSmallVsLargeSerialize) {
     leptris_document_free(dl);
 }
 
-TEST(CensusCopyLane, RecoverFlagNeverNullOnSmallDoc) {
+TEST_F(CensusCopyLane, RecoverFlagNeverNullOnSmallDoc) {
     std::string s = "<r><a><b></r>";
     LeptrisDocument d = leptris_parse_string_flags(
         s.data(), s.size(), LEPTRIS_PARSE_RECOVER, NULL);
@@ -392,7 +433,7 @@ TEST(CensusCopyLane, RecoverFlagNeverNullOnSmallDoc) {
     if (d) leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, DropWsTextFlagParity) {
+TEST_F(CensusCopyLane, DropWsTextFlagParity) {
     /* Boundary whitespace of NON-blank text is data under
      * DROP_WS_TEXT; whitespace-only runs drop. Assert the fast lane
      * matches the classic lane's verdict on the same content. */
@@ -418,7 +459,7 @@ TEST(CensusCopyLane, DropWsTextFlagParity) {
     leptris_document_free(dbig);
 }
 
-TEST(CensusCopyLane, InplaceSmallDocParses) {
+TEST_F(CensusCopyLane, InplaceSmallDocParses) {
     /* leptris_parse_string_inplace keeps its own entry (no copy pass
      * to fuse with) — behavior must be unchanged. */
     std::string xml = make_attr_fixture(4, 16);
@@ -432,7 +473,7 @@ TEST(CensusCopyLane, InplaceSmallDocParses) {
     leptris_document_free(d);
 }
 
-TEST(CensusCopyLane, DeclarationAndNamespacesRoundTrip) {
+TEST_F(CensusCopyLane, DeclarationAndNamespacesRoundTrip) {
     std::string s =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<r xmlns:p=\"urn:t\"><p:a p:x='1'/></r>";
