@@ -656,7 +656,7 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                       const char* target_ns, const char* const* names,
                       const char* const* ns_uris, size_t count,
                       int* oc_from, unsigned char* oc_attr,
-                      unsigned char* wc_attr) {
+                      unsigned char* wc_attr, XsdCm** hit_particle) {
     if (!model) return -1;
     /* #2184: the weak-wildcard attribution trace — wc_attr[c] is 1
      * when child c advanced ONLY through wildcard transitions (the
@@ -870,12 +870,27 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
     ss_add(&live, n.start);
     ss_close(&live, &n);
 
+    /* #2221: the per-child particle trace — WHICH particle consumed
+     * each child (XSD 1.0 §3.9.3: assessment binds the instance
+     * element to the particle it matched, so a same-named LOCAL
+     * particle governs only its own slot and a wildcard-absorbed
+     * child faces the wildcard's processContents). Element-first:
+     * when several live branches could take the child, the element
+     * particle wins the attribution (greedy particle-first, the same
+     * law the open-content trace rides — §3.4.4.3 cl. 3.3); UPA-valid
+     * models are deterministic, so the corner only exists for
+     * UPA-violating schemas where any reading is acceptable. Borrowed
+     * pointers (model-owned); entries may stay NULL when the walk
+     * dies mid-sequence — the caller gates on a full (accepted)
+     * walk. */
     for (size_t c = 0; c < count; c++) {
         StateSet next;
         memset(&next, 0, sizeof(next));
         const char* uri = ns_uris ? ns_uris[c] : NULL;
         int particle_hit = 0;
         int wc_hit = 0;
+        XsdCm* elem_hit = NULL;
+        XsdCm* wild_hit = NULL;
         for (size_t i = 0; i < live.count; i++) {
             for (size_t t = 0; t < n.count; t++) {
                 CmTrans* tr = &n.trans[t];
@@ -892,6 +907,7 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                      * own ns (cross-ns groups, #1881 sets). */
                     const char* pns = p->ns;
                     int named = (strcmp(p->name, names[c]) == 0);
+                    int direct = named;
                     if (!named && n.s) {
                         const XsdElementDecl* m =
                             xsd_substitute_member(n.s, names[c],
@@ -920,6 +936,13 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                     if (named && pns_ok) {
                         ss_add(&next, tr->to);
                         particle_hit = 1;
+                        /* the trace binds the DECLARATION the child
+                         * matched: a substitute hit rides the member's
+                         * own global declaration (elemZ020), so only
+                         * direct-name matches carry the head particle
+                         * here — substitute hits stay untraced and the
+                         * typing walk resolves the member decl. */
+                        if (direct && !elem_hit) elem_hit = p;
                     }
                 } else if (p->kind == XSD_CM_ANY) {
                     /* #1735: ##targetNamespace/##other are relative
@@ -948,6 +971,7 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
                         continue;
                     ss_add(&next, tr->to);
                     wc_hit = 1;
+                    if (!wild_hit) wild_hit = p;
                 }
             }
         }
@@ -956,6 +980,12 @@ int xsd_content_valid(struct leptris_xsd_schema* s, XsdCm* model,
          * particle-first law); only a child no particle could take
          * rides the wildcard. */
         if (wc_attr) wc_attr[c] = (!particle_hit && wc_hit) ? 1 : 0;
+        /* #2221: the per-child particle trace — element-first: the
+         * DIRECT-name element particle outranks the wildcard slot;
+         * substitute-only hits stay untraced (both NULL) and the
+         * typing walk resolves the member declaration. */
+        if (hit_particle)
+            hit_particle[c] = elem_hit ? elem_hit : wild_hit;
         free(live.states);
         live = next;
         ss_close(&live, &n);
