@@ -763,3 +763,51 @@ list, in yield order:**
     target001.n1 (a local declaration's own targetNamespace must
     govern the particle's namespace match at assessment — the
     capture keeps the local tns but the walk matches efd only).
+
+## The wildcard/all wave — branch xsd11-wild-all (#2184)
+
+Clusters 1-4 of the dispositioned remainder closed on the
+xsd11-wild-all branch (measured 2171/2206 with the 1.0 corpus at
+1045, red-set diffed clean against the 58-row list):
+
+1. all-compile residue (10): cos-all-limited at the post-capture
+   sweep — a group reference inside an all resolves to an ALL group
+   at minOccurs=maxOccurs=1 (all008's sequence group, all011's
+   choice, all009/010's occurrence bounds); the all UPA over one
+   all's particles — element identity, substitution-group
+   membership either direction, a COMMON member (all241/242, and
+   subsgroup903's multi-head shape rides the same sweep), and
+   wildcard namespace-set intersection (all243); the all-extension
+   merge rejects overlapping element particles (all302's
+   re-declared c, all303's common-member g/d) and an extension all
+   carries the base's occurrence range (all313 vs all314's
+   consistent (0,1) pair).
+2. Wild compile-time EDC (3): the wildcard arm of
+   cos-element-consistent — a strict/lax wildcard admitting the
+   like-named GLOBAL declaration type-checks the two type tables at
+   compile time (wild078/079/081; skip owes nothing, and wild063's
+   deriving pair stays legal on the both-tables-absent posture).
+3. Wildcard restriction over-rejection (2): the doc-level UPA gate
+   enumerates the EFFECTIVE wildcard sets (positive grammar minus
+   notNamespace), and the all-restriction sum law maps one derived
+   wildcard onto the UNION of base wildcard splits (pc-matched,
+   name-level coverage over the notQName candidates, per-owner min
+   riding only set-covering owners — all244's name routing and
+   wild048/051's notQName gaps stay rejected).
+4. Wildcard assessment residue (4): a chameleon include's
+   components adopt the includer's effective tns, so
+   ##targetNamespace in a wildcard's notNamespace resolves per the
+   owning unit (wild009/010); xsi:nil must spell a boolean lexical
+   even under a skip wildcard (wild042); the wildcard-slot children
+   (same-name particle slots exhausted) assess the
+   wildcard-resolved global declaration under the dynamic EDC with
+   the union-member arm, and xsi:type substitutes for the resolved
+   declaration's type with the EDC holding for the selected type
+   (wild063.n1). wild041's xsi-namespace attribute use fails the
+   schema beside the four built-ins.
+
+Rider flips from the same mechanisms: assert020/021.v1 (the
+included unit's asserts now compile — per-unit evidence re-arm —
+and the nested models validate under the chameleon tns) and
+subsgroup903 (the all UPA's common-member law). Owner-decision rows
+(id001/id003/id015) and clusters 5-10 are untouched.
