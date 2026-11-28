@@ -17,7 +17,8 @@
 #include "xsd_internal.h"
 
 /* rng_regex.c — the XSD pattern dialect (libxml2-compatible). */
-extern int rng_regex_matches(const char* pat, const char* text);
+extern int rng_regex_matches_dialect(const char* pat, const char* text,
+                                     int xsd_10);
 
 /* The terminal-builtin classes driving applicability. */
 enum {
@@ -609,7 +610,8 @@ int xsd_builtin_valid(const char* type, const char* v) {
 /* ---- facet checking on a captured simpleType --------------------- */
 
 int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                     const char* terminal_base, int chain_is_list);
+                     const char* terminal_base, int chain_is_list,
+                     int xsd_10);
 
 /* The base chain resolves to a built-in reference: validate the
  * lexical against it first. */
@@ -631,9 +633,11 @@ static int base_valid(const char* base, const char* v) {
 }
 
 static int facet_check_body(const XsdSimple* s, const char* v,
-                            const char* terminal_base, int chain_is_list);
+                            const char* terminal_base, int chain_is_list,
+                            int xsd_10);
 static int facet_check(const XsdSimple* s, const char* v,
-                       const char* terminal_base, int chain_is_list) {
+                       const char* terminal_base, int chain_is_list,
+                       int xsd_10) {
     /* #1936 (stG010): a LIST value space is whitespace=collapse —
      * element content arrives as "\n\tCA\n  " and the enumeration
      * /pattern facets must see the collapsed form ("CA"), not the
@@ -649,7 +653,8 @@ static int facet_check(const XsdSimple* s, const char* v,
     int collapse_declared = s->whitespace &&
         strcmp(s->whitespace, "collapse") == 0;
     if (!list_valued && !collapse_declared)
-        return facet_check_body(s, v, terminal_base, chain_is_list);
+        return facet_check_body(s, v, terminal_base, chain_is_list,
+                                xsd_10);
     while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r') v++;
     size_t n = strlen(v);
     while (n > 0 && (v[n-1] == ' ' || v[n-1] == '\t' ||
@@ -657,7 +662,8 @@ static int facet_check(const XsdSimple* s, const char* v,
         n--;
     char* collapsed = (char*)malloc(n + 1);
     if (!collapsed)
-        return facet_check_body(s, v, terminal_base, chain_is_list);
+        return facet_check_body(s, v, terminal_base, chain_is_list,
+                                xsd_10);
     size_t o = 0;
     int in_ws = 0;
     for (size_t i = 0; i < n; i++) {
@@ -672,7 +678,8 @@ static int facet_check(const XsdSimple* s, const char* v,
     }
     if (o && collapsed[o-1] == ' ') o--;
     collapsed[o] = 0;
-    int rc = facet_check_body(s, collapsed, terminal_base, chain_is_list);
+    int rc = facet_check_body(s, collapsed, terminal_base, chain_is_list,
+                              xsd_10);
     free(collapsed);
     return rc;
 }
@@ -825,12 +832,13 @@ static int xsd_decimal_parse_exact(const char* v, char* digits,
                                    int* inf);
 static int facet_check_body(const XsdSimple* s, const char* v,
                             const char* terminal_base,
-                            int chain_is_list) {
-    /* several patterns are a disjunction (p16: same as [abc]+|[123]+) */
+                            int chain_is_list, int xsd_10) {
+    /* several patterns are a disjunction (p16: same as [abc]+|[123]+)
+     * — the dash dialect rides the schema's 1.0 pin (#2184) */
     if (s->patterns) {
         int matched = 0;
         for (XsdFacetValue* p = s->patterns; p; p = p->next)
-            if (rng_regex_matches(p->text, v)) {
+            if (rng_regex_matches_dialect(p->text, v, xsd_10)) {
                 matched = 1;
                 break;
             }
@@ -1104,13 +1112,14 @@ static int facet_check_body(const XsdSimple* s, const char* v,
 }
 
 int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                     const char* terminal_base, int chain_is_list) {
+                     const char* terminal_base, int chain_is_list,
+                     int xsd_10) {
     if (!simple || !v) return 0;
     int base = base_valid(simple->base, v);
     if (base == 0) return 0;
     /* base == -1 (local base) delegates to the resolver's chain in
      * the caller; facets still apply here. */
-    return facet_check(simple, v, terminal_base, chain_is_list);
+    return facet_check(simple, v, terminal_base, chain_is_list, xsd_10);
 }
 
 /* ---- #2155: the 1.1 facet-applicability and value-space table -----

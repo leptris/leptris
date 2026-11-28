@@ -23,7 +23,8 @@
 void xsd_capture_ics(struct leptris_xsd_schema* s,
                      LeptrisElement elem, const char* element_name);
 extern int xsd_simple_valid(const XsdSimple* simple, const char* v,
-                            const char* terminal_base, int chain_is_list);
+                            const char* terminal_base, int chain_is_list,
+                            int xsd_10);
 extern struct xsd_validator* xsd_validator_new(
     struct leptris_xsd_schema* s);
 extern void xsd_validator_free(struct xsd_validator* v);
@@ -1049,7 +1050,9 @@ const XsdSimple* xsd_find_simple_ns_pub(
 }
 
 extern int xsd_builtin_valid(const char* type, const char* v);
-extern int rng_regex_matches(const char* pat, const char* text);
+extern int rng_regex_matches_dialect(const char* pat, const char* text,
+                                     int xsd_10);
+extern int xsd_schema_pinned_10(struct leptris_xsd_schema* s);
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
                            const XsdSimple* t, const char* v, int depth);
 
@@ -1137,11 +1140,13 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
         if (ok && t->min_length >= 0 && (long)n < t->min_length) ok = 0;
         if (ok && t->max_length >= 0 && (long)n > t->max_length) ok = 0;
         /* pattern applies to the whole lexical; several patterns are
-         * a disjunction (p16: same as [abc]+|[123]+) */
+         * a disjunction (p16: same as [abc]+|[123]+) — the dash
+         * dialect rides the schema's 1.0 pin (#2184) */
         if (ok && t->patterns) {
             int matched = 0;
             for (XsdFacetValue* p = t->patterns; p; p = p->next)
-                if (rng_regex_matches(p->text, v)) {
+                if (rng_regex_matches_dialect(p->text, v,
+                                              xsd_schema_pinned_10(s))) {
                     matched = 1;
                     break;
                 }
@@ -1163,7 +1168,8 @@ static int xsd_deriv_valid(struct leptris_xsd_schema* s,
      * this level's facets. */
     if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
         return 0;
-    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t), 0);
+    return xsd_simple_valid(t, v, xsd_chain_terminal(s, t), 0,
+                            xsd_schema_pinned_10(s));
 }
 
 static int xsd_valid_chain(struct leptris_xsd_schema* s,
@@ -1181,7 +1187,8 @@ static int xsd_valid_chain(struct leptris_xsd_schema* s,
     if (t->base_def && !xsd_deriv_valid(s, t->base_def, v, depth + 1))
         return 0;
     return xsd_simple_valid(t, v, xsd_chain_terminal(s, t),
-                            xsd_chain_is_list(s, t));
+                            xsd_chain_is_list(s, t),
+                            xsd_schema_pinned_10(s));
 }
 
 static void xsd_set_error(struct leptris_xsd_schema* s, const char* msg) {
@@ -1752,17 +1759,24 @@ static void xsd_canon_builtin_refs(struct leptris_xsd_schema* s) {
 /* XSD Part 2 §4.3.4: every pattern facet value is a regular
  * expression — an unsupported one is a schema error AT COMPILE
  * time (reG26-33/reH19: the suite's schemaTest=invalid rows, e.g.
- * the mid-dash [a-c-1-4x-z-7-9]). Walks the def chains so inline
- * anonymous members are covered too. */
-extern int rng_regex_supported(const char* pat);
-static int xsd_patterns_supported(const XsdSimple* t, int depth) {
+ * the mid-dash [a-c-1-4x-z-7-9]). The dash laws are dialect-split
+ * (#2184): a schema pinned to 1.0 (@version="1.0" /
+ * vc:maxVersion="1.0") keeps the 1.0 F.1.1 mid-group-dash law,
+ * everything else reads §3.16.5 (the suite records reG26
+ * invalid@1.0 AND valid@1.1 for the same schema). Walks the def
+ * chains so inline anonymous members are covered too. */
+extern int rng_regex_supported_dialect(const char* pat, int xsd_10);
+static int xsd_patterns_supported(struct leptris_xsd_schema* s,
+                                  const XsdSimple* t, int depth) {
     if (!t || depth > 32) return 1;
     for (const XsdFacetValue* p = t->patterns; p; p = p->next)
-        if (!rng_regex_supported(p->text)) return 0;
-    if (!xsd_patterns_supported(t->base_def, depth + 1)) return 0;
-    if (!xsd_patterns_supported(t->item_def, depth + 1)) return 0;
+        if (!rng_regex_supported_dialect(p->text,
+                                         xsd_schema_pinned_10(s)))
+            return 0;
+    if (!xsd_patterns_supported(s, t->base_def, depth + 1)) return 0;
+    if (!xsd_patterns_supported(s, t->item_def, depth + 1)) return 0;
     for (size_t i = 0; i < t->member_def_count; i++)
-        if (!xsd_patterns_supported(t->member_defs[i], depth + 1))
+        if (!xsd_patterns_supported(s, t->member_defs[i], depth + 1))
             return 0;
     return 1;
 }
@@ -5954,7 +5968,7 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
     }
 
     for (const XsdSimple* t = s->simple_types; t; t = t->next)
-        if (!xsd_patterns_supported(t, 0)) {
+        if (!xsd_patterns_supported(s, t, 0)) {
             xsd_set_error(s, "pattern facet is not a supported "
                              "regular expression");
             if (status) *status = LEPTRIS_ERROR_PARSE;

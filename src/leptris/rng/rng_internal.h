@@ -105,9 +105,17 @@ struct leptris_relaxng* rng_parse_file(const char* path);
 
 /* rng_regex.c — XSD pattern facet subset (see the .c header).
  * supported() validates at schema-parse time; matches() requires a
- * full-value match. */
+ * full-value match. The _dialect forms take the XSD dialect for the
+ * char-class dash laws (#2184): xsd_10 = 1 keeps the XSD 1.0 F.1.1
+ * law (the strict default these wrappers carry), 0 reads XSD 1.1
+ * §3.16.5 (a standalone mid-group hyphen is a plain member). The
+ * XSD pattern lanes pass xsd_schema_pinned_10(schema); RNG keeps
+ * the strict default. */
 int rng_regex_supported(const char* pat);
 int rng_regex_matches(const char* pat, const char* text);
+int rng_regex_supported_dialect(const char* pat, int xsd_10);
+int rng_regex_matches_dialect(const char* pat, const char* text,
+                              int xsd_10);
 
 /* free.c duties are inline in the public entry */
 void rng_pattern_free(RngPattern* p);
