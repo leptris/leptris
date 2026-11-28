@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [1.9.451] - 2026-11-28
+
+### Fixed
+
+- AVX2 census control detector must test top bits, not signed lt (simd)
+
+### Performance
+
+- fuse the parse census into the scratch copy (#2132) (attrparse)
+- intern jump point moves to 2048 slots (#2132) (dom)
+- intern growth clear stays a full contiguous memset (#2132) (dom)
+- intern table jump-sizing + strided name clear, assign-not-clear carve (#2132) (dom)
+- mutcycle doc-resolve hoist + assign-not-clear carve (#2132) (dom)
+
+
+
 ## [1.9.450] - 2026-11-28
 
 The XSD 1.1 campaign continues: the official W3C suite floor moves **1984 → 2047 / 2206 (89.9% → 92.8%)**, zero regressions at every step.
