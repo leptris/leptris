@@ -23,6 +23,10 @@
 //     registered in the same document (§C.4 integrity: ii04-ii18,
 //     id005/id006/id008).
 //
+// (3) the parentless-content-ID law (§3.17.5.2 / §3.3.4.5 cvc-id): a
+//     content-carried ID on the validation root denotes nothing —
+//     the ii26/ii27 residue of the ID-family corpus.
+//
 // The suite fixtures ride the pinned xsd11-cases corpus (oracle: the
 // w3c/xsdtests suite metadata).
 #include <gtest/gtest.h>
@@ -331,4 +335,71 @@ TEST(Xsd11Bookkeeping, CrossElementDuplicateStillInvalid) {
     EXPECT_EQ(verdict("saxonData/Override/over008.xsd",
                       "saxonData/Override/over008.n01.xml"),
               0);
+}
+
+// ---- (3) the parentless-content-ID law (§3.17.5.2 / §3.3.4.5) -------
+//
+// An ID value carried by an ELEMENT's own content binds to the
+// element's PARENT: the parent is the element "which has an element
+// information item in its [children] whose actual value is the id"
+// (§3.17.5.2 [binding]). A content-carried ID on the VALIDATION ROOT
+// therefore has an EMPTY ID/IDREF binding, and cvc-id clause 1
+// ("There is no ID/IDREF binding ... whose [binding] is the empty
+// set") makes the document invalid. The spec's own worked example
+// (§3.3.4.5 note): "if the X element is the validation root, then
+// 'abcd' will have no element binding, because DOC is outside the
+// scope of the validation episode. So the first clause is violated
+// and the document is invalid." The suite encodes this as the
+// idIDREF annotation "ID on root does not denote any element"
+// (ii26/ii27), and modified the twins v15/v21 on 2011-07-29 "to make
+// the ID effective" per bug #12143 — by WRAPPING root, so the ID
+// carrier gains a parent.
+
+// ii26: the document element itself carries a list-of-ID simple
+// content; its items denote nothing (empty bindings), so the
+// idref_attr="b2" is a reference to an undefined ID. Pinned invalid
+// by the suite; the annotation is the law, not an IBM quirk.
+TEST(Xsd11RootContentId, RootContentListDoesNotDenote) {
+    EXPECT_EQ(verdict("ibmData/instance_invalid/S3_3_4/s3_3_4ii26.xsd",
+                      "ibmData/instance_invalid/S3_3_4/s3_3_4ii26.xml"),
+              0);
+}
+
+// ii27: the same law with the union memberTypes form — the content
+// value b2 rides the ID arm (the FIRST accepting member) and binds
+// to root's nonexistent parent.
+TEST(Xsd11RootContentId, RootContentUnionDoesNotDenote) {
+    EXPECT_EQ(verdict("ibmData/instance_invalid/S3_3_4/s3_3_4ii27.xsd",
+                      "ibmData/instance_invalid/S3_3_4/s3_3_4ii27.xml"),
+              0);
+}
+
+// The twins the suite re-rooted per bug #12143: with the ID carrier
+// wrapped, the bindings are non-empty and both stay valid.
+TEST(Xsd11RootContentId, WrappedContentListStillValid) {
+    EXPECT_EQ(verdict("ibmData/valid/S3_3_4/s3_3_4v15.xsd",
+                      "ibmData/valid/S3_3_4/s3_3_4v15.xml"),
+              1);
+}
+
+TEST(Xsd11RootContentId, WrappedContentUnionStillValid) {
+    EXPECT_EQ(verdict("ibmData/valid/S3_3_4/s3_3_4v21.xsd",
+                      "ibmData/valid/S3_3_4/s3_3_4v21.xml"),
+              1);
+}
+
+// The gate is about the CARRIER's parenthood, not the presence of
+// content IDs: nested carriers keep registering (id008's <id> under
+// <node> under <doc>), and child-element list-of-ID values keep
+// resolving idrefs (v14's u123).
+TEST(Xsd11RootContentId, NestedContentIdsStillResolve) {
+    EXPECT_EQ(verdict("saxonData/Id/id008.xsd",
+                      "saxonData/Id/id008.v01.xml"),
+              1);
+}
+
+TEST(Xsd11RootContentId, RootChildContentStillRegisters) {
+    EXPECT_EQ(verdict("ibmData/valid/S3_3_4/s3_3_4v14.xsd",
+                      "ibmData/valid/S3_3_4/s3_3_4v14.xml"),
+              1);
 }
