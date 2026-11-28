@@ -654,6 +654,12 @@ Saxon's zone004/005 — the law that satisfies BOTH families).
 
 ## The remaining 58 rows, dispositioned
 
+(#2184 subst wave, branch `xsd11-subst`: the clusters below closed 18
+rows — 14 of the 15 cluster rows plus 4 riders — and the red list is
+now **40 rows** at 2166/2206, 1283 valid / 600 invalid / 283
+schema-error; the 1.0 lane holds 1045/1056. The per-cluster
+dispositions below carry their closures.)
+
 **Owner decision pending — the attZ014b oracle tension (3 rows).**
 saxonData/Id id001.v01-vs-id002.xsd, id003.v01, id015.n02: the suite
 admits a wildcard-admitted second ID on an unmarked schema (XSD 1.1
