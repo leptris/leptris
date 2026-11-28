@@ -1228,6 +1228,61 @@ LEPTRIS_API LeptrisStatus leptris_document_absorb(LeptrisDocument dst,
                                                LeptrisDocument src);
 
 /**
+ * Move (steal) a subtree from a source document into the destination
+ * (#1548). The subtree's storage is re-homed into `src`'s neighbor
+ * document `dest_doc` in one pass — element/attribute struct images
+ * transfer with their bytes, element names intern into the
+ * destination's name table, and every document backreference
+ * re-stamps to `dest_doc` — so nothing in the destination references
+ * the source afterward.
+ *
+ * DESIGN LAW (owner directive): adoption/transfer paths are MOVE or
+ * COPY-ON-WRITE — never eager deep copy. A recursive per-node copy
+ * that doubles the live set is a design defect. This face is the
+ * move half of that law (absorb is the share half; the #1529 deep
+ * copy remains only as the fallback for sources that are neither
+ * doomed nor movable).
+ *
+ * On success `element`'s subtree is detached from the source tree
+ * (the source document stays valid minus that subtree) and
+ * `*moved_out` receives the destination-resident handle. The caller
+ * then splices with the ordinary same-document mutators — the
+ * append is zero-copy. On failure the source is untouched
+ * (build-then-detach) and `*moved_out` is NULL.
+ *
+ * A source absorbed into `dest_doc` (leptris_document_absorb) moves
+ * by identity: `*moved_out == element` (the storage already lives
+ * with the destination). A source absorbed into any OTHER document
+ * is anchored there and cannot move.
+ *
+ * @param dest_doc Destination document (receives the storage)
+ * @param src_doc  Source document (loses the subtree; stays valid)
+ * @param element  Subtree root, owned by src_doc (element-typed;
+ *                 may be src_doc's root — the source then becomes
+ *                 rootless)
+ * @param moved_out Required out-param: the moved subtree's new
+ *                 handle (destination-owned lifetime)
+ * @return LEPTRIS_OK; LEPTRIS_ERROR_NULL_ARG on NULL arguments;
+ *         LEPTRIS_ERROR_INVALID_ARG when the element does not
+ *         belong to src_doc (third document, dst-resident alias,
+ *         non-element node), src_doc == dest_doc, the source is
+ *         absorbed elsewhere, or moved_out is NULL;
+ *         LEPTRIS_ERROR_MEMORY when the destination allocation
+ *         fails (source untouched).
+ *
+ * Memory: the moved subtree is owned by dest_doc (released with
+ * leptris_document_free(dest_doc)). After a successful move the
+ * CALLER's `element` handle is void — it names bytes that no longer
+ * belong to any live tree; free(src_doc) in either order is safe.
+ * Fidelity notes: source line/byte-offset info resets (0 = unknown,
+ * same as the deep copy), the raw-attribute source-order view is
+ * not transferred (same as the deep copy), and text nodes keep
+ * their verbatim-serialize flag. */
+LEPTRIS_API LeptrisStatus leptris_document_adopt_move(
+    LeptrisDocument dest_doc, LeptrisDocument src_doc,
+    LeptrisElement element, LeptrisElement* moved_out);
+
+/**
  * Get root element of document
  *
  * @param doc Document
