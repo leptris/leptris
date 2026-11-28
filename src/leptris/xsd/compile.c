@@ -139,6 +139,14 @@ struct leptris_xsd_schema {
     int defattr_suppressed;
     XsdElementIcs* element_ics;
     char* target_ns;
+    /* #2184 (wild009/010): while a CHAMELEON include's unit captures,
+     * the unit's effective target namespace (the includer's) —
+     * xsd_capture_unit_tns falls back to this for components of the
+     * included document. Cleared outside the sub-capture, so a
+     * later splice of an IMPORTED unit's attribute groups resolves
+     * its wildcards against the unit's OWN (absent) tns — wildZ013c
+     * pins exactly that distinction. */
+    char* unit_tns_override;
     int version_11;    /* xs:schema @version = "1.1" */
     /* #2184: the schema EXPLICITLY pins the 1.0 dialect —
      * xs:schema/@version="1.0" or vc:maxVersion="1.0". Syntax
@@ -8910,9 +8918,23 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                             s->default_oc_empty = 0;
                             s->default_oc_mode = 0;
                             s->default_oc_unit_id = 0;
+                            /* #2184 (wild009/010): a CHAMELEON include's
+                             * unit tns is the includer's for the
+                             * sub-capture's span only — an IMPORT of a
+                             * no-tns document keeps the override NULL
+                             * (its components stay namespace-free,
+                             * leptris#1958; wildZ013c's imported
+                             * attribute groups resolve ##other against
+                             * the absent tns). */
+                            char* saved_override = s->unit_tns_override;
+                            s->unit_tns_override =
+                                (!sub_ns && strcmp(local, "import") != 0)
+                                    ? (saved_ns ? saved_ns : (char*)"")
+                                    : NULL;
                             s->include_depth++;
                             xsd_capture_root(s, subroot);
                             s->include_depth--;
+                            s->unit_tns_override = saved_override;
                             /* the sub-document's own default stays
                              * alive (types borrowed it) — pool it */
                             XsdCm* sub_default = s->default_open;
@@ -11862,19 +11884,23 @@ static char* xsd_capture_unit_tns(struct leptris_xsd_schema* s,
         if (local && strcmp(local, "schema") == 0) {
             const char* tns =
                 leptris_element_attribute(up, "targetNamespace");
-            if (tns) return xsd_strdup(tns);
+            if (tns && tns[0]) return xsd_strdup(tns);
             /* chameleon: the active capture unit's tns (the
-             * includer's) — but ONLY inside the sub-document's
-             * capture window. The #1880 attributeGroup phase-2 pass
-             * re-captures from RETAINED elements of every unit with
-             * the MAIN unit's s->target_ns in force (wildZ013c: the
-             * imported unit's ##other would resolve against the
-             * consuming tns instead of ABSENT); outside the window
-             * the physical absence stands. */
-            if (s && s->include_depth > 0 && s->target_ns &&
-                s->target_ns[0])
-                return xsd_strdup(s->target_ns);
-            return xsd_strdup("");
+             * includer's) — the unit's EFFECTIVE tns rides the
+             * capture's unit_tns_override, set for the sub-document's
+             * capture window ONLY (wild009/010: ##targetNamespace
+             * admits per the owning unit's effective tns). The #1880
+             * attributeGroup phase-2 pass re-captures from RETAINED
+             * elements of every unit OUTSIDE that window, where the
+             * override is cleared and the physical absence stands
+             * (wildZ013c: the imported unit's ##other would resolve
+             * against the consuming tns instead of ABSENT). An IMPORT
+             * of a no-tns document keeps the override NULL (leptris
+             * #1958 — namespace-free, chameleon semantics are
+             * include-only). */
+            return xsd_strdup(
+                (s && s->unit_tns_override) ? s->unit_tns_override
+                                            : "");
         }
     }
     return NULL;
