@@ -236,6 +236,13 @@ target_compile_definitions(test_xsd11_wildcard PRIVATE
 leptris_add_test(test_xsd11_xitype xsd/test_xsd11_xitype.cpp)
 target_compile_definitions(test_xsd11_xitype PRIVATE
     LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
+# #2184: the substitution-group / weak-wildcard endgame clusters —
+# the weak-wildcard dialect evidence + assessment law, the
+# substitution-group compile constraints, and the union
+# substitutability law; the suite fixtures ride the pinned corpus.
+leptris_add_test(test_xsd11_substgroup xsd/test_xsd11_substgroup.cpp)
+target_compile_definitions(test_xsd11_substgroup PRIVATE
+    LEPTRIS_XSD11_CASES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/xsd/xsd11-cases")
 # #2184: relaxed xs:all (XSD 1.1 §3.8.3) — order-free per-child
 # counting, wildcard/group children, all-to-all extension merge and
 # restriction; the suite fixtures ride the pinned corpus.

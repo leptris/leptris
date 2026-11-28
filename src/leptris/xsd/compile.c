@@ -735,6 +735,22 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                             const char* start = p;
                             while (*p && !isspace((unsigned char)*p)) p++;
                             size_t len = (size_t)(p - start);
+                            /* #2184: the member resolves by LOCAL name
+                             * (the list itemType convention) — the
+                             * raw prefixed token never matches the
+                             * captured (local) names, so a member
+                             * carrying its own facets accepted every
+                             * value. xs:-spelled builtins keep their
+                             * spelling (the value path reads it). */
+                            const char* colon = NULL;
+                            if (strncmp(start, "xs:", 3) != 0)
+                                for (const char* q = start; q < p; q++)
+                                    if (*q == ':') { colon = q; break; }
+                            if (colon) {
+                                start = colon + 1;
+                                len = (size_t)(p - start);
+                            }
+                            if (!len) break;
                             char* tok = (char*)malloc(len + 1);
                             if (!tok) break;
                             memcpy(tok, start, len);

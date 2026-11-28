@@ -581,7 +581,10 @@ int xsd_builtin_valid(const char* type, const char* v) {
     if (strcmp(type, "xs:base64Binary") == 0) {
         /* #1883: the padded alphabet — '=' only terminates the
          * final group; a remainder of 1 byte cannot form a group
-         * ("abcde"), and nothing may follow padding. */
+         * ("abcde"), and nothing may follow padding. #2184
+         * (d3_3_17ii01): the RFC 2045 padding is MANDATORY — the
+         * quantum must close ("123456" is not a lexical), so every
+         * length carries exactly the padding its remainder implies. */
         size_t n = strlen(v);
         if (!n) return 1;
         size_t eq = 0;
@@ -596,7 +599,10 @@ int xsd_builtin_valid(const char* type, const char* v) {
                 return 0;
         }
         if (eq > 2) return 0;
-        if ((n - eq) % 4 == 1) return 0;
+        /* #2184 (d3_3_17ii01): the RFC 2045 quantum always CLOSES —
+         * the length including its padding is a multiple of four
+         * ("123456" is not a lexical). */
+        if (n % 4 != 0) return 0;
         return 1;
     }
     return -1; /* not in the tier-1 table */
