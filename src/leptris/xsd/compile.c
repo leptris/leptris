@@ -5800,43 +5800,40 @@ static int xsd_all_wild_union_owners(XsdCm* d, XsdCm** bparts, long bn,
     /* coverage: every name the derived admits must live in SOME
      * owner. Name-level candidates: every notQName token on either
      * side (the only names where exclusions differ below the
-     * namespace grain). */
-    for (int pass = 0; pass < 2; pass++) {
-        const char* list = pass == 0 ? d->not_qname : NULL;
-        for (int k = 0; k < n; k++) {
-            if (pass == 1) list = bparts[owners[k]]->not_qname;
-            if (!list) continue;
-            const char* p = list;
-            while (*p) {
-                while (*p == ' ' || *p == '\t' || *p == '\n' ||
-                       *p == '\r')
-                    p++;
-                const char* start = p;
-                while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
-                       *p != '\r')
-                    p++;
-                size_t len = (size_t)(p - start);
-                if (len == 0) break;
-                char tok[640];
-                if (len >= sizeof(tok)) len = sizeof(tok) - 1;
-                memcpy(tok, start, len);
-                tok[len] = '\0';
-                if (tok[0] == '#' && (strcmp(tok, "##defined") == 0 ||
-                                      strcmp(tok,
-                                             "##definedSibling") == 0))
-                    continue;
-                char tns2[256];
-                const char* tlocal;
-                xsd_not_qname_split(tok, tns2, sizeof(tns2), &tlocal);
-                if (!xsd_wc_admits_name(d, tns2, tlocal)) continue;
-                int covered = 0;
-                for (int q = 0; q < n && !covered; q++)
-                    if (xsd_wc_admits_name(bparts[owners[q]], tns2,
-                                           tlocal))
-                        covered = 1;
-                if (!covered) return 0;
-            }
-            if (pass == 1) break;
+     * namespace grain) — the derived's list first, then every
+     * owner's. */
+    for (int k = -1; k < n; k++) {
+        const char* list = k < 0 ? d->not_qname
+                                 : bparts[owners[k]]->not_qname;
+        if (!list) continue;
+        const char* p = list;
+        while (*p) {
+            while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                p++;
+            const char* start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+                   *p != '\r')
+                p++;
+            size_t len = (size_t)(p - start);
+            if (len == 0) break;
+            char tok[640];
+            if (len >= sizeof(tok)) len = sizeof(tok) - 1;
+            memcpy(tok, start, len);
+            tok[len] = '\0';
+            if (tok[0] == '#' && (strcmp(tok, "##defined") == 0 ||
+                                  strcmp(tok,
+                                         "##definedSibling") == 0))
+                continue;
+            char tns2[256];
+            const char* tlocal;
+            xsd_not_qname_split(tok, tns2, sizeof(tns2), &tlocal);
+            if (!xsd_wc_admits_name(d, tns2, tlocal)) continue;
+            int covered = 0;
+            for (int q = 0; q < n && !covered; q++)
+                if (xsd_wc_admits_name(bparts[owners[q]], tns2,
+                                       tlocal))
+                    covered = 1;
+            if (!covered) return 0;
         }
     }
     /* namespace-level probes: the derived's own positive tokens,
