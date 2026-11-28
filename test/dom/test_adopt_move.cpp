@@ -382,11 +382,12 @@ TEST(AdoptMove, DeepTreeAndLargeTextIntegrity) {
     leptris_xpath_result_free(res);
 
     LeptrisXPathResult tail = leptris_xpath_eval(
-        dst, leptris_document_root(dst), "//tail");
+        dst, leptris_document_root(dst), "//tail/text()");
     ASSERT_NE(tail, nullptr);
     ASSERT_EQ(leptris_xpath_result_count(tail), 1u);
     LeptrisNodeRef tnode = leptris_xpath_result_get_node(tail, 0);
     ASSERT_NE(tnode, nullptr);
+    ASSERT_EQ(leptris_node_get_type(tnode), LEPTRIS_NODE_TYPE_TEXT);
     const char* tc = leptris_text_node_get_content(tnode);
     ASSERT_NE(tc, nullptr);
     EXPECT_EQ(std::strlen(tc), 200000u);

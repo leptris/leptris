@@ -2978,4 +2978,713 @@ fail:
     return NULL;
 }
 
+/* ===========================================================================
+ * #1548: move/steal node adoption (leptris_document_adopt_move)
+ *
+ * DESIGN LAW (owner directive): adoption/transfer paths are MOVE or
+ * COPY-ON-WRITE — never eager deep copy. absorb (#1529's fallback)
+ * re-homes ZERO bytes but pins the source pool into the destination
+ * forever; the splice deep copy re-duplicates every node but leaves
+ * the source freeable. The move face is the third point: the source
+ * loses the subtree AND stays freeable, so after splice+cleanup the
+ * live set holds only the destination's copy.
+ *
+ * Mechanism (measured, not assumed): the pool is per-document and
+ * doc-scoped, so bytes cannot hand over — the subtree is re-homed
+ * PER NODE as a struct-image transfer: every node struct is
+ * re-allocated in the destination (elements/attrs in the mutation
+ * blocks, leaves in the pool) and its payload fields re-stamped —
+ * element names interned into dst's table, pool/zero-copy strings
+ * (text content, attribute values, namespace URIs) re-duplicated
+ * into dst's pool, every document backreference re-stamped to dst.
+ * int32 tree edges and the overflow-table spill are re-encoded from
+ * the DECODED source values against the destination addresses (a
+ * raw image copy would decode src offsets — and src overflow-table
+ * entries keyed by src field addresses — against dst memory).
+ * Scalars (name hashes, lengths, counts, the text verbatim bit)
+ * carry byte-for-byte. On any allocation failure the destination
+ * garbage stays pool-scoped and the SOURCE IS UNTOUCHED
+ * (build-then-detach).
+ *
+ * Fidelity notes (matching the deep copy's contract): source line /
+ * byte-offset info resets (0 = unknown — base.line may hold a
+ * byteOffset+1 the dst buffer cannot resolve); the raw-attribute
+ * source-order view is not transferred; text keeps its verbatim
+ * (raw) serialize flag and its verbatim CDATA content; the attr
+ * index bit resets (dst rebuilds lazily).
+ * =========================================================================== */
+
+/* Doc-tagged int32 edge store (the #1320 pattern): out-of-range
+ * deltas spill to the overflow table tagged with the EXPLICIT
+ * destination document — the move runs outside parse context, where
+ * a TLS-tagged entry would leak past document teardown. */
+static inline void mv_edge32(void* base, void* target, int32_t* field,
+                             struct leptris_document* doc) {
+    if (!target) { *field = 0; return; }
+    *field = leptris_compact_int32_encode_doc(base, target, field, doc);
+}
+
+/* Re-home one element's namespace side cache into dst's pool. All
+ * strings re-duplicate (the src cache lives in src's pool or holds
+ * src-scoped views); the heap-string tracking chain (doc_next +
+ * prefix_heap/uri_heap) resets — every moved string is pool-owned
+ * by dst. The raw-attribute source-order view is NOT transferred
+ * (same contract as the deep copy); the child-iteration cache
+ * resets (it cached src node addresses). */
+static int mv_ns_cache(LeptrisElement dst_e, LeptrisElement src_e,
+                       struct leptris_document* dst,
+                       LeptrisMemoryPool* pool, int* any_ns) {
+    struct leptris_ns_cache* src_nc = elem_get_ns_cache(src_e);
+    if (!src_nc) {
+        dst_e->ns_cache_off = 0;
+        return 1;
+    }
+    struct leptris_ns_cache* dst_nc = (struct leptris_ns_cache*)
+        leptris_pool_alloc(pool, sizeof(struct leptris_ns_cache));
+    if (!dst_nc) return 0;
+    memset(dst_nc, 0, sizeof(*dst_nc));
+    if (src_nc->prefix) {
+        dst_nc->prefix = leptris_pool_strdup(pool, src_nc->prefix);
+        if (!dst_nc->prefix) return 0;
+    }
+    if (src_nc->namespace_uri) {
+        dst_nc->namespace_uri =
+            leptris_pool_strdup(pool, src_nc->namespace_uri);
+        if (!dst_nc->namespace_uri) return 0;
+    }
+    /* xmlns:* declarations: pool-copied chain in source order. */
+    struct leptris_namespace** tail_link = &dst_nc->declarations;
+    for (struct leptris_namespace* sd = src_nc->declarations; sd;
+         sd = sd->next) {
+        struct leptris_namespace* ns = leptris_namespace_new_pooled(
+            sd->prefix, sd->uri, pool);
+        if (!ns) return 0;
+        ns->next = NULL;
+        *tail_link = ns;
+        tail_link = &ns->next;
+    }
+    if (src_nc->prefix || src_nc->namespace_uri || src_nc->declarations)
+        *any_ns = 1;
+    mv_edge32(dst_e, dst_nc, &dst_e->ns_cache_off, dst);
+    return 1;
+}
+
+/* Re-home one attribute into dst's mutation attr block (the round-22
+ * carve: dst attrs of one element land contiguously, keeping their
+ * cp16 next-edges in range). Assign-instead-of-clear (#2132): the
+ * recycled slot gets EVERY field assigned. Values <= 7 bytes are
+ * INLINE in the struct — the bytes carry over with no allocation;
+ * longer values re-duplicate into dst's pool. */
+static int mv_attr_chain(LeptrisElement dst_e, LeptrisElement src_e,
+                         struct leptris_document* dst,
+                         LeptrisMemoryPool* pool, int* any_ns) {
+    struct leptris_attribute* prev_dst = NULL;
+    for (struct leptris_attribute* sa =
+             leptris_element_get_first_attribute(src_e);
+         sa; sa = leptris_attr_next(sa)) {
+        struct leptris_attribute* da = mut_attr_carve(dst);
+        if (!da) return 0;
+        /* Name: re-duplicated (the view points into src's buffer or
+         * pool). */
+        if (!leptris_sv_is_empty(&sa->name_view)) {
+            char* n = leptris_sv_to_cstr_pooled(&sa->name_view, pool);
+            if (!n) return 0;
+            da->name_view = leptris_sv_from_ptr(n, sa->name_view.length);
+        } else {
+            da->name_view = leptris_sv_empty();
+        }
+        /* Value: inline bytes carry; heap views re-duplicate. */
+        if (leptris_attr_value_is_inline(sa)) {
+            da->value = sa->value;
+        } else {
+            LeptrisStringView sv = leptris_attr_value_sv(sa);
+            if (!leptris_sv_is_empty(&sv) && sv.data) {
+                char* v = leptris_sv_to_cstr_pooled(&sv, pool);
+                if (!v) return 0;
+                leptris_attr_value_set_heap(da,
+                                            leptris_sv_from_ptr(v, sv.length));
+            } else {
+                da->value.heap.data = NULL;
+                da->value.heap.length = 0;
+            }
+        }
+        da->name_hash = sa->name_hash; /* 15-bit hash + entity flag */
+        /* Namespace side cache (prefix + URI): re-homed, and the
+         * #542 owner backpointer re-stamps to the MOVED element — a
+         * carried src pointer would be the #1528 detonation class;
+         * a NULL stamp would blind every URI resolution (the
+         * resolver walks owner_elem's in-scope declarations). */
+        struct leptris_attr_ns_cache* src_ns = attr_get_ns_cache(sa);
+        if (src_ns) {
+            struct leptris_attr_ns_cache* dst_ns =
+                (struct leptris_attr_ns_cache*)leptris_pool_alloc(
+                    pool, sizeof(struct leptris_attr_ns_cache));
+            if (!dst_ns) return 0;
+            memset(dst_ns, 0, sizeof(*dst_ns));
+            dst_ns->owner_elem = dst_e;
+            if (src_ns->prefix) {
+                dst_ns->prefix =
+                    leptris_pool_strdup(pool, src_ns->prefix);
+                if (!dst_ns->prefix) return 0;
+                dst_ns->prefix_view = leptris_sv_from_cstr(dst_ns->prefix);
+            }
+            if (src_ns->namespace_uri) {
+                dst_ns->namespace_uri =
+                    leptris_pool_strdup(pool, src_ns->namespace_uri);
+                if (!dst_ns->namespace_uri) return 0;
+                dst_ns->namespace_uri_view =
+                    leptris_sv_from_cstr(dst_ns->namespace_uri);
+            }
+            if (src_ns->prefix || src_ns->namespace_uri) *any_ns = 1;
+            mv_edge32(da, dst_ns, &da->ns_cache_off, dst);
+        } else {
+            da->ns_cache_off = 0;
+        }
+        da->next_cp = 0;
+        if (!prev_dst) {
+            mv_edge32(dst_e, da, &dst_e->first_attribute_off, dst);
+        } else {
+            leptris_attr_set_next(prev_dst, da);
+        }
+        prev_dst = da;
+        /* add_attribute's increment convention (uint8 wrap latches
+         * at 255 — the source count wrapped identically). */
+        dst_e->attr_count++;
+    }
+    return 1;
+}
+
+/* Re-home one non-element child node (struct-image transfer: base
+ * bits carry — the text verbatim serialize flag survives — payload
+ * re-duplicates, edges re-encode). Returns the dst node or NULL on
+ * allocation failure. */
+static LeptrisNode* mv_leaf(LeptrisNode* c, struct leptris_document* dst,
+                            LeptrisMemoryPool* pool) {
+    switch (c->type) {
+        case LEPTRIS_NODE_TYPE_TEXT: {
+            LeptrisTextNode* st = (LeptrisTextNode*)c;
+            LeptrisTextNode* dt = (LeptrisTextNode*)leptris_pool_alloc(
+                pool, sizeof(LeptrisTextNode));
+            if (!dt) return NULL;
+            *dt = *st; /* struct image: base bits + content_len carry */
+            dt->base.line = 0;
+            dt->owner_doc_off = 0;
+            dt->parent_off = 0;
+            dt->next_sibling_off = 0;
+            if (st->content_off == LEPTRIS_COMPACT_INT32_EMPTY) {
+                /* The shared static "" sentinel — carry it, not a
+                 * copy. */
+                dt->content_off = LEPTRIS_COMPACT_INT32_EMPTY;
+            } else {
+                const char* content = leptris_textnode_content(st);
+                if (content) {
+                    char* copy = (char*)leptris_pool_alloc(
+                        pool, (size_t)st->content_len + 1);
+                    if (!copy) return NULL;
+                    memcpy(copy, content, st->content_len);
+                    copy[st->content_len] = '\0';
+                    leptris_textnode_set_content_ptr_doc(dt, copy,
+                                                         st->content_len,
+                                                         dst);
+                } else {
+                    dt->content_off = 0;
+                }
+            }
+            return (LeptrisNode*)dt;
+        }
+        case LEPTRIS_NODE_TYPE_CDATA: {
+            LeptrisCDATANode* sc = (LeptrisCDATANode*)c;
+            LeptrisCDATANode* dc = (LeptrisCDATANode*)leptris_pool_alloc(
+                pool, sizeof(LeptrisCDATANode));
+            if (!dc) return NULL;
+            *dc = *sc;
+            dc->base.line = 0;
+            dc->owner_doc = NULL;
+            dc->parent_off = 0;
+            dc->next_sibling_off = 0;
+            dc->content = NULL;
+            if (sc->content) {
+                dc->content = leptris_pool_strdup(pool, sc->content);
+                if (!dc->content) return NULL;
+            }
+            return (LeptrisNode*)dc;
+        }
+        case LEPTRIS_NODE_TYPE_COMMENT: {
+            LeptrisCommentNode* sc = (LeptrisCommentNode*)c;
+            LeptrisCommentNode* dc = (LeptrisCommentNode*)leptris_pool_alloc(
+                pool, sizeof(LeptrisCommentNode));
+            if (!dc) return NULL;
+            *dc = *sc;
+            dc->base.line = 0;
+            dc->owner_doc = NULL;
+            dc->parent_off = 0;
+            dc->next_sibling_off = 0;
+            dc->content = NULL;
+            if (sc->content) {
+                dc->content = leptris_pool_strdup(pool, sc->content);
+                if (!dc->content) return NULL;
+            }
+            return (LeptrisNode*)dc;
+        }
+        case LEPTRIS_NODE_TYPE_PI: {
+            LeptrisPINode* sp = (LeptrisPINode*)c;
+            LeptrisPINode* dp = (LeptrisPINode*)leptris_pool_alloc(
+                pool, sizeof(LeptrisPINode));
+            if (!dp) return NULL;
+            *dp = *sp;
+            dp->base.line = 0;
+            dp->owner_doc = NULL;
+            dp->parent_off = 0;
+            dp->next_sibling_off = 0;
+            dp->target = NULL;
+            dp->data = NULL;
+            if (sp->target) {
+                dp->target = leptris_pool_strdup(pool, sp->target);
+                if (!dp->target) return NULL;
+            }
+            if (sp->data) {
+                dp->data = leptris_pool_strdup(pool, sp->data);
+                if (!dp->data) return NULL;
+            }
+            return (LeptrisNode*)dp;
+        }
+        case LEPTRIS_NODE_TYPE_ENTITY_REF: {
+            LeptrisEntityRefNode* sr = (LeptrisEntityRefNode*)c;
+            LeptrisEntityRefNode* dr = (LeptrisEntityRefNode*)
+                leptris_pool_alloc(pool, sizeof(LeptrisEntityRefNode));
+            if (!dr) return NULL;
+            *dr = *sr;
+            dr->base.line = 0;
+            dr->owner_doc = NULL;
+            dr->parent_off = 0;
+            dr->next_sibling_off = 0;
+            dr->name = NULL;
+            if (sr->name) {
+                dr->name = leptris_pool_strdup(pool, sr->name);
+                if (!dr->name) return NULL;
+            }
+            return (LeptrisNode*)dr;
+        }
+        default:
+            return NULL;
+    }
+}
+
+/* Wire a moved LEAF child under its moved parent (the parent edge is
+ * a self-relative int32 — every store uses the MOVED node's own
+ * address as base). Element children set their own parent edge in
+ * mv_element. */
+static void mv_link_child(LeptrisElement parent, LeptrisNode* child,
+                          struct leptris_document* dst) {
+    switch (child->type) {
+        case LEPTRIS_NODE_TYPE_TEXT:
+            mv_edge32(child, parent, &((LeptrisTextNode*)child)->parent_off,
+                      dst);
+            break;
+        case LEPTRIS_NODE_TYPE_CDATA:
+            mv_edge32(child, parent, &((LeptrisCDATANode*)child)->parent_off,
+                      dst);
+            break;
+        case LEPTRIS_NODE_TYPE_COMMENT:
+            mv_edge32(child, parent,
+                      &((LeptrisCommentNode*)child)->parent_off, dst);
+            break;
+        case LEPTRIS_NODE_TYPE_PI:
+            mv_edge32(child, parent, &((LeptrisPINode*)child)->parent_off,
+                      dst);
+            break;
+        case LEPTRIS_NODE_TYPE_ENTITY_REF:
+            mv_edge32(child, parent,
+                      &((LeptrisEntityRefNode*)child)->parent_off, dst);
+            break;
+        default:
+            break;
+    }
+}
+
+/* ---- out-of-subtree namespace context ----
+ *
+ * The absorb path preserves prefixed-name resolution by leaving the
+ * whole source context alive; the move must CARRY it. Prefixes used
+ * by moved elements/attributes but declared OUTSIDE the moved
+ * subtree are re-declared on the moved top (the namespace-balancing
+ * precedent): without it, `a:att` moved out from under its
+ * `xmlns:a` resolves to nothing in dst — every read lane (snapshot
+ * URI column, live resolver) goes blind, which is the #1548 cg3
+ * shape (xmi:type & co. declared on ancestors). */
+
+/* Temp node: a declaration prefix found within the subtree. Holds
+ * SRC-scoped pointers — valid until detach, freed before return. */
+struct mv_pfx {
+    const char* p;
+    size_t len;
+    struct mv_pfx* next;
+};
+
+/* Temp node: a (prefix, URI) pair that must be re-declared on the
+ * moved top. SRC-scoped pointers; synthesized into dst pool copies. */
+struct mv_ns_need {
+    const char* prefix;
+    const char* uri;
+    struct mv_ns_need* next;
+};
+
+static int mv_pfx_seen(const struct mv_pfx* head, const char* p) {
+    size_t len = strlen(p);
+    for (; head; head = head->next)
+        if (head->len == len && memcmp(head->p, p, len) == 0) return 1;
+    return 0;
+}
+
+/* Needs-list membership (same bytes, different node type). */
+static int mv_need_seen(const struct mv_ns_need* head, const char* p) {
+    for (; head; head = head->next)
+        if (strcmp(head->prefix, p) == 0) return 1;
+    return 0;
+}
+
+/* Reserved prefixes never synthesize (the resolver hard-codes both). */
+static int mv_pfx_reserved(const char* p) {
+    return strcmp(p, "xml") == 0 || strcmp(p, "xmlns") == 0;
+}
+
+/* Collect every prefixed declaration inside the subtree. */
+static int mv_walk_decls(LeptrisElement e, struct mv_pfx** head) {
+    for (struct leptris_namespace* d = leptris_elem_namespaces(e); d;
+         d = d->next) {
+        if (!d->prefix || !*d->prefix) continue; /* default decl */
+        if (mv_pfx_seen(*head, d->prefix)) continue;
+        struct mv_pfx* n = (struct mv_pfx*)malloc(sizeof(*n));
+        if (!n) return 0;
+        n->p = d->prefix;
+        n->len = strlen(d->prefix);
+        n->next = *head;
+        *head = n;
+    }
+    for (LeptrisNode* c = leptris_elem_first_child(e); c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        if (!mv_walk_decls((LeptrisElement)c, head)) return 0;
+    }
+    return 1;
+}
+
+/* Collect the (prefix, URI) pairs resolved in the SOURCE context but
+ * declared outside the subtree. Dedup by prefix: a prefix with no
+ * in-subtree declaration resolves to exactly one ancestor URI. */
+static int mv_walk_needs(LeptrisElement e, const struct mv_pfx* declared,
+                         struct mv_ns_need** head) {
+    const char* pfx = leptris_elem_prefix(e);
+    if (pfx && *pfx && !mv_pfx_reserved(pfx) &&
+        !mv_pfx_seen(declared, pfx) && !mv_need_seen(*head, pfx)) {
+        const char* uri = leptris_element_lookup_namespace(e, pfx);
+        if (uri && *uri) {
+            struct mv_ns_need* n = (struct mv_ns_need*)malloc(sizeof(*n));
+            if (!n) return 0;
+            n->prefix = pfx;
+            n->uri = uri;
+            n->next = *head;
+            *head = n;
+        }
+    }
+    for (struct leptris_attribute* a =
+             leptris_element_get_first_attribute(e);
+         a; a = leptris_attr_next(a)) {
+        const char* p = attr_get_prefix(a);
+        if (!p || !*p || mv_pfx_reserved(p)) continue;
+        if (mv_pfx_seen(declared, p) || mv_need_seen(*head, p)) continue;
+        /* Live resolution through the src owner anchor — valid until
+         * the source detaches. */
+        const char* uri = leptris_attribute_namespace_uri(a);
+        if (!uri || !*uri) continue;
+        struct mv_ns_need* n = (struct mv_ns_need*)malloc(sizeof(*n));
+        if (!n) return 0;
+        n->prefix = p;
+        n->uri = uri;
+        n->next = *head;
+        *head = n;
+    }
+    for (LeptrisNode* c = leptris_elem_first_child(e); c;
+         c = leptris_node_get_next_sibling(c)) {
+        if (c->type != LEPTRIS_NODE_TYPE_ELEMENT) continue;
+        if (!mv_walk_needs((LeptrisElement)c, declared, head)) return 0;
+    }
+    return 1;
+}
+
+static void mv_free_pfx(struct mv_pfx* head) {
+    while (head) {
+        struct mv_pfx* n = head->next;
+        free(head);
+        head = n;
+    }
+}
+
+static void mv_free_needs(struct mv_ns_need* head) {
+    while (head) {
+        struct mv_ns_need* n = head->next;
+        free(head);
+        head = n;
+    }
+}
+
+/* Re-declare the collected needs on the moved top: pool-copied
+ * prefix/URI appended to the moved element's declaration chain. */
+static int mv_synthesize_decls(LeptrisElement moved_top,
+                               const struct mv_ns_need* needs,
+                               LeptrisMemoryPool* pool, int* any_ns) {
+    if (!needs) return 1;
+    struct leptris_namespace** head =
+        leptris_elem_namespaces_ptr(moved_top, pool);
+    if (!head) return 0;
+    for (const struct mv_ns_need* n = needs; n; n = n->next) {
+        struct leptris_namespace* ns = leptris_namespace_new_pooled(
+            n->prefix, n->uri, pool);
+        if (!ns) return 0;
+        ns->next = NULL;
+        if (!*head) {
+            *head = ns;
+        } else {
+            struct leptris_namespace* tail = *head;
+            while (tail->next) tail = tail->next;
+            tail->next = ns;
+        }
+        *any_ns = 1;
+    }
+    return 1;
+}
+
+/* Recursive core: build the dst-resident twin of src_e. Returns the
+ * moved element, or NULL on allocation failure (src untouched). */
+static LeptrisElement mv_element(LeptrisElement src_e,
+                                 LeptrisElement dst_parent,
+                                 struct leptris_document* dst,
+                                 LeptrisMemoryPool* pool, int* any_ns) {
+    char* src_name = elem_name(src_e);
+    if (!src_name || !*src_name) return NULL; /* matches the deep copy */
+
+    /* Assign-instead-of-clear carve (#2132): init_fields assigns
+     * every field; the payload assignments below complete the image
+     * transfer. */
+    LeptrisElement dst_e = mut_elem_carve(dst);
+    if (!dst_e) return NULL;
+    mut_elem_init_fields(dst_e);
+    dst_e->base.type = LEPTRIS_NODE_TYPE_ELEMENT;
+    /* COW/verbatim bits carry; position info resets (the byteOffset
+     * stamp is unresolvable against dst's buffer). */
+    dst_e->base.frozen = src_e->base.frozen;
+    dst_e->base.raw = src_e->base.raw;
+    dst_e->base.version = src_e->base.version;
+
+    /* Name: intern into dst's table (the create path's gate — the
+     * stored name is the LOCAL part; colon'd >= 3-byte names carve a
+     * PRIVATE writable slot so #846's in-place split contract never
+     * sees a shared slot). Fallback ladder matches create:
+     * intern -> name-slot carve (NAMEBP, doc-stamped) -> pool
+     * strdup (no NAMEBP; the top-level register covers resolution). */
+    size_t name_len = (src_e->name_len == 0xFF) ? strlen(src_name)
+                                                : (size_t)src_e->name_len;
+    const char* shared = NULL;
+    uint16_t shared_hash = 0;
+    if (name_len >= 1 && name_len <= 254) {
+        struct leptris_name_intern* ix = dst->name_intern;
+        if (!ix) ix = leptris_name_intern_get(dst);
+        if (ix && !ix->overflow) {
+            int colon_free = (name_len < 3) ||
+                             !memchr(src_name, ':', name_len);
+            if (colon_free)
+                shared = leptris_name_intern_intern(dst, ix, src_name,
+                                                    name_len, &shared_hash);
+        }
+    }
+    if (shared) {
+        dst_e->header.flags |= LEPTRIS_NAMEBP_FLAG;
+        elem_set_name_doc(dst_e, (char*)shared, dst);
+        dst_e->name_hash = shared_hash;
+    } else {
+        char* slot = leptris_dom_name_slot_carve(dst, src_name, name_len);
+        if (slot) {
+            dst_e->header.flags |= LEPTRIS_NAMEBP_FLAG;
+            elem_set_name_doc(dst_e, slot, dst);
+        } else {
+            char* pooled = leptris_pool_strdup(pool, src_name);
+            if (!pooled) return NULL;
+            elem_set_name_doc(dst_e, pooled, dst);
+        }
+        dst_e->name_hash = src_e->name_hash;
+    }
+    dst_e->name_len = src_e->name_len;
+
+    if (!mv_ns_cache(dst_e, src_e, dst, pool, any_ns)) return NULL;
+    if (!mv_attr_chain(dst_e, src_e, dst, pool, any_ns)) return NULL;
+
+    /* Children: struct-image transfer per kind; sibling chain and
+     * parent edges re-encoded against the moved addresses. */
+    LeptrisNode* first = NULL;
+    LeptrisNode* last = NULL;
+    for (LeptrisNode* c = leptris_elem_first_child(src_e); c;
+         c = leptris_node_get_next_sibling(c)) {
+        LeptrisNode* mc = NULL;
+        if (c->type == LEPTRIS_NODE_TYPE_ELEMENT) {
+            mc = (LeptrisNode*)mv_element((LeptrisElement)c, dst_e, dst,
+                                          pool, any_ns);
+        } else {
+            mc = mv_leaf(c, dst, pool);
+        }
+        if (!mc) return NULL;
+        mv_link_child(dst_e, mc, dst);
+        if (last) {
+            /* Generic setter dispatches the per-type int32 stores. */
+            leptris_node_set_next_sibling(last, mc);
+        } else {
+            first = mc;
+        }
+        last = mc;
+    }
+    mv_edge32(dst_e, first, &dst_e->first_child_off, dst);
+    dst_e->child_count = src_e->child_count;
+
+    if (dst_parent) {
+        mv_edge32(dst_e, dst_parent, &dst_e->parent_off, dst);
+    } else {
+        dst_e->parent_off = 0;
+    }
+    dst_e->next_sibling_off = 0;
+    return dst_e;
+}
+
+/* Detach the source subtree after a successful build. The source
+ * document stays a live, usable tree minus the moved element. */
+static void mv_detach_source(struct leptris_document* src,
+                             LeptrisElement element) {
+    if (src->root == element) src->root = NULL;
+    if (src->new_dom_root == element) src->new_dom_root = NULL;
+    /* Roots sit in the #580 document-children chain (between prolog
+     * and epilog nodes) — splice out if present. */
+    {
+        LeptrisNode* prev = NULL;
+        for (LeptrisNode* c = (LeptrisNode*)src->doc_children_head; c;) {
+            LeptrisNode* next = leptris_node_get_next_sibling(c);
+            if (c == (LeptrisNode*)element) {
+                if (prev)
+                    leptris_node_set_next_sibling(prev, next);
+                else
+                    src->doc_children_head = next;
+                if (src->doc_children_tail == (void*)c)
+                    src->doc_children_tail = (void*)prev;
+                leptris_node_set_next_sibling(c, NULL);
+                break;
+            }
+            prev = c;
+            c = next;
+        }
+    }
+    /* Interior element: unlink from the parent's child list. */
+    LeptrisElement p = leptris_elem_parent(element);
+    if (p) {
+        LeptrisNode* prev = NULL;
+        for (LeptrisNode* c = leptris_elem_first_child(p); c;) {
+            LeptrisNode* next = leptris_node_get_next_sibling(c);
+            if (c == (LeptrisNode*)element) {
+                if (prev)
+                    leptris_node_set_next_sibling(prev, next);
+                else
+                    leptris_elem_set_first_child(p, next);
+                break;
+            }
+            prev = c;
+            c = next;
+        }
+        /* child_count counts ELEMENT children (#213); the moved top
+         * is an element. */
+        if (p->child_count) p->child_count--;
+        leptris_node_increment_version((LeptrisNode*)p);
+        leptris_element_invalidate_child_cache(p);
+    }
+    /* The caller's handle is void per the contract — clear the edges
+     * so an accidental post-move walk stops immediately instead of
+     * reading the source's remaining tree. */
+    element->parent_off = 0;
+    element->next_sibling_off = 0;
+    /* Cache teardown: the element set and the serialized view both
+     * changed under src. */
+    src->mutation_version++;
+    src->ser_version++;
+    if (src->element_index) leptris_element_index_invalidate(src);
+    leptris_root_doc_memo_invalidate(src);
+}
+
+LEPTRIS_API LeptrisStatus leptris_document_adopt_move(
+    LeptrisDocument dest_doc, LeptrisDocument src_doc,
+    LeptrisElement element, LeptrisElement* moved_out) {
+    if (!dest_doc || !src_doc || !element) return LEPTRIS_ERROR_NULL_ARG;
+    if (!moved_out) return LEPTRIS_ERROR_INVALID_ARG;
+    if (dest_doc == src_doc) return LEPTRIS_ERROR_INVALID_ARG;
+    if (((LeptrisNodeRef)element)->type != LEPTRIS_NODE_TYPE_ELEMENT)
+        return LEPTRIS_ERROR_INVALID_ARG;
+    /* A source absorbed by some OTHER document is anchored there —
+     * its pool belongs to that absorber. */
+    if (src_doc->absorbed_by && src_doc->absorbed_by != dest_doc)
+        return LEPTRIS_ERROR_INVALID_ARG;
+    /* Ownership: the element must belong to src_doc (third-doc and
+     * dst-resident aliases rejected). */
+    if (leptris_element_get_document(element) != src_doc)
+        return LEPTRIS_ERROR_INVALID_ARG;
+
+    leptris_document_ensure_promoted(dest_doc);
+    leptris_document_ensure_promoted(src_doc);
+    if (!dest_doc->pool) return LEPTRIS_ERROR_MEMORY;
+
+    /* #1548 fast path: the source is a doomed scratch doc absorbed
+     * into the destination — the storage already lives with dst (its
+     * pool dies with dst), so the move is a pure detach and the
+     * handle moves BY IDENTITY. */
+    if (src_doc->absorbed_by == dest_doc) {
+        mv_detach_source(src_doc, element);
+        *moved_out = element;
+        return LEPTRIS_OK;
+    }
+
+    /* Build-then-detach: any failure below leaves src untouched. */
+    int any_ns = 0;
+    /* Namespace context first: prefixes declared outside the moved
+     * subtree must re-declare on the moved top, or every prefixed
+     * name goes blind in dst (the resolution walks in-scope
+     * declarations). Collected against the still-attached source;
+     * freed before return. */
+    struct mv_pfx* declared = NULL;
+    struct mv_ns_need* needs = NULL;
+    int ctx_ok = mv_walk_decls(element, &declared) &&
+                 mv_walk_needs(element, declared, &needs);
+    mv_free_pfx(declared);
+    if (!ctx_ok) {
+        mv_free_needs(needs);
+        return LEPTRIS_ERROR_MEMORY;
+    }
+
+    LeptrisElement moved = mv_element(element, NULL, dest_doc,
+                                      dest_doc->pool, &any_ns);
+    if (moved) {
+        if (!mv_synthesize_decls(moved, needs, dest_doc->pool, &any_ns))
+            moved = NULL;
+    }
+    mv_free_needs(needs);
+    if (!moved) return LEPTRIS_ERROR_MEMORY;
+
+    if (any_ns) dest_doc->has_namespaces = 1;
+    /* Pool-named fallback elements carry no namebp — one root-map
+     * registration keeps the detached tree resolving to dst (the
+     * leptris_element_copy precedent). */
+    leptris_root_doc_register(moved, dest_doc);
+    dest_doc->mutation_version++;
+    dest_doc->ser_version++;
+    if (dest_doc->element_index)
+        leptris_element_index_invalidate(dest_doc);
+
+    mv_detach_source(src_doc, element);
+    leptris_root_doc_memo_invalidate(dest_doc);
+    *moved_out = moved;
+    return LEPTRIS_OK;
+}
+
 
