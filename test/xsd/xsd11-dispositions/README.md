@@ -614,3 +614,114 @@ dateTimeStamp — now REJECT the schema at compile time.)
   (possibly EMPTY) §3.11.5 node table so keyrefs against it fail;
   keyref target tables must exist. Spec tests:
   test/xsd/test_xsd11_ic.cpp.
+
+## #2184 final consolidation — 2026-11-28 (branch xsd11-final)
+
+The 159-row red list measured on the #2226-merged base went to
+**58 rows**: 2047/2206 → **2148/2206** (1278 valid / 597 invalid /
+273 schema-error), zero regressions by red-set diff at every step,
+the pinned 1.0 corpus holding at 1044 throughout. What closed, by
+mechanism:
+
+- duplicate single-occurrence facets (simple060-084, 25 rows);
+- the explicitTimezone posture law: required/prohibited LOCK the
+  chain posture (zone004/005/408/409), optional stays open (IBM
+  D4_3_16 v05/ii05 force that reading), not applicable to a union
+  base (zone008) — 5 rows + the D4_3_16 riders;
+- NOTATION/xs:anyAtomicType placement (simple051-053/090/092/093/
+  095, the xs:notation symbol table) — 7 rows;
+- value constraints are lexicals (s3_3_4si01-11, 11 rows) + the
+  §3.2.5 unparsed-entity integrity (id018/id021 rows) + the
+  src-attribute.4 probe moving to the builtin-exists table
+  (id018.xsd/id021.xsd had lost their compiles to it);
+- union circularity (simple017-020, s3_16_2si01-05, 9 rows);
+- the targetNamespace placement rules + src-import agreement
+  (target002/004/007, s3_2_3si01-si07) — 11 rows;
+- RecurseAsSum in the all restriction sweep + the UPA
+  follow-through-nullability routing (all212-215/227/231/232/233/
+  234) — 8 rows;
+- the §3.4.4.3 dynamic EDC + §3.3.4.3 cl. 4.2 xsi:type
+  substitutability (wild062.n1/n2/n3, wild065.n1, wild063.n2,
+  wild068.xsd/n1, simple016.n01) — 8 rows;
+- multi-head substitution groups + the §3.3.4 {abstract} law
+  (subsgroup001/s2_2_2 instances) — 6 rows.
+
+Two pre-law self-pins moved with the REC evidence, both named in
+their bodies: BuiltinCollapseCoversNonStringBuiltins' boolean-over-
+decimal case (the pre-law lax posture) and the D4_3_16 "optional
+stays open" reading (IBM's valid derivations pin it against
+Saxon's zone004/005 — the law that satisfies BOTH families).
+
+## The remaining 58 rows, dispositioned
+
+**Owner decision pending — the attZ014b oracle tension (3 rows).**
+saxonData/Id id001.v01-vs-id002.xsd, id003.v01, id015.n02: the suite
+admits a wildcard-admitted second ID on an unmarked schema (XSD 1.1
+legal) while the pinned 1.0 corpus requires the one-ID gate to fire
+there (attZ014b) and test_xsd11_multid's
+WildcardAdmittedSecondIdStillInvalid pins the gate. Do NOT flip —
+the owner call recorded in the multi-ID wave stands. id015.n02 rides
+the same family (fixed="p1" ID content assessed as a second ID
+table).
+
+**Real gaps, mechanism-clustered (55 rows) — the next wave's work
+list, in yield order:**
+
+1. all-compile residue (11): all008-011 (a group ref inside an all
+   must reference an all-group with minOccurs=maxOccurs=1 — the
+   flatten helper currently just bails, so the type skips the
+   sweep), all241-243 (UPA inside a single all: substitution-group
+   and wildcard overlaps between all-particles), all302/303 (all
+   extension overlapping particles), all313 (an all extending an
+   all keeps minOccurs=1).
+2. Wild compile-time EDC (3): wild078/079/081 — a content model
+   with a local element particle AND a strict/lax wildcard admitting
+   the same name must type-check the wildcard-resolved global decl
+   against the particle's type at COMPILE time (cos-element-
+   consistent). The DYNAMIC half of this law shipped in this wave;
+   the static/content-model half is open.
+3. Wildcard compile over-rejection (2): wild049/050 — complex-type
+   restriction wildcard subset shapes the compile rejects that the
+   suite compiles clean.
+4. Wildcard assessment residue (4): wild009/010 n1
+   (notNamespace="##targetNamespace" admits per the OWNING unit's
+   tns at assessment), wild042.n1 (the xsi-namespace wildcard
+   shapes), wild063.n1 (wildcard-position xsi:type — needs the NFA's
+   per-child particle attribution to route the strict law; the
+   position-blind particle find assesses the first-position decl).
+5. Union substitutability in substitution groups (3): simple011/
+   014/015 — cos-ct-type-substitutable for element decls
+   (union(x,y) is not derived from union(x,y,z); a union member is
+   not substitutable when the union is derived by restriction). The
+   xsi:type half of the law shipped in this wave; the
+   substitution-group half is open.
+6. Regex char-class lanes (5): simple041/042 (the subtraction and
+   mid-dash class shapes must REJECT), simple045.xsd+v01 (the legal
+   hyphen-in-class form must compile and validate — currently
+   over-rejected), simple085.v01 (a pattern-faceted restricted
+   union instance).
+7. Assertion compile lanes (3): assert020/021.xsd (assertion
+   schemas the suite compiles clean but the engine rejects),
+   d4_3_15si04 (an assertion whose test fails to COMPILE must fail
+   the schema).
+8. Weak-wildcard lax typing residue (8): s3_8_6v01+ii01,
+   s3_10_1v04 x2+ii06, s3_3_4v02, d3_3_17ii01, s3_16_2ii06 — the
+   lax/strict processContents typing of wildcard-admitted declared
+   elements at assessment.
+9. Substitution-group compile constraints (4): s2_2_2si01 (circular
+   substitution groups), s2_2_2si02 (the member's type not validly
+   substitutable for the head's), subsgroup901 (EDC between a local
+   element and a substitution member in one model), subsgroup903
+   (UPA in an all via a multi-head member).
+10. Small classes (6): simple004/005 (simpleType/@final=extension
+    blocks the simpleContent extension — spec bug 2074's law),
+    simple006 (an unresolved list itemType must fail the schema),
+    simple086.n01 (duration seconds needs the digit-before/after-
+    decimal rule), d3_1si01 (the deprecated
+    http://www.w3.org/2001/XMLSchema-datatypes namespace fails the
+    schema), s2_2_4si01 (an identity-constraint @ref forbids
+    attributes beside id), s3_2_3si08 + ii04/ii05 (the §3.2.3
+    residue: restriction base anyType with attribute defaults),
+    target001.n1 (a local declaration's own targetNamespace must
+    govern the particle's namespace match at assessment — the
+    capture keeps the local tns but the walk matches efd only).
