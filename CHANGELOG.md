@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [1.9.453] - 2026-11-28
+
+### Fixed
+
+- content-carried IDs on the validation root denote nothing (xsd11)
+
+
+
 ## [1.9.452] - 2026-11-28
 
 The residue endgame: the XSD 1.1 tail-classes campaign completes — the official W3C floor moves **2148 → 2200 / 2206 (97.4% → 99.7%)**, XML Schema 1.0 stands at **1046/1056 (99.1%)**, and six rows remain (three owner-decision, three itemized corners, all dispositioned row-by-row in `test/xsd/xsd11-dispositions/README.md`).
