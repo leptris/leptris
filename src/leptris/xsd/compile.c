@@ -292,6 +292,8 @@ static void xsd_wc_fold_union_locals(char** ns, char** nq, char** nns,
 static void xsd_wc_expand_defined_sibling_pass(
     struct leptris_xsd_schema* s);
 static int xsd_check_attr_wildcards(struct leptris_xsd_schema* s);
+/* #2184 §3.2.7: no xsi-namespace attribute uses beyond the built-ins. */
+static int xsd_check_xsi_attr_uses(struct leptris_xsd_schema* s);
 /* #2184 §3.8.3: merged-all wildcard namespace-set overlap. */
 static int xsd_all_wildcards_overlap(const XsdCm* w1, const XsdCm* w2);
 /* #2184 wildcard canon helpers (defined past the capture driver) */
@@ -7041,6 +7043,14 @@ static LeptrisXsdSchema xsd_compile_impl(const char* xsd_text,
         return (LeptrisXsdSchema)s;
     }
 
+    /* #2184 §3.2.7: no xsi-namespace attribute declarations or uses
+     * beyond the four built-ins (wild041). */
+    if (xsd_check_xsi_attr_uses(s) != 0) {
+        if (status) *status = LEPTRIS_ERROR_PARSE;
+        leptris_document_free(doc);
+        return (LeptrisXsdSchema)s;
+    }
+
     /* #2184: the all-restriction compatibility sweep — an xs:all
      * restricts an xs:all particle-for-particle with narrowing
      * occurrence windows (s3_3_6/s3_4_6, the saxon subsumption
@@ -12936,6 +12946,64 @@ static int xsd_check_attr_wildcards(struct leptris_xsd_schema* s) {
         char msg[512];
         if (!xsd_wc_attr_subset(dt, bt, base->name, msg,
                                 sizeof(msg))) {
+            xsd_set_error(s, msg);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* #2184 (§3.2.7): the only xsi-namespace attributes a schema may
+ * reference are the four built-ins (type, nil, schemaLocation,
+ * noNamespaceSchemaLocation — §3.17.6.2 cl. 4.2.4). An explicit
+ * declaration or use of ANY other xsi-namespace attribute fails the
+ * schema (wild041's ref of the imported xsi declaration). */
+static int xsd_check_xsi_attr_uses(struct leptris_xsd_schema* s) {
+    static const char* const k_builtin[4] = {
+        "type", "nil", "schemaLocation",
+        "noNamespaceSchemaLocation"};
+    for (const XsdTypeAttrs* ta = s->type_attrs; ta; ta = ta->next)
+        for (const XsdAttrDecl* a = ta->attrs; a; a = a->next) {
+            if (!a->ns || !a->name) continue;
+            if (strcmp(a->ns,
+                       "http://www.w3.org/2001/XMLSchema-instance") != 0)
+                continue;
+            int builtin = 0;
+            for (int i = 0; i < 4; i++)
+                if (strcmp(a->name, k_builtin[i]) == 0) {
+                    builtin = 1;
+                    break;
+                }
+            if (!builtin) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                         "src-attribute: the attribute '%s' in the "
+                         "xsi namespace is not allowed — only the "
+                         "four built-in xsi declarations may be "
+                         "referenced",
+                         a->name);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    for (const XsdAttrDecl* a = s->top_attrs; a; a = a->next) {
+        if (!a->ns || !a->name) continue;
+        if (strcmp(a->ns,
+                   "http://www.w3.org/2001/XMLSchema-instance") != 0)
+            continue;
+        int builtin = 0;
+        for (int i = 0; i < 4; i++)
+            if (strcmp(a->name, k_builtin[i]) == 0) {
+                builtin = 1;
+                break;
+            }
+        if (!builtin) {
+            char msg[300];
+            snprintf(msg, sizeof(msg),
+                     "src-attribute: the attribute '%s' in the xsi "
+                     "namespace is not allowed — only the four "
+                     "built-in xsi declarations may be referenced",
+                     a->name);
             xsd_set_error(s, msg);
             return -1;
         }
