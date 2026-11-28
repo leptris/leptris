@@ -303,6 +303,105 @@ TEST(InterleavedParity, DupAttrDiagnosticParity) {
 }
 
 
+/* #2233: the raw attribute view (leptris_element_attributes_raw)
+ * reads the element's ns_cache raw_attrs journal. The classic lane
+ * journals every WIRED attribute at parse time (dp_add_attr_inline's
+ * fused registration — dups excluded, source views, xmlns included
+ * in source order); the il replay wired the attr list but never
+ * journaled, so the accessor returned 0 on interleaved-built trees
+ * and left the out-slots untouched. Both lanes must expose the same
+ * raw views: count, qnames, values (raw SOURCE bytes — the views
+ * predate §3.3.3 whitespace normalization), source order. */
+TEST(InterleavedParity, RawAttrViewIdentical) {
+    const char* xml =
+        "<r a='1' b=\"2\"><b a='' q='x\ty' p=\"u\nv\"/></r>";
+    struct RawView {
+        size_t n;
+        const char* names[8];
+        const char* vals[8];
+    };
+    for (int lane = 0; lane <= 1; lane++) {
+        SCOPED_TRACE(lane ? "interleaved" : "classic");
+        if (lane) { set_env("LEPTRIS_INTERLEAVED", "1");
+                    set_env("LEPTRIS_IL_MIN", "1"); }
+        else { unset_env("LEPTRIS_INTERLEAVED");
+               unset_env("LEPTRIS_IL_MIN"); }
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(xml, strlen(xml), &st);
+        ASSERT_NE(d, nullptr);
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr);
+        LeptrisElement b = leptris_element_first_child(root, NULL);
+        ASSERT_NE(b, nullptr);
+        RawView rv;
+        rv.n = leptris_element_attributes_raw(root, rv.names, rv.vals, 8);
+        ASSERT_EQ(rv.n, 2u);
+        EXPECT_STREQ(rv.names[0], "a");
+        EXPECT_STREQ(rv.vals[0], "1");
+        EXPECT_STREQ(rv.names[1], "b");
+        EXPECT_STREQ(rv.vals[1], "2");
+        rv.n = leptris_element_attributes_raw(b, rv.names, rv.vals, 8);
+        ASSERT_EQ(rv.n, 3u);
+        EXPECT_STREQ(rv.names[0], "a");
+        EXPECT_STREQ(rv.vals[0], "");
+        EXPECT_STREQ(rv.names[1], "q");
+        EXPECT_STREQ(rv.vals[1], "x\ty");   /* raw source byte */
+        EXPECT_STREQ(rv.names[2], "p");
+        EXPECT_STREQ(rv.vals[2], "u\nv");   /* raw source bytes */
+        /* the lookup accessor stays on normalized values — the raw
+         * view showing source bytes must not drag it along */
+        EXPECT_STREQ(leptris_element_attribute(b, "q"), "x y");
+        EXPECT_STREQ(leptris_element_attribute(b, "p"), "u v");
+        leptris_document_free(d);
+        unset_env("LEPTRIS_INTERLEAVED");
+    }
+}
+
+/* #2233 falsifiability: the count parity spec above would pass
+ * vacuously if the lane bailed on the fixture, so the interleaved
+ * leg here also asserts the lane actually built the tree the spec
+ * reads (attr list via the lookup accessor under the forced floor).
+ * The canary spec (EngagementCanaryFiresOnlyWhenLaneRuns) already
+ * proves the env toggle engages the lane for exactly this shape. */
+TEST(InterleavedParity, RawAttrViewWideFixture) {
+    /* every wired attr journaled, in source order, on a wide element
+     * (the raw-view consumer is the attrparse batch row: wide fans) */
+    std::string xml = "<r>";
+    for (int i = 0; i < 40; i++) xml += "<e k0='0' k1='1' k2='2' k3='3'/>";
+    xml += "</r>";
+    for (int lane = 0; lane <= 1; lane++) {
+        SCOPED_TRACE(lane ? "interleaved" : "classic");
+        if (lane) { set_env("LEPTRIS_INTERLEAVED", "1");
+                    set_env("LEPTRIS_IL_MIN", "1"); }
+        else { unset_env("LEPTRIS_INTERLEAVED");
+               unset_env("LEPTRIS_IL_MIN"); }
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d =
+            leptris_parse_string(xml.data(), xml.size(), &st);
+        ASSERT_NE(d, nullptr);
+        LeptrisElement root = leptris_document_root(d);
+        ASSERT_NE(root, nullptr);
+        int eidx = 0;
+        for (LeptrisElement e = leptris_element_first_child(root, NULL); e;
+             e = leptris_element_next_sibling(e, NULL), eidx++) {
+            const char* names[8];
+            const char* vals[8];
+            const size_t n =
+                leptris_element_attributes_raw(e, names, vals, 8);
+            ASSERT_EQ(n, 4u) << "elem " << eidx;
+            for (size_t k = 0; k < n; k++) {
+                std::string want = "k" + std::to_string(k);
+                EXPECT_STREQ(names[k], want.c_str()) << "elem " << eidx;
+                EXPECT_STREQ(vals[k], std::to_string(k).c_str())
+                    << "elem " << eidx;
+            }
+        }
+        EXPECT_EQ(eidx, 40);
+        leptris_document_free(d);
+        unset_env("LEPTRIS_INTERLEAVED");
+    }
+}
+
 #ifndef _WIN32
 /* #1258: the size floor. Below LEPTRIS_IL_MIN (default 64KB) the
  * lane defers to the classic parser even when the gate is on —
