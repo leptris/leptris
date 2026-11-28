@@ -3423,6 +3423,21 @@ static void validate_local_uri(struct xsd_validator* v,
      * Attributes are unaffected by nil and still validate. */
     const char* nilattr = leptris_element_attribute_ns(
         elem, "http://www.w3.org/2001/XMLSchema-instance", "nil");
+    /* #2184 (wild042): xsi:nil's VALUE must spell a boolean —
+     * "true"/"1"/"false"/"0" (§3.2.7.1 cl. 2 / §c-props-correct).
+     * The admission walk stays silent (the xsi wildcard admits the
+     * attribute; skip imposes no constraint), but a NON-boolean
+     * lexical leaves the element unassessable against nil semantics
+     * — the instance is invalid regardless of the declared type's
+     * nillability. */
+    if (nilattr && *nilattr &&
+        strcmp(nilattr, "true") != 0 && strcmp(nilattr, "1") != 0 &&
+        strcmp(nilattr, "false") != 0 && strcmp(nilattr, "0") != 0) {
+        verrfk(v, "content-model", "element", local,
+               "xsi:nil must be a boolean lexical, not the value "
+               "given");
+        return;
+    }
     /* XSD boolean lexical: "true" and "1" both spell true (#2184 —
      * the saxon All rows write xsi:nil="1") */
     if (nilattr && (strcmp(nilattr, "true") == 0 ||
