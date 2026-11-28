@@ -557,21 +557,41 @@ TEST(XsdDatatypes, ClassNegatedBuiltinsComplement) {
     leptris_xsd_free(s);
 }
 
-// W3C XSD suite msData/regex reG26-33/reH19 (F.1 productions
-// [14]/[17]-[22]): an unescaped '-' is a character range member
-// only at the BEGINNING or END of a positive character group. A
-// '-' after a completed member with a following non-']' char is a
-// grammar error — the SCHEMA must fail to compile (suite
-// schemaTest: invalid; xmllint is lenient here, the suite governs).
+// W3C XSD suite msData/regex reG26-33/reH19 — the dash laws are
+// DIALECT-SPLIT, and the suite metadata records BOTH verdicts
+// (msMeta/Regex_w3c.xml reG26: <expected version="1.0"
+// validity="invalid"/> AND <expected version="1.1"
+// validity="valid"/> for the SAME schema):
+//
+//   - 1.0 (F.1.1 bullets): an unescaped '-' is a character range
+//     only at the BEGINNING or END of a positive character group —
+//     a '-' after a completed member with a following non-']' char
+//     is a grammar error (the schema must fail to compile).
+//   - 1.1 (§3.16.5 charGroup prose): the hyphen rules only fire
+//     when a charGroupPart's singleChar is followed by a HYPHEN —
+//     rule 4 makes x-y a charRange but an unescaped hyphen as
+//     either range ENDPOINT is an error (excludes [--z]); a hyphen
+//     followed by another hyphen that cannot range is "not
+//     recognized as a regular expression" (excludes [!--]); a
+//     standalone hyphen NOT followed by a hyphen is a plain
+//     singleChar ([a-z-+], reG26's [a-c-1-4x-z-7-9] are legal).
+//
+// Dialect-independent (both RECs agree): [--z] and [!--] reject in
+// BOTH dialects. Dialect-dependent: the mid-group standalone dash —
+// error pinned to the 1.0 dialect, legal otherwise. The engine's
+// key is the explicit 1.0 pin (@version="1.0" / vc:maxVersion),
+// matching #2184's "syntax evidence never relaxes a rule the
+// schema pinned to the 1.0 dialect" law.
 TEST(XsdDatatypes, DashAfterRangeMemberIsGrammarError) {
-    auto compile_pattern = [](const char* pat) {
+    auto compile_pattern_d = [](const char* pat, const char* ver) {
         char buf[512];
         snprintf(buf, sizeof(buf),
-            "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+            "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"%s>"
             "<xs:simpleType name=\"t\"><xs:restriction"
             " base=\"xs:string\">"
             "<xs:pattern value=\"%s\"/></xs:restriction>"
-            "</xs:simpleType></xs:schema>", pat);
+            "</xs:simpleType></xs:schema>",
+            ver ? ver : "", pat);
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisXsdSchema s = leptris_xsd_compile(
             buf, strlen(buf), &st);
@@ -580,20 +600,64 @@ TEST(XsdDatatypes, DashAfterRangeMemberIsGrammarError) {
         leptris_xsd_free(s);
         return !err;
     };
-    // reG26-33: dash after a completed range, mid-group
-    EXPECT_EQ(compile_pattern("[a-c-1-4x-z-7-9]*"), 0);
-    // reH19: [a-a-x-x]+ — dash after the a-a range
-    EXPECT_EQ(compile_pattern("[a-a-x-x]+"), 0);
-    // dash mid-group after a plain member
-    EXPECT_EQ(compile_pattern("[a-b-c]"), 0);
-    // the LEGAL shapes stay legal: dash first, dash last, escaped
+    auto compile_pattern = [&compile_pattern_d](const char* pat) {
+        return compile_pattern_d(pat, NULL);
+    };
+    auto compile_pattern_10 = [&compile_pattern_d](const char* pat) {
+        return compile_pattern_d(pat, " version=\"1.0\"");
+    };
+    // [--z]/[!--] reject in BOTH dialects: the range endpoints are
+    // unescaped hyphens (1.0: seRange s/e must be XmlChar or
+    // SingleCharEsc; 1.1: the endpoint error clause + rule 5). The
+    // saxonData/Simple simple041/042 fixtures pin this for 1.1.
+    EXPECT_EQ(compile_pattern("[--z]*"), 0);
+    EXPECT_EQ(compile_pattern("[!--]*"), 0);
+    EXPECT_EQ(compile_pattern_10("[--z]*"), 0);
+    EXPECT_EQ(compile_pattern_10("[!--]*"), 0);
+    // reG26-33/reH19 (suite: invalid@1.0, valid@1.1) — the
+    // mid-group standalone dash fails ONLY the pinned 1.0 dialect;
+    // unmarked schemas ride the 1.1 reading and compile clean.
+    EXPECT_EQ(compile_pattern_10("[a-c-1-4x-z-7-9]*"), 0);
+    EXPECT_EQ(compile_pattern_10("[a-a-x-x]+"), 0);
+    EXPECT_EQ(compile_pattern_10("[a-b-c]"), 0);
+    EXPECT_EQ(compile_pattern("[a-c-1-4x-z-7-9]*"), 1);
+    EXPECT_EQ(compile_pattern("[a-a-x-x]+"), 1);
+    EXPECT_EQ(compile_pattern("[a-b-c]"), 1);
+    // simple045 (saxonData/Simple, suite valid): the legal
+    // hyphen-in-class form — a-z range, then '-' as a plain member
+    // (not followed by a hyphen), then '+'
+    EXPECT_EQ(compile_pattern("[a-z-+]*"), 1);
+    // the LEGAL shapes stay legal in both dialects: dash first,
+    // dash last, escaped
     EXPECT_EQ(compile_pattern("[-abc]"), 1);
     EXPECT_EQ(compile_pattern("[abc-]"), 1);
     EXPECT_EQ(compile_pattern("[a\\-b]"), 1);
     EXPECT_EQ(compile_pattern("[0-9-]"), 1);
     EXPECT_EQ(compile_pattern("[^abc]"), 1);
+    EXPECT_EQ(compile_pattern_10("[-abc]"), 1);
+    EXPECT_EQ(compile_pattern_10("[abc-]"), 1);
+    EXPECT_EQ(compile_pattern_10("[a\\-b]"), 1);
+    EXPECT_EQ(compile_pattern_10("[0-9-]"), 1);
     // reG17: [\\-\\{^] — the escaped-brace range end compiles
     EXPECT_EQ(compile_pattern("[\\\\-\\{^]"), 1);
+    // value level (reG26.v/reG27.v, suite valid@1.1): the unmarked
+    // mid-dash pattern MATCHES — the match-side parser rides the
+    // same dialect as the compile-side gate
+    char buf2[512];
+    snprintf(buf2, sizeof(buf2),
+        "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+        "<xs:simpleType name=\"t\"><xs:restriction"
+        " base=\"xs:string\">"
+        "<xs:pattern value=\"[a-c-1-4x-z-7-9]*\"/></xs:restriction>"
+        "</xs:simpleType></xs:schema>");
+    LeptrisStatus st2 = LEPTRIS_OK;
+    LeptrisXsdSchema s2 = leptris_xsd_compile(buf2, strlen(buf2), &st2);
+    ASSERT_NE(s2, nullptr) << "unmarked reG26 schema must compile";
+    EXPECT_EQ(leptris_xsd_error(s2), nullptr);
+    EXPECT_EQ(leptris_xsd_simple_valid(s2, "t", "a-1x-7"), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s2, "t", ""), 1);
+    EXPECT_EQ(leptris_xsd_simple_valid(s2, "t", "d"), 0);
+    leptris_xsd_free(s2);
 }
 
 // F.1 [7] quantMin "{n,}" is OPEN-ENDED (the {n}-exact fix clobbered

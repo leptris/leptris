@@ -79,6 +79,17 @@ typedef struct RreParser {
     const char* p;
     int depth;
     int bad;
+    /* The dialect for the char-class dash laws (#2184): 1 = the
+     * XSD 1.0 F.1.1 law (a standalone '-' is a character range only
+     * at the BEGINNING or END of a positive character group), 0 =
+     * the XSD 1.1 §3.16.5 reading (a hyphen not followed by a
+     * hyphen / '[' / ']' — and not ending a charRange — is a plain
+     * singleChar member). The endpoint laws (an unescaped '-' as
+     * either end of a range; a hyphen followed by a hyphen that
+     * cannot range) are dialect-INDEPENDENT errors. The XSD lanes
+     * pass xsd_schema_pinned_10(s); every other caller (RNG) keeps
+     * the strict default. */
+    int xsd_10;
 } RreParser;
 
 static RreNode* parse_alt(RreParser* ps);
@@ -804,7 +815,16 @@ static RreNode* parse_class(RreParser* ps) {
                     int hi_esc = (*ps->p == '\\');
                     unsigned hi = 0;
                     if (!cls_read_cp(ps, &hi) || hi < scp ||
-                        hi == 0x5B || (hi_esc && hi == 0x5C)) {
+                        hi == 0x5B || (hi_esc && hi == 0x5C) ||
+                        /* an unescaped '-' as the range END is a
+                         * grammar error in BOTH dialects (1.0: e
+                         * must be XmlChar or SingleCharEsc, and
+                         * XmlChar excludes #x2D; 1.1 §3.16.5: "It
+                         * is an error if either of the two
+                         * singleChars in a charRange is a
+                         * SingleCharNoEsc comprising an unescaped
+                         * hyphen" — the [!--] shape) */
+                        (!hi_esc && hi == 0x2D)) {
                         node_free(n);
                         ps->bad = 1;
                         return NULL;
@@ -859,11 +879,25 @@ static RreNode* parse_class(RreParser* ps) {
          * by subtraction is charClassSub, not a range toward '[' */
         if (*ps->p == '-' && ps->p[1] && ps->p[1] != ']' &&
             ps->p[1] != '[') {
+            /* an unescaped '-' as the range START is a grammar
+             * error in BOTH dialects ([--z]: 1.0's seRange needs s
+             * = XmlChar (dash excluded) or SingleCharEsc; 1.1's
+             * endpoint error clause names it explicitly — "the rule
+             * (not the grammar) excludes the string '[--z]' from
+             * the regular expression language") */
+            if (lo == 0x2D) {
+                node_free(n);
+                ps->bad = 1;
+                return NULL;
+            }
             ps->p++;
             int hi_esc = (*ps->p == '\\');
             unsigned hi = 0;
             if (!cls_read_cp(ps, &hi) || hi < lo ||
-                hi == 0x5B || (hi_esc && hi == 0x5C)) {
+                hi == 0x5B || (hi_esc && hi == 0x5C) ||
+                /* the unescaped-dash END law, same as the escape
+                 * branch above ([!--] rejects in both dialects) */
+                (!hi_esc && hi == 0x2D)) {
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
@@ -877,11 +911,21 @@ static RreNode* parse_class(RreParser* ps) {
                 n->uni_n++;
             }
         } else {
-            /* F.1 [17]/[22]: a standalone '-' is a member only at
-             * the BEGINNING or END of the group — after a completed
-             * member with a following non-']' char it is a grammar
-             * error (reG26-33/reH19: [a-c-1-4x-z-7-9], [a-a-x-x]) */
-            if (lo == '-' && !is_first_member && *ps->p != ']') {
+            /* F.1 [17]/[22] (the 1.0 dialect ONLY — #2184): a
+             * standalone '-' is a member only at the BEGINNING or
+             * END of the group — after a completed member with a
+             * following non-']' char it is a grammar error
+             * (reG26-33/reH19, suite invalid@1.0). XSD 1.1 §3.16.5
+             * reads the same string as a plain singleChar member
+             * (the hyphen rules fire only when a charGroupPart's
+             * singleChar is followed by a HYPHEN), so the suite's
+             * valid@1.1 verdict ([a-c-1-4x-z-7-9], simple045's
+             * [a-z-+]) passes here when the dialect is 1.1. The
+             * hyphen-followed-by-hyphen and range-endpoint shapes
+             * never reach this branch (the range law above already
+             * rejected them in both dialects). */
+            if (ps->xsd_10 && lo == '-' && !is_first_member &&
+                *ps->p != ']') {
                 node_free(n);
                 ps->bad = 1;
                 return NULL;
@@ -1237,7 +1281,9 @@ static const char* rre_match(RreNode* n, const char* s,
     return NULL;
 }
 
-int rng_regex_supported(const char* pat) {
+/* The shared parse gate: xsd_10 selects the char-class dash dialect
+ * (1 = XSD 1.0 F.1.1 strict, 0 = XSD 1.1 §3.16.5). */
+static int rre_supported_d(const char* pat, int xsd_10) {
     if (!pat) return 0;
     /* an EMPTY branch is a valid regExp (F.1 [1]: branch*) — it
      * matches only the empty string (reA1/reA7: pattern='' with
@@ -1247,13 +1293,22 @@ int rng_regex_supported(const char* pat) {
     ps.p = pat;
     ps.depth = 0;
     ps.bad = 0;
+    ps.xsd_10 = xsd_10;
     RreNode* n = parse_alt(&ps);
     int ok = n && !ps.bad && *ps.p == 0;
     node_free(n);
     return ok;
 }
 
-int rng_regex_matches(const char* pat, const char* text) {
+int rng_regex_supported(const char* pat) {
+    return rre_supported_d(pat, 1);
+}
+
+int rng_regex_supported_dialect(const char* pat, int xsd_10) {
+    return rre_supported_d(pat, xsd_10);
+}
+
+static int rre_matches_d(const char* pat, const char* text, int xsd_10) {
     if (!pat || !text) return 0;
     /* XSD Appendix F.1: an EMPTY pattern branch matches only the
      * empty string (the reA1 corpus shape: pattern="" with
@@ -1263,6 +1318,7 @@ int rng_regex_matches(const char* pat, const char* text) {
     ps.p = pat;
     ps.depth = 0;
     ps.bad = 0;
+    ps.xsd_10 = xsd_10;
     RreNode* n = parse_alt(&ps);
     if (!n || ps.bad || *ps.p != 0) {
         node_free(n);
@@ -1275,4 +1331,13 @@ int rng_regex_matches(const char* pat, const char* text) {
     const char* r = rre_match(n, text, &k);
     node_free(n);
     return r != NULL;
+}
+
+int rng_regex_matches(const char* pat, const char* text) {
+    return rre_matches_d(pat, text, 1);
+}
+
+int rng_regex_matches_dialect(const char* pat, const char* text,
+                              int xsd_10) {
+    return rre_matches_d(pat, text, xsd_10);
 }
