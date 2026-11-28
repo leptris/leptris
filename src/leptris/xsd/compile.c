@@ -2784,6 +2784,21 @@ struct xsd_upa_first {
                          * pair law must weigh the EFFECTIVE set */
 };
 
+/* One heap workspace serving a whole xsd_check_upa walk (both
+ * walkers). The first/follow scratch is ~49KB per array and the
+ * walkers recurse depth-first, but every level fills and consumes its
+ * sets BEFORE the descent (the child walk starts after the pair
+ * loops), so a single shared buffer is race-free by construction.
+ * Stack arrays would put ~100KB on EVERY recursion frame: 24 levels
+ * of the depth cap is ~2.4MB, past the 1MB Windows main-thread stack
+ * (PR #2241's corpus/manifest SEGV wave — 8MB POSIX stacks hid it). A
+ * NULL workspace (allocation failure) skips the pair checks: the
+ * under-report law, never a false rejection. */
+struct xsd_upa_scratch {
+    struct xsd_upa_first fi[XSD_UPA_MAX];
+    struct xsd_upa_first nx[XSD_UPA_MAX]; /* fj (choice) / rest (seq) */
+};
+
 /* does the raw notNamespace token list exclude the namespace uri
  * (NULL = no namespace)? ##local excludes "", ##targetNamespace
  * excludes tns, literals compare verbatim (#2184, wild049/050). */
@@ -3076,7 +3091,8 @@ static int xsd_upa_nullable(LeptrisElement e, int depth) {
 
 static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               LeptrisElement e, const char* tns,
-                              int depth, int relax_wildcard);
+                              int depth, int relax_wildcard,
+                              struct xsd_upa_scratch* ws);
 
 static int xsd_upa_collect_children(LeptrisElement e, LeptrisElement* kids,
                                     int max) {
@@ -3116,7 +3132,8 @@ static int xsd_upa_particle_can_repeat_or_skip(LeptrisElement c) {
 
 static int xsd_upa_check_node(struct leptris_xsd_schema* s,
                               LeptrisElement e, const char* tns,
-                              int depth, int relax_wildcard) {
+                              int depth, int relax_wildcard,
+                              struct xsd_upa_scratch* ws) {
     if (!e || depth > 24) return 0;
     const char* l = NULL;
     const char* p2 = NULL;
@@ -3130,19 +3147,19 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
     LeptrisElement kids[64];
     int nk = xsd_upa_collect_children(e, kids, 64);
 
-    if ((is_choice || is_all) && nk >= 2) {
+    if (ws && (is_choice || is_all) && nk >= 2) {
         for (int i = 0; i < nk; i++) {
-            struct xsd_upa_first fi[XSD_UPA_MAX];
             int ni = 0;
-            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            xsd_upa_first(kids[i], ws->fi, XSD_UPA_MAX, &ni, tns,
+                          depth + 1);
             for (int j = i + 1; j < nk; j++) {
-                struct xsd_upa_first fj[XSD_UPA_MAX];
                 int nj = 0;
-                xsd_upa_first(kids[j], fj, XSD_UPA_MAX, &nj, tns,
+                xsd_upa_first(kids[j], ws->nx, XSD_UPA_MAX, &nj, tns,
                               depth + 1);
                 for (int a = 0; a < ni; a++)
                     for (int b = 0; b < nj; b++) {
-                        if (xsd_upa_first_overlap(&fi[a], &fj[b], tns, relax_wildcard)) {
+                        if (xsd_upa_first_overlap(&ws->fi[a], &ws->nx[b],
+                                                  tns, relax_wildcard)) {
                             xsd_set_error(
                                 s,
                                 "upa: the content model is not "
@@ -3154,27 +3171,27 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
             }
         }
     }
-    if (is_seq) {
+    if (ws && is_seq) {
         for (int i = 0; i + 1 < nk; i++) {
             if (!xsd_upa_particle_can_repeat_or_skip(kids[i])) continue;
-            struct xsd_upa_first fi[XSD_UPA_MAX];
             int ni = 0;
-            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
+            xsd_upa_first(kids[i], ws->fi, XSD_UPA_MAX, &ni, tns,
+                          depth + 1);
             /* the FOLLOW set — after the repeating/skippable child
              * only the FIRST of the next sibling can follow; a
              * NON-NULLABLE sibling stops the walk (a choice in
              * between routes the tail away — all234's
              * b{1-3},choice{d|c|a},b{1-2} is deterministic) */
-            struct xsd_upa_first rest[XSD_UPA_MAX];
             int nr = 0;
             for (int j = i + 1; j < nk; j++) {
-                xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
+                xsd_upa_first(kids[j], ws->nx, XSD_UPA_MAX, &nr, tns,
                               depth + 1);
                 if (!xsd_upa_nullable(kids[j], depth + 1)) break;
             }
             for (int a = 0; a < ni; a++)
                 for (int b = 0; b < nr; b++) {
-                    if (xsd_upa_first_overlap(&fi[a], &rest[b], tns, relax_wildcard)) {
+                    if (xsd_upa_first_overlap(&ws->fi[a], &ws->nx[b],
+                                              tns, relax_wildcard)) {
                         xsd_set_error(
                             s,
                             "upa: the content model is not "
@@ -3186,7 +3203,8 @@ static int xsd_upa_check_node(struct leptris_xsd_schema* s,
         }
     }
     for (int i = 0; i < nk; i++)
-        if (xsd_upa_check_node(s, kids[i], tns, depth + 1, relax_wildcard) != 0)
+        if (xsd_upa_check_node(s, kids[i], tns, depth + 1, relax_wildcard,
+                               ws) != 0)
             return -1;
     return 0;
 }
@@ -3235,8 +3253,8 @@ static int xsd_doc_has_defined_sibling(LeptrisElement root) {
  * rejection), and a @version/vc:maxVersion="1.0" pin keeps the
  * gate. */
 static int xsd_seq_wc_overlap(LeptrisElement e, const char* tns,
-                              int depth) {
-    if (!e || depth > 24) return 0;
+                              int depth, struct xsd_upa_scratch* ws) {
+    if (!e || depth > 24 || !ws) return 0;
     const char* l = NULL;
     const char* p2 = NULL;
     const char* u = NULL;
@@ -3248,25 +3266,24 @@ static int xsd_seq_wc_overlap(LeptrisElement e, const char* tns,
         int nk = xsd_upa_collect_children(e, kids, 64);
         for (int i = 0; i + 1 < nk && !hit; i++) {
             if (!xsd_upa_particle_can_repeat_or_skip(kids[i])) continue;
-            struct xsd_upa_first fi[XSD_UPA_MAX];
             int ni = 0;
-            xsd_upa_first(kids[i], fi, XSD_UPA_MAX, &ni, tns, depth + 1);
-            struct xsd_upa_first rest[XSD_UPA_MAX];
+            xsd_upa_first(kids[i], ws->fi, XSD_UPA_MAX, &ni, tns,
+                          depth + 1);
             int nr = 0;
             for (int j = i + 1; j < nk; j++) {
-                xsd_upa_first(kids[j], rest, XSD_UPA_MAX, &nr, tns,
+                xsd_upa_first(kids[j], ws->nx, XSD_UPA_MAX, &nr, tns,
                               depth + 1);
                 if (!xsd_upa_nullable(kids[j], depth + 1)) break;
             }
             for (int a = 0; a < ni && !hit; a++)
                 for (int b = 0; b < nr && !hit; b++) {
-                    if (fi[a].wc[0] && rest[b].name) {
-                        if (xsd_upa_ns_covers(fi[a].wc, rest[b].ns,
-                                              tns))
+                    if (ws->fi[a].wc[0] && ws->nx[b].name) {
+                        if (xsd_upa_ns_covers(ws->fi[a].wc,
+                                              ws->nx[b].ns, tns))
                             hit = 1;
-                    } else if (rest[b].wc[0] && fi[a].name) {
-                        if (xsd_upa_ns_covers(rest[b].wc, fi[a].ns,
-                                              tns))
+                    } else if (ws->nx[b].wc[0] && ws->fi[a].name) {
+                        if (xsd_upa_ns_covers(ws->nx[b].wc,
+                                              ws->fi[a].ns, tns))
                             hit = 1;
                     }
                 }
@@ -3278,7 +3295,7 @@ static int xsd_seq_wc_overlap(LeptrisElement e, const char* tns,
          c && !hit; c = leptris_node_next_sibling(c)) {
         if (leptris_node_get_type(c) != LEPTRIS_NODE_TYPE_ELEMENT)
             continue;
-        hit = xsd_seq_wc_overlap((LeptrisElement)c, tns, depth + 1);
+        hit = xsd_seq_wc_overlap((LeptrisElement)c, tns, depth + 1, ws);
     }
     return hit;
 }
@@ -3286,6 +3303,12 @@ static int xsd_seq_wc_overlap(LeptrisElement e, const char* tns,
 static int xsd_check_upa(struct leptris_xsd_schema* s,
                          LeptrisElement root) {
     if (!root) return 0;
+    int rc = 0;
+    /* the shared first/follow scratch — one heap block for the whole
+     * walk (see xsd_upa_scratch); NULL only on allocation failure,
+     * where both walkers skip their pair checks (under-report) */
+    struct xsd_upa_scratch* ws =
+        (struct xsd_upa_scratch*)malloc(sizeof(*ws));
     const char* tns = s->target_ns;
     /* XSD 1.1 §3.8.6.4 relaxes the wildcard-vs-element overlap;
      * arm the relaxation on any 1.1 evidence (open034 is unmarked).
@@ -3296,17 +3319,19 @@ static int xsd_check_upa(struct leptris_xsd_schema* s,
     int relax_wildcard =
         (s->version_11 || s->saw_open_content || s->saw_relaxed_all ||
          xsd_doc_has_defined_sibling(root) ||
-         (!s->version_pinned_10 && xsd_seq_wc_overlap(root, tns, 0)));
+         (!s->version_pinned_10 &&
+          xsd_seq_wc_overlap(root, tns, 0, ws)));
     for (LeptrisNodeRef n = leptris_node_first_child(
              leptris_element_as_node(root));
-         n; n = leptris_node_next_sibling(n)) {
+         n && rc == 0; n = leptris_node_next_sibling(n)) {
         if (leptris_node_get_type(n) != LEPTRIS_NODE_TYPE_ELEMENT)
             continue;
         if (xsd_upa_check_node(s, (LeptrisElement)n, tns, 0,
-                               relax_wildcard) != 0)
-            return -1;
+                               relax_wildcard, ws) != 0)
+            rc = -1;
     }
-    return 0;
+    free(ws);
+    return rc;
 }
 
 /* ---- #1691 slice 5: element/attribute/group ref resolution -------
