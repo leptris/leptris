@@ -413,11 +413,53 @@ TEST(XsdConformance11, ManifestExpectationsMatch) {
  * enumeration names only DECLARED notations — simple095, with the
  * xs:notation symbol table captured for the check). 40 rows flip,
  * zero regressions by red-set diff: **2087/2206** — 1265 valid /
- * 587 invalid / 235 schema-error (measured 2026-11-28). */
-    EXPECT_GE(pass, 2087) << "conformance floor regressed - re-measure the union";
-    EXPECT_GE(pass_valid, 1265);
-    EXPECT_GE(pass_invalid, 587);
-    EXPECT_GE(pass_schema_error, 235);
+ * 587 invalid / 235 schema-error (measured 2026-11-28).
+ *
+ * The #2184 final-consolidation branch (`xsd11-final`, five more
+ * slices, every one red-set-diffed clean, 1.0 corpus held at 1044
+ * throughout):
+ *  - value constraints are lexicals (§3.2.2/§3.3.4): an attribute
+ *    or element default/fixed value violating the declared type's
+ *    facets fails the schema (s3_3_4si01-11, 11 rows; local
+ *    particles walk their content-model rows; builtin list-typed
+ *    values itemize) — plus the §3.2.5 unparsed-entity integrity
+ *    (ENTITY/ENTITIES values name declared unparsed entities,
+ *    id018/id021) and the src-attribute.4 existence probe moving to
+ *    the builtin-EXISTS table (the list builtins are real
+ *    definitions; id018.xsd/id021.xsd had been losing their
+ *    compiles to the old tier-1 probe);
+ *  - union circularity (st-props-correct): a union's transitive
+ *    membership — members, their bases, their item types, their
+ *    union members — never reaches the union itself (simple017-020,
+ *    s3_16_2si01-05, 9 rows);
+ *  - the targetNamespace placement rules (§3.2.3.2/§3.3.3.2): a
+ *    top-level declaration's tns equals the schema's, a local one
+ *    never carries @form and outside a restriction equals the
+ *    schema's tns (target001's restriction form compiles),
+ *    plus src-import agreement (target007) — 11 rows;
+ *  - RecurseAsSum (§3.9.6): the all restriction sweep grows the
+ *    SEQUENCE and CHOICE arms (per-owner window sums, base-required
+ *    coverage, the re-declared element's type derives, every branch
+ *    independently — all212-215/227/231/232/233/234) and the UPA
+ *    sequence arm routes FOLLOW through nullability (a non-nullable
+ *    sibling stops the walk) — 8 rows;
+ *  - the §3.4.4.3 dynamic EDC (a wildcard-admitted element resolving
+ *    to a global decl derives from the governing chain's same-name
+ *    particle's type) + §3.3.4.3 cl. 4.2 xsi:type substitutability
+ *    (a facet-free union-member path substitutes, a member behind a
+ *    restriction facet does not, in-window overrides keep the cast
+ *    arm for the string family, a wildcard-slot excess stays
+ *    strict) — wild062/065/068, simple016.n01 — 7 rows;
+ *  - multi-head substitution groups (§3.3.6, the member sits in
+ *    several heads) + the §3.3.4 {abstract} law (an abstract
+ *    declaration is never validated against directly) —
+ *    subsgroup001/s2_2_2, 6 rows.
+ * Union re-measure: **2148/2206** — 1278 valid / 597 invalid /
+ * 273 schema-error (measured 2026-11-28). */
+    EXPECT_GE(pass, 2148) << "conformance floor regressed - re-measure the union";
+    EXPECT_GE(pass_valid, 1278);
+    EXPECT_GE(pass_invalid, 597);
+    EXPECT_GE(pass_schema_error, 273);
     RecordProperty("pass_valid", std::to_string(pass_valid));
     RecordProperty("pass_invalid", std::to_string(pass_invalid));
     RecordProperty("pass_schema_error", std::to_string(pass_schema_error));
