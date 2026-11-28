@@ -167,7 +167,11 @@ TEST(Libxml2Corpus, EveryFixtureCompilesOrFailsCleanly) {
     // attribute use), derivation-ok-restriction-2-1-1_0 and
     // restriction-attr1_0 (weakened base uses) — now fail
     // compile).
-    EXPECT_GE(ok, 132u) << "compile-success floor regressed";
+    // -> 131 (#2184: the substitution-group compile constraints —
+    // the oracle-invalid oss-fuzz-51295_0 fixture carries a circular
+    // substitution-group graph (structures 3.3.6.1.5) and now fails
+    // compile; its manifest rows expect schema-error).
+    EXPECT_GE(ok, 131u) << "compile-success floor regressed";
 }
 
 }  // namespace

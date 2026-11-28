@@ -581,10 +581,11 @@ int xsd_builtin_valid(const char* type, const char* v) {
     if (strcmp(type, "xs:base64Binary") == 0) {
         /* #1883: the padded alphabet — '=' only terminates the
          * final group; a remainder of 1 byte cannot form a group
-         * ("abcde"), and nothing may follow padding. #2184
-         * (d3_3_17ii01): the RFC 2045 padding is MANDATORY — the
-         * quantum must close ("123456" is not a lexical), so every
-         * length carries exactly the padding its remainder implies. */
+         * ("abcde"), and nothing may follow padding. The quantum
+         * CLOSES in the XSD chain (base_valid — d3_3_17ii01); the
+         * tier-1 gate stays tolerant for the RNG datatype lane
+         * (Rng2080Data: Jing accepts the unpadded 2/3-remainder
+         * tails "AB"/"ABC"). */
         size_t n = strlen(v);
         if (!n) return 1;
         size_t eq = 0;
@@ -599,10 +600,7 @@ int xsd_builtin_valid(const char* type, const char* v) {
                 return 0;
         }
         if (eq > 2) return 0;
-        /* #2184 (d3_3_17ii01): the RFC 2045 quantum always CLOSES —
-         * the length including its padding is a multiple of four
-         * ("123456" is not a lexical). */
-        if (n % 4 != 0) return 0;
+        if ((n - eq) % 4 == 1) return 0;
         return 1;
     }
     return -1; /* not in the tier-1 table */
@@ -617,7 +615,18 @@ int xsd_simple_valid(const XsdSimple* simple, const char* v,
  * lexical against it first. */
 static int base_valid(const char* base, const char* v) {
     if (!base) return xsd_builtin_valid("xs:string", v);
-    if (strncmp(base, "xs:", 3) == 0) return xsd_builtin_valid(base, v);
+    if (strncmp(base, "xs:", 3) == 0) {
+        int r = xsd_builtin_valid(base, v);
+        /* #2184 (d3_3_17ii01): the XSD chain's base64Binary quantum
+         * CLOSES — the length including its RFC 2045 padding is a
+         * multiple of four ("123456" is not a lexical). The tier-1
+         * gate stays tolerant for the RNG datatype lane
+         * (Rng2080Data). */
+        if (r == 1 && v[0] && strcmp(base, "xs:base64Binary") == 0 &&
+            strlen(v) % 4 != 0)
+            return 0;
+        return r;
+    }
     return -1; /* local base — the resolver walks the chain */
 }
 
