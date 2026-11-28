@@ -1845,3 +1845,85 @@ TEST(XQueryCore, TimeTzEq) {
     }
     leptris_document_free(doc);
 }
+
+/* ---- F&O §15.3.2 fn:in-scope-prefixes (#2184) -----------------------
+ * The prefixes of an element's in-scope namespaces: own declarations
+ * plus every ancestor's, the NEAREST binding deciding (a shadowed
+ * ancestor prefix never resurfaces; xmlns="" un-declares), the
+ * prebound xml prefix, and a zero-length string when a default
+ * namespace is in scope. Ground truth: the F&O rules + the XSD 1.1
+ * IBM corpus row ns4 (assert test in-scope-prefixes(.) = 'a'). */
+TEST(XQueryFn, InScopePrefixes) {
+    const char* xml =
+        "<x xmlns='http://example/' xmlns:a='http://test'"
+        " xmlns:b='http://b'>"
+        " <y xmlns:c='http://c' xmlns:a=''/>"
+        "</x>";
+    LeptrisDocument doc =
+        leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* the root: a, b declared, the default ns in scope, xml prebound
+     * — four prefixes, each existential probe true (the elements are
+     * namespace-qualified by the default ns, so the probes walk
+     * local-name steps) */
+    EXPECT_EQ(seq_string(doc, "count(in-scope-prefixes(/*))"), "4");
+    EXPECT_EQ(seq_string(doc, "in-scope-prefixes(/*) = 'a'"), "true");
+    EXPECT_EQ(seq_string(doc, "in-scope-prefixes(/*) = 'b'"), "true");
+    EXPECT_EQ(seq_string(doc, "in-scope-prefixes(/*) = 'xml'"), "true");
+    EXPECT_EQ(seq_string(doc, "in-scope-prefixes(/*) = ''"), "true");
+    EXPECT_EQ(seq_string(doc, "in-scope-prefixes(/*) = 'zz'"), "false");
+    /* the child: c is its own, b inherits, a was UN-declared by the
+     * nearest xmlns:a='', the default ns still in scope, xml prebound
+     * — four prefixes, a's probe false */
+    EXPECT_EQ(seq_string(doc, "count(in-scope-prefixes(//*[local-name()='y']))"), "4");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'c'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'b'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = ''"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'xml'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'a'"), "false");
+    leptris_document_free(doc);
+}
+
+/* A shadowed prefix reports ONCE (nearest binding decides), and a
+ * document with no default namespace yields no zero-length string. */
+TEST(XQueryFn, InScopePrefixesShadowAndNoDefault) {
+    const char* xml =
+        "<r xmlns:p='http://one' xmlns:a='http://test'>"
+        " <y xmlns:p='http://two'/>"
+        "</r>";
+    LeptrisDocument doc =
+        leptris_parse_string(xml, strlen(xml), nullptr);
+    ASSERT_NE(doc, nullptr);
+    /* y reports xml, p (its nearest http://two binding), and the
+     * inherited a — the shadowed ancestor p binding never
+     * resurfaces — and no zero-length string (no default ns) */
+    EXPECT_EQ(seq_string(doc, "count(in-scope-prefixes(//*[local-name()='y']))"), "3");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'p'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'a'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = 'xml'"), "true");
+    EXPECT_EQ(seq_string(doc,
+        "in-scope-prefixes(//*[local-name()='y']) = ''"), "false");
+    leptris_document_free(doc);
+}
+
+/* A non-element argument is the type error XPTY0004. */
+TEST(XQueryFn, InScopePrefixesNonElementArg) {
+    LeptrisDocument doc = leptris_parse_string("<r/>", 4, nullptr);
+    ASSERT_NE(doc, nullptr);
+    LeptrisXQuery xq =
+        leptris_xquery_parse("in-scope-prefixes(1)", strlen("in-scope-prefixes(1)"));
+    ASSERT_NE(xq, nullptr);
+    LeptrisXPathResult r = leptris_xquery_eval(xq, doc, NULL);
+    EXPECT_EQ(r, nullptr);
+    leptris_xpath_result_free(r);
+    leptris_xquery_free(xq);
+    leptris_document_free(doc);
+}

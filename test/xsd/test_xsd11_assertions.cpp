@@ -231,3 +231,60 @@ TEST(Xsd11Assertions, CorpusAssertCompileRowFlips) {
         << "d4_3_15si04 must be rejected";
     if (s) leptris_xsd_free(s);
 }
+
+/* ---- fn:in-scope-prefixes (#2184, the ns4 rows) ---------------------
+ * ns4's assert (in-scope-prefixes(.) = 'a') is the pinned corpus
+ * row: an unprefixed fn: call through the assert's default function
+ * namespace. The schema compiles (the function IS in the standard
+ * registry now) and the assert EVALUATES — the instance that
+ * declares xmlns:a is valid, the twin that doesn't is not (an
+ * unevaluated assert would admit both). */
+static int ns4_verdict(const char* instance) {
+    std::string sp = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                     "/ibmData/mixed/assertions/namespace/ns4.xsd";
+    std::string ip = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                     "/ibmData/mixed/assertions/namespace/" +
+                     instance;
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    EXPECT_NE(s, (LeptrisXsdSchema)0) << "ns4.xsd must compile";
+    EXPECT_EQ(st, LEPTRIS_OK) << "ns4.xsd compile status";
+    if (!s) return -1;
+    LeptrisStatus pst = (LeptrisStatus)0;
+    LeptrisDocument d = leptris_parse_file(ip.c_str(), &pst);
+    EXPECT_NE(d, (LeptrisDocument)0) << instance << " must parse";
+    if (!d) {
+        leptris_xsd_free(s);
+        return -1;
+    }
+    int v = leptris_xsd_validate(s, d);
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+    return v;
+}
+
+TEST(Xsd11Assertions, InScopePrefixesAssertCorpusRow) {
+    /* the pinned rows: ns4.xsd (schema) and ns4.xml (instance) */
+    EXPECT_EQ(ns4_verdict("ns4.xml"), 1);
+}
+
+TEST(Xsd11Assertions, InScopePrefixesAssertEvaluates) {
+    /* the assert is not just compiled — it evaluates: without the
+     * xmlns:a declaration the probe finds no 'a' and fails */
+    const std::string twin =
+        "<x xmlns=\"http://www.example.org\"><y/></x>";
+    LeptrisStatus st = (LeptrisStatus)0;
+    LeptrisDocument d =
+        leptris_parse_string(twin.data(), twin.size(), &st);
+    ASSERT_NE(d, (LeptrisDocument)0);
+    std::string sp = std::string(LEPTRIS_XSD11_CASES_DIR) +
+                     "/ibmData/mixed/assertions/namespace/ns4.xsd";
+    LeptrisXsdSchema s = leptris_xsd_compile_file(sp.c_str(), &st);
+    ASSERT_NE(s, (LeptrisXsdSchema)0);
+    EXPECT_EQ(st, LEPTRIS_OK);
+    EXPECT_NE(leptris_xsd_validate(s, d), 1)
+        << "the in-scope-prefixes assert must fail the twin without "
+           "xmlns:a";
+    leptris_document_free(d);
+    leptris_xsd_free(s);
+}
