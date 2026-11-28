@@ -4481,6 +4481,73 @@ static int xsd_particle_same_name(const XsdParticleRow* a,
     return strcmp(a->name, b->name) == 0 && strcmp(a->ns, b->ns) == 0;
 }
 
+/* wildcard particle collector for the EDC walk (#2184) */
+static int xsd_wc_admits_name(const XsdCm* w, const char* ns,
+                              const char* local);
+static void xsd_collect_wildcards(const XsdCm* n, const XsdCm** arr,
+                                  int cap, int* count, int depth) {
+    if (!n || depth > 32) return;
+    if (n->kind == XSD_CM_ANY) {
+        if (*count < cap) arr[(*count)++] = n;
+        return;
+    }
+    for (const XsdCm* c = n->first_child; c; c = c->next)
+        xsd_collect_wildcards(c, arr, cap, count, depth + 1);
+}
+
+/* #2184 (§3.4.4.3): the wildcard arm of Element Declarations
+ * Consistent — a content model carrying a local element particle
+ * AND a strict/lax wildcard admitting the like-named GLOBAL
+ * declaration type-checks the two type tables at COMPILE time
+ * (wild078/079/081). wild063's deriving pair (both tables absent)
+ * stays legal; skip owes nothing. */
+static int xsd_check_wild_edc(struct leptris_xsd_schema* s,
+                              const XsdCm* type) {
+    const XsdCm* wilds[64];
+    int nw = 0;
+    xsd_collect_wildcards(type, wilds, 64, &nw, 0);
+    if (!nw) return 0;
+    XsdParticleRow rows[256];
+    int n = 0;
+    xsd_collect_particles(type, rows, 256, &n, 0);
+    for (int w = 0; w < nw; w++) {
+        if (wilds[w]->pc_level == 2) continue; /* skip owes nothing */
+        for (int i = 0; i < n; i++) {
+            if (!rows[i].name[0]) continue;
+            if (!xsd_wc_admits_name(wilds[w], rows[i].ns, rows[i].name))
+                continue;
+            /* the like-named GLOBAL declaration in that namespace */
+            const XsdElementDecl* g = NULL;
+            for (const XsdElementDecl* d = s->elements; d; d = d->next) {
+                if (!d->name || strcmp(d->name, rows[i].name) != 0)
+                    continue;
+                const char* dns = d->ns ? d->ns : "";
+                if (strcmp(dns, rows[i].ns) == 0) {
+                    g = d;
+                    break;
+                }
+            }
+            if (!g) continue;
+            int inconsistent =
+                ((rows[i].table == NULL) != (g->alternatives == NULL));
+            if (!inconsistent && rows[i].table &&
+                !xsd_type_tables_equal(rows[i].table, g->alternatives))
+                inconsistent = 1;
+            if (inconsistent) {
+                char msg[512];
+                snprintf(msg, sizeof(msg),
+                         "cos-element-consistent: the wildcard admits "
+                         "the global declaration of '%s' whose type "
+                         "table differs from the particle's",
+                         rows[i].name);
+                xsd_set_error(s, msg);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* The sweep: per-element-decl constraints (globals + every complex
  * type's particles), the content-model table-equality check, and the
  * restriction particle-table preservation check. */
@@ -4502,6 +4569,8 @@ static int xsd_check_type_tables(struct leptris_xsd_schema* s) {
         XsdParticleRow rows[256];
         int n = 0;
         xsd_collect_particles(c, rows, 256, &n, 0);
+        /* the wildcard arm (§3.4.4.3) rides the same collected rows */
+        if (xsd_check_wild_edc(s, c) != 0) return -1;
         for (int i = 0; i < n; i++) {
             if (rows[i].table &&
                 xsd_check_particle_table(s, rows[i].type[0] ? rows[i].type
