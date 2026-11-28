@@ -176,11 +176,18 @@ struct id_seen {
 
 /* One pool entry: every ID or IDREF value seen this run, in
  * document order. At the end of the run every is_ref entry must
- * match some !is_ref entry (§C.4 integrity — ii04-ii18, id005-008). */
+ * match some !is_ref entry (§C.4 integrity — ii04-ii18, id005-008).
+ * #2245: parentless marks an ID registered from an element's own
+ * CONTENT whose carrier has no parent — the §3.17.5.2 [binding]
+ * members for a content-carried ID are the carrier's PARENT, so a
+ * parentless carrier contributes an EMPTY binding (§3.3.4.5 cvc-id
+ * clause 1) unless the value also registered from a parented
+ * channel. */
 struct id_ref {
     char* v;
     int is_ref;
     LeptrisElement carrier;
+    int parentless;
     struct id_ref* next;
 };
 
@@ -220,9 +227,11 @@ static int xsd_id_value_record(struct xsd_validator* v, const char* val,
     return 1;
 }
 
-/* #2184: pool one value (is_ref = an IDREF awaiting resolution). */
+/* #2184: pool one value (is_ref = an IDREF awaiting resolution;
+ * parentless = the content carrier has no parent, see id_ref). */
 static void xsd_id_pool_record(struct xsd_validator* v, const char* val,
-                               LeptrisElement carrier, int is_ref) {
+                               LeptrisElement carrier, int is_ref,
+                               int parentless) {
     if (!v || !val || !val[0]) return;
     struct id_ref* n = (struct id_ref*)malloc(sizeof(*n));
     if (!n) return;
@@ -233,6 +242,7 @@ static void xsd_id_pool_record(struct xsd_validator* v, const char* val,
     }
     n->is_ref = is_ref;
     n->carrier = carrier;
+    n->parentless = parentless;
     n->next = NULL;
     if (v->id_pool_tail)
         v->id_pool_tail->next = n;
@@ -2655,6 +2665,16 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
      * Linux ASAN leg's finding — macOS Release builds never see it). */
     char norm[512];
     if (!v || !s || !type || !value || !value[0]) return;
+    /* #2245 (§3.17.5.2 / §3.3.4.5): an ID value carried by an
+     * ELEMENT's own content binds to the carrier's PARENT (the
+     * [binding] set is "every element ... which has ... an element
+     * information item in its [children] whose actual value is ...
+     * the [id]"). A parentless carrier — the validation root —
+     * contributes an EMPTY binding; when no other channel registers
+     * the same value, cvc-id clause 1 fires at end of run
+     * (xsd_id_root_content_check). */
+    int content_parentless =
+        via_content && carrier && !leptris_element_parent(carrier);
     /* The token-family datatypes collapse their lexical before the
      * [normalized value] exists (§3.2.4.2) — the tables see the
      * normalized form: v16's trailing-newline idref resolves as b2,
@@ -2669,10 +2689,10 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
             if (!xsd_id_value_record(v, value, carrier, via_content))
                 verrf_atk(v, carrier, "attribute-use", "ID", "attribute",
                           "ID", "duplicate ID value");
-            xsd_id_pool_record(v, value, carrier, 0);
+            xsd_id_pool_record(v, value, carrier, 0, content_parentless);
         } else if (strcmp(type, "xs:IDREF") == 0 ||
                    strcmp(type, "xsd:IDREF") == 0) {
-            xsd_id_pool_record(v, value, carrier, 1);
+            xsd_id_pool_record(v, value, carrier, 1, 0);
         } else if (strcmp(type, "xs:IDREFS") == 0 ||
                    strcmp(type, "xsd:IDREFS") == 0) {
             char* dup = strdup(value);
@@ -2684,7 +2704,7 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
                 while (*end && !isspace((unsigned char)*end)) end++;
                 char was = *end;
                 *end = 0;
-                xsd_id_pool_record(v, p, carrier, 1);
+                xsd_id_pool_record(v, p, carrier, 1, 0);
                 *end = was;
                 p = end;
             }
@@ -2716,7 +2736,7 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
             int c = id_classify_value(s, ldef->item_def, ldef->item_type,
                                       p, 0);
             if (c == 1) {
-                xsd_id_pool_record(v, p, carrier, 0);
+                xsd_id_pool_record(v, p, carrier, 0, content_parentless);
                 /* the FIRST ID item of a list value joins TableA with
                  * document-wide scope (id004.n01's zzz as two id
                  * elements' first items is a duplicate even under one
@@ -2728,7 +2748,7 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
                               "attribute", "ID", "duplicate ID value");
                 first_id = 0;
             } else if (c == 2) {
-                xsd_id_pool_record(v, p, carrier, 1);
+                xsd_id_pool_record(v, p, carrier, 1, 0);
             } else if (c == 3) {
                 xsd_entity_bookkeep(v, p, carrier);
             }
@@ -2743,11 +2763,41 @@ static void xsd_id_bookkeep(struct xsd_validator* v,
         if (!xsd_id_value_record(v, value, carrier, via_content))
             verrf_atk(v, carrier, "attribute-use", "ID", "attribute",
                       "ID", "duplicate ID value");
-        xsd_id_pool_record(v, value, carrier, 0);
+        xsd_id_pool_record(v, value, carrier, 0, content_parentless);
     } else if (c == 2) {
-        xsd_id_pool_record(v, value, carrier, 1);
+        xsd_id_pool_record(v, value, carrier, 1, 0);
     } else if (c == 3) {
         xsd_entity_bookkeep(v, value, carrier);
+    }
+}
+
+/* #2245 (§3.3.4.5 cvc-id clause 1 / §3.17.5.2): a content-carried ID
+ * whose carrier is the validation root has an EMPTY [binding] set —
+ * the binding members are "every element ... which has an element
+ * information item in its [children] whose actual value is ...
+ * the [id]", i.e. the carrier's PARENT, and the root has none ("if
+ * the X element is the validation root, then 'abcd' will have no
+ * element binding ... So the first clause is violated and the
+ * document is invalid" — the spec's own worked example; the suite's
+ * idIDREF annotation "ID on root does not denote any element",
+ * ii26/ii27). The binding set is a UNION of contributions, so an
+ * ID the run ALSO registered from a parented channel (an attribute,
+ * or a nested element's content) keeps its non-empty binding. */
+static void xsd_id_root_content_check(struct xsd_validator* v) {
+    if (!v) return;
+    for (struct id_ref* r = v->id_pool; r; r = r->next) {
+        if (r->is_ref || !r->parentless) continue;
+        int bound_elsewhere = 0;
+        for (struct id_ref* p = v->id_pool; p && !bound_elsewhere;
+             p = p->next)
+            if (p != r && !p->is_ref && !p->parentless &&
+                strcmp(p->v, r->v) == 0)
+                bound_elsewhere = 1;
+        if (!bound_elsewhere && r->carrier)
+            verrf_atk(v, r->carrier, "cvc-id", "ID", "IDREF", "ID",
+                      "ID/IDREF binding is empty - the ID on the "
+                      "validation root's content does not denote any "
+                      "element");
     }
 }
 
@@ -4210,7 +4260,10 @@ int xsd_validator_run(struct xsd_validator* v, LeptrisDocument doc) {
     tables_free(refs);
 
     /* #2184 §C.4: the IDREF half of the bookkeeping — every recorded
-     * IDREF/IDREFS value resolves against the run's ID table. */
+     * IDREF/IDREFS value resolves against the run's ID table.
+     * #2245: first the cvc-id clause-1 half — a content-carried ID
+     * with no parented registration has an empty ID/IDREF binding. */
+    xsd_id_root_content_check(v);
     xsd_idrefs_resolve(v);
 
     return v->count == 0 ? 1 : 0;
