@@ -140,3 +140,22 @@ TEST(Xsd11Assertions, AssertOnSimpleContentBindsValue) {
                          "assert_simplecontent_n.xml"),
               1);
 }
+
+/* ---- the chameleon include lane (#2184, assert020/021) ------------ */
+
+/* A chameleon include (§4.2.2: the included unit has no
+ * targetNamespace of its own) absorbs its components into the
+ * INCLUDER's tns — and the absorbtion governs the PARTICLE refs
+ * captured from the included unit exactly as it governs the
+ * declarations: an unprefixed `ref="temp"` inside the included
+ * unit's complexType resolves to the includer's
+ * {targetNamespace}temp, and the assert test's unprefixed names
+ * ride the included unit's xpathDefaultNamespace=
+ * "##targetNamespace" (the includer's tns). The saxonData Assert
+ * assert020/assert021 rows pin the shape: three nested temps
+ * satisfy empty(temp/temp/temp) and the doc validates; a fourth
+ * temp fails the assert and rejects. */
+TEST(Xsd11Assertions, ChameleonIncludeParticleRefsAdoptTns) {
+    EXPECT_EQ(verdict_of("chameleon_main.xsd", "chameleon_v.xml"), 1);
+    EXPECT_NE(verdict_of("chameleon_main.xsd", "chameleon_n.xml"), 1);
+}

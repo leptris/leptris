@@ -3731,6 +3731,7 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
         std::string(LEPTRIS_XSD_CASES_DIR) + "/MANIFEST.tsv";
     FILE* f = fopen(manifest_path.c_str(), "rb");
     ASSERT_NE(f, nullptr) << "manifest missing";
+    const bool verbose = getenv("LEPTRIS_XSD_VERBOSE") != nullptr;
     char line[512];
     int pass = 0, fail = 0, total = 0;
     int pass_valid = 0, pass_invalid = 0, pass_schema_error = 0;
@@ -3776,6 +3777,8 @@ TEST(XsdConformance, ManifestExpectationsMatchOracle) {
             else pass_schema_error++;
         } else {
             fail++;
+            if (verbose)
+                printf("XSD-RED %s\t%s\t%s\n", inst, schema, expect);
         }
     }
     fclose(f);

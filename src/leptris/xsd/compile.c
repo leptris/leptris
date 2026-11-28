@@ -269,8 +269,11 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
                                      LeptrisElement e);
 static XsdCm* xsd_capture_any(struct leptris_xsd_schema* s,
                               LeptrisElement any_child);
-static char* xsd_capture_unit_tns(LeptrisElement e);
-static char* xsd_capture_ns_prolog(LeptrisElement e, const char* base_dir);
+static char* xsd_capture_unit_tns(struct leptris_xsd_schema* s,
+                                  LeptrisElement e);
+static char* xsd_capture_ns_prolog(struct leptris_xsd_schema* s,
+                                   LeptrisElement e,
+                                   const char* base_dir);
 static char* xsd_ic_default_ns(LeptrisElement host);
 static void xsd_cta_scan_cast_targets(struct leptris_xsd_schema* s,
                                       XsdAlternative* a,
@@ -511,7 +514,7 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                     if (ruri[0])
                         cm->ns = xsd_strdup(ruri);
                     else
-                        cm->ns = xsd_capture_unit_tns(e);
+                        cm->ns = xsd_capture_unit_tns(s, e);
                 } else {
                     nm = leptris_element_attribute(e, "name");
                     /* name-form: @form wins; otherwise the unit's
@@ -538,7 +541,7 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                              : (efd &&
                                 strcmp(efd, "qualified") == 0);
                     if (qualified) {
-                        char* tns = xsd_capture_unit_tns(e);
+                        char* tns = xsd_capture_unit_tns(s, e);
                         if (tns && tns[0])
                             cm->ns = tns;
                         else
@@ -593,7 +596,7 @@ static XsdCm* xsd_cm_parse(struct leptris_xsd_schema* s,
                     s, e, leptris_element_attribute(e, "notQName"));
                 cm->not_ns = xsd_strdup(
                     leptris_element_attribute(e, "notNamespace"));
-                cm->any_unit_tns = xsd_capture_unit_tns(e);
+                cm->any_unit_tns = xsd_capture_unit_tns(s, e);
                 /* #2184 src-wildcard sweep on the element wildcard:
                  * co-occurrence + vacuous exclusions (wild031/037,
                  * wild007's xs:any arm) — canon views, raw fields */
@@ -935,7 +938,7 @@ static XsdSimple* xsd_capture_simple(LeptrisElement st) {
                              * the schema document too — the base
                              * URI rides the validator-side wrap
                              * (this capture has no schema) */
-                            af->ns_prolog = xsd_capture_ns_prolog(fe, NULL);
+                            af->ns_prolog = xsd_capture_ns_prolog(NULL, fe, NULL);
                             if (!simple->assertions) {
                                 simple->assertions = af;
                             } else {
@@ -7814,6 +7817,17 @@ static void xsd_capture_root(struct leptris_xsd_schema* s,
                                 s->saw_open_content =
                                     xsd_doc_has_open_content(subroot,
                                                              0);
+                            /* #2184 (assert020/021): the same per-unit
+                             * re-arm for assertion syntax — the saxon
+                             * Assert chameleon pair carries its
+                             * xs:assert ONLY in the included unit, and
+                             * the main root's evidence scan never sees
+                             * it, so the assert capture stayed
+                             * disarmed and the tests never evaluated
+                             * (a four-temp instance validated). */
+                            if (!s->saw_assert)
+                                s->saw_assert =
+                                    xsd_doc_has_assert(subroot, 0);
                             int saved_unit = s->current_unit;
                             if (s->unit_count < s->unit_cap ||
                                 (s->units = (char**)realloc(
@@ -8803,7 +8817,7 @@ static XsdAlternative* xsd_capture_alternatives(
              * compiled form carries the prolog (cta0002: the
              * instance binds the namespace with a DIFFERENT
              * prefix; the test must still see the schema's). */
-            a->ns_prolog = xsd_capture_ns_prolog(e, s->base_dir);
+            a->ns_prolog = xsd_capture_ns_prolog(s, e, s->base_dir);
             {
                 size_t pl = a->ns_prolog ? strlen(a->ns_prolog) : 0;
                 size_t tl = strlen(test);
@@ -9148,7 +9162,7 @@ static XsdCm* xsd_capture_any(struct leptris_xsd_schema* s,
      * the matcher's canon arm bites (wild027/028, wild036-039) */
     w->not_qname = xsd_wc_canon_not_qname(
         s, any_child, leptris_element_attribute(any_child, "notQName"));
-    w->any_unit_tns = xsd_capture_unit_tns(any_child);
+    w->any_unit_tns = xsd_capture_unit_tns(s, any_child);
     /* #2184 src-wildcard sweep: co-occurrence + vacuous exclusions.
      * The cm keeps the RAW grammar/not_ns (the content-model matcher
      * resolves ##targetNamespace/##other per-unit at match time);
@@ -9190,7 +9204,7 @@ static XsdAssert* xsd_capture_assert(struct leptris_xsd_schema* s,
     /* #2154 (§3.13.2): the bindings the test's prefixes and
      * unprefixed names resolve under, captured at the assert
      * element */
-    a->ns_prolog = xsd_capture_ns_prolog(e, s->base_dir);
+    a->ns_prolog = xsd_capture_ns_prolog(s, e, s->base_dir);
     /* #2149: compiled when the schema claims 1.1 OR carries
      * xs:alternative chains — the alternative evidence marks schemas
      * whose selected types' asserts belong to the CTA semantics
@@ -10195,7 +10209,12 @@ static XsdAttrGroupDef* xsd_find_attr_group_qname(
     if (!local) return NULL;
     for (XsdAttrGroupDef* g = s->attr_groups; g; g = g->next) {
         if (!g->name || strcmp(g->name, local) != 0) continue;
-        char* gns = g->elem ? xsd_capture_unit_tns(g->elem) : NULL;
+        /* post-capture resolution: the PHYSICAL attribute only — the
+         * schema's s->target_ns at this point is whichever unit the
+         * find runs for, not the group's declaring unit (#2184; the
+         * capture-time stampers are the chameleon-aware readers) */
+        char* gns =
+            g->elem ? xsd_capture_unit_tns(NULL, g->elem) : NULL;
         int match;
         if (!ns)
             match = 0;
@@ -10538,7 +10557,7 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
                     if (aform ? strcmp(aform, "qualified") == 0
                               : (afd &&
                                  strcmp(afd, "qualified") == 0)) {
-                        char* tns = xsd_capture_unit_tns(ae);
+                        char* tns = xsd_capture_unit_tns(s, ae);
                         if (tns && tns[0])
                             d->ns = tns;
                         else
@@ -10716,7 +10735,20 @@ static XsdAttrDecl* xsd_capture_attr_rows_ex(struct leptris_xsd_schema* s,
  * would fall back to the merged schema's tns, aiming the ##other
  * exclusion at the wrong namespace (the anyAttr-derive1 family —
  * a no-tns base unit's ##other must admit the main tns). */
-static char* xsd_capture_unit_tns(LeptrisElement e) {
+/* The declaring UNIT's target namespace (#2184, assert020/021): the
+ * physical schema root's @targetNamespace — BUT a chameleon unit
+ * (§4.2.2, no targetNamespace of its own) absorbs into the
+ * INCLUDER's tns, which the capture driver holds in s->target_ns
+ * for the sub-document's whole capture. Reading the attribute alone
+ * stamped the element DECLARATIONS qualified (they ride s->target_ns)
+ * while the unprefixed particle refs came out namespace-free — the
+ * assert020 shape (a chameleon-included self-ref content model)
+ * rejected its own qualified children. An IMPORT of a no-tns
+ * document keeps s->target_ns NULL for the sub-capture (leptris
+ * #1958 — namespace-free, chameleon semantics are include-only), so
+ * the NULL fallback preserves that posture. */
+static char* xsd_capture_unit_tns(struct leptris_xsd_schema* s,
+                                  LeptrisElement e) {
     for (LeptrisElement up = leptris_element_parent(e); up;
          up = leptris_element_parent(up)) {
         const char* local = NULL;
@@ -10724,7 +10756,19 @@ static char* xsd_capture_unit_tns(LeptrisElement e) {
         if (local && strcmp(local, "schema") == 0) {
             const char* tns =
                 leptris_element_attribute(up, "targetNamespace");
-            return xsd_strdup(tns ? tns : "");
+            if (tns) return xsd_strdup(tns);
+            /* chameleon: the active capture unit's tns (the
+             * includer's) — but ONLY inside the sub-document's
+             * capture window. The #1880 attributeGroup phase-2 pass
+             * re-captures from RETAINED elements of every unit with
+             * the MAIN unit's s->target_ns in force (wildZ013c: the
+             * imported unit's ##other would resolve against the
+             * consuming tns instead of ABSENT); outside the window
+             * the physical absence stands. */
+            if (s && s->include_depth > 0 && s->target_ns &&
+                s->target_ns[0])
+                return xsd_strdup(s->target_ns);
+            return xsd_strdup("");
         }
     }
     return NULL;
@@ -10740,7 +10784,8 @@ static char* xsd_capture_unit_tns(LeptrisElement e) {
  * #targetNamespace" (ns1). Only prefixes the assert element has IN
  * SCOPE participate — the schema's unrelated declarations never
  * leak; the xmlns DEFAULT is xpathDefaultNamespace's channel. */
-static char* xsd_capture_ns_prolog(LeptrisElement e,
+static char* xsd_capture_ns_prolog(struct leptris_xsd_schema* s,
+                                   LeptrisElement e,
                                    const char* base_dir) {
     struct { const char* pfx; const char* uri; } seen[16];
     int nseen = 0;
@@ -10768,7 +10813,7 @@ static char* xsd_capture_ns_prolog(LeptrisElement e,
         leptris_element_attribute(e, "xpathDefaultNamespace");
     char* unit_tns = NULL;
     if (!xdn || !xdn[0] || strcmp(xdn, "##targetNamespace") == 0) {
-        unit_tns = xsd_capture_unit_tns(e);
+        unit_tns = xsd_capture_unit_tns(s, e);
         if (!xdn || !xdn[0]) {
             for (LeptrisElement up = e; up;
                  up = leptris_element_parent(up)) {
@@ -11143,7 +11188,7 @@ static int xsd_wc_check(struct leptris_xsd_schema* s,
 static int xsd_wc_capture_member(struct leptris_xsd_schema* s,
                                  LeptrisElement ae, XsdAttrWc* m) {
     memset(m, 0, sizeof(*m));
-    m->unit_ns = xsd_capture_unit_tns(ae);
+    m->unit_ns = xsd_capture_unit_tns(s, ae);
     const char* raw_ns = leptris_element_attribute(ae, "namespace");
     const char* raw_nns =
         leptris_element_attribute(ae, "notNamespace");
