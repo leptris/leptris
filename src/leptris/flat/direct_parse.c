@@ -3406,6 +3406,13 @@ static struct leptris_document* dp_il_build(
             if (r->first_attr != IL_NONE) {
                 uint32_t wired = 0;
                 struct leptris_attribute* tail = NULL;
+                /* #2233: per-element journal resets — the raw-view
+                 * chain restarts per element exactly as the classic
+                 * lane's dp_parse_attrs does (raw_last NULL lands the
+                 * first entry on cache->raw_attrs; cur_elem_cache is
+                 * the parked per-element ns_cache). */
+                pp.raw_last = NULL;
+                pp.cur_elem_cache = NULL;
                 for (uint32_t ai = 0; ai < r->attr_count; ai++) {
                     IlAttr* a = &c->attrs[r->first_attr + ai];
                     struct leptris_attribute* at =
@@ -3440,6 +3447,13 @@ static struct leptris_document* dp_il_build(
                             }
                         }
                         norm[nw] = '\0';
+                        /* #2233: the raw view (journaled below) points
+                         * at the SOURCE bytes, pre-normalization —
+                         * NUL the closing quote so the borrowed view
+                         * is strlen-safe, same discipline as the name
+                         * NUL above (classic NULs both in its scratch;
+                         * the byte is dead after the stream scan). */
+                        scratch[a->val_off + a->val_len] = '\0';
                         leptris_attr_value_set_heap(
                             at, leptris_sv_from_cstr(norm));
                     } else {
@@ -3524,6 +3538,19 @@ static struct leptris_document* dp_il_build(
                     }
                     tail = at;
                     wired++;
+                    /* #2233: the raw-view journal — the classic lane
+                     * registers every wired attr in dp_add_attr_inline
+                     * (fused, round 9); the replay skipped it, so
+                     * leptris_element_attributes_raw returned 0 on
+                     * interleaved-built trees. WIRED attrs only (the
+                     * dup path continued above — neither surface sees
+                     * a dup), raw SOURCE views, source order. */
+                    if (dp_raw_attr(&pp, e, scratch + a->name_off,
+                                    a->name_len, scratch + a->val_off,
+                                    a->val_len) != 0) {
+                        free(smap); free(rdepth); free(lc);
+                        goto oom_pool;
+                    }
                 }
                 e->attr_count = (uint8_t)wired;
             }
